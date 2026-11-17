@@ -12,6 +12,14 @@ const build = {
     layout: { id: 'layout', parentId: 'root', path: 'app' },
     page: { id: 'page', parentId: 'layout', path: ':id' },
     sibling: { id: 'sibling', parentId: 'root', path: 'other' },
+    // Unguarded pages, as a real app has: they keep the policied subtree under
+    // half the build, where the prefilter applies.
+    pad0: { id: 'pad0', parentId: 'root', path: 'pad-0' },
+    pad1: { id: 'pad1', parentId: 'root', path: 'pad-1' },
+    pad2: { id: 'pad2', parentId: 'root', path: 'pad-2' },
+    pad3: { id: 'pad3', parentId: 'root', path: 'pad-3' },
+    pad4: { id: 'pad4', parentId: 'root', path: 'pad-4' },
+    pad5: { id: 'pad5', parentId: 'root', path: 'pad-5' },
   },
 };
 const runtime: SsrRuntime = {
@@ -223,6 +231,9 @@ describe('page policies', () => {
         root: { id: 'root', path: '' },
         login: { id: 'login', parentId: 'root', path: 'login' },
         sibling: { id: 'sibling', parentId: 'root', path: 'other' },
+        // The root/login reduced tree must stay below half to exercise the prefilter.
+        pad0: build.routes.pad0,
+        pad1: build.routes.pad1,
       },
     };
     const matcher = vi.fn(matchRoutes);
@@ -257,6 +268,34 @@ describe('page policies', () => {
     expect(await groups.select(context('POST', '/random/path'))).toEqual([]);
     expect(matcher).toHaveBeenCalledTimes(2);
   });
+  it('a layout wrapping at least half the routes skips the prefilter; a smaller one keeps it', async () => {
+    const routes = {
+      root: { id: 'root', path: '' },
+      app: { id: 'app', parentId: 'root' },
+      a: { id: 'a', parentId: 'app', path: 'a' },
+      b: { id: 'b', parentId: 'app', path: 'b' },
+      login: { id: 'login', parentId: 'root', path: 'login' },
+      files: { id: 'files', parentId: 'root', path: 'files/*' },
+    };
+    const matcher = vi.fn(matchRoutes);
+    const wide = (await createPagePolicies(
+      { app: { middleware: [middleware] } },
+      { ...runtime, pageRoutes: { build: () => ({ routes }), matchRoutes: matcher } },
+    ))!;
+    expect(await wide.select(context('POST', '/files/x'))).toEqual([]);
+    expect(matcher).toHaveBeenCalledOnce();
+    expect(await wide.select(context('POST', '/a'))).toEqual(['app']);
+    expect(matcher).toHaveBeenCalledTimes(2);
+    matcher.mockClear();
+    const narrow = (await createPagePolicies(
+      { login: { middleware: [middleware] } },
+      { ...runtime, pageRoutes: { build: () => ({ routes }), matchRoutes: matcher } },
+    ))!;
+    expect(await narrow.select(context('POST', '/files/x'))).toEqual([]);
+    expect(matcher).toHaveBeenCalledOnce();
+    expect(await narrow.select(context('POST', '/login'))).toEqual(['login']);
+    expect(matcher).toHaveBeenCalledTimes(3);
+  });
   it('root plus login policies cost only one full-tree call when they cover the whole tree', async () => {
     const sourceBuild = {
       routes: {
@@ -277,6 +316,44 @@ describe('page policies', () => {
     expect(await groups.select(context('POST', '/login'))).toEqual(['root', 'login']);
     expect(matcher).toHaveBeenCalledTimes(2);
   });
+  it('a pathless layout covering all but two of 100 routes matches once per uncached request', async () => {
+    const sourceBuild = {
+      routes: {
+        root: { id: 'root', path: '' },
+        app: { id: 'app', parentId: 'root' },
+        ...Object.fromEntries(
+          Array.from(
+            { length: 96 },
+            (_, index) =>
+              [
+                `page${index}`,
+                { id: `page${index}`, parentId: 'app', path: `page-${index}/:id` },
+              ] as const,
+          ),
+        ),
+        login: { id: 'login', parentId: 'root', path: 'login' },
+        files: { id: 'files', parentId: 'root', path: 'files/*' },
+      },
+    };
+    expect(Object.keys(sourceBuild.routes)).toHaveLength(100);
+    const matcher = vi.fn(matchRoutes);
+    const groups = (await createPagePolicies(
+      { app: { middleware: [middleware] } },
+      { ...runtime, pageRoutes: { build: () => sourceBuild, matchRoutes: matcher } },
+    ))!;
+    for (const [path, selected] of [
+      ['/page-0/one', ['app']],
+      ['/page-0/two', ['app']],
+      ['/page-95/three', ['app']],
+      ['/login', []],
+      ['/files/readme', []],
+      ['/unmatched', []],
+    ] as const) {
+      matcher.mockClear();
+      expect(await groups.select(context('GET', path))).toEqual(selected);
+      expect(matcher).toHaveBeenCalledOnce();
+    }
+  });
   it('uses the full ranking after a reduced splat hit and caches an empty answer', async () => {
     const matcher = vi.fn(matchRoutes);
     const sourceBuild = {
@@ -284,6 +361,9 @@ describe('page policies', () => {
         root: { id: 'root', path: '' },
         wildcard: { id: 'wildcard', parentId: 'root', path: 'files/*' },
         static: { id: 'static', parentId: 'root', path: 'files/readme' },
+        // Keep the splat prefilter, then prove the full ranking selects the static route.
+        pad0: build.routes.pad0,
+        pad1: build.routes.pad1,
       },
     };
     const groups = (await createPagePolicies(

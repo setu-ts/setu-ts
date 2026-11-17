@@ -276,7 +276,8 @@ ARCHITECTURE §10 and the plugin table row at line 1649).
      it is never returned itself. The result is cached in a per-build LRU keyed by method class and
      normalized pathname: at most 1,000 entries, and only pathnames of at most 512 bytes are cached,
      so the cache holds at most ~0.5 MB however the keys are chosen; a longer path is matched
-     uncached. **At most one whole-tree ranking per request**, whatever the policies.
+     uncached. **At most one whole-tree ranking per request, plus a prefilter over fewer than half
+     the routes**, whatever the policies.
   5. **Fail closed on a build the selector cannot mirror.** A build with
      `future.unstable_routePatternMatching` truthy is refused at registration
      (`PagePolicyConfigurationError`) and answers `500` per request (a development build may
@@ -472,6 +473,9 @@ design changes it records (§3.5 `on`, §3.10) are reviewed here before they are
 - **Accepted residual:** a request that can reach a policied route with a parameterised path pays
   one full `matchRoutes` (~1.2 ms at 502 routes, §3.10), never two; the prefilter confines it to
   requests that can reach a policy (with a policy on a top-level layout, that is every request).
+- **Re-audit 3 (2026-11-17, b60f0a748):** A1, A3, the kernel tracking fix and A2's root half hold;
+  A4 (a layout wrapping most routes still ranked the tree twice) is fixed by §3.10 step 3's
+  half-tree threshold.
 - **Re-audit (2026-11-17, c24ccdced):** F0/F1/F3 closed; A1 (route-pattern matching), A2 (double
   ranking with a root policy) and A3 (dev rebuild dropping a policied id) are fixed by §3.10 steps
   2, 3 and 5.

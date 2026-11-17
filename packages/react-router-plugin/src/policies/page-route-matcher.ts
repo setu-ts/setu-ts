@@ -123,9 +123,10 @@ function selectionPlan(
   return {
     ids: matched,
     roots,
-    tree: Array.from(byId.keys()).every((id) => included.has(id))
-      ? undefined
-      : routeTree(byParent, '', included),
+    // A reduced tree holding half the routes or more saves little and would be
+    // ranked again by the full match: skip the prefilter, so a request ranks
+    // at most one whole tree plus a prefilter over fewer than half the routes.
+    tree: included.size * 2 >= byId.size ? undefined : routeTree(byParent, '', included),
   };
 }
 

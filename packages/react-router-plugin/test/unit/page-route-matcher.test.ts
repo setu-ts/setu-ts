@@ -19,18 +19,28 @@ function selector(
 }
 
 describe('page route selector matching', () => {
+  // Keep the reduced layout tree (four routes) below half the full tree.
+  const unguardedRoutes = Object.fromEntries(
+    Array.from(
+      { length: 4 },
+      (_, index) =>
+        [`pad${index}`, { id: `pad${index}`, parentId: 'root', path: `pad-${index}` }] as const,
+    ),
+  );
   const routes = {
     root: { id: 'root', path: '' },
     layout: { id: 'layout', parentId: 'root', path: 'app', caseSensitive: true },
     index: { id: 'index', parentId: 'layout', index: true, path: 'settings', caseSensitive: true },
     page: { id: 'page', parentId: 'layout', path: ':id' },
     sibling: { id: 'sibling', parentId: 'root', path: 'elsewhere' },
+    ...unguardedRoutes,
     absent: undefined,
   };
   const splatRoutes = {
     root: { id: 'root', path: '' },
     page: { id: 'page', parentId: 'root', path: '*' },
     sibling: { id: 'sibling', parentId: 'root', path: 'elsewhere' },
+    ...unguardedRoutes,
   };
   it('groups both trees, preserves case sensitivity and index paths, and caches per build', async () => {
     const matcher = vi.fn<PageRouteSource['matchRoutes']>(() => [
@@ -65,7 +75,11 @@ describe('page route selector matching', () => {
     expect(full).toEqual([
       {
         ...expected[0],
-        children: [...expected[0]!.children, { id: 'sibling', path: 'elsewhere', children: [] }],
+        children: [
+          ...expected[0]!.children,
+          { id: 'sibling', path: 'elsewhere', children: [] },
+          ...Object.values(unguardedRoutes).map(({ id, path }) => ({ id, path, children: [] })),
+        ],
       },
     ]);
     expect(await select(request('/shop/app/two'))).toEqual(['root', 'layout', 'page']);
