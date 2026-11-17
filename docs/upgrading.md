@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Page route policies (0.13.0)
+### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)
 
 Only two kinds of code need a change, and neither exists in a generated project:
 
