@@ -1,5 +1,7 @@
 # Durable support agent
 
+<!-- version:history -->
+
 Available from **0.12.0**. A support agent that looks up an order and asks a person to approve a
 refund before it issues one. The run outlives the request and the process: reload the page, or stop
 and restart the server, and the run carries on where it was. The refund is written exactly once

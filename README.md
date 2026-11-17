@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.12.0` publishes 55 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.13.0` publishes 55 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -194,16 +194,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+npm install @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Bun
-bun add @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+bun add @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.12.0 npm:@setu-ts/runtime@^0.12.0
+deno add npm:@setu-ts/kernel@^0.13.0 npm:@setu-ts/runtime@^0.13.0
 ```
 
-**The `@^0.12.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.13.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -250,7 +250,7 @@ freeze — is [docs/versioning.md](docs/versioning.md).
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.12.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.13.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';

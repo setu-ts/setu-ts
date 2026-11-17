@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-17
+
 ### Changed
 
 - **BREAKING — open defect fixes (`@setu-ts/common`, `@setu-ts/agent-runs-plugin`,
@@ -11182,7 +11184,8 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.12.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.13.0
 [0.12.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.12.0
 [0.11.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.11.0
 [0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0

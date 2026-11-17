@@ -242,6 +242,8 @@ being explicit about:
 - If the browser cannot reach Vite's port directly (containers, remote dev), set `server.hmr.port` /
   `server.hmr.clientPort` in the Vite config rather than trying to route the socket through the app.
 
+<!-- version:history -->
+
 Leaving `hmr` unset is not enough on every runtime: on Node and Deno the client first tried the
 app's port, failed the upgrade and fell back, and on Bun the app-port socket reloaded the page
 instead of updating it in place. The `dev.ts` that `setu new --template full-stack` generates

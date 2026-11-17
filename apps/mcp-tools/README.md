@@ -1,5 +1,7 @@
 # MCP tools
 
+<!-- version:history -->
+
 Available from **0.12.0**. Four explicitly marked HTTP routes are exposed as scoped MCP tools at
 `POST /mcp`: `list_items`, `read_item`, `create_item` and `archive_item`.
 This app was generated with `setu new --template rest --runtime node` and

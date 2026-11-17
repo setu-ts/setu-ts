@@ -15,6 +15,8 @@ npm run smoke   # the example's own proof; exits when done
 npm start       # serves until stopped
 ```
 
+<!-- version:history -->
+
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
 matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
 and fetches nothing. Offered examples are `minimal`, `rest-api`, `mcp-tools` (from 0.12.0),
@@ -359,6 +361,8 @@ pnpm --dir apps/cqrs run start
 
 ### mcp-tools
 
+<!-- version:history -->
+
 Available from **0.12.0**, the [MCP tools example](../apps/mcp-tools) follows the generated REST
 module layout and exposes four explicitly marked routes through `POST /mcp`. Read-only tokens see
 only `list_items` and `read_item`; writers also see `create_item` and `archive_item`. The
@@ -372,6 +376,8 @@ pnpm --dir apps/mcp-tools run smoke
 pnpm --dir apps/mcp-tools test
 pnpm --dir apps/mcp-tools run test:e2e
 ```
+
+<!-- version:history -->
 
 From the 0.12.0 release, `setu new demo --example mcp-tools` downloads the matching CLI release's
 files from GitHub. Before release, the packed-package CLI e2e is the proof; after publication,

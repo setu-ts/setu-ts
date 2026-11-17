@@ -10,7 +10,7 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)
 
@@ -206,6 +206,8 @@ to get the body.
   options or the `setu.config.ts` builder.
 - **A malformed `Content-Length` answers `400`** where `requestSize` is enabled. A correct client
   never sends one; no change is needed unless a test sends one deliberately.
+
+<!-- version:history -->
 
 ## 0.12.0
 
@@ -767,7 +769,7 @@ enabled the devtool):
 ```json
 {
   "tasks": {
-    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.12.0 check"
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.13.0 check"
   }
 }
 ```
