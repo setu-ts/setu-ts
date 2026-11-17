@@ -473,6 +473,9 @@ design changes it records (§3.5 `on`, §3.10) are reviewed here before they are
 - **Accepted residual:** a request that can reach a policied route with a parameterised path pays
   one full `matchRoutes` (~1.2 ms at 502 routes, §3.10), never two; the prefilter confines it to
   requests that can reach a policy (with a policy on a top-level layout, that is every request).
+- **A4 re-audit (2026-11-17, fd7b5f9ee):** passed — one ranking per request where the policied part
+  is half the build or more, at most 1.49 trees otherwise; selection exact on both sides of the
+  threshold.
 - **Re-audit 3 (2026-11-17, b60f0a748):** A1, A3, the kernel tracking fix and A2's root half hold;
   A4 (a layout wrapping most routes still ranked the tree twice) is fixed by §3.10 step 3's
   half-tree threshold.
