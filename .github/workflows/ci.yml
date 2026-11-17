@@ -72,6 +72,28 @@ jobs:
             exit 1
           fi
 
+  # `plans/` and `ROADMAP.md` are develop's working documents and never reach `main`
+  # (docs/releasing.md, "Keep plans and the roadmap off `main`"). A release branch removes them in
+  # its last commit; this job fails a pull request into `main`, or a push to it, that still holds
+  # either. On every other event it reports success without checking anything.
+  main-branch-tree:
+    name: Main branch tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        if: github.base_ref == 'main' || github.ref == 'refs/heads/main'
+        with:
+          persist-credentials: false
+      - name: Refuse plans and the roadmap on main
+        if: github.base_ref == 'main' || github.ref == 'refs/heads/main'
+        run: |
+          found=$(git ls-files -- plans ROADMAP.md)
+          if [ -n "$found" ]; then
+            echo "These paths must not reach main; remove them on the release branch:"
+            echo "$found"
+            exit 1
+          fi
+
   # Fork PRs remain visible for maintainer triage but do not start repository validation jobs or
   # service containers. An accepted contribution is validated from a trusted repository branch.
   # The gates and the test suite run as parallel shards of one job, each on its

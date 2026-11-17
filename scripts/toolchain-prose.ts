@@ -490,7 +490,7 @@ const DENO_INSTALL = /\bdeno\s+(?:add|install)\b[^\n`<>;|&]*/g;
 const CONTINUED = /\\\s*$/;
 
 function history(path: string): boolean {
-  return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:archive\/|reviews\/|milestone-[^/]+\.md$))/.test(
+  return /^(?:CHANGELOG\.md$|ROADMAP\.md$|plans\/(?:reviews\/|milestone-[^/]+\.md$))/.test(
     path,
   );
 }

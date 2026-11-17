@@ -124,9 +124,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 ## Current status
 
 One line per entry. The full account of each entry — what shipped, what verification and review
-found, and every recorded decision — is in
-[`plans/archive/status-history.md`](plans/archive/status-history.md), unchanged from the text that
-stood here until 2026-10-24.
+found, and every recorded decision — was moved out of the repository on 2026-11-17 and is kept by
+the maintainer (`status-history.md` in their local plans folder), unchanged from the text that stood
+here until 2026-10-24. Git history before `v0.13.0` also holds it at
+`plans/archive/status-history.md`.
 
 Write a new entry the same way: one or two lines naming the packages, the change and the PR. The
 long account of what verification and review found belongs in the milestone's PR description, not
@@ -853,7 +854,9 @@ here.
   `routeMiddlewareOf` for the `requirePolicy` scan; `pageRoutes` from the default loader and the dev
   entry; `setu add` wiring value-free and generated-seam full-stack arms itself) — complete (PR
   #599).
-- **Next milestone** — every M139, M140 and M141 letter is complete; the `v0.13.0` release follows.
+- **Release `v0.13.0`** — cut 2026-11-17 (PR pending); 55 packages. From this release `plans/` and
+  `ROADMAP.md` stay off `main` and completed plans are deleted, not archived.
+- **Next milestone** — not yet chosen.
 
 ## Verification (run before declaring any work done)
 
@@ -1113,21 +1116,24 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   `git add` it. M10 shipped four `plans/milestone-10-*.md` files into the tree (main plan + three
   fix/continuation prompts) because scratch was committed — do not repeat this. Before every commit
   run `git status --short` and `git diff --cached --name-only`; if a transient plan/prompt file is
-  staged, `git rm --cached` (or delete) it. **A completed milestone's plan is ARCHIVED, never
-  deleted** — move it to `plans/archive/milestone-<N>-<desc>.md` in the same PR that flips the
-  status, so `plans/` root holds only the plan being built. Deleting a plan is the maintainer's call
-  and theirs alone: do not remove one unless asked, even when the milestone has shipped. (A previous
-  revision of this file mandated `git rm` here, on the reasoning that a shipped plan is a fourth
-  copy of what the code, tests, ROADMAP and CHANGELOG already say, and that
-  `git log --diff-filter=D --name-only -- plans/` recovers it. That reasoning is superseded: an
-  archived plan stays readable without an archaeology step.)
+  staged, `git rm --cached` (or delete) it. **A completed milestone's plan is DELETED** — `git rm`
+  it in the same PR that flips the status, so `plans/` holds only `TEMPLATE.md` and the plans being
+  built. There is no `plans/archive/` (maintainer decision, 2026-11-17): a shipped plan is a copy of
+  what the code, tests, ROADMAP and CHANGELOG already say, and
+  `git log --diff-filter=D --name-only -- plans/` recovers it.
+- **No plan file and no `ROADMAP.md` ever reach `main`.** Both are working documents of `develop`.
+  The release branch removes them as its last commit, a CI job fails any pull request into `main`
+  whose tree still holds them, and the back-merge restores them on `develop`. `docs/releasing.md`
+  ("Keep plans and the roadmap off `main`") has the commands. So no file outside `plans/` and
+  `ROADMAP.md` may link into either with a relative link: on `main` it points nowhere. Link
+  `https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md` instead.
 
 ## Key conventions
 
-- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), moved to
-  `plans/archive/` on completion in the milestone's own PR — archived, never deleted; removal is the
-  maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
-  plan-cleanup rule in "Before reporting a task done").
+- Plans: one committed plan per milestone (`plans/milestone-<N>-<desc>.md`), deleted on completion
+  in the milestone's own PR; plans and `ROADMAP.md` live on `develop` only, never on `main`. All
+  other prompts/notes are scratchpad only and never committed (see the plan-cleanup rule in "Before
+  reporting a task done").
 - Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
   `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` also imports `vitest` and runs in
   the `tooling` member. Deno-only proofs use the same Vitest-shaped files through the Deno-lane
@@ -1168,7 +1174,7 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   a defect in merged code, nor documentation-only work (for example, CI/release reproducibility
   across several packages). Record that approval and the scope in the PR; do not silently invent a
   `chore/…` branch type. A doc edit that belongs to a milestone still ships on that milestone's own
-  `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan archival are part of
+  `feat/…` branch — the status flip, the PUBLIC_API correction, and the plan deletion are part of
   the milestone, not separate work. Commits: conventional format (`feat(scope): subject`); **no
   commit message may exceed 100 words** in total (AI_GUIDELINES §15.1) — the plan, the PR body, and
   the code comments are where the long reasoning goes; no direct commits to `develop` or `main`.
@@ -1203,15 +1209,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with
   the commit), refuted (with the evidence), or deferred (with the owning milestone). Verify before
   agreeing — several such findings have been correct about the defect and wrong about the mechanism,
-  and one was wholly refuted. **A finding whose entire subject is an ARCHIVED plan
-  (`plans/archive/`) is DECLINED** — it is a design record, not a spec the code is checked against —
-  unless the finding ALSO lands on the implementation, in which case the implementation half is
-  fixed and the plan is left alone. A plan still at `plans/` root belongs to a milestone under
-  construction and is corrected normally. AI_GUIDELINES §16.5 is canonical and binds every agent
-  (Claude, ChatGPT/Codex, Roo).
+  and one was wholly refuted. A plan in `plans/` belongs to a milestone under construction and is
+  corrected normally; a finding against a plan the PR deletes is declined, and any implementation
+  half of it is fixed. AI_GUIDELINES §16.5 is canonical and binds every agent (Claude,
+  ChatGPT/Codex, Roo).
 - **Record the PR number in the same PR.** The CLAUDE.md "Current status" entry needs the number,
   which does not exist until the PR does, so the order is: commit the status entry as "complete (PR
   pending)" → push → `gh pr create` → edit the entry to the real number → commit and push again →
   only then post `@coderabbitai review` (see above). That second commit lands on the same branch
   before merge, so the merged history never carries "PR pending". Same for the ROADMAP row and the
-  plan archival — all of it ships in the milestone's own PR (see "Before reporting a task done").
+  plan deletion — all of it ships in the milestone's own PR (see "Before reporting a task done").

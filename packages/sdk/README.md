@@ -619,7 +619,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 
 [Architecture](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) ·
 [Public API](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#sdk--client-sdk-setu-tssdk)
-· [Roadmap](https://github.com/setu-ts/setu-ts/blob/main/ROADMAP.md)
+· [Roadmap](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md)
 
 ## Exports
 

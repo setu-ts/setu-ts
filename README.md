@@ -386,15 +386,15 @@ be replaced without touching the others.
 
 ## Documentation
 
-| Document                                   | Audience                | Purpose                                                                  |
-| ------------------------------------------ | ----------------------- | ------------------------------------------------------------------------ |
-| [**docs/README.md**](docs/README.md)       | All users               | Documentation hub — navigation and guide index                           |
-| [**ARCHITECTURE.md**](ARCHITECTURE.md)     | Framework contributors  | How the framework works internally and why it was designed this way      |
-| [**PUBLIC_API.md**](PUBLIC_API.md)         | Application developers  | How to use the framework — complete examples for every plugin            |
-| [**AI_GUIDELINES.md**](AI_GUIDELINES.md)   | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
-| [**ROADMAP.md**](ROADMAP.md)               | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
-| [**CHANGELOG.md**](CHANGELOG.md)           | Everyone                | What each release contains, and its known limitations                    |
-| [**docs/releasing.md**](docs/releasing.md) | Maintainers             | npm release runbook — setup, trust, and the per-release sequence         |
+| Document                                                                     | Audience                | Purpose                                                                  |
+| ---------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------ |
+| [**docs/README.md**](docs/README.md)                                         | All users               | Documentation hub — navigation and guide index                           |
+| [**ARCHITECTURE.md**](ARCHITECTURE.md)                                       | Framework contributors  | How the framework works internally and why it was designed this way      |
+| [**PUBLIC_API.md**](PUBLIC_API.md)                                           | Application developers  | How to use the framework — complete examples for every plugin            |
+| [**AI_GUIDELINES.md**](AI_GUIDELINES.md)                                     | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
+| [**ROADMAP.md**](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md) | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
+| [**CHANGELOG.md**](CHANGELOG.md)                                             | Everyone                | What each release contains, and its known limitations                    |
+| [**docs/releasing.md**](docs/releasing.md)                                   | Maintainers             | npm release runbook — setup, trust, and the per-release sequence         |
 
 Each package also carries its own README with options, semantics, and a worked example.
 
@@ -457,6 +457,7 @@ production.
 <div align="center">
 
 **[Documentation Hub](docs/README.md)** · **[Architecture](ARCHITECTURE.md)** ·
-**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)** · **[Roadmap](ROADMAP.md)**
+**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)** ·
+**[Roadmap](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md)**
 
 </div>

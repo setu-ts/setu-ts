@@ -225,6 +225,36 @@ own placeholder and trust configuration before their first real release.
   the wrong releases (M90h). `test/docs-gate.test.ts` refuses a heading with no matching CHANGELOG
   section, so a forgotten rename fails the suite rather than shipping.
 
+### Keep plans and the roadmap off `main`
+
+`plans/` and `ROADMAP.md` are working documents of `develop` and never reach `main`. Because `main`
+and `develop` merge into each other, keeping them out takes a step at each end of every release.
+
+**Last commit on the release branch** — after every other change, so the gates below run on the tree
+`main` will hold:
+
+```fish
+git rm -r -q plans ROADMAP.md
+git commit -m "chore(release): keep plans and the roadmap off main"
+```
+
+The CI job **Main branch tree** fails any pull request into `main`, release or hotfix, whose tree
+still holds either path. Nothing outside them may link into them relatively, since on `main` such a
+link points nowhere; link the `develop` copy on GitHub instead.
+
+**The back-merge restores them.** Merging `main` into `develop` would carry the removal back, so
+take `develop`'s copies before committing the merge:
+
+```fish
+git merge --no-ff --no-commit origin/main
+git checkout origin/develop -- plans ROADMAP.md
+git commit
+git diff origin/develop HEAD -- plans ROADMAP.md
+```
+
+The last command must print nothing. If `develop` changed either path after the release was cut, the
+merge reports a modify/delete conflict on it; the `git checkout` line resolves that the same way.
+
 ### 2. Verify the committed tree
 
 ```fish

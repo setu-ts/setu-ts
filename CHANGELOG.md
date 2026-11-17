@@ -11181,7 +11181,8 @@ are never hard dependencies. Each is injected through plugin options or imported
 
 ### Milestones in this release
 
-Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
+Milestones 0–33 and 41–46. See
+[ROADMAP.md](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
 [unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.13.0...HEAD

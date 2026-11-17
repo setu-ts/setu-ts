@@ -8,7 +8,8 @@
 > **Companion documents:**
 >
 > - [`PUBLIC_API.md`](PUBLIC_API.md) — How developers use the framework
-> - [`ROADMAP.md`](ROADMAP.md) — Implementation phases
+> - [`ROADMAP.md`](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md) — Implementation
+>   phases
 > - [`AI_GUIDELINES.md`](AI_GUIDELINES.md) — Engineering rules
 
 ---
@@ -3431,6 +3432,7 @@ Contributors should internalize these principles:
 6. **Test everything** — 90%+ coverage; tests on all runtimes.
 7. **Never break backward compatibility** — Deprecate, do not remove.
 
-For implementation phases, refer to [`ROADMAP.md`](ROADMAP.md). For developer-facing API, refer to
-[`PUBLIC_API.md`](PUBLIC_API.md). For engineering rules, refer to
+For implementation phases, refer to
+[`ROADMAP.md`](https://github.com/setu-ts/setu-ts/blob/develop/ROADMAP.md). For developer-facing
+API, refer to [`PUBLIC_API.md`](PUBLIC_API.md). For engineering rules, refer to
 [`AI_GUIDELINES.md`](AI_GUIDELINES.md).

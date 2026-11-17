@@ -8,12 +8,12 @@ connector (`.roo/skills/security-audit/SKILL.md`) is checked against this docume
 ## Status and scope
 
 **Completed 2026-09-27, retroactively.** M98b shipped (PR #347) with this review deferred: its plan
-(`plans/archive/milestone-98b-local-diagnostics-connector.md`) records the threat design in §3 and
-states that a security review must cover "bootstrap, MAC canonicalization, replay races,
-origin/authority checks and post-await revocation", but it records no completed review. PR #370 then
-audited the native client against an external contract audit and listed the missing review as a gap
-on `main`. The plan is archived, and an archived plan is a design record that is not edited, so the
-review lives here.
+(`plans/archive/milestone-98b-local-diagnostics-connector.md`, in git history before `v0.13.0`)
+records the threat design in §3 and states that a security review must cover "bootstrap, MAC
+canonicalization, replay races, origin/authority checks and post-await revocation", but it records
+no completed review. PR #370 then audited the native client against an external contract audit and
+listed the missing review as a gap on `main`. The plan is archived, and an archived plan is a design
+record that is not edited, so the review lives here.
 
 Because the code already exists, the review follows one rule: **it is derived from the committed
 design — the plan's §3 and the protocol specification — not from the code.** A threat model written
