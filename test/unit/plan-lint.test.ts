@@ -103,11 +103,9 @@ describe('planRootFiles', () => {
   const entry = (name: string, file = true) => ({ name, isFile: () => file });
 
   it('lists only Markdown files', async () => {
-    const files = await planRootFiles(async () => [
-      entry('milestone-1-x.md'),
-      entry('notes.txt'),
-      entry('reviews', false),
-    ]);
+    const files = await planRootFiles(() =>
+      Promise.resolve([entry('milestone-1-x.md'), entry('notes.txt'), entry('reviews', false)]),
+    );
     expect(files).toEqual(['milestone-1-x.md']);
   });
 
