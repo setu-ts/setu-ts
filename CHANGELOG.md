@@ -467,7 +467,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Documentation (M140e, M139e; `@setu-ts/agent-runs-plugin`, `@setu-ts/auth-plugin`,
+- **Documentation (M140e, M139e, #597; `@setu-ts/agent-runs-plugin`, `@setu-ts/auth-plugin`,
   `@setu-ts/config-plugin`, `@setu-ts/decorator-plugin`, `@setu-ts/events-plugin`,
   `@setu-ts/mail-plugin`, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/secrets-plugin`,
   `@setu-ts/session-plugin`, `@setu-ts/sse-plugin`, `@setu-ts/vector-store-plugin`,
