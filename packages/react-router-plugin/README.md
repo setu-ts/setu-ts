@@ -191,9 +191,14 @@ export const frontend = ReactRouterPlugin({
   the loaders, so a guard on loader data needs `'all'`.
 - **Same semantics as kernel route middleware.** Policies run after the global pipeline, in the
   kernel, with the page render as the terminal: a policy that answers without calling `next()` ends
-  the request (the action never runs), and its own response is what the client receives, not a React
-  Router error boundary. Middleware that reads the response after `next()` sees the rendered page. A
-  policy may read `ctx.request.formData()`; the action still receives the same body.
+  the request (the action never runs), and the client receives that policy's own response (the
+  limiter's `429` with its Problem Details body, for example). A plain HTML form post shows that
+  response as is. A hydrated page submitting through React Router's client fetches the route's
+  `.data` URL, and React Router turns a non-data response into a route error, so the nearest
+  `ErrorBoundary` renders with that status; check
+  `isRouteErrorResponse(error) && error.status === 429` there to show a friendly message. Middleware
+  that reads the response after `next()` sees the rendered page. A policy may read
+  `ctx.request.formData()`; the action still receives the same body.
 - **Refused at startup:** an id naming no route in the build (the message lists known ids), an empty
   `middleware` array, an `on` value other than `'action'` or `'all'`, or a custom
   `loadRequestHandler` that returns no `pageRoutes`, and a build with React Router's
