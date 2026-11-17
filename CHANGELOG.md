@@ -316,27 +316,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`setu add` finishes full-stack wiring it can do safely (`@setu-ts/cli`, M141).** On a project
-  composed by `createFullStackAppFromConfig`, `setu add health` and `setu add metrics` now wire
-  their generated barrels into the starter's arm, and `setu add sse`, `websocket` and
+- **`setu add` finishes full-stack wiring it can do safely (`@setu-ts/cli`, M141, #599).** On a
+  project composed by `createFullStackAppFromConfig`, `setu add health` and `setu add metrics` now
+  wire their generated barrels into the starter's arm, and `setu add sse`, `websocket` and
   `realtime-backplane` set their opt-in arm to `{}`. The note for every other arm says whether the
   starter already registers the plugin with defaults or registers it only once the arm is set. An
   existing arm is never rewritten.
 
-- **Page route policies (M141, `@setu-ts/react-router-plugin`, `@setu-ts/kernel`, `@setu-ts/common`,
-  `@setu-ts/auth-plugin`).** `pagePolicies` on `ReactRouterPlugin` attaches Setu middleware (a rate
-  limit, `requirePolicy`, `idempotent()`) to a page by its React Router route id; `on: 'action'`
-  limits one to the requests that can run the action, leaving page views alone. Requests are matched
-  with React Router's own `matchRoutes` after its `.data` normalization, so document, single-fetch
-  and `?index` requests all select the route; the kernel runs the policies after the global pipeline
-  with the page render as terminal. `PagePolicy` and `PageRouteSource` are exported;
-  `SsrRuntime.pageRoutes` is supplied by the default loader and by the generated full-stack
-  development entry. In `common`, `RouteDefinition.middlewareGroups` (`RouteMiddlewareGroups`)
-  selects static middleware groups per request, and `routeMiddlewareOf` returns a route's whole
-  middleware set, which `AuthPlugin`'s `requirePolicy` startup check now reads. **Upgrade:** a
-  custom `loadRequestHandler` must return `pageRoutes` before `pagePolicies` can be used
-  (`register()` refuses otherwise); anything that dispatches a `RouteDefinition` itself must also
-  run `middlewareGroups`, or its guards fail open.
+- **Page route policies (M141, #599, `@setu-ts/react-router-plugin`, `@setu-ts/kernel`,
+  `@setu-ts/common`, `@setu-ts/auth-plugin`).** `pagePolicies` on `ReactRouterPlugin` attaches Setu
+  middleware (a rate limit, `requirePolicy`, `idempotent()`) to a page by its React Router route id;
+  `on: 'action'` limits one to the requests that can run the action, leaving page views alone.
+  Requests are matched with React Router's own `matchRoutes` after its `.data` normalization, so
+  document, single-fetch and `?index` requests all select the route; the kernel runs the policies
+  after the global pipeline with the page render as terminal. `PagePolicy` and `PageRouteSource` are
+  exported; `SsrRuntime.pageRoutes` is supplied by the default loader and by the generated
+  full-stack development entry. In `common`, `RouteDefinition.middlewareGroups`
+  (`RouteMiddlewareGroups`) selects static middleware groups per request, and `routeMiddlewareOf`
+  returns a route's whole middleware set, which `AuthPlugin`'s `requirePolicy` startup check now
+  reads. **Upgrade:** a custom `loadRequestHandler` must return `pageRoutes` before `pagePolicies`
+  can be used (`register()` refuses otherwise); anything that dispatches a `RouteDefinition` itself
+  must also run `middlewareGroups`, or its guards fail open.
 
 - **Form bodies and file uploads in the document and the client (M137c, #590, `@setu-ts/common`,
   `@setu-ts/validation-plugin`, `@setu-ts/openapi-plugin`, `@setu-ts/sdk`).** `formFile` and

@@ -852,7 +852,7 @@ here.
   after its `.data` normalization, run by the kernel through `RouteDefinition.middlewareGroups`;
   `routeMiddlewareOf` for the `requirePolicy` scan; `pageRoutes` from the default loader and the dev
   entry; `setu add` wiring value-free and generated-seam full-stack arms itself) — complete (PR
-  pending).
+  #599).
 - **Next milestone** — every M139, M140 and M141 letter is complete; the `v0.13.0` release follows.
 
 ## Verification (run before declaring any work done)
