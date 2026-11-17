@@ -24,6 +24,22 @@ function stepOf(text: string, name: string): string {
  * because a regression is a one-word edit that CI reports as passing.
  */
 describe('dependency drift gate configuration', () => {
+  it('pins the same helm as ci.yml before its tests run', async () => {
+    // Issue #575: script-entrypoints renders k8s/chart with `helm template`, and
+    // the runner image's helm renders it differently. ci.yml pinned helm (#588);
+    // this workflow did not, so every drift run reported a test failure that no
+    // dependency caused. Both workflows must pin one version, before the tests.
+    const text = await readWorkflow();
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
+    const pin = /uses:\s*azure\/setup-helm@v\d+\n(?:\s+if:[^\n]*\n)?\s+with:\n\s+version:\s*(\S+)/;
+    const ciVersion = pin.exec(ci)?.[1];
+    expect(ciVersion, 'ci.yml pins helm').toMatch(/^v\d+\.\d+\.\d+$/);
+    expect(pin.exec(text)?.[1], 'drift.yml pins helm').toBe(ciVersion);
+    expect(text.indexOf('azure/setup-helm@')).toBeLessThan(
+      text.indexOf('- name: Test against fresh resolution'),
+    );
+  });
+
   it('checks out develop, not the default branch', async () => {
     // Issue #507: a scheduled run checks out `main`, the last release, so the
     // gates reported a test race develop had already fixed. The one checkout
