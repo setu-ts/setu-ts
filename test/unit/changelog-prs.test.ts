@@ -150,6 +150,18 @@ describe('requiredToken', () => {
     // Only the exact branch: a feature branch that merely starts with "main" is not exempt.
     expect(requiredToken(pr(460, 'fix/main-loop', bump))).toBe('#460');
   });
+
+  it('exempts a back-merge opened from its own branch, at that release and the next', () => {
+    // #602 back-merged v0.13.0 from `chore/back-merge-v0.13.0`, because the merge commit had to
+    // restore plans/ and ROADMAP.md; develop's next publish dry-run then refused it.
+    const bump = ['packages/kernel/src/version.ts'];
+    expect(requiredToken(pr(602, 'chore/back-merge-v0.13.0', bump), '0.13.0')).toBeNull();
+    expect(requiredToken(pr(602, 'chore/back-merge-v0.13.0', bump), '0.14.0')).toBeNull();
+    expect(requiredToken(pr(602, 'chore/back-merge-v0.13.0', bump))).toBeNull();
+    // Only that exact shape: another chore branch, or a suffixed name, still needs its entry.
+    expect(requiredToken(pr(604, 'chore/back-merge-cleanup', bump))).toBe('#604');
+    expect(requiredToken(pr(605, 'chore/back-merge-v0.13.0-extra', bump))).toBe('#605');
+  });
 });
 
 describe('checkChangelogPrs', () => {

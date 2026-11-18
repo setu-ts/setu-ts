@@ -31,8 +31,9 @@
  * `src/` changes are the version bump, the section it would have to name itself
  * in is the release, and on the tag — the only place it is merged — nothing can
  * edit that section any more. So is the `main` → `develop` back-merge that follows
- * every release: it carries only commits already represented in the section they
- * were released in, and its `src/` changes are that release's version bump.
+ * every release, opened from `main` or from `chore/back-merge-v<version>`: it
+ * carries only commits already represented in the section they were released
+ * in, and its `src/` changes are that release's version bump.
  *
  * **Misfiling** is checked for milestone PRs only, because that is the shape
  * that has actually happened and the only one with an identifier that can be
@@ -95,6 +96,15 @@ const MILESTONE_BRANCH = /^feat\/m(\d+(?:[a-z]\d?)?)(?:-|$)/i;
 
 /** A path whose change alters what a published package ships. */
 const PUBLISHED_SOURCE = /^packages\/(?:starters\/)?[^/]+\/src\//;
+
+/**
+ * The branch a `main` → `develop` back-merge is opened from. From `v0.13.0` the
+ * back-merge must restore `plans/` and `ROADMAP.md` in its merge commit, which
+ * cannot be made on `main` itself (docs/releasing.md, "Keep plans and the
+ * roadmap off `main`"). Any version matches: the same PR is checked again at the
+ * next release, against that release's version.
+ */
+const BACK_MERGE_BRANCH = /^chore\/back-merge-v\d+\.\d+\.\d+$/;
 
 /** The milestone tag in an entry's bold lead: `- **… (M101d).**` / `(M101b, V8-2)` / `(M111e1)`. */
 const ENTRY_LEAD_TAG = /^- \*\*[^\n]*?\((M\d+(?:[a-z]\d?)?)(?=[,) ])/gm;
@@ -180,12 +190,13 @@ export function shippingSection(
  * @param pr - The merged pull request
  * @param version - The version being verified; its own release PR
  *   (`release/v<version>`) needs no entry, and neither does a back-merge from `main`
+ *   or `chore/back-merge-v<version>`
  * @returns `M<id>` for a milestone branch, `#<n>` for any other branch that
  *   changed a published `src/` tree, `null` otherwise
  */
 export function requiredToken(pr: MergedPullRequest, version?: string): string | null {
   if (version !== undefined && pr.branch === `release/v${version}`) return null;
-  if (pr.branch === 'main') return null;
+  if (pr.branch === 'main' || BACK_MERGE_BRANCH.test(pr.branch)) return null;
   const milestone = MILESTONE_BRANCH.exec(pr.branch);
   if (milestone !== null) return `M${milestone[1]}`;
   return pr.changedPaths.some((path) => PUBLISHED_SOURCE.test(path)) ? `#${pr.number}` : null;
