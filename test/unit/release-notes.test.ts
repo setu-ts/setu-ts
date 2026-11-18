@@ -387,8 +387,13 @@ describe('release workflow wiring', () => {
     const prJob = jobBlock(ci, 'node');
     const uses = (job: string, tool: string): boolean =>
       new RegExp(`^ +- uses: \\S*/${tool}@`, 'm').test(job);
-    const toolchains = ['setup-bun', 'setup-deno'].filter((tool) => uses(prJob, tool));
+    // helm joined the list after the v0.13.0 tag run: ci.yml pins it for the
+    // tooling shard's render check and release.yml did not (#601).
+    const toolchains = ['setup-bun', 'setup-deno', 'setup-helm'].filter((tool) =>
+      uses(prJob, tool),
+    );
     expect(toolchains).toContain('setup-bun');
+    expect(toolchains).toContain('setup-helm');
     for (const { workflow, job } of SUITE_CONSUMERS) {
       const consumer = jobBlock(await readFile(workflow, 'utf8'), job);
       for (const tool of toolchains) {
@@ -399,6 +404,34 @@ describe('release workflow wiring', () => {
         });
       }
     }
+  });
+
+  it("keeps a failed CLI shard's report on the tag path, and still refuses to publish", async () => {
+    // The CLI shards report through Vitest blobs and print no per-test failure,
+    // so a failed shard is diagnosable only if its blob is uploaded and merged
+    // anyway. ci.yml does both under `always()`; release.yml did neither, and
+    // v0.13.0's tag run lost a cli-3 failure with no cause in the log.
+    const blobUploads = (workflow: string): string[] =>
+      [...workflow.matchAll(/^ +if: (.*)\n +with:\n +name: cli-blob-\d$/gm)].map(
+        (match) => match[1] ?? '',
+      );
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
+    const release = await readFile('.github/workflows/release.yml', 'utf8');
+    for (const workflow of [ci, release]) {
+      const conditions = blobUploads(workflow);
+      expect(conditions).toHaveLength(3);
+      for (const condition of conditions) expect(condition).toMatch(/^always\(\) && /);
+      expect(jobBlock(workflow, 'cli-coverage')).toMatch(/^ {4}if: always\(\)/m);
+    }
+
+    // The other half: running the merge after a failure must not open the
+    // way to publishing. `publish` names no status function, so GitHub
+    // applies `success()` to every need, and a failed gate skips it.
+    const publish = jobBlock(release, 'publish');
+    expect(publish).toMatch(/^ {4}needs: \[gates, cli-coverage\]$/m);
+    expect(/^ {4}if: (.*)$/m.exec(publish)?.[1]).not.toMatch(
+      /always\(\)|failure\(\)|cancelled\(\)/,
+    );
   });
 
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {
