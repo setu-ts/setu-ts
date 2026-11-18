@@ -433,12 +433,24 @@ In a full-stack project, `setu g module <name>` writes a request-bound module: `
 (`requestServiceToken`), a service factory taking the request context, `/api/<name>` routes that
 resolve it with `resolveRequestService`, generated tests that sign a session through `/login` and
 send its CSRF token, and a managed `index.ts` that registers the service with `requestService`.
-`--page` also writes `app/routes/_app/<name>._index.tsx`, a page guarded by `requireUser` whose
-loader reads the service with `getService`. `--page` is refused outside the full-stack template. A
-page may import kernel code only as `import type` or from a `*.token.ts` module through `~kernel/*`;
-`setu check` refuses any other value import (`setu.E017`) outside React Router `.server` modules,
-including an `import.meta.glob` that reaches `src/`. The check reads only the imports a page makes
-itself: a file outside `app/` that re-exports kernel code is not followed.
+Choose the module's entry points:
+
+| Command                             | Generated entry points                           |
+| ----------------------------------- | ------------------------------------------------ |
+| `setu g module <name>`              | `/api/<name>` controller, no page                |
+| `setu g module <name> --page`       | Page loader, action and CSRF form, no controller |
+| `setu g module <name> --page --api` | Both page and API controller                     |
+
+The page at `app/routes/_app/<name>._index.tsx` is guarded by `requireUser`. Its loader reads with
+`getService`; its action calls the service's `parse` and `create`, redirects on success and renders
+a validation message otherwise. The API uses the same parser, which trims the name. Use
+`pagePolicies` with the literal route id `routes/_app/<name>._index` and `on: 'action'` for action
+guards. API routes are for callers outside the app and need their own authentication. `--api`
+requires `--page`; both are refused outside functional full-stack generation. Existing modules are
+untouched. A page may import kernel code only as `import type` or from a `*.token.ts` module through
+`~kernel/*`; `setu check` refuses any other value import (`setu.E017`) outside React Router
+`.server` modules, including an `import.meta.glob` that reaches `src/`. The check reads only the
+imports a page makes itself: a file outside `app/` that re-exports kernel code is not followed.
 
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
 routes that would shadow an existing page, with its file named. Run `setu g module orders` for

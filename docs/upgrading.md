@@ -10,6 +10,15 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Module pages (`@setu-ts/cli`)
+
+`setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
+`/api/<name>` routes. Pass `--page --api` when callers outside the app also need those routes.
+Without `--page`, the API remains the default; `--api` requires `--page`. The generated API now
+trims the name through the service's shared `parse` method. Existing modules are untouched.
+
 ## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)

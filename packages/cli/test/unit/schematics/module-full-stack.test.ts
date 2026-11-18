@@ -110,6 +110,89 @@ describe('generateModule in a full-stack project', () => {
       'expect(await service.get(record.id)).toEqual(record);',
     );
   });
+
+  it.each([
+    [{}, true, false],
+    [{ page: true }, false, true],
+    [{ page: true, api: true }, true, true],
+  ] as const)('selects controller, index and e2e paths for %j', (options, api, page) => {
+    const generated = generateFullStackModule(names, { runtime: 'node', ...options });
+    expect(generated.some((file) => file.path.endsWith('.controller.ts'))).toBe(api);
+    expect(
+      byPath(generated, 'src/modules/articles/index.ts').includes('articles.controller.ts'),
+    ).toBe(api);
+    const test = byPath(generated, 'src/modules/articles/articles.e2e.test.ts');
+    expect(test.includes('await signedSession(')).toBe(api);
+    expect(test.includes('await signedInSession(')).toBe(page);
+    if (page) {
+      const source = byPath(generated, modulePagePath(names));
+      for (const fragment of [
+        'export async function action',
+        'getCsrfToken(context)',
+        "service.parse({ name: form.get('name') })",
+        "redirect('/articles', 303)",
+        "'routes/_app/articles._index'",
+        "on: 'action'",
+        '<Form method="post">',
+        'name="_csrf"',
+        'useActionData<typeof action>()',
+      ])
+        expect(source).toContain(fragment);
+      for (const fragment of [
+        "'/articles.data'",
+        'A non-empty name is required.',
+        'session.token',
+        "created.headers.get('location')",
+        'Data example',
+      ])
+        expect(test).toContain(fragment);
+      expect(test).toContain("created.headers.get('location'), '/articles'");
+      expect(test).not.toContain('${names.');
+    }
+  });
+
+  it('shares trimmed-name parsing across both write paths and tests it', () => {
+    const service = byPath(files, 'src/modules/articles/articles.service.ts');
+    expect(service).toContain('parse(value: { readonly name?: unknown }): ArticlesInput | string');
+    expect(service).toContain('value.name.trim()');
+    const controller = byPath(files, 'src/modules/articles/articles.controller.ts');
+    expect(controller).not.toContain('inputOf');
+    expect(controller.match(/service.parse\(/g)).toHaveLength(2);
+    expect(controller).toContain('throw badRequest(input)');
+    expect(byPath(files, 'src/modules/articles/articles.test.ts')).toContain('service.parse(');
+    const support = renderSessionSupport();
+    expect(support).toContain("email = 'e2e@example.test'");
+    expect(support).toContain('placeholder sign-in');
+    expect(support).toContain('cookie =');
+    expect(support.match(/await fetch\(baseUrl \+ '\/login'/g)).toHaveLength(3);
+  });
+
+  it('refuses api without page in the schematic itself', () => {
+    expect(() => generateFullStackModule(names, { runtime: 'node', api: true })).toThrow(
+      '--api applies with --page: a module without a page is already reached through its /api routes.',
+    );
+    expect(() =>
+      generateModule(names, { runtime: 'node', plugins: FULL_STACK, api: true }),
+    ).toThrow('--api applies with --page');
+    expect(
+      generateModule(names, { runtime: 'node', plugins: FULL_STACK, page: true, api: true }).some(
+        (file) => file.path.endsWith('.controller.ts'),
+      ),
+    ).toBe(true);
+    expect(
+      generateFullStackModule(names, { runtime: 'cloudflare-workers', page: true }).some((file) =>
+        file.path.endsWith('/articles.test.ts'),
+      ),
+    ).toBe(false);
+    for (const plugins of [
+      new Set<string>(),
+      new Set(['react-router-plugin', 'decorator-plugin']),
+    ]) {
+      expect(() =>
+        generateModule(names, { runtime: 'node', plugins, page: true, api: true }),
+      ).toThrow();
+    }
+  });
 });
 
 describe('generateModule outside full-stack is unchanged', () => {
@@ -150,9 +233,35 @@ describe('setu generate module --page', () => {
     const h = project({ '@setu-ts/react-router-plugin': '^0.11.0', '@setu-ts/common': '^0.11.0' });
     expect(await h.run(['module', 'articles', '--page']), h.err.text()).toBe(0);
     expect(h.fs.has('/app/app/routes/_app/articles._index.tsx')).toBe(true);
+    expect(h.fs.has('/app/src/modules/articles/articles.controller.ts')).toBe(false);
     expect(h.fs.read('/app/src/modules/articles/index.ts')).toContain(
       'services.register(ARTICLES, requestService(articlesService));',
     );
+  });
+
+  it('passes --api through only with --page', async () => {
+    const h = project({ '@setu-ts/react-router-plugin': '^0.13.0' });
+    expect(await h.run(['module', 'articles', '--api'])).toBe(2);
+    expect(h.err.text()).toContain(
+      '--api applies with --page: a module without a page is already reached through its /api routes.',
+    );
+    expect(await h.run(['module', 'articles', '--page', '--api']), h.err.text()).toBe(0);
+    expect(h.fs.has('/app/src/modules/articles/articles.controller.ts')).toBe(true);
+  });
+
+  it.each([
+    [{}, ['module', 'articles'], 'full-stack template'],
+    [
+      { '@setu-ts/react-router-plugin': '^0.13.0', '@setu-ts/decorator-plugin': '^0.13.0' },
+      ['module', 'articles'],
+      'functional generation',
+    ],
+    [{ '@setu-ts/react-router-plugin': '^0.13.0' }, ['service', 'billing'], 'applies only'],
+  ] as const)('refuses --page --api for %j', async (manifest, args, message) => {
+    const h = project(manifest);
+    expect(await h.run([...args, '--page', '--api'])).toBe(2);
+    expect(h.err.text()).toContain(message);
+    expect(h.fs.writes).toEqual([]);
   });
 
   it('lists the page route under --dry-run without writing it', async () => {

@@ -43,6 +43,52 @@ function harness(
 }
 
 describe('generation refuses kernel routes that shadow React Router pages', () => {
+  it.each([false, true])(
+    'checks API shadowing only when --api writes the controller (%s)',
+    async (api) => {
+      const h = harness(undefined, () =>
+        Promise.resolve({
+          code: 0,
+          stdout: JSON.stringify([
+            { id: 'api-orders', path: 'api/orders', file: 'routes/_app/api.orders.tsx' },
+          ]),
+          stderr: '',
+        }),
+      );
+      expect(await h.run(['g', 'module', 'orders', '--page', ...(api ? ['--api'] : [])])).toBe(
+        api ? 1 : 0,
+      );
+      expect(h.err.text().includes('would take precedence')).toBe(api);
+      expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(!api);
+    },
+  );
+
+  it.each([false, true])('keeps the existing-page refusal with --api=%s', async (api) => {
+    const h = harness();
+    expect(await h.run(['g', 'module', 'products', '--page', ...(api ? ['--api'] : [])])).toBe(1);
+    expect(h.err.text()).toContain('the page /products already exists');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it.each([false, true])('keeps the same-named adoption refusal with --api=%s', async (api) => {
+    const h = harness();
+    await h.fs.writeFile(
+      '/app/src/controllers/orders.controller.ts',
+      new TextEncoder().encode('export function registerOrdersRoutes() {}'),
+    );
+    expect(
+      await h.run([
+        'g',
+        'module',
+        'orders',
+        '--page',
+        '--adopt-controllers',
+        ...(api ? ['--api'] : []),
+      ]),
+    ).toBe(1);
+    expect(h.err.text()).toContain('while adopting src/controllers/orders.controller.ts');
+    expect(h.fs.has('/app/app/routes/_app/orders._index.tsx')).toBe(false);
+  });
   it.each([
     [['react-router-plugin'], '/api/articles'],
     [[], '/articles'],

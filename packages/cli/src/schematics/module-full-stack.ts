@@ -1,16 +1,15 @@
 /**
- * `setu g module <name>` in a full-stack project (M130 §3.6, §3.8).
+ * `setu g module <name>` in a full-stack project.
  *
  * The module owns its business logic: a request-bound service factory over an
- * in-memory store, a typed token, `/api/<name>` routes that resolve the service
- * with `resolveRequestService`, and a managed index that registers the token
- * (derived from the module-service family, so `setu sync` keeps it). `--page`
- * adds a React Router page whose loader reads the SAME service with
- * `getService`, importing only the type and the token through `~kernel/*`.
+ * in-memory store, shared input parsing, a typed token and a managed index that
+ * registers it (the module-service family survives `setu sync`). Without
+ * `--page`, `/api/<name>` routes resolve the service with `resolveRequestService`.
+ * `--page` writes a guarded React Router loader, action and form using
+ * `getService`; add `--api` for outside callers to reach the same service.
  *
- * The generated tests sign a session first: the full-stack template runs session
- * CSRF on every unsafe route, so a POST without the session cookie and token is
- * 403 by design (X91-2). `test/support/session.ts` obtains both from `/login`.
+ * Generated page tests sign in through the template's placeholder login and
+ * re-read the rotated CSRF token. API tests keep an anonymous signed session.
  *
  * @module
  */
@@ -35,6 +34,10 @@ export function modulePagePath(names: DerivedNames): string {
 
 /** Path of the session helper the full-stack module tests import. */
 export const SESSION_SUPPORT_PATH = 'test/support/session.ts';
+
+/** Shared refusal for command and schematic callers. */
+export const API_REQUIRES_PAGE =
+  '--api applies with --page: a module without a page is already reached through its /api routes.';
 
 function types(names: DerivedNames): string {
   const p = names.pascal;
@@ -75,13 +78,15 @@ const records = new Map<string, ${p}>();
 
 /** What the ${names.kebab} module offers to pages and to its API routes. */
 export interface ${p}Service {
+  /** Parses a client's name, trimming it or returning a validation message. */
+  parse(value: { readonly name?: unknown }): ${p}Input | string;
   /** Every record, ordered by name. */
   list(): Promise<readonly ${p}[]>;
   /** One record, or undefined. */
   get(id: string): Promise<${p} | undefined>;
-  /** Creates a record. */
+  /** Creates a record from parsed input. */
   create(input: ${p}Input): Promise<${p}>;
-  /** Updates a record, or answers undefined when it does not exist. */
+  /** Updates from parsed input, or answers undefined when the record does not exist. */
   update(id: string, input: Partial<${p}Input>): Promise<${p} | undefined>;
 }
 
@@ -99,6 +104,10 @@ export interface ${p}Service {
 export function ${names.camel}Service(ctx: IRequestContext): ${p}Service {
   void ctx;
   return {
+    parse: (value) => {
+      const name = typeof value.name === 'string' ? value.name.trim() : '';
+      return name.length > 0 ? { name } : 'A non-empty name is required.';
+    },
     list: () => {
       const all = [...records.values()];
       return Promise.resolve(all.sort((a, b) => a.name.localeCompare(b.name)));
@@ -140,20 +149,12 @@ function controller(names: DerivedNames): string {
   return `import { type IRouterApi, type IServiceRegistry, resolveRequestService } from '@setu-ts/common';
 import { badRequest, notFound } from '@setu-ts/exceptions';
 
-import type { ${p}Input } from './${names.kebab}.types.ts';
 import { ${names.screaming} } from './${names.kebab}.token.ts';
-
-/** Reads a client's input, refusing a body without a string \`name\`. */
-function inputOf(body: unknown): ${p}Input | undefined {
-  if (typeof body !== 'object' || body === null) return undefined;
-  const name = (body as { name?: unknown }).name;
-  return typeof name === 'string' && name.length > 0 ? { name } : undefined;
-}
 
 /**
  * The ${names.kebab} API, under \`/api\` so a kernel route never shadows a page.
- * Every unsafe request passes the session's CSRF check: browser code sends the
- * page's token in \`x-csrf-token\`.
+ * For callers outside the app; pages write through their own action.
+ * Unsafe requests need a session cookie and its token in \`x-csrf-token\`.
  *
  * Not behind sign-in: the page's \`requireUser\` guard covers the page only.
  * Add authentication here before these routes serve or accept real data.
@@ -172,19 +173,17 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
       return ctx.response.json(record);
     });
     routes.post('/', async (ctx) => {
-      const input = inputOf(await ctx.request.json<unknown>());
-      if (input === undefined) {
-        throw badRequest('A non-empty name is required.');
-      }
       const service = resolveRequestService(ctx, ${names.screaming});
+      const body = await ctx.request.json<unknown>();
+      const input = service.parse(typeof body === 'object' && body !== null ? body : {});
+      if (typeof input === 'string') throw badRequest(input);
       return ctx.response.status(201).json(await service.create(input));
     });
     routes.patch('/:id', async (ctx) => {
-      const input = inputOf(await ctx.request.json<unknown>());
-      if (input === undefined) {
-        throw badRequest('A non-empty name is required.');
-      }
       const service = resolveRequestService(ctx, ${names.screaming});
+      const body = await ctx.request.json<unknown>();
+      const input = service.parse(typeof body === 'object' && body !== null ? body : {});
+      if (typeof input === 'string') throw badRequest(input);
       const record = await service.update(ctx.params['id'] ?? '', input);
       if (record === undefined) throw notFound('${p} not found.');
       return ctx.response.json(record);
@@ -196,12 +195,13 @@ export function ${routeRegistrarSymbol(names)}(router: IRouterApi, services?: IS
 
 function page(names: DerivedNames): string {
   const p = names.pascal;
-  return `import { useLoaderData } from 'react-router';
+  return `import { Form, redirect, useActionData, useLoaderData } from 'react-router';
 import { getService } from '@setu-ts/react-router-plugin';
 
 import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import { requireUser } from '~/server/require-user.server.ts';
+import { getCsrfToken } from '~/server/session.server.ts';
 import type { ${p} } from '~kernel/modules/${names.kebab}/${names.kebab}.types.ts';
 import { ${names.screaming} } from '~kernel/modules/${names.kebab}/${names.kebab}.token.ts';
 
@@ -209,17 +209,32 @@ import { ${names.screaming} } from '~kernel/modules/${names.kebab}/${names.kebab
 export const middleware = [requireUser];
 
 /**
- * Reads the ${names.kebab} module's service for THIS request: the same instance
- * \`/api/${names.kebab}\` uses. Only the type and the token are imported from
+ * Reads the ${names.kebab} module's service for THIS request, shared with the
+ * action. Only the type and the token are imported from
  * \`~kernel/*\`; \`setu check\` refuses any other value import (setu.E017), except in React Router .server modules.
  */
 export async function loader({ context }: { context: AppLoadContext }) {
   const items: readonly ${p}[] = await getService(context, ${names.screaming}).list();
-  return { items };
+  return { items, csrfToken: getCsrfToken(context) };
+}
+
+/**
+ * Creates through the request-bound service. For a rate limit, upload check or
+ * other guard, use pagePolicies in setu.config.ts with the literal key
+ * 'routes/_app/${names.kebab}._index' and on: 'action'.
+ */
+export async function action({ request, context }: { request: Request; context: AppLoadContext }) {
+  const form = await request.formData();
+  const service = getService(context, ${names.screaming});
+  const input = service.parse({ name: form.get('name') });
+  if (typeof input === 'string') return { error: input };
+  await service.create(input);
+  return redirect('/${names.kebab}', 303);
 }
 
 export default function ${p}Page() {
-  const { items } = useLoaderData<typeof loader>();
+  const { items, csrfToken } = useLoaderData<typeof loader>();
+  const result = useActionData<typeof action>();
   return (
     <Card>
       <CardContent className='grid gap-4'>
@@ -227,6 +242,15 @@ export default function ${p}Page() {
         <ul className='list-disc space-y-1 pl-5'>
           {items.map((item) => <li key={item.id}>{item.name}</li>)}
         </ul>
+        <Form method="post">
+          <input type="hidden" name="_csrf" value={csrfToken} />
+          <label>
+            Name
+            <input name="name" />
+          </label>
+          <button type="submit">Create</button>
+          {result?.error && <p role="alert">{result.error}</p>}
+        </Form>
       </CardContent>
     </Card>
   );
@@ -235,9 +259,8 @@ export default function ${p}Page() {
 }
 
 /**
- * The session helper the full-stack module tests use (§3.8): GETs `/login`,
- * keeps the session cookie and the `_csrf` field, and returns headers that
- * carry both on every unsafe request.
+ * Session helpers for generated API and page tests. The page helper signs in
+ * and reads the rotated token; both retain the cookie for unsafe requests.
  *
  * @returns The `test/support/session.ts` contents
  */
@@ -264,10 +287,46 @@ export async function signedSession(baseUrl: string): Promise<{
     headers: (extra = {}) => ({ cookie, 'x-csrf-token': token, ...extra }),
   };
 }
+
+/**
+ * Relies on the template's placeholder sign-in. Update this helper when the
+ * application replaces it. Sign-in rotates the session and its CSRF token.
+ */
+export async function signedInSession(baseUrl: string, email = 'e2e@example.test'): Promise<{
+  readonly cookie: string;
+  readonly token: string;
+  readonly headers: (extra?: Record<string, string>) => Record<string, string>;
+}> {
+  const anonymous = await signedSession(baseUrl);
+  const headers = anonymous.headers();
+  const signedIn = await fetch(baseUrl + '/login', {
+    method: 'POST',
+    redirect: 'manual',
+    headers: { cookie: headers['cookie']!, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email, _csrf: headers['x-csrf-token']! }),
+  });
+  await signedIn.text();
+  if (signedIn.status !== 302 && signedIn.status !== 303) {
+    throw new Error('POST /login did not redirect after sign-in.');
+  }
+  let cookie = signedIn.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
+  if (cookie.length === 0) throw new Error('POST /login returned no rotated session cookie.');
+  const page = await fetch(baseUrl + '/login', { headers: { cookie } });
+  const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+  if (token === undefined) throw new Error('GET /login rendered no signed-in _csrf field.');
+  cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ') || cookie;
+  return { cookie, token, headers: (extra = {}) => ({ cookie, 'x-csrf-token': token, ...extra }) };
+}
 `;
 }
 
-function moduleTest(names: DerivedNames, runtime: TargetRuntime, e2e: boolean): string {
+function moduleTest(
+  names: DerivedNames,
+  runtime: TargetRuntime,
+  e2e: boolean,
+  page: boolean,
+  api: boolean,
+): string {
   const eq = (actual: string, expected: string): string => renderEquals(runtime, actual, expected);
   if (!e2e)
     return `${testHarnessFor(runtime).imports}
@@ -275,6 +334,13 @@ import { createTestContext } from '@setu-ts/testing';
 import { ${names.camel}Service } from './${names.kebab}.service.ts';
 
 describe('${names.kebab} module', () => {
+  it('parses and trims a name or explains invalid input', () => {
+    const service = ${names.camel}Service(createTestContext());
+    ${eq("service.parse({ name: '  Example  ' })", "{ name: 'Example' }")}
+    for (const value of [{}, { name: null }, { name: 1 }, { name: '' }, { name: '   ' }]) {
+      ${eq('service.parse(value)', "'A non-empty name is required.'")}
+    }
+  });
   it('creates a record and reads it back through the service', async () => {
     const service = ${names.camel}Service(createTestContext());
     const record = await service.create({ name: 'Example' });
@@ -287,10 +353,55 @@ describe('${names.kebab} module', () => {
   const base = `/api/${names.kebab}`;
   return `${testHarnessFor(runtime).imports}
 import { startTestServer } from '../../../test/support/server.ts';
-import { signedSession } from '../../../test/support/session.ts';
+import { ${[...(page ? ['signedInSession'] : []), ...(api ? ['signedSession'] : [])].join(', ')} } from '../../../test/support/session.ts';
 
 describe('${names.kebab} e2e', () => {
-  it('creates a record with the session token and reads it back', async () => {
+${
+  page
+    ? `  it('creates through the page action and checks validation and CSRF', async () => {
+    const server = await startTestServer();
+    try {
+      const session = await signedInSession(server.baseUrl);
+      const headers = { cookie: session.cookie, 'content-type': 'application/x-www-form-urlencoded' };
+      const created = await fetch(server.baseUrl + '/${names.kebab}', {
+        method: 'POST', redirect: 'manual', headers,
+        body: new URLSearchParams({ name: 'Example', _csrf: session.token }),
+      });
+      ${eq('created.status', '303')}
+      ${eq("created.headers.get('location')", `'/${names.kebab}'`)}
+      await created.text();
+      const read = await fetch(server.baseUrl + '/${names.kebab}', { headers: { cookie: session.cookie } });
+      ${eq('read.status', '200')}
+      ${eq("(await read.text()).includes('Example')", 'true')}
+      const invalid = await fetch(server.baseUrl + '/${names.kebab}', {
+        method: 'POST', headers,
+        body: new URLSearchParams({ name: '', _csrf: session.token }),
+      });
+      ${eq('invalid.status', '200')}
+      ${eq("(await invalid.text()).includes('A non-empty name is required.')", 'true')}
+      const refused = await fetch(server.baseUrl + '/${names.kebab}', {
+        method: 'POST', headers, body: new URLSearchParams({ name: 'Refused' }),
+      });
+      ${eq('refused.status', '403')}
+      await refused.text();
+      const data = await fetch(server.baseUrl + '/${names.kebab}.data', {
+        method: 'POST', redirect: 'manual', headers,
+        body: new URLSearchParams({ name: 'Data example', _csrf: session.token }),
+      });
+      ${eq('data.status < 400', 'true')}
+      await data.text();
+      const afterData = await fetch(server.baseUrl + '/${names.kebab}', { headers: { cookie: session.cookie } });
+      ${eq('afterData.status', '200')}
+      ${eq("(await afterData.text()).includes('Data example')", 'true')}
+    } finally {
+      await server.stop();
+    }
+  });
+`
+    : ''
+}${
+    api
+      ? `  it('creates a record with the session token and reads it back', async () => {
     const server = await startTestServer();
     try {
       const session = await signedSession(server.baseUrl);
@@ -317,6 +428,9 @@ describe('${names.kebab} e2e', () => {
       await server.stop();
     }
   });
+`
+      : ''
+  }
 });
 `;
 }
@@ -328,30 +442,37 @@ export interface FullStackModuleOptions {
   readonly modules?: readonly string[];
   /** Also write the module's page route. */
   readonly page?: boolean;
+  /** With a page, also write its API controller and test. */
+  readonly api?: boolean;
 }
 
 /**
  * The files `setu g module <name>` writes in a full-stack project.
  *
  * @param names - The module's derived names
- * @param options - Runtime, existing modules and `--page`
+ * @param options - Runtime, existing modules, `--page` and `--api`
  * @returns The generated files
  */
 export function generateFullStackModule(
   names: DerivedNames,
   options: FullStackModuleOptions,
 ): readonly GeneratedFile[] {
+  if (options.api === true && options.page !== true) throw new Error(API_REQUIRES_PAGE);
+  const hasPage = options.page === true;
+  const hasApi = !hasPage || options.api === true;
   const dir = `${MODULES_DIR}/${names.kebab}`;
   return [
     { path: `${dir}/${names.kebab}.types.ts`, contents: types(names) },
     { path: `${dir}/${names.kebab}.service.ts`, contents: service(names) },
     { path: `${dir}/${names.kebab}.token.ts`, contents: token(names) },
-    { path: `${dir}/${names.kebab}.controller.ts`, contents: controller(names) },
+    ...(hasApi
+      ? [{ path: `${dir}/${names.kebab}.controller.ts`, contents: controller(names) }]
+      : []),
     {
       path: `${dir}/index.ts`,
       managed: true,
       contents: renderFunctionalModuleIndex(names, {
-        controller: [names.kebab],
+        ...(hasApi ? { controller: [names.kebab] } : {}),
         [MODULE_SERVICE_ARTIFACTS]: [names.kebab],
       }),
     },
@@ -366,12 +487,12 @@ export function generateFullStackModule(
       : [
           {
             path: `${dir}/${names.kebab}.test.ts`,
-            contents: moduleTest(names, options.runtime, false),
+            contents: moduleTest(names, options.runtime, false, hasPage, hasApi),
           },
         ]),
     {
       path: `${dir}/${names.kebab}.e2e.test.ts`,
-      contents: moduleTest(names, options.runtime, true),
+      contents: moduleTest(names, options.runtime, true, hasPage, hasApi),
     },
     { path: 'test/support/server.ts', managed: true, contents: renderTestServer(options.runtime) },
     { path: SESSION_SUPPORT_PATH, managed: true, contents: renderSessionSupport() },

@@ -1,7 +1,6 @@
 /**
- * M130 §7 generated-output gate, on Node: a full-stack scaffold, `setu g module
- * articles --page`, then the project's own check, build and generated tests,
- * and a boot that reads the module's data back through the page and the API.
+ * Generated-output gate: articles --page and notes --page --api pass the
+ * project's own gates, then write through page actions and the optional API.
  *
  * Every step runs the GENERATED project with its own scripts; nothing here is
  * hand-wired, which is the point: a page uses a module's service with no hand
@@ -26,7 +25,7 @@ function cookiesOf(response: Response): string {
 }
 
 it(
-  'g module --page: check, build, generated tests, and page + API read back one service',
+  'page-only and page + API modules: project gates, sync and built route manifest',
   { timeout: 900_000 },
   async () => {
     const root = await tempDir({ prefix: 'full-stack-modules-' });
@@ -62,26 +61,67 @@ it(
       expect(
         await nodeFs.readFile(`${project}/src/modules/articles/articles.token.ts`, 'utf8'),
       ).toContain('requestServiceToken<ArticlesService>');
+      await expect(
+        nodeFs.stat(`${project}/src/modules/articles/articles.controller.ts`),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+      // A stale managed index must be derived again without inventing a controller.
+      const beforeSync = await nodeFs.readFile(`${project}/src/modules/articles/index.ts`, 'utf8');
+      expect(beforeSync).not.toContain('controller');
+      await nodeFs.writeFile(`${project}/src/modules/articles/index.ts`, beforeSync + '// stale\n');
+      expect(await cli(['sync', '--dir', project]), output.join('\n')).toBe(0);
+      const articleIndex = await nodeFs.readFile(
+        `${project}/src/modules/articles/index.ts`,
+        'utf8',
+      );
+      expect(articleIndex).toContain('requestService(articlesService)');
+      expect(articleIndex).not.toContain('controller');
+      expect(
+        await cli(['g', 'module', 'notes', '--page', '--api', '--dir', project]),
+        output.join('\n'),
+      ).toBe(0);
 
       expect(
-        await cli(['g', 'route', 'summary', '--module', 'articles', '--dir', project]),
+        await cli(['g', 'route', 'summary', '--module', 'notes', '--dir', project]),
         output.join('\n'),
       ).toBe(0);
 
       // The project's own gates: setu check is part of `check`.
       const checked = await npmRun(project, 'check');
       expect(checked.code, checked.output).toBe(0);
+      const formatted = await npmRun(project, 'format:check');
+      expect(formatted.code, formatted.output).toBe(0);
+      const linted = await npmRun(project, 'lint');
+      expect(linted.code, linted.output).toBe(0);
       const built = await npmRun(project, 'build');
       expect(built.code, built.output).toBe(0);
+      // Inspect the compiled route registry, not the source route filename.
+      const build = await import(`${project}/build/server/index.js`);
+      const articleRoute = Object.values(build.routes as Record<string, { id: string }>).find(
+        (route) => route.id === 'routes/_app/articles._index',
+      );
+      expect(articleRoute?.id).toBe('routes/_app/articles._index');
+      process.stdout.write(`Built manifest route id: ${articleRoute!.id}\n`);
       // (1, X91-2) The generated module tests pass with no hand edit: they sign a
       // session and send its CSRF token.
       const unit = await npmRun(project, 'test');
       expect(unit.code, unit.output).toBe(0);
+      process.stdout.write(
+        `Generated unit tests:\n${unit.output
+          .split('\n')
+          .filter((line) => /(?:tests|pass|fail|skipped) \d+$/.test(line))
+          .join('\n')}\n`,
+      );
       const e2e = await npmRun(project, 'test:e2e');
       expect(e2e.code, e2e.output).toBe(0);
+      process.stdout.write(
+        `Generated e2e tests:\n${e2e.output
+          .split('\n')
+          .filter((line) => /(?:tests|pass|fail|skipped) \d+$/.test(line))
+          .join('\n')}\n`,
+      );
 
       const { result, output: serverOutput } = await withNodeServer(project, async (origin) => {
-        const summary = await fetch(`${origin}/api/articles/summary`);
+        const summary = await fetch(`${origin}/api/notes/summary`);
         expect(summary.status).toBe(200);
         expect(await summary.json()).toEqual({ items: [] });
         // Sign in through /login; regeneration invalidates this anonymous form token.
@@ -98,7 +138,7 @@ it(
         });
         await submitted.body?.cancel();
         let cookie = cookiesOf(submitted);
-        const stale = await fetch(`${origin}/api/articles`, {
+        const stale = await fetch(`${origin}/api/notes`, {
           method: 'POST',
           headers: { cookie, 'x-csrf-token': token, 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'Stale token' }),
@@ -111,31 +151,31 @@ it(
         cookie = cookiesOf(freshForm) || cookie;
 
         // (O3) An unsafe /api request without the token is refused; with it, created.
-        const refused = await fetch(`${origin}/api/articles`, {
+        const refused = await fetch(`${origin}/api/notes`, {
           method: 'POST',
           headers: { cookie, 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'Refused' }),
         });
         await refused.body?.cancel();
         // A bearer header without an auth arm is not an exemption.
-        const bearer = await fetch(`${origin}/api/articles`, {
+        const bearer = await fetch(`${origin}/api/notes`, {
           method: 'POST',
           headers: { authorization: 'Bearer x', 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'Bearer' }),
         });
         await bearer.body?.cancel();
         // (2) Seed through the API with the session cookie and CSRF token.
-        const seeded = await fetch(`${origin}/api/articles`, {
+        const seeded = await fetch(`${origin}/api/notes`, {
           method: 'POST',
           headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
-          body: JSON.stringify({ name: 'Hello from the module' }),
+          body: JSON.stringify({ name: '  Hello from the module  ' }),
         });
         const record = (await seeded.json()) as { id: string; name: string };
         // V12-90: application errors pass through the starter's RFC 9457 renderer.
         for (const [path, init, status, title, detail] of [
-          ['/api/articles/missing', {}, 404, 'Not Found', 'Articles not found.'],
+          ['/api/notes/missing', {}, 404, 'Not Found', 'Notes not found.'],
           [
-            '/api/articles',
+            '/api/notes',
             {
               method: 'POST',
               headers: { cookie, 'x-csrf-token': freshToken, 'content-type': 'application/json' },
@@ -155,10 +195,25 @@ it(
         }
 
         // (2) The page lists what the module's service holds.
-        const page = await fetch(`${origin}/articles`, { headers: { cookie } });
+        const direct = await fetch(`${origin}/articles`, {
+          method: 'POST',
+          redirect: 'manual',
+          headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ name: '  Article from action  ', _csrf: freshToken }),
+        });
+        expect(direct.status).toBe(303);
+        expect(direct.headers.get('location')).toBe('/articles');
+        await direct.text();
+        const articlesPage = await fetch(`${origin}/articles`, { headers: { cookie } });
+        expect(articlesPage.status).toBe(200);
+        expect(await articlesPage.text()).toContain('Article from action');
+        const noArticleApi = await fetch(`${origin}/api/articles`);
+        expect(noArticleApi.status).toBe(404);
+        await noArticleApi.text();
+        const page = await fetch(`${origin}/notes`, { headers: { cookie } });
         const html = await page.text();
         // (3) The API returns the same list.
-        const api = (await (await fetch(`${origin}/api/articles`)).json()) as {
+        const api = (await (await fetch(`${origin}/api/notes`)).json()) as {
           items: { id: string; name: string }[];
         };
         // The template's own module: page and API agree too.
@@ -199,13 +254,15 @@ it(
       expect(result.bearer).toBe(403);
       expect(result.stale).toBe(403);
       expect(result.seeded).toBe(201);
+      expect(result.record.name).toBe('Hello from the module');
       expect(result.page.status).toBe(200);
       expect(result.page.html).toContain('Hello from the module');
       expect(result.api.items).toEqual([result.record]);
       expect(result.products.status).toBe(200);
       for (const product of result.productsApi.items)
         expect(result.products.html).toContain(product.name);
-      expect(result.paths).toContain('/api/articles');
+      expect(result.paths).toContain('/api/notes');
+      expect(result.paths).not.toContain('/api/articles');
       expect(result.paths).toContain('/api/products');
       for (const path of result.paths) {
         expect(path.startsWith('/assets'), path).toBe(false);

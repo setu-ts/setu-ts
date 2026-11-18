@@ -20,6 +20,9 @@ describe('composition-specific rule blocks', () => {
       expect(text).toContain('getService(context, TOKEN)');
       expect(text).toContain('@setu-ts/react-router-plugin');
       expect(text).toContain('context keys carry only non-service values');
+      expect(text).toContain(
+        'Pages write through their own `action` (a `<Form>` or `useFetcher`), guarded with `pagePolicies`. Write an `/api` route only for callers outside the app (`g module --page --api`).',
+      );
     }
   });
   const always = ['verify', 'generate', 'services', 'add-first', 'time', 'config', 'imports'];

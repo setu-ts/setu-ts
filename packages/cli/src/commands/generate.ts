@@ -7,6 +7,7 @@
 import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { moduleRouteBase } from '../schematics/module-route-base.ts';
+import { API_REQUIRES_PAGE } from '../schematics/module-full-stack.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { diagnoseProject, type ProjectDiagnosis } from '../diagnostics/diagnose.ts';
 import { refuseDuplicateNames, renderGenerateFindings } from '../diagnostics/render.ts';
@@ -155,8 +156,10 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log('                      required for the first four once the project has modules');
   log('  --adopt-controllers The first module only: move src/controllers/ and src/services/');
   log('                      into it, rewriting imports and keeping their URLs');
-  log('  --page             g module in a full-stack project: also write its page route,');
-  log('                      reading the module service with getService');
+  log(
+    '  --page             g module in a full-stack project: page with loader and action; add --api',
+  );
+  log('  --api              With --page, also write /api routes for callers outside the app');
 }
 
 /**
@@ -250,6 +253,11 @@ export async function runGenerateCommand(
   const schematicName = args.positionals[0];
   const adoptControllers = args.flags['adopt-controllers'] === true;
   const page = args.flags['page'] === true;
+  const api = args.flags['api'] === true;
+  if (api && !page) {
+    deps.error(API_REQUIRES_PAGE);
+    return EXIT_USAGE;
+  }
   if (page && schematicName !== 'module') {
     deps.error('--page applies only to `g module` in a full-stack project, which adds its page.');
     return EXIT_USAGE;
@@ -546,7 +554,10 @@ export async function runGenerateCommand(
         `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
       );
     } else {
-      const shadowed = pages.paths.find((path) => kernelShadows(base, path));
+      const writesController = schematicName !== 'module' || !page || api;
+      const shadowed = writesController
+        ? pages.paths.find((path) => kernelShadows(base, path))
+        : undefined;
       if (shadowed !== undefined) {
         deps.error(
           `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(shadowed)} (${escapeName(pages.files.get(shadowed)!)}).`,
@@ -585,6 +596,7 @@ export async function runGenerateCommand(
     artifacts: scan.artifacts,
     ...(module === undefined ? {} : { targetModule: module, moduleArtifacts: scan.artifacts }),
     ...(page ? { page: true } : {}),
+    ...(api ? { api: true } : {}),
   };
 
   let generated: readonly GeneratedFile[];

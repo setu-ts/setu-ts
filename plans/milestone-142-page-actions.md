@@ -185,9 +185,9 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
     route only for callers outside the app (`g module --page --api`)." It must keep the brief
     formatter-stable (M139d).
   - `docs/cli.md` describes the three combinations.
-  - `CHANGELOG.md` ("Changed", `@setu-ts/cli`) and `docs/upgrading.md` ("## 0.14.0"): `--page` no
-    longer writes `/api/<name>`, so pass `--api` for it; the generated API now trims the name.
-    Existing modules are untouched.
+  - `CHANGELOG.md` ("Changed", `@setu-ts/cli`) and `docs/upgrading.md` ("## Unreleased", renamed to
+    0.14.0 by the release bump): `--page` no longer writes `/api/<name>`, so pass `--api` for it;
+    the generated API now trims the name. Existing modules are untouched.
 - **Test home:** `test/unit/agents` (the rule text and its stability test);
   `generated-guidance.test.ts`.
 

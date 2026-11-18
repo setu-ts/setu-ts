@@ -8,6 +8,17 @@ import { runCli } from '../../../src/cli.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  it.each(['node', 'cloudflare-workers'] as const)(
+    'keeps %s page-write guidance formatter-stable',
+    async (runtime) => {
+      const text = renderBrief(
+        agentFacts({ runtime, installed: new Set(['react-router-plugin']) }),
+      );
+      expect(text).toContain('Pages write through their own `action`');
+      expect(text).toContain('`g module --page --api`');
+      expect(await format(text, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(text);
+    },
+  );
   it('V12-1 survives real Prettier with the scaffold options', async () => {
     const fs = createFakeFs();
     const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };

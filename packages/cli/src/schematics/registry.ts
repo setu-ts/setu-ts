@@ -76,6 +76,8 @@ export interface SchematicOptions {
    * by the module schematic in a full-stack project; refused elsewhere.
    */
   readonly page?: boolean;
+  /** With `--page`, also generate the module's API controller. */
+  readonly api?: boolean;
   /**
    * Pre-module-declaration directories that retain the old controller/service
    * barrel exports until their application converts to `MODULES`.
