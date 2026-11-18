@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.12.0` publishes 55 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.13.0` publishes 55 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -194,16 +194,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+npm install @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Bun
-bun add @setu-ts/kernel@^0.12.0 @setu-ts/runtime@^0.12.0
+bun add @setu-ts/kernel@^0.13.0 @setu-ts/runtime@^0.13.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.12.0 npm:@setu-ts/runtime@^0.12.0
+deno add npm:@setu-ts/kernel@^0.13.0 npm:@setu-ts/runtime@^0.13.0
 ```
 
-**The `@^0.12.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.13.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -250,7 +250,7 @@ freeze — is [docs/versioning.md](docs/versioning.md).
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.12.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.13.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
@@ -373,7 +373,6 @@ setu-ts/
 ├── ARCHITECTURE.md        # Technical architecture guide
 ├── PUBLIC_API.md          # Public API contract
 ├── AI_GUIDELINES.md       # Engineering guidelines
-├── ROADMAP.md             # Implementation roadmap, milestones 0–75
 ├── CHANGELOG.md           # Release notes
 └── README.md              # This file
 ```
@@ -392,7 +391,7 @@ be replaced without touching the others.
 | [**ARCHITECTURE.md**](ARCHITECTURE.md)     | Framework contributors  | How the framework works internally and why it was designed this way      |
 | [**PUBLIC_API.md**](PUBLIC_API.md)         | Application developers  | How to use the framework — complete examples for every plugin            |
 | [**AI_GUIDELINES.md**](AI_GUIDELINES.md)   | All contributors        | Permanent engineering rules — TypeScript, testing, security, performance |
-| [**ROADMAP.md**](ROADMAP.md)               | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
+| **ROADMAP.md** (`develop` only)            | Implementation tracking | Milestone-by-milestone implementation roadmap with package details       |
 | [**CHANGELOG.md**](CHANGELOG.md)           | Everyone                | What each release contains, and its known limitations                    |
 | [**docs/releasing.md**](docs/releasing.md) | Maintainers             | npm release runbook — setup, trust, and the per-release sequence         |
 
@@ -407,7 +406,7 @@ Each package also carries its own README with options, semantics, and a worked e
 - Found a reproducible problem?
   [Open a bug report](https://github.com/setu-ts/setu-ts/issues/new?template=bug-report.yml).
 - Want to contribute? Read [CONTRIBUTING.md](CONTRIBUTING.md).
-- Want to understand the plan? Read **ROADMAP.md**.
+- Want to understand the plan? Read **ROADMAP.md** on the `develop` branch.
 
 ---
 
@@ -457,6 +456,6 @@ production.
 <div align="center">
 
 **[Documentation Hub](docs/README.md)** · **[Architecture](ARCHITECTURE.md)** ·
-**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)** · **[Roadmap](ROADMAP.md)**
+**[Public API](PUBLIC_API.md)** · **[Guidelines](AI_GUIDELINES.md)**
 
 </div>

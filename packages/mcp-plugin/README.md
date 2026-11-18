@@ -208,6 +208,8 @@ safe to repeat where those windows matter. Forwarding credentials means JWT veri
 on the inner call; issuer key sets remain cached. This trades additional verification work for the
 same HTTP controls.
 
+<!-- version:history -->
+
 Node integration tests and one native Deno proof exercise list and call. The workerd condition has a
 bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is unproven until the
 0.12.0 artifacts are published and the compat row runs.

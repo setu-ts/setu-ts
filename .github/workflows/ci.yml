@@ -896,3 +896,26 @@ jobs:
       # `--ignore-registry-errors` is deliberately not used.
       - name: Audit
         run: pnpm run audit:ci
+
+  # `plans/` and `ROADMAP.md` are develop's working documents and never reach `main`
+  # (docs/releasing.md, "Keep plans and the roadmap off `main`"). A release branch removes them in
+  # its last commit; this job fails a pull request into `main`, or a push to it, that still holds
+  # either. It is skipped for every other event, and for fork pull requests like the jobs above.
+  main-branch-tree:
+    if: >-
+      (github.base_ref == 'main' || github.ref == 'refs/heads/main') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    name: Main branch tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Refuse plans and the roadmap on main
+        run: |
+          found=$(git ls-files -- plans ROADMAP.md)
+          if [ -n "$found" ]; then
+            echo "These paths must not reach main; remove them on the release branch:"
+            echo "$found"
+            exit 1
+          fi

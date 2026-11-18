@@ -392,6 +392,8 @@ deliberately accepts partial test doubles without token binding.
 
 ## Request-bound services (`@setu-ts/common`)
 
+<!-- version:history -->
+
 Since 0.12.0, common exports the request-bound service helpers that kernel routes and React Router
 loaders share (M130).
 
@@ -489,6 +491,8 @@ parseEnv('export A="x y"\nB=plain # note\nEMPTY=\n');
 
 ## Durable agent runs (`@setu-ts/common` + `@setu-ts/agent-runs-plugin` + `@setu-ts/database-plugin`)
 
+<!-- version:history -->
+
 Since 0.12.0, `CAPABILITIES.AGENT_RUNS` (`'agent-runs'`) binds `IAgentRunService`. `AgentRunsPlugin`
 persists SDK calls, leases, approvals and replay; applications supply models. The required SDK peer
 is `ai@^7.0.159`, loaded once at registration by guarded dynamic import.
@@ -545,6 +549,8 @@ defined principals. Every request method enforces tenant identity. SDK UI-messag
 204; an explicit id serves the retained remainder. See [durable runs](docs/durable-runs.md).
 
 ## Vector store (`@setu-ts/common` + `@setu-ts/vector-store-plugin`)
+
+<!-- version:history -->
 
 Since 0.12.0, `@setu-ts/vector-store-plugin` provides tenant-scoped similarity search over
 collections declared up front. The scope is a required argument of every data method, not a filter
@@ -680,6 +686,8 @@ meanings and the full limits table.
 
 ### Vectorize (`@setu-ts/cloudflare-plugin`)
 
+<!-- version:history -->
+
 `VectorizeVectorStore`, `VectorizeIndexLike`, `VectorizeVectorLike` and
 `VectorizeVectorStoreOptions` are exported since 0.12.0. `VectorizeVectorStore({ index, onClose? })`
 takes a structural facade of the current `Vectorize` binding (`describe`, `query`, `upsert`,
@@ -735,6 +743,8 @@ own status: the read can now REJECT, and a `catch` that assumes a parse failure 
 cause and the wrong remedy. `@setu-ts/graphql-plugin`'s two HTTP transports answer `413` with
 `extensions.code: 'REQUEST_BODY_TOO_LARGE'`, and `@setu-ts/storage-plugin`'s upload middleware
 serves the hint through `respondWithError`.
+
+<!-- version:history -->
 
 ### Bind and body-read failure contracts (0.12.0)
 
@@ -2249,6 +2259,8 @@ Through a repository the check runs in `BaseRepository` first, so every backend 
 `UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint 501), before any I/O. Both
 members stay optional for implementors.
 
+<!-- version:history -->
+
 **Optimistic locking (M128, since 0.12.0).**
 `updateVersioned(repo, id, expectedVersion, data, options?)` writes `data` with the version field
 set to `expectedVersion + 1` under the precondition `{ [field]: expectedVersion }`, and returns the
@@ -2272,6 +2284,8 @@ transactions apply it).
 | `VersionedDeletable<E, Id>`                                                                                                                                        | `{ deleteWhere?(id, where: WritePrecondition): Promise<boolean>; findById(id): Promise<E \| null> }`                                                                                                               |
 | `VersionedWriteOptions`                                                                                                                                            | `{ readonly field?: string /* default 'version' */; readonly entity?: string }` — `entity` is carried by both errors and their logged `message`, never by the served detail                                        |
 | `VersionConflictError`, `EntityNotFoundError`                                                                                                                      | classes; `name`, `readonly entity: string \| undefined`, status hint as above                                                                                                                                      |
+
+<!-- version:history -->
 
 **Conditional writes on the tenant path (M128, since 0.12.0).** `ITenantDataStore` (common) gains
 optional `updateWhere?<E, Id>(tenantId, entity, id, where, data)` and
@@ -2306,6 +2320,8 @@ Other errors propagate. On that fallback the tenant bridge reads ownership and t
 so a delete-and-recreate under a reused caller-supplied key in between can move the write onto
 another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back separately;
 the tenant bridge checks the returned tenant on both paths before returning it.
+
+<!-- version:history -->
 
 **Tenant registry over the database (M127, since 0.12.0).**
 `createDatabaseTenantRegistry(options?: DatabaseTenantRegistryOptions): RegistryFactory<ITenantRegistry>`
@@ -3628,6 +3644,8 @@ what changed is that the refusal is legible.
 > returns `value` when it is a single-leading-slash path with no `\`, no control character and at
 > most 256 bytes after non-ASCII characters are percent-encoded (the encoded form), else `fallback`.
 
+> <!-- version:history -->
+>
 > **Resource-server authentication (M132, 0.12.0).** Three additions make the plugin a correct OAuth
 > 2.0 resource server for an API or an MCP server accepting tokens an outside authorization server
 > issued. `IPrincipal.scopes` is filled from the `scope` claim — a space-delimited string, which
@@ -5041,6 +5059,8 @@ omitted when it did not. An unauthenticated upgrade is anonymous, and a guard in
 band refuses it before the handshake. See the `session` arm of
 [`AuthPlugin`](#authplugin-setu-tsauth-plugin) for the cookie-backed strategy that produces it.
 
+<!-- version:history -->
+
 Since 0.12.0 the kernel also passes the request's public origin as `routeUpgrade`'s optional third
 argument, `publicOrigin` (`requestOriginOf(ctx).origin`, honouring an origin a trusted proxy
 published), and the service refuses a **cross-site handshake** with `403`: one whose `Origin` is
@@ -5068,6 +5088,8 @@ app.register(
 ```
 
 ### Options
+
+<!-- version:history -->
 
 | Option             | Type                                                                 | Default     | Behavior                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------ | -------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -5633,6 +5655,8 @@ app.router.get('/api/health', (ctx) => {
 | `pagePolicies`        | `Readonly<Record<string, PagePolicy>>`                       | omitted        | Since 0.13.0. Setu middleware per React Router route id, run by the kernel on the SSR catch-all after the global pipeline, with the page render as terminal. Matched with React Router's `matchRoutes` after its `.data` normalization, so `/x`, `/x.data`, `/x/_.data` and `?index` all select the route; ancestors' policies run first. Refused at registration: an unknown id, empty `middleware` or a non-function entry, an `on` other than `'action'`/`'all'`, a runtime without `pageRoutes`, a build without a `routes` manifest, or a build with `future.unstable_routePatternMatching`. Requests that no applicable policy can reach skip matching (method exit, then a prefilter over the policied routes only). Public files are served before policies. |
 
 ### Interface Reference
+
+<!-- version:history -->
 
 - `ISsrService.render(ctx): Promise<HandlerResult>` — delegates the request to React Router and
   writes back the result (streaming or buffered).
@@ -7348,6 +7372,8 @@ Pass `options.queue` to `respond` to load-balance requests across competing resp
 
 `request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
+
+<!-- version:history -->
 
 | Error                        | Thrown when                                                                                                                                                                                                                               |
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -9630,6 +9656,8 @@ through `CAPABILITIES.MAIL`.
 
 ### Notes
 
+<!-- version:history -->
+
 - `INotifier` has exactly one method, `send`. There is no `sendEmail` / `sendSms` / `sendSlack` —
   single-channel dispatch is `send({ channels: ['sms'], … })`.
 - Channels dispatch in parallel via `Promise.allSettled`: one failing channel never aborts the
@@ -9867,6 +9895,8 @@ the transaction with every tenant guard intact. The store must implement the opt
 work is a `TypeError`), `MemoryTenantDataStore` does not, and the call then throws
 `TenantUnitOfWorkUnsupportedError` (status hint 500).
 
+<!-- version:history -->
+
 **Which tenants exist — the `tenants` option** (since `0.12.0`). Without it, any id a resolver
 returns is the tenant. With it, the tenant middleware checks the FIRST resolved id before the
 request carries it (the resolver chain is not re-entered on a miss), and the registry's tenant — its
@@ -9890,6 +9920,8 @@ MultiTenancyPlugin({ resolver: 'subdomain', required: true, tenants: ['acme', 'g
 MultiTenancyPlugin({ resolver: 'header', tenants: createDatabaseTenantRegistry() }); // database-plugin
 ```
 
+<!-- version:history -->
+
 `IMultiTenancyService.lookupTenant(id)` (since `0.12.0`) runs the SAME check for non-HTTP work: a
 queue job reading a tenant id from its payload calls it before the trusted `getRepositoryFor`. With
 no `tenants` configured it answers `some({ id })` for any non-empty string id — what the HTTP path
@@ -9899,6 +9931,8 @@ registry fault throws `TenantRegistryUnavailableError`, branded with a `503` sta
 handler that lets it escape answers `503` through `errorHandler`.
 
 ### Options
+
+<!-- version:history -->
 
 | Option                  | Type                                                                                              | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ----------------------- | ------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -11034,6 +11068,8 @@ app.router.post('/users', {
 });
 ```
 
+<!-- version:history -->
+
 ### Reused component names (0.12.0)
 
 A hoisted schema uses its own Zod `.meta({ id })` / registry id when present. Otherwise its name
@@ -11377,6 +11413,8 @@ Any casing of the name produces identical output: `setu g controller user-profil
 `setu g controller UserProfile` emit the same file.
 
 ### Options
+
+<!-- version:history -->
 
 | Option                                          | Commands                                                           | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ----------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -12215,6 +12253,8 @@ export async function createApp(env?: Readonly<Record<string, unknown>>): Promis
 }
 ```
 
+<!-- version:history -->
+
 Since 0.12.0 (M130) the template is split in two. Business logic lives in kernel modules under
 `src/modules/<name>/` — the service, its types, its token (`requestServiceToken`), its `/api/<name>`
 routes and a managed `index.ts` that registers the service with `requestService` — and
@@ -12445,6 +12485,8 @@ supplied**, so a starter called with no options registers exactly its always-on 
 | everything else      | on     | Registered with defaults when the arm is omitted.                                             |
 
 Notes:
+
+<!-- version:history -->
 
 - **`realtime: {}` adds nothing and is not an error.** `backplane: {}` selects the in-process
   `'memory'` transport, whose discriminant is optional.
@@ -13665,6 +13707,8 @@ app.register({
 
 ### OpenAPI service
 
+<!-- version:history -->
+
 `IOpenApiService` (since 0.1.0; shared from common since 0.12.0) is the interface bound to
 `CAPABILITIES.OPENAPI`: `getSpec(): Readonly<Record<string, unknown>>` returns the generated OpenAPI
 document and `addSchema(name: string, schema: unknown): void` registers a named schema. The CLI
@@ -13890,6 +13934,8 @@ reaches `redactors[<string>]`):
 | `isPromiseLike(value)`                                 | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ### Types
+
+<!-- version:history -->
 
 | Group                  | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14734,6 +14780,8 @@ Cloudflare Workers.
 > ```
 
 ### Values (runtime exports)
+
+<!-- version:history -->
 
 | Export                            | Kind     | Purpose                                                                                             |
 | --------------------------------- | -------- | --------------------------------------------------------------------------------------------------- |
@@ -15735,7 +15783,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-npm install @setu-ts/sdk@^0.12.0
+npm install @setu-ts/sdk@^0.13.0
 ```
 
 ### createClient()
@@ -16982,6 +17030,8 @@ GraphqlPlugin({ schema });
 > port.
 
 ### Notes
+
+<!-- version:history -->
 
 - **Two schema construction arms.** Schema-first (`typeDefs` + `resolvers`) and code-first
   (`schema`) are mutually exclusive; supplying both is a compile error.

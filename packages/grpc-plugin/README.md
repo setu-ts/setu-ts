@@ -329,7 +329,6 @@ base64 -w0 < reflection.binpb  # 2332 chars
   — the `grpc-plugin` Options / Exports / Notes section
 - [ARCHITECTURE.md](https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md) — §7 the
   `IHttpAdapter` seam, §18 why the plugin does not hang off the kernel
-- [ROADMAP.md](https://github.com/setu-ts/setu-ts/blob/main/ROADMAP.md) — Milestone 49
 
 ## Exports
 

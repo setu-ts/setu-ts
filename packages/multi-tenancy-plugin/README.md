@@ -113,6 +113,8 @@ Bind each credential to it:
   that created it. It compares only when both the session and the request carry a tenant, and
   `tenantBinding: false` turns it off.
 
+<!-- version:history -->
+
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
 `delete`, plus `updateWhere(id, where, data)` and `deleteWhere(id, where)` when the configured store
 supports conditional writes (the shipped memory store and `createDatabaseTenantDataStore()` both do,

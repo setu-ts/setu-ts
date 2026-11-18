@@ -23,8 +23,8 @@ On the port `./src/discovery/services.ts` exports:
 ## Generate code
 
 ```bash
-npx @setu-ts/cli@0.12.0 generate module billing
-npx @setu-ts/cli@0.12.0 generate --help
+npx @setu-ts/cli@0.13.0 generate module billing
+npx @setu-ts/cli@0.13.0 generate --help
 ```
 
 ## Development transports
@@ -33,7 +33,7 @@ npx @setu-ts/cli@0.12.0 generate --help
   workspace broker in setu.workspace.json. With the `memory` broker both are in-memory: one process,
   lost on restart. `nats`, `kafka`, `pubsub` and `service-bus` have no queue arm, so with them the
   queue stays in memory. Change the broker for every member with
-  `npx @setu-ts/cli@0.12.0 workspace broker <name>`.
+  `npx @setu-ts/cli@0.13.0 workspace broker <name>`.
 - Telemetry has no exporter: spans are dropped. Set the `TelemetryPlugin` `exporter` option.
 
 ## Production
