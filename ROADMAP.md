@@ -17207,6 +17207,48 @@ the changed development entry; every changed file at the 90% per-file bar.
 
 ---
 
+## Milestone 142: Page Actions in the Module Generator
+
+**Package(s):** `packages/cli`; docs.
+
+**Source:** the Mohor demo on published `0.13.0` (2026-11-18). Its pages make about 40 calls to its
+own `/api/…` routes, and the question was whether an SSR project should need a JSON API at all for
+its pages' own writes. M141 removed the framework reason (route middleware now reaches a React
+Router action through `pagePolicies`), but the generator still teaches the old shape.
+
+**The problem.** `setu g module <name> --page` writes a page that reads through a `loader` and
+`getService`, and gives it no `action`. Every module also gets `/api/<name>` routes. So the only
+write path Setu generates for a page is a browser `fetch` to a kernel route, with a CSRF header and
+a second place to put validation. A reader of a Setu full-stack project learns to build a JSON API
+for every page.
+
+**What ships.** Compared first with Rails (`rails g scaffold` writes HTML forms and controller
+actions; JSON is the API-mode choice), Phoenix (`mix phx.gen.html` and `mix phx.gen.json` are
+separate generators), Laravel and AdonisJS (`make:controller --resource`, with `--api` for an API
+controller) and React Router's own guidance (pages read in `loader` and write in `action`):
+
+1. **`--page` writes an `action`.** The page gets a `<Form method="post">` that creates a record
+   through the same request-bound service as the loader (`getService`), with the session's CSRF
+   field. It redirects back to the page on success and shows the reason on invalid input. Its
+   comment names the route id to use in `pagePolicies` to guard the action.
+2. **The `/api` routes become opt-in on a page module.** `--page` alone writes no controller.
+   `--page --api` writes both, sharing one service. `g module` without `--page` is unchanged: such a
+   module is reached only through its API.
+3. **One validation rule.** The service gains `parse(value)`, which the action and the controller
+   both call, so an input rule is never written twice.
+4. **The generated tests follow.** The module's e2e test signs in, posts the page's action, reads
+   the record back on the page, and checks the invalid-input and missing-CSRF answers. With `--api`,
+   the API test is generated too.
+5. **The brief and docs teach the rule:** pages write through actions; an `/api` route is for
+   callers outside the app.
+
+**Gate:** a scaffolded full-stack project with `g module --page` (and with `--page --api`) passes
+its own check, build and generated tests; the page action creates a record that the page then shows;
+`setu sync` keeps a page-only module's index without a controller; every changed file at the 90%
+per-file bar.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17493,3 +17535,4 @@ the changed development entry; every changed file at the 90% per-file bar.
 | 140d      | ✅     | cli + vector-store-plugin — what the generators write, the agent brief, and vector-store readiness                                                                                                                                                                                        |
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
 | 141       | ✅     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |
+| 142       | ⬜     | cli — page actions in the module generator: `--page` writes an action, `/api` routes opt-in with `--api`                                                                                                                                                                                  |
