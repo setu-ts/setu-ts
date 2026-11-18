@@ -431,7 +431,7 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 1/3
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: matrix.shard == 'cli-1'
+        if: always() && matrix.shard == 'cli-1'
         with:
           name: cli-blob-1
           path: .vitest-reports/cli/blob-1.json
@@ -444,7 +444,7 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 2/3
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: matrix.shard == 'cli-2'
+        if: always() && matrix.shard == 'cli-2'
         with:
           name: cli-blob-2
           path: .vitest-reports/cli/blob-2.json
@@ -457,7 +457,7 @@ jobs:
         run: pnpm test:coverage --no-tooling cli --shard 3/3
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: matrix.shard == 'cli-3'
+        if: always() && matrix.shard == 'cli-3'
         with:
           name: cli-blob-3
           path: .vitest-reports/cli/blob-3.json
@@ -527,8 +527,15 @@ jobs:
 
   # The CLI's three shards each write a blob; this merges them and enforces the
   # per-file coverage bar, as ci.yml's job of the same name does.
+  # `always()` here and on the three blob uploads, as in ci.yml: a failed CLI
+  # shard still uploads its Vitest blob, and this job merges the three so the
+  # log names the failing test (the blob reporter prints no per-test failure).
+  # v0.13.0's tag run lost a cli-3 failure without it. It cannot open the way
+  # to publishing: `publish` has no status function in its `if:`, so GitHub
+  # applies `success()` to all of its needs, and a failed gate skips it.
   cli-coverage:
     needs: gates
+    if: always()
     permissions:
       contents: read
     runs-on: ubuntu-latest

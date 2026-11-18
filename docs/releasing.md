@@ -243,9 +243,12 @@ still holds either path. Nothing outside them may link into them — `check:docs
 GitHub URL to this repository locally — so name them in text.
 
 **The back-merge restores them.** Merging `main` into `develop` would carry the removal back, so
-take `develop`'s copies before committing the merge:
+take `develop`'s copies before committing the merge. The restore needs a commit `main` cannot hold,
+so open the back-merge from a branch named `chore/back-merge-v<version>`: the changelog PR check
+exempts exactly that name, as it exempts a back-merge from `main`.
 
 ```fish
+git switch -c chore/back-merge-v0.13.0 origin/develop
 git merge --no-ff --no-commit origin/main
 git checkout origin/develop -- plans ROADMAP.md
 git commit
