@@ -8,6 +8,8 @@ rules separate it from a generic vector library:
 - **A filter is refused, never ignored.** Only declared metadata fields may be filtered, with a
   small operator set. A clause the backend cannot honour throws instead of matching everything.
 
+<!-- version:history -->
+
 The store takes vectors. It does not embed text: embed chunks and queries with the AI SDK and pass
 the vectors in. This guide covers the plugin, the three adapters it ships, the Cloudflare Workers
 adapter in `@setu-ts/cloudflare-plugin`, and how the `semantic-search` example puts them together.

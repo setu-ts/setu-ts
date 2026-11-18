@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type BumpOptions,
-  isArchivedPlan,
+  isPlan,
   isLater,
   isTestPath,
   main,
@@ -154,22 +154,23 @@ describe('isTestPath', () => {
   });
 });
 
-describe('isArchivedPlan', () => {
-  it('matches only plans under plans/archive/', () => {
-    expect(isArchivedPlan('plans/archive/milestone-111a-node-build.md')).toBe(true);
-    expect(isArchivedPlan('plans/milestone-112-x.md')).toBe(false);
-    expect(isArchivedPlan('docs/plans/archive/x.md')).toBe(false);
+describe('isPlan', () => {
+  it('matches only paths under plans/', () => {
+    expect(isPlan('plans/milestone-112-x.md')).toBe(true);
+    expect(isPlan('plans/TEMPLATE.md')).toBe(true);
+    expect(isPlan('docs/plans/x.md')).toBe(false);
+    expect(isPlan('ROADMAP.md')).toBe(false);
   });
 
-  // Cutting v0.9.0: the sweep rewrote what two archived plans recorded about
-  // the 0.8.0 tree, turning history false.
-  it('leaves an archived plan untouched while moving a live document', () => {
+  // Cutting v0.9.0: the sweep rewrote what two plans recorded about the 0.8.0
+  // tree, turning history false.
+  it('leaves a plan untouched while moving a live document', () => {
     const files = tree({
-      'plans/archive/milestone-1-x.md': 'probed `@setu-ts/common@^0.8.0`\n',
+      'plans/milestone-1-x.md': 'probed `@setu-ts/common@^0.8.0`\n',
       'docs/guide.md': 'install `@setu-ts/common@^0.8.0`\n',
     });
     const { plan, content } = edited(files);
-    expect(plan.edits.some((edit) => edit.path === 'plans/archive/milestone-1-x.md')).toBe(false);
+    expect(plan.edits.some((edit) => edit.path === 'plans/milestone-1-x.md')).toBe(false);
     expect(content('docs/guide.md')).toContain('@setu-ts/common@^0.9.0');
   });
 });

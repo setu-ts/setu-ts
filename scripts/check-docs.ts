@@ -1856,6 +1856,7 @@ export const POST_ALPHA_MINOR_LINES: readonly string[] = [
   '0.10',
   '0.11',
   '0.12',
+  '0.13',
 ];
 
 /**

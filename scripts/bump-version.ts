@@ -252,15 +252,17 @@ export function isTestPath(path: string): boolean {
 }
 
 /**
- * Whether a path is an archived milestone plan. A plan records what was true
- * when its milestone shipped, so a version it names is history — moving it
- * makes the record false. `check:versions` reads no Markdown, so the two agree.
+ * Whether a path is a milestone plan. A plan records what was true when it was
+ * written, so a version it names is history — moving it makes the record false.
+ * Plans live only on `develop` (completed ones are deleted, and the release
+ * branch removes the rest), so no released tree depends on them. `check:versions`
+ * reads no Markdown, so the two agree.
  *
  * @param path - A repository-relative path
- * @returns `true` for anything under `plans/archive/`
+ * @returns `true` for anything under `plans/`
  */
-export function isArchivedPlan(path: string): boolean {
-  return path.startsWith('plans/archive/');
+export function isPlan(path: string): boolean {
+  return path.startsWith('plans/');
 }
 
 /** Replaces exactly one occurrence, reporting whether it was found. */
@@ -352,7 +354,7 @@ export function planBump(files: ReadonlyMap<string, string>, options: BumpOption
   //    version it is checked against would fail the test it belongs to).
   //    `check:versions` reads no test file either, so the two agree.
   for (const [path, source] of files) {
-    if ((!path.endsWith('deno.lock') && isTestPath(path)) || isArchivedPlan(path)) continue;
+    if ((!path.endsWith('deno.lock') && isTestPath(path)) || isPlan(path)) continue;
     const base = current(path) ?? source;
     const { content, replacements } = rewriteReferences(path, base, from, to);
     if (replacements > 0) stage(path, content, replacements);

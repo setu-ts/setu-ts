@@ -99,6 +99,8 @@ use `getService` below: the registry holds such a service as its `requestService
 
 ### `getService` — a request-bound kernel service in one line
 
+<!-- version:history -->
+
 Since 0.12.0 the context also carries a resolver bound to the current request (never the kernel
 request context itself). `getService(context, token)` resolves through `resolveRequestService` from
 `@setu-ts/common`, so a module's request-bound service is built once per request and the page and a

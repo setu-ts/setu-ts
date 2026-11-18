@@ -1,5 +1,7 @@
 # Semantic search
 
+<!-- version:history -->
+
 Available from **0.12.0**. Upload a document, index it in the background, and search it by meaning
 inside the caller's tenant. The example composes `@setu-ts/vector-store-plugin` with the AI SDK,
 multi-tenancy and the queue plugin.

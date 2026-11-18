@@ -7,8 +7,8 @@ defaults; regenerated whenever a member is added.
 ## Deploy
 
 ```bash
-npx @setu-ts/cli@0.12.0 workspace deploy --dry-run   # show the plan
-npx @setu-ts/cli@0.12.0 workspace deploy             # build, ship, apply, wait
+npx @setu-ts/cli@0.13.0 workspace deploy --dry-run   # show the plan
+npx @setu-ts/cli@0.13.0 workspace deploy             # build, ship, apply, wait
 ```
 
 It builds every member's image, tags it with the current commit, loads it into a `kind-*` context's

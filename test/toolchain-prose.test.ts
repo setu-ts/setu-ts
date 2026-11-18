@@ -232,7 +232,6 @@ describe('toolchain prose refusals', () => {
   it.each([
     'CHANGELOG.md',
     'ROADMAP.md',
-    'plans/archive/old.md',
     'plans/reviews/old.md',
     'plans/milestone-111f-docs-jsr-sunset.md',
   ])('exempts history %s from every rule', (path) => {

@@ -11,4 +11,4 @@
  */
 
 /** The package version used by the default MCP server identity. */
-export const VERSION: string = '0.12.0';
+export const VERSION: string = '0.13.0';

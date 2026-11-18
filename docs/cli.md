@@ -100,6 +100,8 @@ failed download leaves the target untouched and names a template alternative. Dr
 manifest's output paths without fetching anything. Existing file collisions are refused through the
 same writer used by template scaffolds.
 
+<!-- version:history -->
+
 Choose `minimal`, `rest-api`, `mcp-tools` (from 0.12.0), `semantic-search` (from 0.12.0),
 `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`,
 `grpc`, `microservices` or `realtime`. Unknown names list those choices; excluded names explain the
@@ -826,6 +828,8 @@ setu workspace broker redis --redis-client node-redis
 setu workspace rpc orders grpc                  # one member
 setu workspace rpc orders http --dry-run        # print the plan, write nothing
 ```
+
+<!-- version:history -->
 
 A change rewrites the files the CLI owns — each affected member's module, the manifest, the Compose
 stack, the Kubernetes objects, and the README section between `<!-- setu:transport -->` markers —

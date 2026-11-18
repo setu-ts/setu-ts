@@ -79,3 +79,11 @@ allowBuilds:
   sse4_crc32: false
   # The TC39 decorator transformer requires its native build.
   esbuild: true
+
+# GHSA-fc5q-39xc-vjpf (picomatch ReDoS, <=4.0.7) has no patched release yet. picomatch is
+# reached only through dev tooling (vitest, vite, tinyglobby, fdir); no published package
+# depends on it at runtime (`pnpm why picomatch -r --prod` is empty). Remove this entry and
+# let the scan pick up the fix once picomatch publishes one.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf

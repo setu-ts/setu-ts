@@ -7,7 +7,7 @@ import { currentUserContext, sessionContext } from '~/server/context-keys.server
  *
  * This project has two middleware layers, and this is the second one:
  *
- * - **Kernel middleware** (`npx @setu-ts/cli@0.12.0 generate middleware <name>`,
+ * - **Kernel middleware** (`npx @setu-ts/cli@0.13.0 generate middleware <name>`,
  *   in `src/middleware/`)
  *   runs for EVERY request the application serves — health probes, API routes,
  *   static files and SSR pages alike — and works on the kernel request context.
