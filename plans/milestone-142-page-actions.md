@@ -38,7 +38,7 @@ its generated tests, the agent brief rule and the CLI docs. No framework package
 | Generated service                 | `module-full-stack.ts:62-122`                                                                                                                                                                        | `list`, `get`, `create(input)`, `update(id, input)` over an in-memory `Map`; no validation                                                                                                                                         |
 | Generated e2e test                | `module-full-stack.ts:270-322`                                                                                                                                                                       | `fetch`es `/api/<kebab>` with `signedSession` headers (cookie + `x-csrf-token`), checks 201, read-back, and 403 without the token                                                                                                  |
 | Session support helper            | `module-full-stack.ts:244-268`                                                                                                                                                                       | `signedSession(baseUrl)` GETs `/login`, keeps the cookie and the `_csrf` field; it does not sign in                                                                                                                                |
-| E017 page imports                 | `module-full-stack.ts:129-133` (token comment); `packages/cli/src/diagnostics/` E017                                                                                                                 | a page may value-import only `*.token.ts` from `~kernel/*` (types by `import type`); so a page cannot import a kernel validator function                                                                                           |
+| E017 page imports                 | `packages/cli/src/diagnostics/page-imports.ts` (`page-kernel-value-import`, `ids.ts:25`); `module-full-stack.ts:129-133` (token comment)                                                             | a page may value-import only `*.token.ts` from `~kernel/*` (types by `import type`); so a page cannot import a kernel validator function                                                                                           |
 | `--page` flag handling            | `packages/cli/src/commands/generate.ts:158, 252-254, 495-505, 523-572, 587, 787-789`                                                                                                                 | help line; refused for a schematic other than `module`, without `react-router-plugin`, in class-based mode; collision checks; passed as `{ page: true }`; the "add to APP_NAV" hint                                                |
 | Template CSRF helper              | `packages/cli/src/templates/full-stack-app-files.ts:304` (`app/server/session.server.ts`), used by the login page at `:613-626`                                                                      | `getCsrfToken(context: AppLoadContext): string`; the login form posts it as `_csrf`                                                                                                                                                |
 | Template login                    | `full-stack-app-files.ts:641-657` (login `action`)                                                                                                                                                   | a placeholder: any non-empty email signs in (`session.regenerate()`, `userEmail`), redirects to `/products`                                                                                                                        |
@@ -98,8 +98,13 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
   no `react-router-plugin`, class-based), because it requires `--page`.
 
   With no controller, the module index is written with only the service family, so the module
-  registers its token and no routes. The kernel-route-shadows-page collision check
-  (`generate.ts:523-560`) applies only when a controller is written.
+  registers its token and no routes. Of the existing collision checks:
+  - the refusal while adopting a same-named controller (`generate.ts:523-541`) still runs, because
+    that controller's routes would still shadow the page;
+  - the "kernel routes `<base>` and `<base>/:id` would take precedence" check
+    (`generate.ts:543-558`) runs only when a controller is written, because otherwise there are no
+    kernel routes;
+  - the existing-page refusal (`generate.ts:561-572`) still runs.
 
 - **Why:** an SSR page module needs no JSON API, and an unused API is attack surface someone must
   secure (the controller comment already warns it is not behind sign-in). The flag name follows
@@ -111,8 +116,10 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
 ### 3.3 One input rule: `service.parse`
 
 - **Decision:** the generated `<Pascal>Service` gains
-  `parse(value: { readonly name?: unknown }): <Pascal>Input | string`. It returns the input, or the
-  message "A non-empty name is required." when `name` is not a non-empty string after trimming.
+  `parse(value: { readonly name?: unknown }): <Pascal>Input | string`. It returns `{ name }` with
+  the name trimmed, or the message "A non-empty name is required." when `name` is not a string or is
+  empty after trimming. The API therefore stores a trimmed name where it stored the raw string
+  before; the CHANGELOG entry says so.
   - The action calls it through `getService`, because a page may not value-import kernel code
     (E017).
   - The controller (when written) calls it in POST and PATCH and throws `badRequest(message)` on a
@@ -140,10 +147,19 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
         `location` `/<kebab>`;
       - GET `/<kebab>` HTML contains `Example`;
       - POST with an empty name gives 200 and HTML containing "A non-empty name is required.";
-      - POST without `_csrf` gives 403.
+      - POST without `_csrf` gives 403. Form CSRF runs in the global pipeline before the page's
+        `requireUser`, so this holds whether or not the request is signed in;
+      - POST `/<kebab>.data` with the same form, the request a browser sends with JavaScript,
+        answers below 400 and creates a record the page then shows. The test asserts the record, not
+        React Router's encoded redirect body.
     - **API (with no `--page`, or with `--api`):** today's assertions, unchanged.
   - The session helper's JSDoc says the signed-in helper relies on the template's placeholder
     sign-in, and must change when the application replaces it.
+  - `test/support/session.ts` is a managed file (`module-full-stack.ts:377`), so `setu sync` and the
+    next `g module` rewrite it in existing projects. `signedInSession` is added beside an unchanged
+    `signedSession`, so existing module tests keep passing.
+  - Cloudflare Workers keeps today's split: the e2e test is generated and the service unit test is
+    not (`module-full-stack.ts:364-375`). The scaffold gate covers the Workers target.
 - **Why:** each generated write path gets a test that drives it through the real server, as today's
   API test does.
 - **Test home:** `module-full-stack.test.ts` (rendered test per combination); the generated tests
@@ -170,7 +186,8 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
     formatter-stable (M139d).
   - `docs/cli.md` describes the three combinations.
   - `CHANGELOG.md` ("Changed", `@setu-ts/cli`) and `docs/upgrading.md` ("## 0.14.0"): `--page` no
-    longer writes `/api/<name>`, so pass `--api` for it. Existing modules are untouched.
+    longer writes `/api/<name>`, so pass `--api` for it; the generated API now trims the name.
+    Existing modules are untouched.
 - **Test home:** `test/unit/agents` (the rule text and its stability test);
   `generated-guidance.test.ts`.
 
