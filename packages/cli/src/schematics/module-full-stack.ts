@@ -242,14 +242,14 @@ export default function ${p}Page() {
         <ul className='list-disc space-y-1 pl-5'>
           {items.map((item) => <li key={item.id}>{item.name}</li>)}
         </ul>
-        <Form method="post">
-          <input type="hidden" name="_csrf" value={csrfToken} />
+        <Form method='post'>
+          <input type='hidden' name='_csrf' value={csrfToken} />
           <label>
             Name
-            <input name="name" />
+            <input name='name' />
           </label>
-          <button type="submit">Create</button>
-          {result?.error && <p role="alert">{result.error}</p>}
+          <button type='submit'>Create</button>
+          {result?.error && <p role='alert'>{result.error}</p>}
         </Form>
       </CardContent>
     </Card>
@@ -320,6 +320,98 @@ export async function signedInSession(baseUrl: string, email = 'e2e@example.test
 `;
 }
 
+type Eq = (actual: string, expected: string) => string;
+
+function pageCase(names: DerivedNames, eq: Eq): string {
+  const url = `server.baseUrl + '/${names.kebab}'`;
+  return `  it('creates through the page action and checks validation and CSRF', async () => {
+    const server = await startTestServer();
+    try {
+      const session = await signedInSession(server.baseUrl);
+      const headers = {
+        cookie: session.cookie,
+        'content-type': 'application/x-www-form-urlencoded',
+      };
+      const created = await fetch(${url}, {
+        method: 'POST',
+        redirect: 'manual',
+        headers,
+        body: new URLSearchParams({ name: 'Example', _csrf: session.token }),
+      });
+      ${eq('created.status', '303')}
+      ${eq("created.headers.get('location')", `'/${names.kebab}'`)}
+      await created.text();
+      const read = await fetch(${url}, {
+        headers: { cookie: session.cookie },
+      });
+      ${eq('read.status', '200')}
+      ${eq("(await read.text()).includes('Example')", 'true')}
+      const invalid = await fetch(${url}, {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({ name: '', _csrf: session.token }),
+      });
+      ${eq('invalid.status', '200')}
+      ${eq("(await invalid.text()).includes('A non-empty name is required.')", 'true')}
+      const refused = await fetch(${url}, {
+        method: 'POST',
+        headers,
+        body: new URLSearchParams({ name: 'Refused' }),
+      });
+      ${eq('refused.status', '403')}
+      await refused.text();
+      // The request React Router sends for a <Form> when JavaScript runs.
+      const data = await fetch(server.baseUrl + '/${names.kebab}.data', {
+        method: 'POST',
+        redirect: 'manual',
+        headers,
+        body: new URLSearchParams({ name: 'Data example', _csrf: session.token }),
+      });
+      ${eq('data.status < 400', 'true')}
+      await data.text();
+      const afterData = await fetch(${url}, {
+        headers: { cookie: session.cookie },
+      });
+      ${eq('afterData.status', '200')}
+      ${eq("(await afterData.text()).includes('Data example')", 'true')}
+    } finally {
+      await server.stop();
+    }
+  });
+`;
+}
+
+function apiCase(base: string, eq: Eq): string {
+  return `  it('creates a record with the session token and reads it back', async () => {
+    const server = await startTestServer();
+    try {
+      const session = await signedSession(server.baseUrl);
+      const created = await fetch(server.baseUrl + '${base}', {
+        method: 'POST',
+        headers: session.headers({ 'content-type': 'application/json' }),
+        body: JSON.stringify({ name: 'Example' }),
+      });
+      ${eq('created.status', '201')}
+      const record: { id: string; name: string } = await created.json();
+      ${eq('record.name', "'Example'")}
+      const read = await fetch(server.baseUrl + '${base}/' + record.id);
+      ${eq('read.status', '200')}
+      ${eq('await read.json()', 'record')}
+      // Without the session token the CSRF check answers 403, by design.
+      const refused = await fetch(server.baseUrl + '${base}', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Refused' }),
+      });
+      ${eq('refused.status', '403')}
+      await refused.text();
+    } finally {
+      await server.stop();
+    }
+  });
+`;
+}
+
 function moduleTest(
   names: DerivedNames,
   runtime: TargetRuntime,
@@ -356,82 +448,7 @@ import { startTestServer } from '../../../test/support/server.ts';
 import { ${[...(page ? ['signedInSession'] : []), ...(api ? ['signedSession'] : [])].join(', ')} } from '../../../test/support/session.ts';
 
 describe('${names.kebab} e2e', () => {
-${
-  page
-    ? `  it('creates through the page action and checks validation and CSRF', async () => {
-    const server = await startTestServer();
-    try {
-      const session = await signedInSession(server.baseUrl);
-      const headers = { cookie: session.cookie, 'content-type': 'application/x-www-form-urlencoded' };
-      const created = await fetch(server.baseUrl + '/${names.kebab}', {
-        method: 'POST', redirect: 'manual', headers,
-        body: new URLSearchParams({ name: 'Example', _csrf: session.token }),
-      });
-      ${eq('created.status', '303')}
-      ${eq("created.headers.get('location')", `'/${names.kebab}'`)}
-      await created.text();
-      const read = await fetch(server.baseUrl + '/${names.kebab}', { headers: { cookie: session.cookie } });
-      ${eq('read.status', '200')}
-      ${eq("(await read.text()).includes('Example')", 'true')}
-      const invalid = await fetch(server.baseUrl + '/${names.kebab}', {
-        method: 'POST', headers,
-        body: new URLSearchParams({ name: '', _csrf: session.token }),
-      });
-      ${eq('invalid.status', '200')}
-      ${eq("(await invalid.text()).includes('A non-empty name is required.')", 'true')}
-      const refused = await fetch(server.baseUrl + '/${names.kebab}', {
-        method: 'POST', headers, body: new URLSearchParams({ name: 'Refused' }),
-      });
-      ${eq('refused.status', '403')}
-      await refused.text();
-      const data = await fetch(server.baseUrl + '/${names.kebab}.data', {
-        method: 'POST', redirect: 'manual', headers,
-        body: new URLSearchParams({ name: 'Data example', _csrf: session.token }),
-      });
-      ${eq('data.status < 400', 'true')}
-      await data.text();
-      const afterData = await fetch(server.baseUrl + '/${names.kebab}', { headers: { cookie: session.cookie } });
-      ${eq('afterData.status', '200')}
-      ${eq("(await afterData.text()).includes('Data example')", 'true')}
-    } finally {
-      await server.stop();
-    }
-  });
-`
-    : ''
-}${
-    api
-      ? `  it('creates a record with the session token and reads it back', async () => {
-    const server = await startTestServer();
-    try {
-      const session = await signedSession(server.baseUrl);
-      const created = await fetch(server.baseUrl + '${base}', {
-        method: 'POST',
-        headers: session.headers({ 'content-type': 'application/json' }),
-        body: JSON.stringify({ name: 'Example' }),
-      });
-      ${eq('created.status', '201')}
-      const record: { id: string; name: string } = await created.json();
-      ${eq('record.name', "'Example'")}
-      const read = await fetch(server.baseUrl + '${base}/' + record.id);
-      ${eq('read.status', '200')}
-      ${eq('await read.json()', 'record')}
-      // Without the session token the CSRF check answers 403, by design.
-      const refused = await fetch(server.baseUrl + '${base}', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'Refused' }),
-      });
-      ${eq('refused.status', '403')}
-      await refused.text();
-    } finally {
-      await server.stop();
-    }
-  });
-`
-      : ''
-  }
-});
+${[...(page ? [pageCase(names, eq)] : []), ...(api ? [apiCase(base, eq)] : [])].join('')}});
 `;
 }
 

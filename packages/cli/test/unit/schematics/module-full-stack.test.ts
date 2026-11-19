@@ -133,8 +133,8 @@ describe('generateModule in a full-stack project', () => {
         "redirect('/articles', 303)",
         "'routes/_app/articles._index'",
         "on: 'action'",
-        '<Form method="post">',
-        'name="_csrf"',
+        "<Form method='post'>",
+        "name='_csrf'",
         'useActionData<typeof action>()',
       ])
         expect(source).toContain(fragment);

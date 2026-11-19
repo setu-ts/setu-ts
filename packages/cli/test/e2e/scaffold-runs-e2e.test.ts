@@ -363,7 +363,7 @@ it('runs the deno full-stack scaffold check task', { timeout: 900_000 }, async (
 // The Deno half is the one that caught generated imports `deno fmt` reorders.
 for (const target of ['deno', 'bun'] as const) {
   it(
-    `g module --page keeps a ${target} full-stack project formatted, checked and tested`,
+    `g module --page (and --page --api) keeps a ${target} full-stack project formatted, checked and tested`,
     { timeout: 900_000 },
     async () => {
       expect(
@@ -371,6 +371,7 @@ for (const target of ['deno', 'bun'] as const) {
       ).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'articles', '--page', '--dir', project])).toBe(0);
+      expect(await run(['g', 'module', 'notes', '--page', '--api', '--dir', project])).toBe(0);
       const overlay = await startOverlay();
       try {
         if (target === 'deno') {
