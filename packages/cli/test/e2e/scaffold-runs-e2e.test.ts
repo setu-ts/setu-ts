@@ -1587,7 +1587,8 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
         // The products page writes through its action with the rotated token, a
         // duplicate comes back to the form, and Sign out ends the session.
         let cookie = cookiesOf(signedIn) || cookiesOf(submitted);
-        const rotated = /name="_csrf"\s+value="([^"]+)"/.exec(signedInBody)?.[1] ?? '';
+        // A RegExp from a string: a quote-bearing regex literal misleads the manifest scanner.
+        const rotated = new RegExp('name="_csrf"\\s+value="([^"]+)"').exec(signedInBody)?.[1] ?? '';
         const post = async (path: string, fields: Record<string, string>) => {
           const response = await fetch(`${origin}${path}`, {
             method: 'POST',

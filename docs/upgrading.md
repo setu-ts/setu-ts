@@ -28,7 +28,7 @@ A 4xx `HttpError` thrown from a loader or action used to answer 500. Wrap the ca
 `serviceCall(request, work)` to keep its status, or `pageAction(intent, work)` in an action to show
 it in the form. See [Pages that write through actions](./pages.md).
 
-### Sign-out and the products action (full-stack template)
+### Sign-out and the products action (`@setu-ts/cli` full-stack template)
 
 A new full-stack project's products page adds a product through its action, and `/logout` is a
 guarded page whose form posts to its action. An existing project keeps its files; copy
