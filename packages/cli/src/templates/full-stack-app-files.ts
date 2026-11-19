@@ -405,27 +405,14 @@ export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => 
 `;
 
 const appLayout = `import { useEffect, useRef } from 'react';
-import { Form, NavLink, Outlet, useLoaderData, useLocation } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 
 import { ThemeToggle } from '~/components/theme-toggle.tsx';
-import { Button } from '~/components/ui/button.tsx';
-import type { AppLoadContext } from '~/lib/load-context.ts';
 import { APP_NAV, isActive } from '~/lib/nav-utils.ts';
-import { getCsrfToken, getSession } from '~/server/session.server.ts';
 import { cn } from 'cn';
-
-/**
- * Hands the sign-out form its CSRF token. React Router runs this loader again
- * after every action, so the token is the current one after sign-in rotates it.
- */
-export function loader({ context }: { context: AppLoadContext }) {
-  const email = getSession(context).get<string>('userEmail');
-  return { csrfToken: getCsrfToken(context), signedIn: email !== undefined && email !== '' };
-}
 
 /** Chrome for the signed-in application, with one scrolling content region. */
 export default function AppLayout() {
-  const { csrfToken, signedIn } = useLoaderData<typeof loader>();
   const { pathname } = useLocation();
   const content = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -452,16 +439,13 @@ export default function AppLayout() {
         className='flex h-14 shrink-0 items-center justify-between border-b px-6'
       >
         <span className='font-semibold'>Setu-TS</span>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-3'>
           <ThemeToggle />
-          {signedIn
-            ? (
-              <Form method='post' action='/logout'>
-                <input type='hidden' name='_csrf' value={csrfToken} />
-                <Button type='submit' variant='ghost' size='sm'>Sign out</Button>
-              </Form>
-            )
-            : null}
+          {/* A page, not a loader here: a layout loader would move every child
+              route's middleware refusal up to this layout's error boundary. */}
+          <Link to='/logout' className='text-sm underline-offset-4 hover:underline'>
+            Sign out
+          </Link>
         </div>
       </header>
       <nav
@@ -680,26 +664,51 @@ export default function ProductsRoute() {
   );
 }
 `;
-const logoutRoute = `import { redirect } from 'react-router';
+const logoutRoute = `import { Form, redirect, useLoaderData } from 'react-router';
 
+import { Button } from '~/components/ui/button.tsx';
+import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getSession } from '~/server/session.server.ts';
+import { getCsrfToken, getSession } from '~/server/session.server.ts';
+import { requireUser } from '~/server/require-user.server.ts';
+
+/** Only a signed-in visitor has anything to sign out of; others go to /login. */
+export const middleware = [requireUser];
+
+/** Hands the sign-out form its CSRF token. */
+export function loader({ context }: { context: AppLoadContext }) {
+  return { csrfToken: getCsrfToken(context) };
+}
 
 /**
- * Signs out: the layout's sign-out form posts here.
- *
- * Action only, so a link or a prefetch cannot sign anyone out; the session
- * plugin's form-CSRF check has already passed when this runs. It ends the
- * session the way the login action starts it: \`clear()\` drops the signed-in
- * user, and \`regenerate()\` gives the browser a new session id and CSRF token.
- * An application on the auth plugin's sign-in calls its session service's
- * \`signOut(ctx)\` from a request-bound service instead.
+ * Signs out. A POST, so a link or a prefetch cannot sign anyone out, and the
+ * session plugin's form-CSRF check has already passed when this runs. It ends
+ * the session the way the login action starts it: \`clear()\` drops the
+ * signed-in user, and \`regenerate()\` gives the browser a new session id and
+ * CSRF token. An application on the auth plugin's sign-in calls its session
+ * service's \`signOut(ctx)\` from a request-bound service instead.
  */
 export function action({ context }: { context: AppLoadContext }) {
   const session = getSession(context);
   session.clear();
   session.regenerate();
   return redirect('/login', 303);
+}
+
+export default function LogoutRoute() {
+  const { csrfToken } = useLoaderData<typeof loader>();
+
+  return (
+    <Card>
+      <CardContent className='grid gap-4'>
+        <h1 className='text-2xl font-semibold'>Sign out</h1>
+        <Form method='post' className='flex gap-3'>
+          <input type='hidden' name='_csrf' value={csrfToken} />
+          <Button type='submit'>Sign out</Button>
+        </Form>
+      </CardContent>
+    </Card>
+  );
 }
 `;
 const loginRoute = `import { Form, redirect, useActionData, useLoaderData } from 'react-router';
@@ -876,7 +885,7 @@ const products: readonly Product[] = await getService(context, PRODUCTS).list();
 
 A page writes through its own \`action\`, never through its \`/api\` routes. The products page adds a
 product with \`pageAction\`, which returns a refusal (a duplicate name answers 409 in the service) to
-the form, and the header's Sign out posts to the action-only \`app/routes/_app/logout.tsx\`. Use
+the form, and the header's Sign out opens \`app/routes/_app/logout.tsx\`, whose form posts to its action. Use
 \`serviceCall\` in a loader or a resource route so a refusal keeps its status instead of answering
 500. \`/api\` routes are for callers outside the app.
 

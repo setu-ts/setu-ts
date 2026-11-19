@@ -12,3 +12,6 @@ export interface Product {
   /** Price in minor units. */
   readonly priceCents: number;
 }
+
+/** A product's fields before it has an id: what `parse` returns and `create` takes. */
+export type ProductInput = Omit<Product, 'id'>;

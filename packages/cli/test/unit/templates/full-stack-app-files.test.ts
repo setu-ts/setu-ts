@@ -78,19 +78,22 @@ describe('full-stack app files', () => {
     expect(page).not.toContain('fetch(');
   });
 
-  it('signs out through an action-only route the layout posts to', () => {
+  it('signs out through a guarded page whose form posts to its action', () => {
     const logout = contentsOf('app/routes/_app/logout.tsx');
+    expect(logout).toContain('export const middleware = [requireUser];');
+    expect(logout).toContain('return { csrfToken: getCsrfToken(context) };');
     expect(logout).toContain('export function action(');
-    expect(logout).not.toContain('export default');
-    expect(logout).not.toContain('export function loader');
     expect(logout.indexOf('session.clear();')).toBeLessThan(
       logout.indexOf('session.regenerate();'),
     );
     expect(logout).toContain("redirect('/login', 303)");
+    expect(logout).toContain("<Form method='post'");
+    expect(logout).toContain("<input type='hidden' name='_csrf' value={csrfToken} />");
+    // The layout links to the page and has no loader: a layout loader would move
+    // every child route's middleware refusal up to the layout's error boundary.
     const layout = contentsOf('app/components/layouts/AppLayout.tsx');
-    expect(layout).toContain("<Form method='post' action='/logout'>");
-    expect(layout).toContain("<input type='hidden' name='_csrf' value={csrfToken} />");
-    expect(layout).toContain('csrfToken: getCsrfToken(context)');
+    expect(layout).toContain("<Link to='/logout'");
+    expect(layout).not.toContain('export function loader');
   });
 
   it('gives the products service parse and create with a duplicate refusal', () => {

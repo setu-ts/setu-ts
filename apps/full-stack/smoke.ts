@@ -183,4 +183,116 @@ describe('full-stack example', () => {
     assert.equal(submitted.status, 302);
     assert.equal(submitted.headers.get('location'), '/products');
   });
+
+  // Writes go last: the reads above compare against the seeded catalogue.
+
+  /** Signs in and reads the rotated CSRF token from the products page's form. */
+  const signedInPage = async (): Promise<{ cookie: string; token: string }> => {
+    let cookie = await signIn();
+    const page = await app.fetch(new Request(`${ORIGIN}/products`, { headers: { cookie } }));
+    assert.equal(page.status, 200);
+    cookie = mergeCookies(cookie, page);
+    return { cookie, token: readCsrfToken(await page.text()) };
+  };
+
+  /** Posts a form the way the browser does, without following a redirect. */
+  const postForm = (path: string, session: { cookie: string }, fields: Record<string, string>) =>
+    app.fetch(
+      new Request(`${ORIGIN}${path}`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: session.cookie },
+        body: new URLSearchParams(fields),
+      }),
+    );
+
+  it('creates a product through the page action, with and without JavaScript', async () => {
+    const session = await signedInPage();
+    // Without JavaScript: a document POST to the index route's action.
+    const created = await postForm('/products?index', session, {
+      _csrf: session.token,
+      name: 'Gadget',
+      price: '5',
+    });
+    assert.equal(created.status, 303);
+    assert.equal(created.headers.get('location'), '/products');
+    // With JavaScript: React Router posts the same form to the .data URL.
+    const viaData = await postForm('/products.data?index', session, {
+      _csrf: session.token,
+      name: 'Widget',
+      price: '7.5',
+    });
+    assert.ok(viaData.status < 400, `the .data action answered ${viaData.status}`);
+    await viaData.text();
+
+    const page = await app.fetch(
+      new Request(`${ORIGIN}/products`, { headers: { cookie: session.cookie } }),
+    );
+    const html = await page.text();
+    assert.ok(html.includes('Gadget') && html.includes('$5.00'), 'the created product is missing');
+    assert.ok(html.includes('Widget') && html.includes('$7.50'), 'the .data product is missing');
+  });
+
+  it('shows a refused create in the form instead of an error page', async () => {
+    const session = await signedInPage();
+    const refused = await postForm('/products?index', session, {
+      _csrf: session.token,
+      name: seeded[0]!.name.toUpperCase(),
+      price: '1',
+    });
+    // The service refuses a duplicate with 409; pageAction returns it to the form.
+    assert.equal(refused.status, 200);
+    assert.ok(
+      (await refused.text()).includes(
+        `A product named ${seeded[0]!.name.toUpperCase()} already exists.`,
+      ),
+    );
+    const invalid = await postForm('/products?index', session, { _csrf: session.token, name: ' ' });
+    assert.equal(invalid.status, 200);
+    assert.ok((await invalid.text()).includes('A non-empty name is required.'));
+  });
+
+  it('downloads the catalogue as CSV from a resource route, behind sign-in', async () => {
+    const anonymous = await get('/products/export');
+    assert.equal(anonymous.status, 302);
+    const session = await signedInPage();
+    const download = await app.fetch(
+      new Request(`${ORIGIN}/products/export`, { headers: { cookie: session.cookie } }),
+    );
+    assert.equal(download.status, 200);
+    assert.equal(download.headers.get('content-type'), 'text/csv; charset=utf-8');
+    assert.equal(
+      download.headers.get('content-disposition'),
+      'attachment; filename="products.csv"',
+    );
+    const lines = (await download.text()).split('\r\n');
+    assert.equal(lines[0], '"id","name","price"');
+    for (const product of seeded) {
+      assert.ok(
+        lines.includes(
+          `"${product.id}","${product.name}","${(product.priceCents / 100).toFixed(2)}"`,
+        ),
+      );
+    }
+  });
+
+  it('signs out through an action, after which the page sends the visitor to /login', async () => {
+    const session = await signedInPage();
+    const signedOut = await postForm('/logout', session, { _csrf: session.token });
+    assert.equal(signedOut.status, 303);
+    assert.equal(signedOut.headers.get('location'), '/login');
+    const after = await app.fetch(
+      new Request(`${ORIGIN}/products`, {
+        redirect: 'manual',
+        headers: { cookie: mergeCookies(session.cookie, signedOut) },
+      }),
+    );
+    assert.equal(after.status, 302);
+  });
+
+  it('keeps /api/products for callers outside the app, reading the same service', async () => {
+    const response = await get('/api/products');
+    const { items } = (await response.json()) as { items: readonly Product[] };
+    assert.ok(items.some((product) => product.name === 'Gadget'));
+  });
 });

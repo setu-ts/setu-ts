@@ -179,6 +179,32 @@ for (const target of ['example', 'scaffold'] as const) {
         for (const product of body.items) expect(html).toContain(product.name);
       });
     });
+    it('creates through the page form, shows a refusal in place, and signs out', async () => {
+      await drive(project(), async (page, origin) => {
+        await signIn(page, origin);
+        await page.waitForLoadState('networkidle');
+        const name = `Browser ${target}`;
+        const form = page.locator('form', { has: page.locator('[name=price]') });
+        await form.locator('[name=name]').fill(name);
+        await form.locator('[name=price]').fill('12');
+        await form.getByRole('button', { name: 'Add product' }).click();
+        await page.getByText(`${name} — $12.00`).waitFor();
+        // The same name again: the service refuses it and the form shows why.
+        await form.locator('[name=name]').fill(name.toUpperCase());
+        await form.locator('[name=price]').fill('1');
+        await form.getByRole('button', { name: 'Add product' }).click();
+        await expect(page.getByRole('alert').textContent()).resolves.toContain('already exists');
+        // Still on the page: an action that returns data stays at /products?index.
+        expect(new URL(page.url()).pathname).toBe('/products');
+        // Sign-out is a page whose form posts to its action.
+        await page.getByRole('link', { name: 'Sign out' }).click();
+        await page.waitForURL('**/logout');
+        await page.getByRole('button', { name: 'Sign out' }).click();
+        await page.waitForURL('**/login');
+        const after = await page.goto(`${origin}/products`);
+        expect(new URL(after!.url()).pathname).toBe('/login');
+      });
+    });
     it('hydrates route state and changes pages without reloading the document', async () => {
       await drive(project(), async (page, origin) => {
         await page.goto(origin, { waitUntil: 'networkidle' });
