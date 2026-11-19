@@ -10,6 +10,8 @@ import { generateModule } from '../../../src/schematics/module.ts';
 import {
   generateFullStackModule,
   modulePagePath,
+  PAGES_SUPPORT_PATH,
+  renderPagesSupport,
   renderSessionSupport,
   renderSignInSupport,
   SIGN_IN_SUPPORT_PATH,
@@ -312,7 +314,13 @@ describe('generateModule in a full-stack project', () => {
       ])
         expect(test).toContain(fragment);
       expect(test).toContain("created.headers.get('location'), '/articles'");
-      for (const request of ['created', 'invalid', 'refused', 'unsigned']) {
+      expect(test).toContain(
+        "import { pageData, postForm } from '../../../test/support/pages.ts';",
+      );
+      expect(test).toContain("postForm(\n        server.baseUrl,\n        '/articles?index',");
+      expect(test).toContain("'routes/_app/articles._index',\n        session,");
+      expect(test).toContain("loadedNames.includes('Example')");
+      for (const request of ['invalid', 'refused', 'unsigned']) {
         expect(test).toContain(
           `const ${request} = await fetch(server.baseUrl + '/articles?index',`,
         );
@@ -468,5 +476,31 @@ describe('setu generate module --page', () => {
     const h = project({ '@setu-ts/react-router-plugin': '^0.11.0' });
     expect(await h.run(['service', 'billing', '--page'])).toBe(2);
     expect(h.err.text()).toContain('--page applies only to `g module`');
+  });
+});
+
+describe('page test support', () => {
+  it('writes a managed pages.ts only with a page', () => {
+    const paths = (options: { page?: boolean; api?: boolean }) =>
+      generateFullStackModule(names, { runtime: 'node', ...options })
+        .filter((file) => file.path === PAGES_SUPPORT_PATH)
+        .map((file) => file.managed);
+    expect(paths({})).toEqual([]);
+    expect(paths({ page: true })).toEqual([true]);
+    expect(paths({ page: true, api: true })).toEqual([true]);
+    const api = generateFullStackModule(names, { runtime: 'node' });
+    expect(byPath(api, 'src/modules/articles/articles.e2e.test.ts')).not.toContain('pages.ts');
+  });
+
+  it('posts a CSRF form and decodes loader data with React Router', () => {
+    const pages = renderPagesSupport();
+    expect(pages).toContain(
+      "import { UNSAFE_decodeViaTurboStream as decodeViaTurboStream } from 'react-router';",
+    );
+    expect(pages).toContain('body: new URLSearchParams({ ...fields, _csrf: session.token })');
+    expect(pages).toContain("redirect: 'manual'");
+    expect(pages).toContain("'.data?_routes=' + encodeURIComponent(routeId)");
+    expect(pages).toContain('await decodeViaTurboStream(response.body, globalThis)');
+    expect(pages).toContain("!('data' in route)");
   });
 });
