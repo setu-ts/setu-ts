@@ -14,7 +14,7 @@ describe('project brief rendering', () => {
       const text = renderBrief(
         agentFacts({ runtime, installed: new Set(['react-router-plugin']) }),
       );
-      expect(text).toContain('Pages write through their own `action`');
+      expect(text).toContain('Pages write through their `action`');
       expect(text).toContain('`g module --page --api`');
       expect(await format(text, { ...PRETTIER_OPTIONS, parser: 'markdown' })).toBe(text);
     },

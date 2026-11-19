@@ -54,7 +54,8 @@ the docs and the agent brief all teach it. `/api` stays for callers outside the 
 **Added to scope:**
 
 - `packages/react-router-plugin`: `serviceCall` and `pageAction` (§3.7, §3.8), README section.
-- `packages/auth-plugin`: its browser sign-in routes leave the OpenAPI document (§3.11).
+- `packages/auth-plugin`: its browser sign-in routes and its RFC 9728 metadata route leave the
+  OpenAPI document (§3.11).
 - `packages/cli`: the full-stack template (products action, sign-out action; §3.10), `setu check`
   `setu.W007` (§3.12), the generated `test/support/pages.ts` (§3.13), the brief sentence extended
   (§3.14).
@@ -98,6 +99,7 @@ the Bearer challenge on key-only routes, `/mcp`); migrating Mohor (done by hand 
 | Problem Details shape                | `packages/exceptions/src/formatters/rfc9457-formatter.ts:1-30`, `problem-details.ts`                                                                                                                                              | `type`, `title`, `status`, `detail`, `instance` (request path)                                                                                                                                                                     |
 | Plugins depending on `exceptions`    | `packages/auth-plugin/package.json`, `packages/mcp-plugin/package.json`                                                                                                                                                           | a plugin may depend on `@setu-ts/exceptions` (not a plugin); `react-router-plugin` today depends only on `common`                                                                                                                  |
 | Auth sign-in routes                  | `packages/auth-plugin/src/sign-in/routes.ts:284` (login), `:409` (callback), `:566` (`registerLogout`, `POST <basePath>/logout`)                                                                                                  | registered without a `schema`, so the OpenAPI document lists them                                                                                                                                                                  |
+| Protected-resource metadata route    | `packages/auth-plugin/src/resource-server/metadata-route.ts:30` (`router.get(compiled.metadataPath, …)`); path built in `resource-server/config.ts:126`                                                                           | registered without a `schema`, so the OpenAPI document lists `/.well-known/oauth-protected-resource…`                                                                                                                              |
 | Excluding one route                  | `packages/common/src/http.ts:578` (`RouteSchema.excludeFromDocument`)                                                                                                                                                             | a route can leave the document from its own definition                                                                                                                                                                             |
 | `setu check` ids and page scan       | `packages/cli/src/diagnostics/ids.ts:5-28` (last warning `setu.W006`); `page-imports.ts` (scans `app/` for E017)                                                                                                                  | a new warning takes `setu.W007` and reuses the `app/` file walk                                                                                                                                                                    |
 | AI recipe                            | `docs/ai.md:85-110` (`registerChatRoutes`, `router.post('/chat', …)` writing through `ctx`)                                                                                                                                       | teaches the stream as a kernel route only                                                                                                                                                                                          |
@@ -268,6 +270,15 @@ No other conflict found (checked ROADMAP M130/M141, the full-stack agent brief r
   Problem Details field asserted present and no `message` field); an integration test through a real
   React Router build (a resource route and a page loader) in the plugin's existing harness.
 
+- **Implementation note (2026-11-20):** no `@setu-ts/exceptions` dependency. Every 4xx `HttpError`
+  brands itself with the common status hint in its constructor
+  (`exceptions/src/errors/http-error.ts`, `withHttpStatusHint(this, { status, title, detail })`), so
+  `httpStatusHintOf` alone covers both cases and the plugin keeps `common` as its only dependency
+  (no duplicate-`instanceof` hazard). `type` and `title` follow the hint's `problem` when it carries
+  one, as the error handler does. The real-handler test showed React Router parses only
+  `application/json`, so a page boundary's `error.data` is the Problem Details JSON text;
+  `docs/pages.md` says so.
+
 ### 3.8 `pageAction`: a form's refusal shown in the page
 
 - **Decision:**
@@ -308,17 +319,32 @@ e2e run asserts no "SSR request failed" line for a refused request.
 - **Test home:** the template files test (action, form, logout route, layout form); the scaffold e2e
   run (create through the page, sign out, then a protected page redirects to `/login`).
 
-### 3.11 The auth plugin's sign-in routes leave the API document
+- **Implementation note (2026-11-20):** sign-out is a guarded `/logout` page (loader for the token,
+  a form posting to its own action), and the layout's header only links to it. The planned layout
+  sign-out form needed a layout loader, and React Router places a middleware error at the highest
+  route with a loader (`router.js:1663`), so every child route's middleware refusal moved to the
+  root boundary (the example's `/forbidden` smoke check caught it). The products service refuses a
+  duplicate name with `conflict` in the template too, so `pageAction` has a refusal to show.
 
-- **Decision:** the login, callback and logout routes registered by `sign-in/routes.ts`
-  (`router.get(path, flowRoute(...))` today) move to the definition form
-  `router.get(path, { handler: flowRoute(...), schema: { excludeFromDocument: true } })`, the
-  handler unchanged.
-- **Why:** they are browser redirects and a form post with a session cookie, not API operations; in
-  the document they read as callable endpoints that no API client can use.
-- **Test home:** `packages/auth-plugin/test/unit/sign-in/*` (the three definitions carry the flag);
-  an OpenAPI-plugin-composed test that the document has no `/auth/*` path while
-  `/.well-known/oauth-protected-resource` stays.
+### 3.11 The auth plugin's browser and discovery routes leave the API document
+
+- **Decision:** two route families move to the definition form with
+  `schema: { excludeFromDocument: true }`, their handlers unchanged:
+  - the login, callback and logout routes registered by `sign-in/routes.ts`
+    (`router.get(path, flowRoute(...))` today);
+  - the RFC 9728 protected-resource metadata route registered by
+    `resource-server/metadata-route.ts:30` (`router.get(compiled.metadataPath, handler)` today;
+    `/.well-known/oauth-protected-resource` plus the resource's path).
+- **Why:** the sign-in routes are browser redirects and a form post with a session cookie, not API
+  operations; in the document they read as callable endpoints no API client can use. The metadata
+  document is found by a client from the `resource_metadata` parameter of a `401`'s
+  `WWW-Authenticate` header or at its well-known address (RFC 9728 §3, §5), never from the
+  application's OpenAPI document, so listing it there only adds an operation that is not the
+  application's API. (Corrected 2026-11-20: the first version of this section kept it listed.)
+- **Test home:** `packages/auth-plugin/test/unit/sign-in-routes-document.test.ts` (the three sign-in
+  definitions and the metadata route carry the flag); an OpenAPI-plugin-composed test that the
+  document lists no `/auth/*` and no `/.well-known/*` path, while the metadata route still answers
+  its document and a `401` still names it in `WWW-Authenticate`.
 
 ### 3.12 `setu check` warns when a page fetches its own `/api`
 
@@ -336,6 +362,13 @@ e2e run asserts no "SSR request failed" line for a refused request.
 - **Test home:** `packages/cli/test/unit/diagnostics/page-fetch.test.ts` (positives: string and
   template literal; negatives: absolute URL, `/apis`, comment, a non-`fetch` call, a silenced
   finding); `setu check` on a scaffold stays at 0 warnings.
+
+- **Implementation note (2026-11-20):** `maskComments` refuses any template literal, so it cannot
+  scan a template's substitutions at all. The finder is `lexApiFetches` beside `lexImportSpecifiers`
+  (`utils/import-specifiers.ts`), on the same tokenizer, which reads `${…}` as code; it runs on
+  esbuild's output, and each call is mapped to its source line through esbuild's source map
+  (`page-fetch.ts`, `originalLineAt`). Matched hosts: bare `fetch`, `window.`, `globalThis.`,
+  `self.`.
 
 ### 3.13 Generated test support for pages
 
@@ -413,37 +446,37 @@ no longer writes a controller; the auth plugin's sign-in routes leave the OpenAP
 
 ## 5. Implementation files
 
-| File                                                                                                          | Purpose                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/cli/src/schematics/module-full-stack.ts`                                                            | page with action and form; `parse` in the service; controller via `parse`; files and index per `page`/`api`; e2e test per path; `signedInSession` |
-| `packages/cli/src/commands/generate.ts`                                                                       | `--api` help, refusal without `--page`, pass-through; collision check only when a controller is written                                           |
-| `packages/cli/src/agents/rules.ts`                                                                            | the `full-stack` and `full-stack-workers` rule sentence                                                                                           |
-| `docs/cli.md`, `CHANGELOG.md`, `docs/upgrading.md`                                                            | C1, §3.6                                                                                                                                          |
-| `packages/react-router-plugin/src/handler/service-call.ts` (new), `src/index.ts`, `package.json`, `README.md` | §3.7, §3.8 (`@setu-ts/exceptions` added as a dependency)                                                                                          |
-| `packages/auth-plugin/src/sign-in/routes.ts`                                                                  | §3.11                                                                                                                                             |
-| `packages/cli/src/templates/full-stack-app-files.ts`                                                          | §3.10 (products action, logout route, layout form)                                                                                                |
-| `packages/cli/src/templates/full-stack-module-files.ts`                                                       | §3.10 (the products service gains `parse` and `create`)                                                                                           |
-| `packages/cli/src/schematics/module-full-stack.ts`                                                            | §3.13 (`pages.ts` managed file; the e2e test reads back through `pageData`)                                                                       |
-| `packages/cli/src/diagnostics/page-fetch.ts` (new), `ids.ts`, `diagnose.ts`                                   | §3.12                                                                                                                                             |
-| `apps/full-stack/**`                                                                                          | §3.15                                                                                                                                             |
-| `docs/pages.md` (new), `docs/ai.md`, `docs/README.md`, website docs list, `PUBLIC_API.md`                     | §3.14                                                                                                                                             |
+| File                                                                                          | Purpose                                                                                                                                           |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli/src/schematics/module-full-stack.ts`                                            | page with action and form; `parse` in the service; controller via `parse`; files and index per `page`/`api`; e2e test per path; `signedInSession` |
+| `packages/cli/src/commands/generate.ts`                                                       | `--api` help, refusal without `--page`, pass-through; collision check only when a controller is written                                           |
+| `packages/cli/src/agents/rules.ts`                                                            | the `full-stack` and `full-stack-workers` rule sentence                                                                                           |
+| `docs/cli.md`, `CHANGELOG.md`, `docs/upgrading.md`                                            | C1, §3.6                                                                                                                                          |
+| `packages/react-router-plugin/src/handler/service-call.ts` (new), `src/index.ts`, `README.md` | §3.7, §3.8 (no new dependency: the 4xx `HttpError` brand is read through `common`)                                                                |
+| `packages/auth-plugin/src/sign-in/routes.ts`, `src/resource-server/metadata-route.ts`         | §3.11                                                                                                                                             |
+| `packages/cli/src/templates/full-stack-app-files.ts`                                          | §3.10 (products action, logout route, layout form)                                                                                                |
+| `packages/cli/src/templates/full-stack-module-files.ts`                                       | §3.10 (the products service gains `parse` and `create`)                                                                                           |
+| `packages/cli/src/schematics/module-full-stack.ts`                                            | §3.13 (`pages.ts` managed file; the e2e test reads back through `pageData`)                                                                       |
+| `packages/cli/src/diagnostics/page-fetch.ts` (new), `ids.ts`, `diagnose.ts`                   | §3.12                                                                                                                                             |
+| `apps/full-stack/**`                                                                          | §3.15                                                                                                                                             |
+| `docs/pages.md` (new), `docs/ai.md`, `docs/README.md`, website docs list, `PUBLIC_API.md`     | §3.14                                                                                                                                             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                     | src covered                    | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/cli/test/unit/schematics/module-full-stack.test.ts`                                                                 | `module-full-stack.ts`         | file list for `{}`, `{ page: true }`, `{ page: true, api: true }`; the index has a controller entry only with a controller; the page exports `action`, posts `_csrf`, calls `parse`, names `routes/_app/<kebab>._index`; the controller calls `parse` and has no `inputOf`; the e2e test has the page case, the API case, or both; `signedInSession` re-reads the token after `POST /login` |
-| a generate-command test (existing file covering `--page` refusals, or `test/unit/commands/generate-api-flag.test.ts`)         | `generate.ts`                  | `--api` without `--page` is refused with the §3.2 message; `--page --api` passes `api: true`; `--page` alone writes no controller and skips the shadowing check                                                                                                                                                                                                                             |
-| `packages/cli/test/unit/agents/*` (the rule-text tests)                                                                       | `rules.ts`                     | the new sentence appears in both full-stack rules; the brief stays formatter-stable                                                                                                                                                                                                                                                                                                         |
-| `packages/cli/test/unit/generated-guidance.test.ts`                                                                           | `generate.ts` guidance         | the `--page` help line names `--api`                                                                                                                                                                                                                                                                                                                                                        |
-| `packages/cli/test/e2e/full-stack-modules-e2e.test.ts` (reworked)                                                             | generated project              | `g module articles --page` then `check`, `build` and the generated tests pass, and a direct POST to `/articles` creates a record the page shows. `g module notes --page --api` passes the same gates, and the API and the page read back one service. `setu sync` leaves the page-only module's index without a controller entry. The built manifest names `routes/_app/articles._index`    |
-| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (existing)                                                                  | generated project per target   | `g module articles --page` still keeps each target formatted, checked and tested; the template's products page creates through its action, sign-out ends the session, and `setu check` reports 0 warnings                                                                                                                                                                                   |
-| `packages/react-router-plugin/test/unit/service-call.test.ts` (new)                                                           | `service-call.ts`              | `serviceCall`: value passthrough; `HttpError` 4xx → thrown `Response` with the status, `application/problem+json`, every RFC 9457 field and no `message`; a 4xx status hint likewise (its `detail`); a 5xx and an unknown error rethrown. `pageAction`: ok, refusal `{ ok: false, error, status }`, fault rethrown                                                                          |
-| `packages/react-router-plugin/test/integration/*` (existing harness)                                                          | `service-call.ts`              | through a real React Router build: a resource route answers the refusal's status and body unlogged; a page loader's refusal reaches the error boundary with its status                                                                                                                                                                                                                      |
-| `packages/auth-plugin/test/unit/sign-in-routes-document.test.ts` (new; the sign-in tests are flat files, `sign-in-*.test.ts`) | `sign-in/routes.ts`            | login, callback and logout carry `excludeFromDocument`; a composed document has no `/auth/*` path and keeps `/.well-known/oauth-protected-resource`                                                                                                                                                                                                                                         |
-| `packages/cli/test/unit/diagnostics/page-fetch.test.ts` (new)                                                                 | `page-fetch.ts`, `diagnose.ts` | W007 for a string and a template literal; none for an absolute URL, `/apis/…`, a comment, a non-`fetch` call; silenced by id                                                                                                                                                                                                                                                                |
-| `packages/cli/test/unit/templates/full-stack-app-files.test.ts` (existing)                                                    | `full-stack-app-files.ts`      | the products action and form, the logout route and layout form; the products service's `parse` and `create` (`full-stack-module-files.ts`)                                                                                                                                                                                                                                                  |
-| `apps/full-stack/smoke.ts` via `pnpm run check:apps`; `apps/full-stack/browser` via `pnpm run check:browser`                  | the example app                | §3.15: create through the page (document and `.data`), a refused create shown in place, CSV download, sign-out, one `/api/products` read                                                                                                                                                                                                                                                    |
+| Test file                                                                                                                     | src covered                                              | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli/test/unit/schematics/module-full-stack.test.ts`                                                                 | `module-full-stack.ts`                                   | file list for `{}`, `{ page: true }`, `{ page: true, api: true }`; the index has a controller entry only with a controller; the page exports `action`, posts `_csrf`, calls `parse`, names `routes/_app/<kebab>._index`; the controller calls `parse` and has no `inputOf`; the e2e test has the page case, the API case, or both; `signedInSession` re-reads the token after `POST /login` |
+| a generate-command test (existing file covering `--page` refusals, or `test/unit/commands/generate-api-flag.test.ts`)         | `generate.ts`                                            | `--api` without `--page` is refused with the §3.2 message; `--page --api` passes `api: true`; `--page` alone writes no controller and skips the shadowing check                                                                                                                                                                                                                             |
+| `packages/cli/test/unit/agents/*` (the rule-text tests)                                                                       | `rules.ts`                                               | the new sentence appears in both full-stack rules; the brief stays formatter-stable                                                                                                                                                                                                                                                                                                         |
+| `packages/cli/test/unit/generated-guidance.test.ts`                                                                           | `generate.ts` guidance                                   | the `--page` help line names `--api`                                                                                                                                                                                                                                                                                                                                                        |
+| `packages/cli/test/e2e/full-stack-modules-e2e.test.ts` (reworked)                                                             | generated project                                        | `g module articles --page` then `check`, `build` and the generated tests pass, and a direct POST to `/articles` creates a record the page shows. `g module notes --page --api` passes the same gates, and the API and the page read back one service. `setu sync` leaves the page-only module's index without a controller entry. The built manifest names `routes/_app/articles._index`    |
+| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` (existing)                                                                  | generated project per target                             | `g module articles --page` still keeps each target formatted, checked and tested; the template's products page creates through its action, sign-out ends the session, and `setu check` reports 0 warnings                                                                                                                                                                                   |
+| `packages/react-router-plugin/test/unit/service-call.test.ts` (new)                                                           | `service-call.ts`                                        | `serviceCall`: value passthrough; `HttpError` 4xx → thrown `Response` with the status, `application/problem+json`, every RFC 9457 field and no `message`; a 4xx status hint likewise (its `detail`); a 5xx and an unknown error rethrown. `pageAction`: ok, refusal `{ ok: false, error, status }`, fault rethrown                                                                          |
+| `packages/react-router-plugin/test/integration/*` (existing harness)                                                          | `service-call.ts`                                        | through a real React Router build: a resource route answers the refusal's status and body unlogged; a page loader's refusal reaches the error boundary with its status                                                                                                                                                                                                                      |
+| `packages/auth-plugin/test/unit/sign-in-routes-document.test.ts` (new; the sign-in tests are flat files, `sign-in-*.test.ts`) | `sign-in/routes.ts`, `resource-server/metadata-route.ts` | login, callback, logout and the metadata route carry `excludeFromDocument`; a composed document lists no `/auth/*` and no `/.well-known/*` path; the metadata route still serves its document and a `401` still names it in `WWW-Authenticate`                                                                                                                                              |
+| `packages/cli/test/unit/diagnostics/page-fetch.test.ts` (new)                                                                 | `page-fetch.ts`, `diagnose.ts`                           | W007 for a string and a template literal; none for an absolute URL, `/apis/…`, a comment, a non-`fetch` call; silenced by id                                                                                                                                                                                                                                                                |
+| `packages/cli/test/unit/templates/full-stack-app-files.test.ts` (existing)                                                    | `full-stack-app-files.ts`                                | the products action and form, the logout route and layout form; the products service's `parse` and `create` (`full-stack-module-files.ts`)                                                                                                                                                                                                                                                  |
+| `apps/full-stack/smoke.ts` via `pnpm run check:apps`; `apps/full-stack/browser` via `pnpm run check:browser`                  | the example app                                          | §3.15: create through the page (document and `.data`), a refused create shown in place, CSV download, sign-out, one `/api/products` read                                                                                                                                                                                                                                                    |
 
 ## 7. Verification gates
 
@@ -482,8 +515,9 @@ build, generated tests and start, and answers its advertised pages.
 - **`pageData` uses React Router's `UNSAFE_decodeViaTurboStream`.** It may change in a React Router
   release. Mitigation: it lives in one generated support file; the scaffold e2e test runs it against
   the installed version, so a change fails the gate, not a user's tests silently.
-- **`react-router-plugin` gains a dependency on `@setu-ts/exceptions`.** Mitigation: the precedent
-  is `auth-plugin` and `mcp-plugin`; both publish gates run.
+- **(Retired at implementation) `react-router-plugin` gaining a dependency on
+  `@setu-ts/exceptions`.** It does not: the 4xx `HttpError` brand is read through `common` (§3.7
+  implementation note).
 - **W007 false positives** (a page that calls an API it also publishes on purpose). Mitigation: a
   warning, silenceable by id, matching only a literal `/api/` first argument to `fetch`.
 - **Hiding the auth plugin's routes from the document** could surprise someone who used Swagger to

@@ -17253,8 +17253,9 @@ sign-out, and nothing helped a test drive a page. So M142 also ships:
    resource routes) and `pageAction(intent, work)` (a refusal shown in the form).
 7. **The template practises it.** The products page creates through its action; a `/logout` page
    action signs out.
-8. **Browser sign-in routes leave the API document.** The auth plugin's login, callback and logout
-   routes declare `excludeFromDocument`.
+8. **Browser and discovery routes leave the API document.** The auth plugin's login, callback and
+   logout routes and its RFC 9728 metadata route (`/.well-known/oauth-protected-resource`) declare
+   `excludeFromDocument`; clients find the metadata from the `401` challenge, not the document.
 9. **`setu check` warns (`setu.W007`)** when a page `fetch`es its own `/api/…`.
 10. **Pages are testable as pages.** A generated `test/support/pages.ts` posts a form and reads a
     page's loader data the way the browser does.

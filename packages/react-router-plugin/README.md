@@ -149,8 +149,48 @@ status. The kernel `errorHandler({ format: 'rfc9457' })` continues to govern ker
 responder terminals; the plugin does not rewrite a route boundary's HTML into Problem Details.
 
 For document navigation, throw `redirect('/login')` when the user is anonymous or
-`data(..., { status: 403 })` when the page is forbidden. A fetch caller that requires the API error
-shape should call the corresponding kernel API route.
+`data(..., { status: 403 })` when the page is forbidden.
+
+### `serviceCall` and `pageAction` — a service refusal keeps its status
+
+React Router answers any error thrown from a loader or an action with 500, except a thrown
+`Response`. A module service refuses with a 4xx `HttpError` (`notFound`, `conflict`, …) or another
+error carrying a 4xx status hint, and two helpers keep that refusal a refusal:
+
+```ts
+import { redirect } from 'react-router';
+import { getService, pageAction, serviceCall, type RouterLoadContext } from '@setu-ts/react-router-plugin';
+import { ORDERS } from '~kernel/modules/orders/orders.token.ts';
+
+export async function loader({ request, context }: { request: Request; context: RouterLoadContext }) {
+  // A refusal is thrown as an RFC 9457 Problem Details Response with its status.
+  return { orders: await serviceCall(request, () => getService(context, ORDERS).list()) };
+}
+
+export async function action({ request, context }: { request: Request; context: RouterLoadContext }) {
+  const form = await request.formData();
+  const orders = getService(context, ORDERS);
+  const input = orders.parse({ name: form.get('name') });
+  if (typeof input === 'string') return { error: input };
+  // A refusal comes back to the form as { ok: false, error, status }.
+  const result = await pageAction('create', () => orders.create(input));
+  return result.ok ? redirect('/orders', 303) : { error: result.error };
+}
+```
+
+`serviceCall(request, work)` throws the refusal as `application/problem+json` with `type`, `title`,
+`status`, `detail` and `instance`, and `cache-control: private, no-store`. A resource route returns
+it as is; a page's error boundary receives it as a route error response with that status (its `data`
+is the JSON text, since React Router parses only `application/json`). React Router does not pass a
+thrown `Response` to the server entry's `handleError`, so a refusal is not logged as a fault.
+`pageAction(intent, work)` returns `{ ok: true, intent, value }` or, for a refusal,
+`{ ok: false, intent, error, status }` with the refusal's caller-safe detail. Any other error, a 5xx
+included, is rethrown by both.
+
+A route module with no default component is a resource route: its loader or action returns any
+`Response`, so files, images, PDFs and streams are served from one without a kernel `/api` route.
+[Pages that write through actions](https://github.com/setu-ts/setu-ts/blob/main/docs/pages.md)
+covers forms, uploads, downloads, streams, sign-out and testing.
 
 ## Protecting page actions
 
@@ -271,7 +311,9 @@ application's choice.
 | `createStaticAssetHandler`        | function  |
 | `getService`                      | function  |
 | `loadRequestHandler`              | function  |
+| `pageAction`                      | function  |
 | `ReactRouterPlugin`               | function  |
+| `serviceCall`                     | function  |
 | `viteDevExternals`                | function  |
 | `ServiceResolverUnavailableError` | class     |
 | `SsrService`                      | class     |
@@ -292,6 +334,7 @@ application's choice.
 | `ViteDevExternalsPlugin`          | interface |
 | `ViteHookContext`                 | interface |
 | `ViteResolvedEnvironments`        | interface |
+| `PageActionResult`                | type      |
 | `PagePolicy`                      | type      |
 | `PageRouteSource`                 | type      |
 | `PopulateLoadContext`             | type      |

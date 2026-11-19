@@ -5704,6 +5704,20 @@ app.router.get('/api/health', (ctx) => {
   route resolving that token sees in the same request. Throws `ServiceResolverUnavailableError` when
   the context carries no resolver (the request was not served by this plugin, or a page test did not
   set one), and `RequestServiceUnavailableError` when nothing is registered under the token.
+- `serviceCall<T>(request: Request, work: () => Promise<T>): Promise<T>` (since 0.14.0) — runs a
+  service call for a loader, action or resource route and returns its value. An error carrying a 4xx
+  status hint (every 4xx `HttpError` carries one) is thrown instead as a `Response`: the hint's
+  status, `content-type: application/problem+json`, `cache-control: private, no-store`, and a body
+  of `type` (the hint's `problem.type`, else `about:blank`), `title` (the hint's `problem.title`,
+  else its `title`), `status`, `detail` and `instance` (the request's path); no `message` field. Any
+  other error, a 5xx included, is rethrown untouched. React Router returns the `Response` from a
+  resource route as is, and hands it to a page's error boundary as a route error response with that
+  status (its `data` is the JSON text); it is not passed to the server entry's `handleError`.
+- `pageAction<T>(intent: string, work: () => Promise<T>): Promise<PageActionResult<T>>` (since
+  0.14.0) — runs one intent of a page's action: `{ ok: true, intent, value }`, or for an error
+  carrying a 4xx status hint `{ ok: false, intent, error: <the hint's detail>, status }`. Any other
+  error is rethrown to the route's error boundary.
+- `type PageActionResult<T>` (since 0.14.0) — the union `pageAction` returns.
 - `serviceResolverContext: RouterContextKey<ServiceResolver | null>` (since 0.12.0) — the key the
   bridge sets to a closure over the current request; the load context never holds the kernel
   `IRequestContext` itself. Created with `contextKeyFor`, so its identity survives the SSR bundle. A

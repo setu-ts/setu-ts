@@ -6,8 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@setu-ts/react-router-plugin` (M142).** `serviceCall(request, work)` keeps a service refusal's
+  status in a loader, action or resource route: an error carrying a 4xx status hint (every 4xx
+  `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns from
+  a resource route as is and hands a page's error boundary with its status, where it answered 500.
+  `pageAction(intent, work)` returns such a refusal to the form as
+  `{ ok: false, intent, error, status }` (the `PageActionResult` type). A fault, 5xx included, is
+  rethrown by both.
+- **`@setu-ts/cli` (M142).** `setu check` warns `setu.W007` when a module under `app/` calls `fetch`
+  on a path under `/api/`: a page writes through its action. `setu g module --page` writes
+  `test/support/pages.ts` (`postForm`, and `pageData`, which reads a route's loader data through
+  React Router's decoder). The full-stack template's products page adds a product through its
+  action, and a guarded `/logout` page signs out.
+- **Docs (M142).** A new guide, [Pages that write through actions](docs/pages.md): forms, refusals,
+  uploads, downloads, streams, sign-out and testing pages. `docs/ai.md` shows the chat stream from a
+  full-stack page, and the full-stack example creates, refuses, exports and signs out through pages.
+
 ### Changed
 
+- **`@setu-ts/auth-plugin` (M142).** The sign-in login, callback and logout routes and the RFC 9728
+  protected-resource metadata route leave the OpenAPI document (`excludeFromDocument`): they are
+  browser redirects, a form post and a discovery document a client finds from a `401`'s
+  `WWW-Authenticate`, not API operations. They still answer as before.
 - **`@setu-ts/cli` (M142).** `setu g module <name> --page` writes a guarded page loader, action and
   CSRF form, and no longer writes `/api/<name>` routes. Pass `--page --api` to generate both;
   without `--page`, the API remains the default. The generated service parses input for both write

@@ -240,10 +240,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   },
   // M140e: the run-budget recipe adds one compiling TypeScript fence.
   'docs/durable-runs.md': { total: 3, ts: 2, compile: 2, external: 0, pseudocode: 0, skipped: 1 },
-  'docs/ai.md': { total: 10, ts: 9, compile: 9, external: 0, pseudocode: 0, skipped: 1 },
+  // M142: +1 compiling fence, the full-stack page's request-bound chat service.
+  'docs/ai.md': { total: 11, ts: 10, compile: 10, external: 0, pseudocode: 0, skipped: 1 },
   'docs/mcp.md': { total: 19, ts: 16, compile: 16, external: 0, pseudocode: 0, skipped: 3 },
   // M135: the retrieval guide; every TypeScript fence compiles.
   'docs/retrieval.md': { total: 10, ts: 8, compile: 8, external: 0, pseudocode: 0, skipped: 2 },
+  // M142: the pages guide; every TypeScript fence compiles.
+  'docs/pages.md': { total: 8, ts: 8, compile: 8, external: 0, pseudocode: 0, skipped: 0 },
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
@@ -290,9 +293,10 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M138: +1 skipped shell fence in docs/cli.md (`setu workspace broker` / `rpc`).
   // grpc-workspace example: +2 skipped shell fences in docs/examples.md.
   // M140e: docs/durable-runs.md's run-budget recipe (+1 compiling).
-  total: 363,
-  ts: 264,
-  compile: 231,
+  // M142: docs/pages.md joins (+8 compiling) and docs/ai.md gains one (+1 compiling).
+  total: 372,
+  ts: 273,
+  compile: 240,
   external: 33,
   pseudocode: 0,
   skipped: 99,
