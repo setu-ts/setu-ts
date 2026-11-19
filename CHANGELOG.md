@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cli` (M142).** `setu g module <name> --page` writes a guarded page loader, action and
   CSRF form, and no longer writes `/api/<name>` routes. Pass `--page --api` to generate both;
   without `--page`, the API remains the default. The generated service parses input for both write
-  paths, and the generated API now trims the name before storing it. Existing modules are untouched.
+  paths, and the generated API now trims the name before storing it, so a name of only spaces is a
+  400 where it was accepted. Existing modules are untouched.
 
 ## [0.13.0] — 2026-11-17
 

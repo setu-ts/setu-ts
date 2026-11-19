@@ -43,7 +43,10 @@ describe('full-stack app files', () => {
     expect(section).toContain('## Modules and pages');
     expect(section).toContain('getService(context, PRODUCTS)');
     expect(section).toContain('setu.E017');
-    expect(section).toContain('npx setu generate module <name> --page');
+    expect(section).toContain(
+      '`npx setu generate module <name>` (`/api/<name>` routes), or with `--page`',
+    );
+    expect(section).toContain('add `--api` to `--page` for both');
     expect(section).toContain('## Calling the API');
     expect(section).toContain('The generated `/api` routes are not behind sign-in');
     expect(section).toContain('`x-csrf-token`');

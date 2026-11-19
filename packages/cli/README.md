@@ -114,11 +114,11 @@ the `wrangler.toml` stanzas both need. Service discovery is not part of it: the 
 The only template that composes through a starter rather than inline wiring — its plugin set is
 twenty-two, and a generated file a human is meant to edit should not open with twenty-two imports
 they did not choose. Business logic lives in kernel modules under `src/modules/<name>/` (the
-service, its token, its `/api/<name>` routes; `src/modules/products/` is the example), and pages
-live in `app/`: `routes/`, `components/`, client-safe `lib/` and server-only `server/`. A loader
-reaches a module's service with `getService(context, TOKEN)`. It also emits `flatRoutes`
-`_app`/`_auth` layout groups, the `~/*` and `~kernel/*` aliases and the `.server.ts` convention,
-plus the Vite build files.
+service, its token, and its `/api/<name>` routes or a page action; `src/modules/products/` is the
+example), and pages live in `app/`: `routes/`, `components/`, client-safe `lib/` and server-only
+`server/`. A loader reaches a module's service with `getService(context, TOKEN)`. It also emits
+`flatRoutes` `_app`/`_auth` layout groups, the `~/*` and `~kernel/*` aliases and the `.server.ts`
+convention, plus the Vite build files.
 
 It deliberately emits **no** `lib/session.server.ts`, `lib/csrf.server.ts`, `lib/sse.server.ts`,
 `lib/kv.server.ts` or `lib/service-logger.server.ts` — those are the session, SSE, secrets and
@@ -450,6 +450,8 @@ install, and `setu generate --help` lists only what is available here.
 | `--yes`, `-y`           | `new` and `add`: take every default and ask nothing; `generate`, `generate custom`, `generate app` and `generate library` accept it and never prompt. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints, and Compose waits for a prerequisite with health probes to be healthy (started, otherwise).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--module <name>`       | `generate`: place a `controller`, `route`, `service`, `sse` or `schema` in the named feature module (required for the first four once the project has modules; refused while it has none); `add view`: place the views controller there. See [Controllers and modules](#controllers-and-modules).                                                                                                                                                                                                                                                                                                                                           |
+| `--page`                | `generate module` in a functional full-stack project: write a guarded page with a loader, action and CSRF form instead of `/api/<name>` routes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `--api`                 | `generate module` with `--page` only: also write the `/api/<name>` controller for callers outside the app. Refused without `--page`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--adopt-controllers`   | `generate module`, first module only: move the flat controllers and services into it, rewriting imports and keeping URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `--config <path>`       | Load the app from this module instead of `./setu.config.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `--help`, `-h`          | Prints usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -582,21 +584,22 @@ left alone, with the lines to change printed. From then on `controller`, `route`
 CLI-written files that no longer resolve (`setu.E015`).
 
 In a full-stack project, which is modular from the start, `setu g module <name>` writes a
-request-bound module instead: `<name>.token.ts`, a service factory taking the request context,
-`/api/<name>` routes and tests that sign a session and send its CSRF token. `--page` also writes a
-guarded page, `app/routes/_app/<name>._index.tsx`, whose loader reads the service with `getService`.
-Pages may import kernel code only as `import type` or from a `*.token.ts` module; `setu check`
-refuses other value imports (`setu.E017`), except in React Router `.server` modules confirmed inside
-`app/`: both the path the page is reached by and its real path must be server-only, so a file or
-directory symlink cannot move a page out of the check. Confirmed `.server` modules are skipped
-entirely, so neither E017 nor an oversized-file `setu.E018` is reported for them; a symlink leaving
-`app/` is still E018. Where the file system cannot resolve real paths, nothing is confirmed and
-`.server` modules are scanned like any page. Every path a symlink gives a page directory is scanned,
-each resolving its relative imports from where it sits, as Vite does under
-`resolve.preserveSymlinks`, and each path's findings are reported (and silenced) separately; only a
-link back to one of its own parent directories is skipped. A walk past 4,096 directories, every
-symlink path counted, reports the rest as `setu.E018`. It reads only a page's own imports, not
-re-exports in files outside `app/`.
+request-bound module instead: `<name>.token.ts`, a service factory taking the request context, and,
+without `--page`, `/api/<name>` routes and tests that sign a session and send its CSRF token.
+`--page` instead writes a guarded page, `app/routes/_app/<name>._index.tsx`, with a loader, an
+action and a CSRF form, and no `/api` controller; `--page --api` writes both. The action and the API
+share the service's `parse` rule. Pages may import kernel code only as `import type` or from a
+`*.token.ts` module; `setu check` refuses other value imports (`setu.E017`), except in React Router
+`.server` modules confirmed inside `app/`: both the path the page is reached by and its real path
+must be server-only, so a file or directory symlink cannot move a page out of the check. Confirmed
+`.server` modules are skipped entirely, so neither E017 nor an oversized-file `setu.E018` is
+reported for them; a symlink leaving `app/` is still E018. Where the file system cannot resolve real
+paths, nothing is confirmed and `.server` modules are scanned like any page. Every path a symlink
+gives a page directory is scanned, each resolving its relative imports from where it sits, as Vite
+does under `resolve.preserveSymlinks`, and each path's findings are reported (and silenced)
+separately; only a link back to one of its own parent directories is skipped. A walk past 4,096
+directories, every symlink path counted, reports the rest as `setu.E018`. It reads only a page's own
+imports, not re-exports in files outside `app/`.
 
 A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
 `PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a

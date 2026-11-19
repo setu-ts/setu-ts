@@ -763,7 +763,7 @@ public files in \`public/\`.
   return `## Modules and pages
 
 Business logic lives in kernel modules under \`src/modules/<name>/\`: the service, its types, its
-token and its \`/api/<name>\` routes. \`src/modules/products/\` is the example. A module registers its
+token and its \`/api/<name>\` routes or a page action. \`src/modules/products/\` is the example. A module registers its
 service per request (\`requestService\`), so a page and the API share one instance within a request.
 
 Pages live in \`app/\`: \`routes/\`, \`components/\`, client-safe \`lib/\` and server-only \`server/\` (the
@@ -779,8 +779,9 @@ const products: readonly Product[] = await getService(context, PRODUCTS).list();
 
 \`app/\` imports kernel code only through \`~kernel/*\`, and only types and \`*.token.ts\` modules:
 \`setu check\` refuses any other value import (setu.E017), except in React Router .server modules, so no server code reaches the browser
-bundle. Keep a token file to its token. Add a module, and optionally its page, with
-\`${invocation} generate module <name> --page\`.
+bundle. Keep a token file to its token. Add a module with
+\`${invocation} generate module <name>\` (\`/api/<name>\` routes), or with \`--page\` (a page whose
+action writes through the service, and no \`/api\` routes); add \`--api\` to \`--page\` for both.
 
 ## Calling the API
 

@@ -17,7 +17,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
 `/api/<name>` routes. Pass `--page --api` when callers outside the app also need those routes.
 Without `--page`, the API remains the default; `--api` requires `--page`. The generated API now
-trims the name through the service's shared `parse` method. Existing modules are untouched.
+trims the name through the service's shared `parse` method, and refuses a name of only spaces.
+Existing modules are untouched.
 
 ## 0.13.0
 

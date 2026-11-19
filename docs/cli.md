@@ -430,10 +430,10 @@ writing and explains that the starter already runs the queue. Functional jobs ou
 starter remain ungated.
 
 In a full-stack project, `setu g module <name>` writes a request-bound module: `<name>.token.ts`
-(`requestServiceToken`), a service factory taking the request context, `/api/<name>` routes that
-resolve it with `resolveRequestService`, generated tests that sign a session through `/login` and
-send its CSRF token, and a managed `index.ts` that registers the service with `requestService`.
-Choose the module's entry points:
+(`requestServiceToken`), a service factory taking the request context, the entry points chosen
+below, generated tests that drive each of them with a session and its CSRF token, and a managed
+`index.ts` that registers the service with `requestService`. The `/api/<name>` routes resolve the
+service with `resolveRequestService`. Choose the module's entry points:
 
 | Command                             | Generated entry points                           |
 | ----------------------------------- | ------------------------------------------------ |
