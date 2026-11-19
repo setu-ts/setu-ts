@@ -856,6 +856,9 @@ here.
   #599).
 - **Release `v0.13.0`** — cut 2026-11-17 (PR #600); 55 packages. From this release `plans/` and
   `ROADMAP.md` stay off `main` and completed plans are deleted, not archived.
+- **Milestone 142** (`packages/cli` — page actions in the module generator: `g module --page` writes
+  a loader, an action and a CSRF form with no `/api` controller, `--page --api` adds the controller,
+  and the service's trimming `parse` is the one input rule) — complete (PR pending).
 - **Next milestone** — not yet chosen.
 
 ## Verification (run before declaring any work done)
