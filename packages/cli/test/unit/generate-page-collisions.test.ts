@@ -43,6 +43,24 @@ function harness(
 }
 
 describe('generation refuses kernel routes that shadow React Router pages', () => {
+  it('keeps the application sign-in bytes on a second page module and its dry run', async () => {
+    const h = harness();
+    const path = '/app/test/support/sign-in.ts';
+    expect(await h.run(['g', 'module', 'orders', '--page']), h.err.text()).toBe(0);
+    expect(h.fs.read(path)).toContain('export async function signIn(');
+    const edited = new Uint8Array([239, 187, 191, 47, 47, 32, 109, 105, 110, 101, 13, 10]);
+    await h.fs.writeFile(path, edited);
+    const writesBefore = h.fs.writes.filter((target) => target === path).length;
+    expect(await h.run(['g', 'module', 'other', '--page', '--dry-run']), h.err.text()).toBe(0);
+    expect(h.out.text()).toContain(`unchanged ${path}`);
+    expect(await h.fs.readFile(path)).toEqual(edited);
+    expect(await h.run(['g', 'module', 'other', '--page']), h.err.text()).toBe(0);
+    expect(await h.fs.readFile(path)).toEqual(edited);
+    expect(h.fs.writes.filter((target) => target === path)).toHaveLength(writesBefore);
+    expect(h.fs.has('/app/app/routes/_app/other._index.tsx')).toBe(true);
+    expect(h.err.text()).not.toContain('already exists');
+  });
+
   it.each([false, true])(
     'checks API shadowing only when --api writes the controller (%s)',
     async (api) => {

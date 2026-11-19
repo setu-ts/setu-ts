@@ -3,12 +3,16 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { transform } from 'esbuild';
+import { format } from 'prettier';
 import { generateModule } from '../../../src/schematics/module.ts';
 import {
   generateFullStackModule,
   modulePagePath,
   renderSessionSupport,
+  renderSignInSupport,
+  SIGN_IN_SUPPORT_PATH,
 } from '../../../src/schematics/module-full-stack.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { parseArgs } from '../../../src/args.ts';
@@ -23,6 +27,153 @@ function byPath(files: readonly { path: string; contents: string }[], path: stri
   if (file === undefined) throw new Error(`no ${path}`);
   return file.contents;
 }
+
+interface ITestSession {
+  readonly cookie: string;
+  readonly token: string;
+  readonly headers: (extra?: Record<string, string>) => Record<string, string>;
+}
+
+async function sessionHelpers(): Promise<{
+  signIn: (baseUrl: string, session: ITestSession, email?: string) => Promise<string>;
+  signedSession: (baseUrl: string) => Promise<ITestSession>;
+  signedInSession: (baseUrl: string, email?: string) => Promise<ITestSession>;
+}> {
+  const source =
+    renderSignInSupport() +
+    renderSessionSupport().replace("import { signIn } from './sign-in.ts';", '');
+  const { code } = await transform(source, { loader: 'ts', format: 'esm' });
+  return import(/* @vite-ignore */ `data:text/javascript,${encodeURIComponent(code)}`);
+}
+
+describe('rendered session helpers', () => {
+  it.each(['node', 'deno', 'bun'] as const)(
+    'keeps %s helpers and page tests formatted',
+    async (runtime) => {
+      const generated = generateFullStackModule(names, { runtime, page: true });
+      for (const path of [
+        'test/support/session.ts',
+        SIGN_IN_SUPPORT_PATH,
+        'src/modules/articles/articles.e2e.test.ts',
+      ]) {
+        const source = byPath(generated, path);
+        expect(
+          await format(source, {
+            parser: 'typescript',
+            printWidth: 100,
+            singleQuote: true,
+          }),
+          path,
+        ).toBe(source);
+      }
+    },
+  );
+
+  it.each([302, 303])(
+    'signs in with the default email and joins cookies after %s',
+    async (status) => {
+      const helpers = await sessionHelpers();
+      const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(null, {
+          status,
+          headers: [
+            ['set-cookie', 'session=rotated; HttpOnly'],
+            ['set-cookie', 'other=value; Path=/'],
+          ],
+        }),
+      );
+      try {
+        expect(
+          await helpers.signIn('http://app', {
+            cookie: 'session=anonymous',
+            token: 'csrf',
+            headers: () => ({}),
+          }),
+        ).toBe('session=rotated; other=value');
+        const [url, init] = fetch.mock.calls[0]!;
+        expect(url).toBe('http://app/login');
+        expect(init).toMatchObject({
+          method: 'POST',
+          redirect: 'manual',
+          headers: {
+            cookie: 'session=anonymous',
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+        });
+        expect(String(init?.body)).toBe('email=e2e%40example.test&_csrf=csrf');
+      } finally {
+        fetch.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    [200, 'session=unexpected', 'POST /login did not redirect after sign-in.'],
+    [303, '', 'POST /login returned no rotated session cookie.'],
+  ] as const)('rejects a broken placeholder sign-in (%s)', async (status, cookie, error) => {
+    const helpers = await sessionHelpers();
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status,
+        headers: cookie === '' ? {} : { 'set-cookie': cookie },
+      }),
+    );
+    try {
+      await expect(
+        helpers.signIn('http://app', {
+          cookie: 'session=anonymous',
+          token: 'csrf',
+          headers: () => ({}),
+        }),
+      ).rejects.toThrow(error);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it('uses the anonymous token to sign in and returns the rotated cookie, token and headers', async () => {
+    const helpers = await sessionHelpers();
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response('<input name="_csrf" value="anonymous-token">', {
+          headers: { 'set-cookie': 'session=anonymous; HttpOnly' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 303,
+          headers: { 'set-cookie': 'session=signed-in; HttpOnly' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response('<input name="_csrf" value="rotated-token">', {
+          headers: { 'set-cookie': 'session=refreshed; HttpOnly' },
+        }),
+      );
+    try {
+      const session = await helpers.signedInSession('http://app', 'custom@example.test');
+      expect(session.cookie).toBe('session=refreshed');
+      expect(session.token).toBe('rotated-token');
+      expect(session.headers({ accept: 'text/html' })).toEqual({
+        cookie: 'session=refreshed',
+        'x-csrf-token': 'rotated-token',
+        accept: 'text/html',
+      });
+      expect(String(fetch.mock.calls[1]?.[1]?.body)).toBe(
+        'email=custom%40example.test&_csrf=anonymous-token',
+      );
+      expect(fetch.mock.calls[2]).toEqual([
+        'http://app/login',
+        {
+          headers: { cookie: 'session=signed-in' },
+        },
+      ]);
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+});
 
 describe('generateModule in a full-stack project', () => {
   const files = generateModule(names, {
@@ -43,6 +194,7 @@ describe('generateModule in a full-stack project', () => {
       'src/modules/articles/articles.e2e.test.ts',
       'test/support/server.ts',
       'test/support/session.ts',
+      'test/support/sign-in.ts',
     ]);
   });
 
@@ -122,8 +274,16 @@ describe('generateModule in a full-stack project', () => {
       byPath(generated, 'src/modules/articles/index.ts').includes('articles.controller.ts'),
     ).toBe(api);
     const test = byPath(generated, 'src/modules/articles/articles.e2e.test.ts');
-    expect(test.includes('await signedSession(')).toBe(api);
+    expect(test.includes('await signedSession(')).toBe(true);
     expect(test.includes('await signedInSession(')).toBe(page);
+    expect(generated.find((file) => file.path === SIGN_IN_SUPPORT_PATH)).toEqual({
+      path: SIGN_IN_SUPPORT_PATH,
+      createOnly: true,
+      contents: renderSignInSupport(),
+    });
+    expect(byPath(generated, 'test/support/session.ts')).toContain(
+      "import { signIn } from './sign-in.ts';",
+    );
     if (page) {
       const source = byPath(generated, modulePagePath(names));
       for (const fragment of [
@@ -139,14 +299,24 @@ describe('generateModule in a full-stack project', () => {
       ])
         expect(source).toContain(fragment);
       for (const fragment of [
-        "'/articles.data'",
+        "'/articles.data?index'",
         'A non-empty name is required.',
         'session.token',
         "created.headers.get('location')",
         'Data example',
+        'import { signedInSession, signedSession }',
+        'unsigned.status, 302',
+        "unsigned.headers.get('location'), '/login'",
+        "name: 'Anonymous refusal', _csrf: anonymous.token",
+        "(await afterUnsigned.text()).includes('Anonymous refusal'), false",
       ])
         expect(test).toContain(fragment);
       expect(test).toContain("created.headers.get('location'), '/articles'");
+      for (const request of ['created', 'invalid', 'refused', 'unsigned']) {
+        expect(test).toContain(
+          `const ${request} = await fetch(server.baseUrl + '/articles?index',`,
+        );
+      }
       expect(test).not.toContain('${names.');
     }
   });
@@ -161,10 +331,16 @@ describe('generateModule in a full-stack project', () => {
     expect(controller).toContain('throw badRequest(input)');
     expect(byPath(files, 'src/modules/articles/articles.test.ts')).toContain('service.parse(');
     const support = renderSessionSupport();
-    expect(support).toContain("email = 'e2e@example.test'");
-    expect(support).toContain('placeholder sign-in');
+    const signIn = renderSignInSupport();
+    expect(signIn).toContain("email = 'e2e@example.test'");
+    expect(signIn).toContain('placeholder sign-in');
+    expect(signIn).toContain('setu writes it once and never overwrites it');
+    expect(support).toContain('Regenerated by setu g module; do not edit');
+    expect(support).toContain('test/support/sign-in.ts, which the application owns');
+    expect(support).toContain('await signIn(baseUrl, anonymous, email)');
+    expect(support).not.toContain("method: 'POST'");
     expect(support).toContain('cookie =');
-    expect(support.match(/await fetch\(baseUrl \+ '\/login'/g)).toHaveLength(3);
+    expect(support.match(/await fetch\(baseUrl \+ '\/login'/g)).toHaveLength(2);
   });
 
   it('refuses api without page in the schematic itself', () => {

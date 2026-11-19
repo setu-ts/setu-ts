@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows
   CSRF form, and no longer writes `/api/<name>` routes. Pass `--page --api` to generate both;
   without `--page`, the API remains the default. The generated service parses input for both write
   paths, and the generated API now trims the name before storing it, so a name of only spaces is a
-  400 where it was accepted. Existing modules are untouched.
+  400 where it was accepted. The page's e2e test signs in through `test/support/sign-in.ts`, which
+  `setu` writes once and never overwrites; change it when the application replaces the placeholder
+  sign-in. Existing modules are untouched.
 
 ## [0.13.0] — 2026-11-17
 

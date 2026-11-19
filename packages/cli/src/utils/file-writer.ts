@@ -89,6 +89,12 @@ export interface GeneratedFile {
    */
   readonly managed?: boolean;
   /**
+   * Writes this file only when it does not exist. An existing file belongs to
+   * the developer and is left byte-for-byte untouched, without refusal or overwrite.
+   * Mutually exclusive with `managed` in meaning; do not combine them.
+   */
+  readonly createOnly?: boolean;
+  /**
    * The file holds, or is a local env file that will hold, a generated secret, so a file this
    * write CREATES is owner-only (`0600`).
    * An existing file keeps the mode it has: the operator's choice. Honoured by the
@@ -336,6 +342,7 @@ export function firstDuplicatePath(files: readonly GeneratedFile[]): string | un
  *
  * A file marked {@linkcode GeneratedFile.managed} is skipped: the CLI generated
  * it and regenerates it, so rewriting it destroys nothing the developer authored.
+ * A create-only file is never a collision: an existing path is kept untouched.
  *
  * @param fs - The filesystem to probe
  * @param files - The planned files
@@ -350,7 +357,7 @@ export async function findExisting(
     if (file.managed === true) continue;
     try {
       await fs.stat(file.path);
-      existing.push(file.path);
+      if (file.createOnly !== true) existing.push(file.path);
     } catch (cause) {
       // Only a positive missing-path response is safe to treat as absent. An
       // access or I/O error must stop before the writer can touch this path.
@@ -523,6 +530,10 @@ export async function classifyFiles(
   const encoder = new TextEncoder();
   const outcomes: WriteOutcome[] = [];
   for (const file of files) {
+    if (await keepCreateOnly(fs, file)) {
+      outcomes.push({ path: file.path, outcome: 'unchanged' });
+      continue;
+    }
     outcomes.push(
       outcomeFor(
         file.path,
@@ -534,8 +545,20 @@ export async function classifyFiles(
   return outcomes;
 }
 
+/** Probes existence without reading or normalizing an application-owned file. */
+async function keepCreateOnly(fs: IFileSystem, file: GeneratedFile): Promise<boolean> {
+  if (file.createOnly !== true) return false;
+  try {
+    await fs.stat(file.path);
+    return true;
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return false;
+  }
+}
+
 /**
- * Reports the same collisions and managed-file outcomes as a real write, without writing.
+ * Reports the same collisions and file outcomes as a real write, without writing.
  *
  * @param deps - The filesystem and output sinks
  * @param files - The planned files
@@ -613,13 +636,16 @@ export async function writeFiles(
   files: readonly GeneratedFile[],
   options: { readonly root: string; readonly signal?: AbortSignal },
 ): Promise<readonly WriteOutcome[]> {
-  // Every target is checked BEFORE the first write, so a link anywhere in the
-  // plan refuses the whole batch with nothing written.
+  // Every target we may write is checked BEFORE the first write, so a link at
+  // a write target refuses the whole batch. Existing create-only paths are kept
+  // without opening them, including when the application uses a link there.
   // assertInsideProject checks the parents; the Node writer replaces the leaf
   // via rename. Agents workspace writes also check directory ownership:
   // a chain owned by the invoking user cannot be rearranged by another user.
   // Other writes still resolve parents by name.
-  for (const file of files) await assertInsideProject(fs, options.root, file.path);
+  for (const file of files) {
+    if (!(await keepCreateOnly(fs, file))) await assertInsideProject(fs, options.root, file.path);
+  }
   const encoder = new TextEncoder();
   const directories: string[] = [];
   const known = new Set<string>();
@@ -628,6 +654,12 @@ export async function writeFiles(
   try {
     for (const file of files) {
       throwIfInterrupted(options.signal);
+      if (await keepCreateOnly(fs, file)) {
+        outcomes.push({ path: file.path, outcome: 'unchanged' });
+        continue;
+      }
+      // A create-only target kept during preflight may have disappeared since.
+      if (file.createOnly === true) await assertInsideProject(fs, options.root, file.path);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
       const bytes = file.bytes ?? encoder.encode(file.contents);
       let before: Uint8Array | undefined;

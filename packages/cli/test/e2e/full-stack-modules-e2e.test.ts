@@ -195,7 +195,7 @@ it(
         }
 
         // (2) The page lists what the module's service holds.
-        const direct = await fetch(`${origin}/articles`, {
+        const direct = await fetch(`${origin}/articles?index`, {
           method: 'POST',
           redirect: 'manual',
           headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },

@@ -445,12 +445,14 @@ The page at `app/routes/_app/<name>._index.tsx` is guarded by `requireUser`. Its
 `getService`; its action calls the service's `parse` and `create`, redirects on success and renders
 a validation message otherwise. The API uses the same parser, which trims the name. Use
 `pagePolicies` with the literal route id `routes/_app/<name>._index` and `on: 'action'` for action
-guards. API routes are for callers outside the app and need their own authentication. `--api`
-requires `--page`; both are refused outside functional full-stack generation. Existing modules are
-untouched. A page may import kernel code only as `import type` or from a `*.token.ts` module through
-`~kernel/*`; `setu check` refuses any other value import (`setu.E017`) outside React Router
-`.server` modules, including an `import.meta.glob` that reaches `src/`. The check reads only the
-imports a page makes itself: a file outside `app/` that re-exports kernel code is not followed.
+guards. The page's e2e test signs in through `test/support/sign-in.ts`: the application owns that
+file, and `setu` writes it once and never overwrites it, so change it when the app replaces the
+placeholder sign-in. API routes are for callers outside the app and need their own authentication.
+`--api` requires `--page`; both are refused outside functional full-stack generation. Existing
+modules are untouched. A page may import kernel code only as `import type` or from a `*.token.ts`
+module through `~kernel/*`; `setu check` refuses any other value import (`setu.E017`) outside React
+Router `.server` modules, including an `import.meta.glob` that reaches `src/`. The check reads only
+the imports a page makes itself: a file outside `app/` that re-exports kernel code is not followed.
 
 In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
 routes that would shadow an existing page, with its file named. Run `setu g module orders` for

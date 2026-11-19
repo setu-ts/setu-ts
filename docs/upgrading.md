@@ -17,7 +17,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
 `/api/<name>` routes. Pass `--page --api` when callers outside the app also need those routes.
 Without `--page`, the API remains the default; `--api` requires `--page`. The generated API now
-trims the name through the service's shared `parse` method, and refuses a name of only spaces.
+trims the name through the service's shared `parse` method, and refuses a name of only spaces. The
+page's e2e test signs in through `test/support/sign-in.ts`, which `setu` writes once and never
+overwrites; once the application replaces the placeholder sign-in, change `signIn` there to match.
 Existing modules are untouched.
 
 ## 0.13.0
