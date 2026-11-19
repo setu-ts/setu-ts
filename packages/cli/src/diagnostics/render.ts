@@ -150,6 +150,11 @@ function lines(finding: Finding): readonly string[] {
         `Installed @setu-ts/${escapeName(f.pkg)} has no ${escapeName(f.symbol)} call in setu.config.ts.`,
         `  Add ${escapeName(f.symbol)}({ … }) in that config factory. If registered in another module, silence setu.W006 in .setu-ts/check.json.`,
       ];
+    case 'page-fetches-own-api':
+      return [
+        `${escapeName(f.path)}:${f.line} fetches ${escapeName(f.target)}, the application's own API.`,
+        '  A page writes through its action and reads through its loader; `/api` routes are for callers outside the app. If this page calls an API it also publishes on purpose, silence setu.W007 in .setu-ts/check.json.',
+      ];
     case 'page-unreadable':
       return [
         `Cannot read the imports of ${escapeName(f.path)}, so whether it imports kernel code by value cannot be checked.`,

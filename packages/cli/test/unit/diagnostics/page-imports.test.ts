@@ -427,6 +427,7 @@ describe('scanPageImports', () => {
     expect(scan.unreadable).toEqual(['app/routes/broken.tsx']);
     expect(await scanPageImports(createFakeFs({ '/q/package.json': '{}' }), '/q')).toEqual({
       violations: [],
+      fetches: [],
       unreadable: [],
     });
   });
@@ -514,7 +515,7 @@ describe('scanPageImports bounds', () => {
       return read(path);
     };
     const scan = await scanPageImports(fs, '/p');
-    expect(scan).toEqual({ violations: [], unreadable: ['app/routes/big.tsx'] });
+    expect(scan).toEqual({ violations: [], fetches: [], unreadable: ['app/routes/big.tsx'] });
     expect(opened).toEqual([]);
   });
 
@@ -827,7 +828,11 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       );
       await nodeFs.symlink('a.ts', `${root}/app/lib/alias.ts`);
       const scan = await scanPageImports(createNodeRuntimeServices().fs!, root);
-      expect(scan).toEqual({ violations: [], unreadable: ['app/lib/svc.ts', 'app/routes/g.ts'] });
+      expect(scan).toEqual({
+        violations: [],
+        fetches: [],
+        unreadable: ['app/lib/svc.ts', 'app/routes/g.ts'],
+      });
     } finally {
       await nodeFs.rm(root, { recursive: true, force: true });
     }
@@ -840,7 +845,11 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       path === '/p/app/b.tsx'
         ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
         : realPath(path);
-    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/b.tsx'] });
+    expect(await scanPageImports(fs, '/p')).toEqual({
+      violations: [],
+      fetches: [],
+      unreadable: ['app/b.tsx'],
+    });
   });
 
   it('reports an entry whose stat fails instead of throwing', async () => {
@@ -853,7 +862,11 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       path === '/p/app/broken'
         ? Promise.reject(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }))
         : stat(path);
-    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/broken'] });
+    expect(await scanPageImports(fs, '/p')).toEqual({
+      violations: [],
+      fetches: [],
+      unreadable: ['app/broken'],
+    });
   });
 
   it('reports a page it cannot read instead of throwing (PR review)', async () => {
@@ -863,7 +876,11 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       path === '/p/app/b.tsx'
         ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
         : readFile(path);
-    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/b.tsx'] });
+    expect(await scanPageImports(fs, '/p')).toEqual({
+      violations: [],
+      fetches: [],
+      unreadable: ['app/b.tsx'],
+    });
   });
 
   it('reports a directory it cannot list instead of throwing', async () => {
@@ -873,7 +890,11 @@ describe('scanPageImports over real symlinks (review finding 6)', () => {
       path === '/p/app/routes'
         ? Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' }))
         : readdir(path);
-    expect(await scanPageImports(fs, '/p')).toEqual({ violations: [], unreadable: ['app/routes'] });
+    expect(await scanPageImports(fs, '/p')).toEqual({
+      violations: [],
+      fetches: [],
+      unreadable: ['app/routes'],
+    });
   });
 });
 

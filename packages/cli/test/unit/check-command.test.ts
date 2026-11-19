@@ -246,6 +246,7 @@ it('renders each stable id with its severity and strict counts', () => {
     'Cannot read the imports of app/routes/broken.tsx, so whether it imports kernel code by value cannot be checked.',
     'src/services/plain.service.ts is not re-exported from src/services/index.ts: it does not export describePlain.',
     'Installed @setu-ts/mcp-plugin has no McpPlugin call in setu.config.ts.',
+    "app/routes/_app/products._index.tsx:12 fetches /api/products, the application's own API.",
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {

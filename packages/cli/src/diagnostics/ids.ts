@@ -26,6 +26,7 @@ export const FINDING_IDS = {
   'page-unreadable': 'setu.E018',
   'artifact-unlisted': 'setu.W005',
   'plugin-unregistered': 'setu.W006',
+  'page-fetches-own-api': 'setu.W007',
 } as const;
 
 /** Looks up an identity without parsing rendered prose. */

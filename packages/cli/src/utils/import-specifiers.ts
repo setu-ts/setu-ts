@@ -205,6 +205,54 @@ function tokenize(source: string): readonly IToken[] | undefined {
   return templates.length === 0 ? tokens : undefined;
 }
 
+/** The global objects a page can call `fetch` through. */
+const FETCH_HOSTS: ReadonlySet<string> = new Set(['window', 'globalThis', 'self']);
+
+/** A `fetch` call whose first argument is a literal path under `/api/`. */
+export interface IApiFetch {
+  /** Offset of the argument's opening quote or backtick. */
+  readonly start: number;
+  /** The path as written: a string's text, or a template's text up to its first substitution. */
+  readonly target: string;
+}
+
+/**
+ * Finds every `fetch(…)` call whose first argument is a string or template
+ * literal starting with `/api/`, called bare or through `window`, `globalThis`
+ * or `self`. Reads JavaScript (a page after esbuild has removed its types and
+ * JSX). A template literal's `${…}` substitutions are read as code, so a call
+ * nested in one is found, and a call written inside a string or a comment is not.
+ *
+ * @param source - JavaScript source
+ * @returns The calls in source order, or undefined when the source cannot be tokenized
+ */
+export function lexApiFetches(source: string): readonly IApiFetch[] | undefined {
+  const tokens = tokenize(source);
+  if (tokens === undefined) return undefined;
+  const calls: IApiFetch[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.kind !== 'word' || token.text !== 'fetch' || tokens[i + 1]?.text !== '(') continue;
+    if (tokens[i - 1]?.text === '.') {
+      // `client.fetch(…)` is another object's method; only the global's counts.
+      const host = tokens[i - 2];
+      if (host?.kind !== 'word' || !FETCH_HOSTS.has(host.text) || tokens[i - 3]?.text === '.')
+        continue;
+    }
+    const argument = tokens[i + 2];
+    if (argument?.kind === 'string' && argument.text.startsWith('/api/'))
+      calls.push({ start: argument.start, target: argument.text });
+    else if (argument?.kind === 'template' && argument.text.startsWith('`/api/')) {
+      const head = argument.text.slice(1);
+      calls.push({
+        start: argument.start,
+        target: head.endsWith('${') ? `${head.slice(0, -2)}\${…}` : head.slice(0, -1),
+      });
+    }
+  }
+  return calls;
+}
+
 /** A string token's text, or a template's when it has no substitution. */
 function literalOf(token: IToken | undefined): string | undefined {
   if (token?.kind === 'string') return token.text;
