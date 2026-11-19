@@ -5,6 +5,7 @@ import {
   FULL_STACK_APP_FILES,
   FULL_STACK_README_SECTION,
 } from '../../../src/templates/full-stack-app-files.ts';
+import { fullStackModuleFiles } from '../../../src/templates/full-stack-module-files.ts';
 import { cliInvocation } from '../../../src/templates/project-files.ts';
 
 function contentsOf(path: string): string {
@@ -59,5 +60,52 @@ describe('full-stack app files', () => {
 
     expect(middleware).toContain("rendered by React Router's route error boundary");
     expect(middleware).toContain('API callers');
+  });
+
+  it('writes products through the page action, not the API', () => {
+    const page = contentsOf('app/routes/_app/products._index.tsx');
+    expect(page).toContain('export async function action(');
+    expect(page).toContain(
+      "import { getService, pageAction } from '@setu-ts/react-router-plugin';",
+    );
+    expect(page).toContain("products.parse({ name: form.get('name'), price: form.get('price') })");
+    expect(page).toContain("pageAction('create', () => products.create(input))");
+    expect(page).toContain("redirect('/products', 303)");
+    expect(page).toContain("<Form method='post'");
+    expect(page).toContain("<input type='hidden' name='_csrf' value={csrfToken} />");
+    expect(page).toContain('csrfToken: getCsrfToken(context)');
+    expect(page).not.toContain("/api/products'");
+    expect(page).not.toContain('fetch(');
+  });
+
+  it('signs out through an action-only route the layout posts to', () => {
+    const logout = contentsOf('app/routes/_app/logout.tsx');
+    expect(logout).toContain('export function action(');
+    expect(logout).not.toContain('export default');
+    expect(logout).not.toContain('export function loader');
+    expect(logout.indexOf('session.clear();')).toBeLessThan(
+      logout.indexOf('session.regenerate();'),
+    );
+    expect(logout).toContain("redirect('/login', 303)");
+    const layout = contentsOf('app/components/layouts/AppLayout.tsx');
+    expect(layout).toContain("<Form method='post' action='/logout'>");
+    expect(layout).toContain("<input type='hidden' name='_csrf' value={csrfToken} />");
+    expect(layout).toContain('csrfToken: getCsrfToken(context)');
+  });
+
+  it('gives the products service parse and create with a duplicate refusal', () => {
+    const service = fullStackModuleFiles().find((file) =>
+      file.path.endsWith('products.service.ts'),
+    )!.contents;
+    expect(service).toContain(
+      'parse(value: { readonly name?: unknown; readonly price?: unknown })',
+    );
+    expect(service).toContain('create(input: ProductInput): Promise<Product>;');
+    expect(service).toContain("import { conflict } from '@setu-ts/exceptions';");
+    expect(service).toContain('Promise.reject(conflict(');
+    const controller = fullStackModuleFiles().find((file) =>
+      file.path.endsWith('products.controller.ts'),
+    )!.contents;
+    expect(controller).toContain('For callers outside the app');
   });
 });

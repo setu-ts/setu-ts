@@ -36,26 +36,45 @@ export interface Product {
   /** Price in minor units. */
   readonly priceCents: number;
 }
+
+/** A product's fields before it has an id: what \`parse\` returns and \`create\` takes. */
+export type ProductInput = Omit<Product, 'id'>;
 `;
 
 const productsService = `import { CAPABILITIES, type ILogger, type IRequestContext } from '@setu-ts/common';
+import { conflict } from '@setu-ts/exceptions';
 
-import type { Product } from './products.types.ts';
+import type { Product, ProductInput } from './products.types.ts';
+
+/**
+ * Sample storage: replace it with a repository before deploying.
+ *
+ * This \`Map\` lives in process memory with no size limit, seeded so the page
+ * has something to show.
+ */
+const catalogue = new Map<string, Product>([
+  ['p-1', { id: 'p-1', name: 'Standard plan', priceCents: 4900 }],
+  ['p-2', { id: 'p-2', name: 'Premium plan', priceCents: 9900 }],
+]);
 
 /** What the products module offers to pages and to its API routes. */
 export interface ProductsService {
+  /** Parses a posted product, or returns a validation message. */
+  parse(value: { readonly name?: unknown; readonly price?: unknown }): ProductInput | string;
   /** The catalogue, ordered by name. */
   list(): Promise<readonly Product[]>;
+  /** Adds a product; refuses a name already in the catalogue with 409. */
+  create(input: ProductInput): Promise<Product>;
 }
 
 /**
  * Builds the service for one request.
  *
  * Registered with \`requestService\` in this module's \`index.ts\`, so it runs at
- * most once per request and every caller in that request — a page loader
- * through \`getService\`, an API route through \`resolveRequestService\` — shares
- * the instance. The request context is here for what is request-bound: the
- * tenant, the principal, \`ctx.signal\`. A page never receives it.
+ * most once per request and every caller in that request — a page loader or
+ * action through \`getService\`, an API route through \`resolveRequestService\` —
+ * shares the instance. The request context is here for what is request-bound:
+ * the tenant, the principal, \`ctx.signal\`. A page never receives it.
  *
  * @param ctx - The kernel request context
  * @returns The request's products service
@@ -63,14 +82,27 @@ export interface ProductsService {
 export function productsService(ctx: IRequestContext): ProductsService {
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   return {
-    async list() {
+    parse: (value) => {
+      const name = typeof value.name === 'string' ? value.name.trim() : '';
+      if (name.length === 0) return 'A non-empty name is required.';
+      const price = typeof value.price === 'string' ? Number(value.price) : Number.NaN;
+      if (!Number.isFinite(price) || price < 0) return 'The price must be a number of 0 or more.';
+      return { name, priceCents: Math.round(price * 100) };
+    },
+    list() {
       logger.debug('products: listing');
-      // Replace with a repository read. Static data keeps the skeleton runnable.
-      const products: readonly Product[] = await Promise.resolve([
-        { id: 'p-1', name: 'Standard plan', priceCents: 4900 },
-        { id: 'p-2', name: 'Premium plan', priceCents: 9900 },
-      ]);
-      return [...products].sort((left, right) => left.name.localeCompare(right.name));
+      const products = [...catalogue.values()];
+      return Promise.resolve(products.sort((left, right) => left.name.localeCompare(right.name)));
+    },
+    create(input) {
+      const taken = [...catalogue.values()].some(
+        (product) => product.name.toLowerCase() === input.name.toLowerCase(),
+      );
+      // A caller error: pageAction shows its detail in the form, an API route answers 409.
+      if (taken) return Promise.reject(conflict(\`A product named \${input.name} already exists.\`));
+      const product: Product = { id: crypto.randomUUID(), ...input };
+      catalogue.set(product.id, product);
+      return Promise.resolve(product);
     },
   };
 }
@@ -100,6 +132,9 @@ import { PRODUCTS } from './products.token.ts';
  *
  * Resolves the same request-bound service the products page reads with
  * \`getService\`, so the page and the API cannot disagree.
+ *
+ * For callers outside the app: the products page reads through its loader and
+ * writes through its action, never through these routes.
  *
  * Not behind sign-in: the page's \`requireUser\` guard covers the page only.
  * Add authentication here before these routes serve real data.
