@@ -263,6 +263,9 @@ function flowRoute(flow: (ctx: IRequestContext) => Promise<FlowOutcome>): RouteD
       },
     ],
     handler: (ctx) => ctx.response.redirect(String(ctx.state.get(REDIRECT_STATE_KEY)), 302),
+    // Browser redirects and a form post carrying a session cookie, not API
+    // operations: none of these routes is listed in the OpenAPI document.
+    schema: { excludeFromDocument: true },
   };
 }
 

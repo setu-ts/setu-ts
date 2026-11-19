@@ -37,6 +37,8 @@ export {
   ServiceResolverUnavailableError,
 } from './handler/get-service.ts';
 export type { ServiceResolver } from './handler/get-service.ts';
+export { pageAction, serviceCall } from './handler/service-call.ts';
+export type { PageActionResult } from './handler/service-call.ts';
 export { viteDevExternals } from './dev/vite-dev-externals.ts';
 export type {
   ViteDevExternalId,
