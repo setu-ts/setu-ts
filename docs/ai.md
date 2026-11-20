@@ -158,8 +158,10 @@ streaming has begun is a stream failure; the HTTP status has already been sent.
 A full-stack page streams the same response from a resource route instead of a kernel route (see
 [Pages that write through actions](./pages.md#streams-a-resource-route-action)). The work that needs
 the kernel request context (the quota, the budget scope, `ctx.signal`) moves into a request-bound
-service, registered with `requestService` in the module's `index.ts`, which hands the route a web
-`Response`:
+service, which hands the route a web `Response`. The module's `index.ts` creates the quota resolver
+once, when the application registers the module, with
+`services.register(TOKEN, requestService(createPageChatService(chatQuota())))`, so each application
+keeps its own quota store:
 
 ```typescript
 import { createUIMessageStreamResponse, streamText, toUIMessageStream } from 'ai';
@@ -167,9 +169,7 @@ import type { IRequestContext } from '@setu-ts/common';
 import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
 import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
 import { budgetedModel, requestScope } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
-import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
-
-const quota = chatQuota();
+import type { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
 
 /** What the page's chat route calls. */
 export interface PageChatService {
@@ -177,9 +177,14 @@ export interface PageChatService {
   answer(prompt: string): Promise<Response>;
 }
 
-/** The chat service for one request: it holds the context a React Router action does not have. */
-export function pageChatService(ctx: IRequestContext): PageChatService {
-  return {
+/**
+ * The chat service factory for one application: `quota` is that application's resolver.
+ * The service it returns holds the request context a React Router action does not have.
+ */
+export function createPageChatService(
+  quota: ReturnType<typeof chatQuota>,
+): (ctx: IRequestContext) => PageChatService {
+  return (ctx) => ({
     async answer(prompt) {
       const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
       const { model, ready } = budgetedModel(requestScope(ctx), models, quota(ctx));
@@ -198,7 +203,7 @@ export function pageChatService(ctx: IRequestContext): PageChatService {
       await Promise.race([ready, failed]);
       return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream }) });
     },
-  };
+  });
 }
 ```
 
