@@ -90,6 +90,22 @@ The framework follows hexagonal (ports and adapters) architecture:
 - Service resolution uses capability tokens (strings), not class references.
 - No public API returns or accepts a concrete class when an interface exists.
 
+### 1.7 Built for Coding Agents
+
+Setu-TS is purpose-built for applications written with AI coding agents (ARCHITECTURE.md §1, "Why It
+Is Built for Coding Agents"). When working on the framework:
+
+- **Judge a responsibility by what it gives an agent.** A command, a check or a shipped fact that
+  replaces a guess belongs in the framework, even where a framework for hand-written code would
+  leave it to the application. Do not propose removing one because other frameworks lack it.
+- **Everything the framework says must be true.** An agent acts on CLI output, generated comments,
+  README sections the CLI writes, agent cards, briefs and `setu check` results exactly as written. A
+  false statement in any of them is a defect, and a test asserts the text against the behaviour
+  (§7).
+- **A CLI change keeps the result checkable.** A new or changed command keeps `--dry-run` accurate,
+  uses the documented exit codes, and leaves a project that passes `setu check`.
+- **A package's agent card changes with its API.** An option or export the card names must exist.
+
 ---
 
 ## 2. Architecture Rules

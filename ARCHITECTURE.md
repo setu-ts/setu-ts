@@ -66,6 +66,9 @@ hooks.
 5. **Enterprise capabilities** — Secrets management, audit logging, circuit breakers, feature flags,
    and multi-tenancy are available as plugins.
 
+6. **Direction for coding agents** — The framework's commands, checks and shipped briefs give an AI
+   coding agent verified facts to work from and a way to check its work.
+
 ### Why It Is Not a Framework Clone
 
 Setu-TS makes dependency injection, decorators, and reflection optional. Plugins provide the units
@@ -165,6 +168,31 @@ runtime-specific APIs**. All runtime-specific operations (UUID generation, timer
 system, environment variables) are abstracted behind `IRuntimeServices` and provided by the
 `RuntimePlugin`.
 
+### Why It Is Built for Coding Agents
+
+Setu-TS is built for applications that are written with AI coding agents. That purpose explains
+responsibilities this framework takes on which a framework for hand-written code would leave to the
+application.
+
+An agent meeting a framework it was not trained on guesses from the ones it knows. The guess is
+usually plausible and often wrong. Setu-TS answers that in three ways:
+
+1. **Operations the agent runs instead of writes.** Installing and registering a plugin, generating
+   a controller that is already registered, switching the broker a workspace shares, and deploying
+   its members are commands with one correct outcome. A command cannot be mis-copied.
+
+2. **A way to check the work.** `setu check` verifies a project's wiring without starting the
+   application, reports each finding under a stable id, and runs from every generated project's
+   `check` script. `--dry-run` shows a command's writes before it makes them.
+
+3. **Verified facts within reach.** Every published library package ships an agent card, and
+   `setu agents` writes a brief from the project's real state: its packages, style, runtime and
+   scripts.
+
+This is why the CLI owns more than scaffolding. The cost is real: the CLI has to be correct on every
+template and runtime it supports, and everything it prints has to be true, because an agent acts on
+a wrong statement where a person would notice it.
+
 ---
 
 ## 2. Design Principles
@@ -235,6 +263,19 @@ This ensures:
   them).
 - Developers who prefer functional style are not forced into OOP.
 - Testing is easier — no need to bootstrap a decorator system.
+
+### Direction for Agents
+
+Where an agent would otherwise guess, the framework provides a command, a check or a verified fact.
+Three rules follow:
+
+- **Deterministic before descriptive.** If the framework can perform a step, it provides a command
+  for it rather than instructions to follow.
+- **Verifiable.** A step the CLI performs can be checked afterwards: by `setu check`, by the
+  project's own gates, or by a documented exit code.
+- **Truthful output.** Every message, generated comment, generated README section, agent card, brief
+  and check result states what is actually the case. Output that is wrong is a defect of the same
+  weight as code that is wrong.
 
 ### Optional Decorators
 
