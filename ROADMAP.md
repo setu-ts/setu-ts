@@ -15308,8 +15308,8 @@ the letter adds every package README with a compilable fence to the gate, and a 
 
 **Deliverables (M119 as a whole):**
 
-- [ ] M119a–M119i, each closing its rows on a published re-run
-- [ ] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
+- [x] M119a–M119i, each closing its rows on a published re-run
+- [x] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
 - [x] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
 
 ---
@@ -17273,6 +17273,334 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 
 ---
 
+## Milestone 143: The `v0.13.0` Smoke Closeout
+
+**Source:** the full `0.13.0` smoke programme of 2026-11-19/20 on published `0.13.0`, recorded in
+`smoke/DEFECTS.md` as V13-1 … V13-181:
+
+- an outside claims-intake validation report and its soak evidence
+  (`smoke/V0130-CLAIMS-VALIDATION.md`);
+- the row re-run (`smoke/V0130-REGRESSION.md`), which closed 97 rows and left 12 partial;
+- Part 22 (`smoke/X96-X103-FINDINGS.md`), Part 19 (`smoke/X83-X86-FINDINGS.md`) and the re-drive of
+  every retained exercise (`smoke/V0130-REDRIVE.md`);
+- two new blocks, race gaps (`smoke/X104-X105-FINDINGS.md`) and the CLI in depth
+  (`smoke/X106-X111-FINDINGS.md`, 1,652 matrix rows);
+- rows found building an application on `0.13.0` (`smoke/V0130-MOHOR-RERUN.md`).
+
+A prior-decision audit then withdrew two rows and reworded 27. That leaves 159 open or partial rows
+(11 High, 53 Medium, 95 Low), including the remainders of M139 (X3-3, V12-8, V12-14, V12-15) and
+M140 (V12-65, V12-70, V12-75, V12-82, V12-85, V12-111, V12-120, V12-125, V12-130). They are grouped
+by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its reasons.
+
+**Decisions (maintainer, 2026-11-20).**
+
+- **Nothing is cut.** A scope review (`smoke/SCOPE-REVIEW.md`) weighed removing `setu adopt`,
+  `setu workspace deploy` with its generated manifests and Secrets, and `setu workspace broker`,
+  `workspace rpc` and `workspace ports --reallocate`. All stay, and their rows are fixed in M143d.
+- **No experimental tier.** Every published package is held to the same bar.
+- **One release.** All fourteen letters ship together in `0.14.0`. No row closes until that release
+  is published and re-run.
+
+| Letter    | Kind   | Shape                                           | Rows                                                                                                                                                                     | Packages                                                                                                                                                 |
+| --------- | ------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M143a** | design | sessions and shared caches                      | V13-111, V13-112, V13-135, V13-136, V13-20, V13-34, V13-60, V13-137                                                                                                      | `session-plugin`, `react-router-plugin`, `http-security-plugin`, `kernel`, `cli` (full-stack template)                                                   |
+| **M143b** | fix    | a first command that fails                      | V13-36, V13-140, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161, V13-166, V13-168                                                                         | `cli`, `telemetry-plugin`, `database-plugin` (packaging)                                                                                                 |
+| **M143c** | design | calls between services that hang or pile up     | V13-101, X3-3, V13-23, V13-24, V13-43, V13-102, V13-103, V13-104, V13-25, V13-52, V13-54                                                                                 | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`, `realtime-backplane-plugin`, `common`                                          |
+| **M143d** | fix    | `adopt` and workspace output                    | V13-121, V13-144, V13-16, V13-22, V12-111, V13-153, V13-45, V13-46, V13-125, V13-163, V13-164, V13-179, V13-180, V13-181                                                 | `cli` (workspace, `adopt`)                                                                                                                               |
+| **M143e** | fix    | `add` wiring that is incomplete                 | V13-15, V13-37, V12-75, V13-149, V13-150, V13-151, V13-152, V13-155, V13-6, V13-21, V13-30, V13-44, V12-82, V13-167, V13-170, V13-171, V13-172, V13-176                  | `cli` (`add`)                                                                                                                                            |
+| **M143f** | fix    | `generate` output that is wrong or unwired      | V13-14, V12-65, V12-70, V13-147, V13-17, V13-18, V13-156, V13-159, V13-165, V12-85                                                                                       | `cli` (`generate`)                                                                                                                                       |
+| **M143g** | fix    | `setu check` and CLI-owned files                | V12-130, V13-146, V13-7, V13-47, V13-48, V13-49, V13-157, V13-158, V13-162                                                                                               | `cli` (`check`, `sync`)                                                                                                                                  |
+| **M143h** | fix    | errors a client can act on                      | V13-9, V13-40, V13-107, V13-115, V13-117, V13-118, V13-50, V13-53, V13-132, V13-133, V13-139                                                                             | `database-plugin`, `messaging-plugin`, `queue-plugin`, `exceptions`, `audit-plugin`, `runtime`                                                           |
+| **M143i** | fix    | what the process says while it runs and stops   | V13-8, V13-11, V13-27, V13-38, V13-39, V13-10, V13-12, V13-13, V13-26, V13-120                                                                                           | `kernel`, `runtime`, `common`, `queue-plugin`, `messaging-plugin`, `agent-runs-plugin`, `vector-store-plugin`                                            |
+| **M143j** | fix    | the full-stack template and runtime differences | V13-41, V13-42, V13-108, V13-109, V13-113, V12-120, V13-55, V13-110, V13-114                                                                                             | `cli` (full-stack template), `runtime`, `kernel`, `react-router-plugin`                                                                                  |
+| **M143k** | fix    | prompts, devtool, briefs, client and build      | V13-122, V12-125, V13-32, V13-33, V13-57, V13-127, V13-169, V13-173, V13-174, V13-175, V13-177                                                                           | `cli`, `sdk`                                                                                                                                             |
+| **M143l** | design | OpenAPI document gaps                           | V13-58, V13-59, V13-61, V13-62, V13-63, V13-65, V13-56                                                                                                                   | `openapi-plugin`, `common`, `validation-plugin`, `storage-plugin`, `mcp-plugin`                                                                          |
+| **M143m** | design | options and small gaps in integrations          | V13-2, V13-4, V13-5, V13-64, V13-119, V13-131, V12-131, V12-132, V12-8, V12-15                                                                                           | `mail-plugin`, `worker-pool-plugin`, `auth-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`, `localization-plugin`, `full-stack-starter`, `common` |
+| **M143n** | docs   | documentation                                   | V13-28, V13-29, V13-106, V13-123, V13-124, V13-1, V13-3, V13-19, V13-31, V13-35, V13-105, V13-126, V13-128, V13-134, V13-138, V13-160, V13-178, V12-14, V13-129, V13-130 | `docs/upgrading.md`, package READMEs and agent cards, `PUBLIC_API.md`, the website                                                                       |
+
+**Sequence.** The letters run in order, a to n, because the order decides what is safe first. M143a
+leads: it is the only letter whose rows harm an application's users, it crosses a trust boundary,
+and it is **security-audited** before it merges. M143b follows with the commands that fail outright.
+M143a to M143d hold all eleven High rows, so if the release must be cut short, the cut falls on the
+late letters, which hold none. M143c and M143h to M143m can start beside the CLI letters, since they
+touch other packages; the CLI letters (b, d, e, f, g, k) run one at a time, because they share
+files. M143n batches the documentation last.
+
+**Gates for the whole milestone.** Beside each letter's own gates:
+
+- every fix ships with a test that fails without it; for a CLI row that is a row in the
+  scaffold-and-boot gate, not only a unit test;
+- the CLI matrix of the smoke programme's Part 24 is re-run on the release candidate;
+- after `0.14.0` is published, every row is re-run on it with `0.13.0` as the control, and a
+  first-hour exercise follows the getting-started guide with no other context, per template and
+  runtime.
+
+### Milestone 143a: Sessions and Shared Caches
+
+**Package(s):** `session-plugin`, `react-router-plugin`, `http-security-plugin`, `kernel`, `cli`
+(full-stack template). Ships in `0.14.0`. A signed-in page can reach another visitor through a
+shared cache, and a logout or `regenerate()` can be undone by a request already in flight. These are
+the only rows where an application's users are harmed without its developer doing anything wrong.
+The plan settles the two designs: which responses are marked private, and how a store write refuses
+a revoked or superseded session. **Security-audited** before it merges.
+
+- **V13-111** (High) — Signed-in pages lack private cache headers; shared cache leaks.
+- **V13-112** (High) — CSRF-token login page cacheable; later visitors get 403.
+- **V13-135** (High) — Store-session logout undone by later committing request.
+- **V13-136** — regenerate() undone by overlapping request write.
+- **V13-20** — No favicon; missing-asset 404 starts a session.
+- **V13-34** — 413 and IP refusals lack CORS and security headers.
+- **V13-60** — Session cookie on Swagger UI makes Try-it-out fail CSRF.
+- **V13-137** — Store sessions commit whole payload; concurrent writes lost.
+
+### Milestone 143b: A First Command That Fails
+
+**Package(s):** `cli`, `telemetry-plugin`, `database-plugin` (packaging). Ships in `0.14.0`.
+Documented commands that fail or silently do the wrong thing in a new user's first hour.
+
+- **V13-36** (High) — Workers add telemetry: no OTel peer, pasted registration 503s.
+- **V13-140** (High) — new/generate app --env-file consumed by Node; CLI fails.
+- **V13-141** (High) — add view CSS build missing from test; npm test fails.
+- **V13-142** (High) — add database bigtable OTel peer conflict breaks npm install.
+- **V13-143** (High) — add messaging pubsub never sets PUBSUB_EMULATOR_HOST.
+- **V13-145** — Flags with no value silently ignored, exit 0.
+- **V13-148** — Concurrent add runs lose a package silently.
+- **V13-154** — Fresh workspace root test command fails without members.
+- **V13-161** — new onto existing file crashes with ENOTDIR trace.
+- **V13-166** — CLI runs outside declared engines without warning.
+- **V13-168** — new into non-empty directory writes silently.
+
+### Milestone 143c: Calls Between Services That Hang or Pile Up
+
+**Package(s):** `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`,
+`realtime-backplane-plugin`, `common`. Ships in `0.14.0`. A hung or restarted registry takes every
+caller down, and gRPC calls fail through a rolling restart. The plan settles a read bound on
+discovery, what an empty successful read does to a warm cache, a stable registration id, and a
+failure-rate option on the breaker.
+
+- **V13-101** (High) — Hung Consul agent turns warm cache into total outage.
+- **X3-3** — Backplane publisher loses frames on a real disconnect (M139f fix incomplete).
+- **V13-23** — Draining member answers 503, not REFUSED_STREAM; calls fail.
+- **V13-24** — grpcClient single session pins all calls to one replica.
+- **V13-43** — Stop during backplane-waiting start leaks sockets, later listens.
+- **V13-102** — Empty Consul read after restart replaces warm cache.
+- **V13-103** — Random Consul registration id leaves orphan entries after restart.
+- **V13-104** — Circuit breaker only counts absolute failures, no rate option.
+- **V13-25** — Lost gRPC peer yields Canceled/Internal; reported healthy.
+- **V13-52** — Hung Kubernetes API logged as AbortError, not probe bound.
+- **V13-54** — Backplane startup unbounded with injected client pair.
+
+### Milestone 143d: `adopt` and Workspace Output
+
+**Package(s):** `cli` (workspace, `adopt`). Ships in `0.14.0`. The maintainer reviewed removing
+`adopt`, `workspace deploy` and the workspace switches on 2026-11-20 and kept all of them
+(`smoke/SCOPE-REVIEW.md`), so their rows are fixed here.
+
+- **V13-121** (High) — Regenerated Dockerfile copies instrumentation.mjs old members lack.
+- **V13-144** (High) — adopt leaves instrumentation and lint config at root.
+- **V13-16** — K8s/Compose replicas, resources, probes have no setting.
+- **V13-22** — Workspace gRPC members at /grpc exclude native gRPC clients.
+- **V12-111** — depends-on member gets gRPC client it cannot connect with.
+- **V13-153** — Adopted member config never calls transport module.
+- **V13-45** — Compose project names and image tags collide across projects.
+- **V13-46** — Standalone .dockerignore says context is workspace root.
+- **V13-125** — generate app notice misreports README transport section markers.
+- **V13-163** — add/generate write through symlinked member outside workspace.
+- **V13-164** — SIGINT during workspace build/deploy exits 1, not 130.
+- **V13-179** — workspace broker nats ignores out-of-subject topics.
+- **V13-180** — workspace deploy demands empty TRUSTED_PROXIES keys.
+- **V13-181** — Service Bus Compose images pinned to latest.
+
+### Milestone 143e: `add` Wiring That Is Incomplete
+
+**Package(s):** `cli` (`add`). Ships in `0.14.0`. `add` succeeds but leaves the plugin unwired,
+wired to memory, or without its companion files.
+
+- **V13-15** — add queue on microservice prints QueuePlugin line without processors.
+- **V13-37** — add mail provider registers no MailPlugin; README claims Mailpit.
+- **V12-75** — add websocket: no connection cap, heartbeat or idle timeout.
+- **V13-149** — Workers add idempotency/backplane insert per-isolate memory stores.
+- **V13-150** — Full-stack store/lock/backplane redis skip starter option.
+- **V13-151** — Multi-package add wires only first package/broker.
+- **V13-152** — add database prisma after drizzle leaves mixed toolchain.
+- **V13-155** — Generated Deno output fails deno fmt in four places.
+- **V13-6** — add database prints GitHub links, not setu-ts.dev.
+- **V13-21** — add database writes default URL for PostgreSQL nothing starts.
+- **V13-30** — add idempotency writes bare plugin agent-runs refuses.
+- **V13-44** — add database drizzle pg: @types/pg not installed.
+- **V12-82** — add database leaves empty DATABASE_URL fallback.
+- **V13-167** — add ignores pnpm/yarn lockfiles, says npm install.
+- **V13-170** — Redis/broker arms write runtime-specific env reads.
+- **V13-171** — Similar add refusals use inconsistent exit codes.
+- **V13-172** — --store memory after redis silently ignored.
+- **V13-176** — Default memory backend for database/vector-store left unwired.
+
+### Milestone 143f: `generate` Output That Is Wrong or Unwired
+
+**Package(s):** `cli` (`generate`). Ships in `0.14.0`. Includes the three regressions the `0.13.0`
+row re-run found (V13-14, V13-17, V13-18); they go first within the letter.
+
+- **V13-14** — Regression: generated module update drops every field except name.
+- **V12-65** — g schema emits stripping z.object({}), misplaced module file.
+- **V12-70** — Generated tests need live Redis after add cache redis.
+- **V13-147** — SIGTERM mid adopt-controllers leaves unregistered controllers, no rollback.
+- **V13-17** — Regression: g job on Workers suggests add queue, which refuses.
+- **V13-18** — Regression: g service claims registration that did not happen.
+- **V13-156** — --dry-run over-reports writes and omits guidance.
+- **V13-159** — g migration twice writes duplicate-named migration.
+- **V13-165** — No did-you-mean for mistyped command/schematic/package.
+- **V12-85** — Following g job hint leaves job unwired.
+
+### Milestone 143g: `setu check` and CLI-Owned Files
+
+**Package(s):** `cli` (`check`, `sync`). Ships in `0.14.0`. The gate misses real mis-wiring, or
+fails a correctly wired application.
+
+- **V12-130** — E017 refuses server-only modules; no shared data-module place.
+- **V13-146** — sync drops module from barrel when its index.ts deleted.
+- **V13-7** — One computed config key makes check abandon whole config.
+- **V13-47** — check passes duplicate starter-owned plugin registration.
+- **V13-48** — check misses removed module service registration.
+- **V13-49** — W006 counts unregistered factory call as registration.
+- **V13-157** — Non-ASCII names accepted but barrels and Docker break.
+- **V13-158** — Hand edits in CLI-owned listing silently dropped.
+- **V13-162** — Re-exported createApp yields E006 errors, not W001.
+
+### Milestone 143h: Errors a Client Can Act On
+
+**Package(s):** `database-plugin`, `messaging-plugin`, `queue-plugin`, `exceptions`, `audit-plugin`,
+`runtime`. Ships in `0.14.0`. Conflicts, timeouts and outages that still answer a masked `500`, and
+conflicts a client cannot tell apart.
+
+- **V13-9** — Audit entry cannot join caller's transaction.
+- **V13-40** — poolStats neither wired nor defaulted; saturation drains replicas.
+- **V13-107** — RabbitMQ unroutable outbox rows confirmed sent, silently lost.
+- **V13-115** — Serializable conflict via native Drizzle handle masked 500.
+- **V13-117** — RPC with no reply answers 500, not 504.
+- **V13-118** — RabbitMQ queue.add during outage answers opaque 500.
+- **V13-50** — Pool acquire timeout: 503 outage vs saturation, error log flood.
+- **V13-53** — Node refused WebSocket upgrade gets bare response, no problem body.
+- **V13-132** — Prisma P1017 unclassified; masked 500.
+- **V13-133** — Mongo error subclasses missed by exact-name classifier.
+- **V13-139** — Distinct 409 conflicts share about:blank type.
+
+### Milestone 143i: What the Process Says While It Runs and Stops
+
+**Package(s):** `kernel`, `runtime`, `common`, `queue-plugin`, `messaging-plugin`,
+`agent-runs-plugin`, `vector-store-plugin`. Ships in `0.14.0`. Silent crashes and shutdowns,
+failures logged without their cause, and ceilings nothing documents.
+
+- **V13-8** — Outbox relay throughput ceiling and backlog undocumented, no warning.
+- **V13-11** — No structured log on uncaught exception or unhandled rejection.
+- **V13-27** — Agent-run model failures log generic Error, cause discarded.
+- **V13-38** — Queue job loop logs reserve failure every tick, no recovery.
+- **V13-39** — vector-store readiness indicator discards probe error.
+- **V13-10** — Outbox dispatch cost undocumented; delivery waits up to 1 s.
+- **V13-12** — SIGHUP missing from RuntimeSignal; generated entry dies silently.
+- **V13-13** — app.stop logs no stopping or stopped line.
+- **V13-26** — Shutdown drain hard-coded 10 s vs generated 30 s.
+- **V13-120** — Queue readiness cache TTL hard-coded 5 s.
+
+### Milestone 143j: The Full-Stack Template and Runtime Differences
+
+**Package(s):** `cli` (full-stack template), `runtime`, `kernel`, `react-router-plugin`. Ships in
+`0.14.0`. Streaming errors and time bounds in the template, limits that differ silently between
+runtimes, `HEAD`, and validators on public files.
+
+- **V13-41** — Bun/Deno silently cap WebSocket maxMessageBytes.
+- **V13-42** — Bun closes quiet SSE streams after 10 s idle.
+- **V13-108** — Template entry.server swallows Suspense errors unlogged.
+- **V13-109** — Template sets no streamTimeout or abort on render.
+- **V13-113** — No implicit HEAD on GET routes.
+- **V12-120** — Deno templates disable dependency cooldown; check runs -A --no-lock.
+- **V13-55** — Full-stack SSR bundle built without sourcemaps.
+- **V13-110** — Client aborts of SSR logged as 500.
+- **V13-114** — React Router public files lack ETag and conditional handling.
+
+### Milestone 143k: Prompts, Devtool, Briefs, Client and Build
+
+**Package(s):** `cli`, `sdk`. Ships in `0.14.0`. Friction in the remaining commands.
+
+- **V13-122** — devtool enable refusal calls CLI-written script user-written.
+- **V12-125** — Agent brief goes stale; check ignores stale brief.
+- **V13-32** — Generated client requires idempotencyKey; SDK option never applies.
+- **V13-33** — setu client refusals omit offending method and path.
+- **V13-57** — setu build unresolved task error names no source file.
+- **V13-127** — agents --check fails on version stamp alone.
+- **V13-169** — Assorted misleading CLI messages and bare generate exit 0.
+- **V13-173** — Interactive new asks all questions, then refuses unfixably.
+- **V13-174** — CI=true still prompts in a terminal.
+- **V13-175** — Cancelled interactive add exits 130 silently.
+- **V13-177** — Single-option Logger question; wrong standalone broker label.
+
+### Milestone 143l: OpenAPI Document Gaps
+
+**Package(s):** `openapi-plugin`, `common`, `validation-plugin`, `storage-plugin`, `mcp-plugin`.
+Ships in `0.14.0`. Found documenting a real application's API: response media types, multipart
+encoding, component hoisting, API-key parameters.
+
+- **V13-58** — Upload-middleware routes documented as JSON body.
+- **V13-59** — Multipart encoding cannot mark non-file part as JSON.
+- **V13-61** — Zod meta id hoists every property into components.
+- **V13-62** — One OpenAPI document; Swagger UI cannot list several.
+- **V13-63** — API-key header cannot be derived as per-operation parameter.
+- **V13-65** — MCP GET/DELETE documented 200 but GET answers 405.
+- **V13-56** — OpenAPI cannot declare non-JSON binary response media type.
+
+### Milestone 143m: Options and Small Gaps in Integrations
+
+**Package(s):** `mail-plugin`, `worker-pool-plugin`, `auth-plugin`, `multi-tenancy-plugin`,
+`vector-store-plugin`, `localization-plugin`, `full-stack-starter`, `common`. Ships in `0.14.0`.
+Missing options and small requests. Each plan names the public surface it adds.
+
+- **V13-2** — resourceServer.resource fixed; per-tenant hosts get broken challenge.
+- **V13-4** — SMTP sends contentId attachment as attachment, not inline.
+- **V13-5** — pgvector wrong-opclass index reported as missing.
+- **V13-64** — Bearer challenge added to every 401, including API-key routes.
+- **V13-119** — SMTP provider has no DNS TTL or timeout options.
+- **V13-131** — Worker task cannot be withdrawn; no AbortSignal.
+- **V12-131** — Feature idea: localization option on full-stack starter.
+- **V12-132** — Feature idea: key filter on exposeCatalogues.
+- **V12-8** — No run-budget recipe usable with AgentRunContext.
+- **V12-15** — Multi-tenancy resolver-name array passed through unconverted.
+
+### Milestone 143n: Documentation
+
+**Package(s):** `docs/upgrading.md`, package READMEs and agent cards, `PUBLIC_API.md`, the website.
+Ships in `0.14.0`. Rows whose fix is text, batched last so the documentation describes the code as
+fixed.
+
+- **V13-28** — Docs put image base64 in data; provider gets undefined.
+- **V13-29** — Run-budget recipe fails tsc in scaffolded project.
+- **V13-106** — Versioned-topic rollout docs omit double processing.
+- **V13-123** — Upgrade guide omits two BREAKING auth changes.
+- **V13-124** — Upgrade guide lacks entries for generated-file-only fixes.
+- **V13-1** — Upgrade notes omit setu build literal task-reference refusal.
+- **V13-3** — Worker-pool README contradicts itself on task builds.
+- **V13-19** — Generated event-handler comment claims errors are logged.
+- **V13-31** — No documented DDL for agent-run tables.
+- **V13-35** — CLI docs say page routes stay until M130.
+- **V13-105** — Discovery README never calls watch; drain delay below TTL.
+- **V13-126** — Upgrade notes omit client regeneration breaking changes.
+- **V13-128** — Deno upgrade steps omit lockfile regen; image stays fat.
+- **V13-134** — Bounding table lacks mysql2 and SQLite rows.
+- **V13-138** — Versioned write in transaction raises SerializationConflictError; undocumented.
+- **V13-160** — Class-based ws-route gateway never joins room or broadcasts.
+- **V13-178** — Interactive docs disagree on end-of-input and --yes.
+- **V12-14** — createFullStackAppFromConfig JSDoc example fails as written.
+- **V13-129** — PUBLIC_API documents nonexistent shutdown options and signal handling.
+- **V13-130** — Upgrade guide omits Zod peer ERESOLVE and remedy.
+
+**Deliverables (M143 as a whole):**
+
+- [ ] M143a–M143n, each closing its rows on the published `0.14.0` re-run
+- [ ] `smoke/DEFECTS.md` rows updated as each letter ships
+- [ ] A plan per design letter (M143a, M143c, M143l, M143m) before implementation
+- [ ] The committed-tree security audit of M143a
+- [x] **ROADMAP.md** — this section and the Progress Tracking rows `143`–`143n`
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17508,7 +17836,7 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ✅     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
 | 118       | ✅     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
-| 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
+| 119       | ✅     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i; every row closed on published `0.11.0`, `0.12.0` or `0.13.0`                                                                                                                     |
 | 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
 | 119c      | ✅     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |
@@ -17529,7 +17857,7 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 | 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
 | 129       | ✅     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
 | 130       | ✅     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
-| 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
+| 131       | ✅     | the `v0.11.0` smoke closeout — four letters, regression first; every row closed on published `0.12.0` or `0.13.0`                                                                                                                                                                         |
 | 131a      | ✅     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |
 | 131b      | ✅     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |
 | 131c      | ✅     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
@@ -17544,7 +17872,7 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 | 137b      | ✅     | common + openapi-plugin + auth-plugin + decorator-plugin — derived 401/403/415/429 and idempotency headers, declared response headers, opt-in Problem Details schema                                                                                                                      |
 | 137c      | ✅     | common + validation-plugin + openapi-plugin + sdk — form bodies and file uploads in the document and the generated client                                                                                                                                                                 |
 | 138       | ✅     | cli — workspace broker and per-member RPC style: a CLI-owned transport module per member, `setu workspace broker` and `setu workspace rpc`; PR #568                                                                                                                                       |
-| 139       | ⬜     | the `v0.12.0` smoke closeout — the `0.12.0` row re-run done, then seven letters (0.13.0)                                                                                                                                                                                                  |
+| 139       | ✅     | the `v0.12.0` smoke closeout — seven letters (0.13.0); rows closed on published `0.13.0` (X3-3, V12-8, V12-14 and V12-15 remainders carried into M143)                                                                                                                                    |
 | 139a      | ✅     | auth-plugin + multi-tenancy + session + mcp + cli — identity and authorization a token or a tenant can escape                                                                                                                                                                             |
 | 139b      | ✅     | common + kernel + runtime + grpc-plugin — gRPC over HTTP/2: streamed RPC bodies, an HTTP/2 listener that keeps HTTP/1.1, response trailers and native gRPC on Node and Bun                                                                                                                |
 | 139c      | ✅     | agent-runs + idempotency + vector-store + auth + multi-tenancy + database + mail + common — AI-layer and data contracts with a missing half                                                                                                                                               |
@@ -17552,7 +17880,7 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 | 139e      | ✅     | docs — documentation                                                                                                                                                                                                                                                                      |
 | 139f      | ✅     | service-discovery + database + realtime-backplane + queue + scheduler — health and failure signals that mislead the operator                                                                                                                                                              |
 | 139g      | ✅     | common + kernel + testing + react-router + cli — capability lookups typed by their token (0.13.0); V12-58, V12-59, V12-61                                                                                                                                                                 |
-| 140       | ⬜     | generated code read as code — the 2026-11-12 review of what the CLI writes, four code letters and docs                                                                                                                                                                                    |
+| 140       | ✅     | generated code read as code — four code letters and docs; rows closed on published `0.13.0` (V12-65, V12-70, V12-75, V12-82, V12-85, V12-111, V12-120, V12-125 and V12-130 remainders carried into M143)                                                                                  |
 | 140a      | ✅     | cli + session-plugin + auth-plugin — security defaults a generated project starts with                                                                                                                                                                                                    |
 | 140b      | ✅     | cli — Workers, Deno and Bun project output                                                                                                                                                                                                                                                |
 | 140c      | ✅     | cli — images, Compose, Kubernetes and gRPC between workspace members                                                                                                                                                                                                                      |
@@ -17560,3 +17888,18 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
 | 141       | ✅     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |
 | 142       | ✅     | cli + react-router-plugin + auth-plugin + apps/full-stack — pages that never need the app's own `/api`: generator actions, refusals keep their status, template and example practise it, `setu.W007`                                                                                      |
+| 143       | ⬜     | the `v0.13.0` smoke closeout — 159 rows in fourteen letters, all shipping in `0.14.0`                                                                                                                                                                                                     |
+| 143a      | ⬜     | session + react-router + http-security + kernel + cli — sessions and shared caches (security-audited)                                                                                                                                                                                     |
+| 143b      | ⬜     | cli + telemetry + database — a first command that fails                                                                                                                                                                                                                                   |
+| 143c      | ⬜     | service-discovery + resilience + grpc + kernel + realtime-backplane — calls between services that hang or pile up                                                                                                                                                                         |
+| 143d      | ⬜     | cli — `adopt` and workspace output                                                                                                                                                                                                                                                        |
+| 143e      | ⬜     | cli — `add` wiring that is incomplete                                                                                                                                                                                                                                                     |
+| 143f      | ⬜     | cli — `generate` output that is wrong or unwired                                                                                                                                                                                                                                          |
+| 143g      | ⬜     | cli — `setu check` and CLI-owned files                                                                                                                                                                                                                                                    |
+| 143h      | ⬜     | database + messaging + queue + exceptions + audit — errors a client can act on                                                                                                                                                                                                            |
+| 143i      | ⬜     | kernel + runtime + queue + messaging + agent-runs + vector-store — what the process says while it runs and stops                                                                                                                                                                          |
+| 143j      | ⬜     | cli + runtime + kernel + react-router — the full-stack template and runtime differences                                                                                                                                                                                                   |
+| 143k      | ⬜     | cli + sdk — prompts, devtool, briefs, client and build                                                                                                                                                                                                                                    |
+| 143l      | ⬜     | openapi + common + validation + storage + mcp — OpenAPI document gaps                                                                                                                                                                                                                     |
+| 143m      | ⬜     | mail + worker-pool + auth + multi-tenancy + vector-store + localization — options and small gaps in integrations                                                                                                                                                                          |
+| 143n      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
