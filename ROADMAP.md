@@ -17628,6 +17628,82 @@ fixed.
 
 ---
 
+## Milestone 144: Agent Guidance — Finding Repairs, Corrections and `llms.txt`
+
+**Package(s):** `packages/cli`, `website/`; `docs/cli.md`. Ships in `0.14.0`, after M143g and M143k,
+which change the same files (`setu check` and the agent brief).
+
+**Source:** the four agent builds of 2026-11-20 (`smoke/X112-FINDINGS.md`), and a review on
+2026-11-21 of how another open-source project ships guidance for coding agents inside its npm
+package. Setu-TS is built for coding agents, so what an agent is told when something is wrong is
+part of the product.
+
+**The problem.** Setu-TS already ships an agent card in every published library package, and
+`setu agents` writes a brief that names each installed card. Three things are missing:
+
+- **A finding does not say how to repair it in one known place.** `setu check` has 25 stable ids
+  (`setu.E001`–`setu.E018`, `setu.W001`–`setu.W007`). Some findings print a fix line and some do
+  not, the only description of an id is one table in `docs/cli.md`, and the output is text only. In
+  the guarded-writes build, one builder's page-policy middleware failed `setu check` (V13-194). Both
+  fix lines it could print assume the file should be registered for every request, and the builder
+  moved the file out of `src/middleware/` instead.
+- **The brief states rules but shows no mistakes.** In the same build, none of the four builders
+  used the framework's rate limit or upload check; each wrote its own. The brief says not to guess
+  APIs and does not show the wrong shape beside the right one.
+- **An agent without the project installed has nothing to read.** The website holds the docs as
+  pages for people. There is no index or single file an assistant can fetch.
+
+**What ships.**
+
+1. **A repair section per finding id.** `@setu-ts/cli` ships one file with a section for each id:
+   what `setu check` saw, and what to change. The file carries `name` and `description` frontmatter,
+   so a tool that loads skills from installed packages finds it; nothing else is converted to that
+   format (see "Not in scope").
+2. **One catalog, generated.** A JSON catalog (id, severity, one-line trigger, one-line repair, docs
+   anchor) is generated from `FINDING_IDS` and the repair file and shipped beside it. A test fails
+   when an id has no section, a section has no id, or the `docs/cli.md` table disagrees.
+3. **Every finding points at its repair.** The first finding of each id in a run ends with two
+   lines: the docs anchor for that id, and the installed path of its repair section, using the same
+   installed-modules path the brief prints for each runtime.
+4. **`setu check --json`.** The same findings as data: id, severity, path, message and the two
+   pointers. The exit status is unchanged, and `--strict` applies as it does today.
+5. **Corrections in the brief.** A short section of wrong/right pairs, taken from what the agent
+   builds measured: a hand-written rate limit or upload check where the framework has one, a
+   module-level cache, a page that calls its own `/api` route. Every "right" example is compiled by
+   the fence gate. The brief stays within its size budget; the plan lists the pairs.
+6. **`llms.txt` on the website.** The website build writes `/llms.txt` (every docs page with a
+   one-line description) and `/llms-full.txt` (the docs as one Markdown file) from `docs/`, and the
+   link check covers both. The brief names the index.
+
+**Not in scope.**
+
+- **The 53 agent cards stay cards.** A tool that loads skills reads every skill's description up
+  front, so 53 more would cost each session context for packages it is not using. The brief already
+  points at the cards a project has installed.
+- **No second primer.** The brief is the primer. A second copy would be one more place for the brief
+  and the template to disagree (V13-189, V13-190).
+- **No reactive state library.** A request is a one-shot pipeline, not a graph kept consistent over
+  time, and module-level reactive state would be shared between requests.
+
+**Gate:** the catalog test above; a test that runs `setu check` on a project with each finding kind
+and asserts both pointer lines resolve to an existing section; `--json` output validated against its
+documented shape for every finding kind; the brief's examples compiled; the website build fails when
+a docs page is missing from `/llms.txt`; a scaffolded project passes its own `check` script; every
+changed file at the 90% per-file bar. The guarded-writes agent build is re-run on the release
+candidate with the same builders and recorded against the baseline of 0 of 4; it is a measurement,
+not a pass threshold.
+
+**Deliverables:**
+
+- [ ] The repair file and generated catalog in `@setu-ts/cli`
+- [ ] Pointer lines in `setu check` output, and `--json`
+- [ ] The corrections section in the brief
+- [ ] `/llms.txt` and `/llms-full.txt` in the website build
+- [ ] **docs/cli.md** — `--json`, the pointer lines and the repair file
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `144`
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17930,3 +18006,4 @@ fixed.
 | 143l      | ⬜     | openapi + common + validation + storage + mcp — OpenAPI document gaps                                                                                                                                                                                                                     |
 | 143m      | ⬜     | react-router + auth + storage + mail + worker-pool + multi-tenancy + vector-store + localization — options and small gaps in integrations                                                                                                                                                 |
 | 143n      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
+| 144       | ⬜     | cli + website + docs — agent guidance: a repair section per `setu check` finding, `--json`, corrections in the brief, `llms.txt`                                                                                                                                                          |
