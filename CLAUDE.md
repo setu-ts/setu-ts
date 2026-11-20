@@ -861,7 +861,7 @@ here.
   a loader, an action and a CSRF form with no `/api` controller, `--page --api` adds the controller,
   and the service's trimming `parse` is the one input rule; widened 2026-11-20 to refusals in pages,
   the template, `apps/full-stack`, `setu.W007` and `docs/pages.md`) — complete (PR #604).
-- **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 159 rows in fourteen letters
+- **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 172 rows in fourteen letters
   (M143a–M143n), all shipping in `0.14.0`; M143a (sessions and shared caches) first.
 
 ## Verification (run before declaring any work done)
