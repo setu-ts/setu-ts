@@ -93,8 +93,17 @@ import { isRouteErrorResponse } from 'react-router';
 /** The caller-safe detail of a refusal, for an error boundary to show. */
 export function refusalDetail(error: unknown): string | undefined {
   if (!isRouteErrorResponse(error) || error.status >= 500) return undefined;
-  const body: unknown = typeof error.data === 'string' ? JSON.parse(error.data) : error.data;
-  return (body as { readonly detail?: string }).detail;
+  let body: unknown = error.data;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      // A plain-text refusal, such as `new Response('Not Found', { status: 404 })`.
+      return undefined;
+    }
+  }
+  const detail = typeof body === 'object' && body !== null ? (body as { detail?: unknown }).detail : undefined;
+  return typeof detail === 'string' ? detail : undefined;
 }
 ```
 

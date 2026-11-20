@@ -83,9 +83,8 @@ describe('full-stack app files', () => {
     expect(logout).toContain('export const middleware = [requireUser];');
     expect(logout).toContain('return { csrfToken: getCsrfToken(context) };');
     expect(logout).toContain('export function action(');
-    expect(logout.indexOf('session.clear();')).toBeLessThan(
-      logout.indexOf('session.regenerate();'),
-    );
+    // Both calls, in this order: a missing clear() must fail, not compare -1.
+    expect(logout).toContain('session.clear();\n  session.regenerate();');
     expect(logout).toContain("redirect('/login', 303)");
     expect(logout).toContain("<Form method='post'");
     expect(logout).toContain("<input type='hidden' name='_csrf' value={csrfToken} />");

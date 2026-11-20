@@ -140,6 +140,23 @@ function lineAt(mappings: string, emitted: string, offset: number): number {
   return createLineMapper(mappings, emitted)(offset);
 }
 
+/**
+ * Three interleaved samples of each size, keeping the fastest of each: a host
+ * pause slows one sample, not the minimum, so the growth ratio stays stable.
+ */
+async function fastestOf(
+  small: () => Promise<number>,
+  large: () => Promise<number>,
+): Promise<{ small: number; large: number }> {
+  const smalls: number[] = [];
+  const larges: number[] = [];
+  for (let round = 0; round < 3; round++) {
+    smalls.push(await small());
+    larges.push(await large());
+  }
+  return { small: Math.min(...smalls), large: Math.min(...larges) };
+}
+
 describe('the W007 building blocks', () => {
   it('lexApiFetches refuses source it cannot tokenize', () => {
     expect(lexApiFetches("fetch('/api/x")).toBeUndefined();
@@ -166,8 +183,10 @@ describe('the W007 building blocks', () => {
       return performance.now() - started;
     };
     await timed(500);
-    const small = await timed(1_000);
-    const large = await timed(4_000);
+    const { small, large } = await fastestOf(
+      () => timed(1_000),
+      () => timed(4_000),
+    );
     // Four times the calls: about four times the work, where a per-call decode was about sixteen.
     expect(large / small).toBeLessThan(10);
   });
@@ -183,8 +202,10 @@ describe('the W007 building blocks', () => {
       return performance.now() - started;
     };
     await timed(2_000);
-    const small = await timed(4_000);
-    const large = await timed(16_000);
+    const { small, large } = await fastestOf(
+      () => timed(4_000),
+      () => timed(16_000),
+    );
     // A scan of the line's segments per call was about sixteen times the work here.
     expect(large / small).toBeLessThan(10);
   });

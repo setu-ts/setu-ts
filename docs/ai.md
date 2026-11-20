@@ -183,8 +183,19 @@ export function pageChatService(ctx: IRequestContext): PageChatService {
     async answer(prompt) {
       const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
       const { model, ready } = budgetedModel(requestScope(ctx), models, quota(ctx));
-      const result = streamText({ model, prompt, maxRetries: 0, abortSignal: ctx.signal });
-      await ready;
+      const result = streamText({
+        model,
+        prompt,
+        // The budget estimates a call from its output bound and refuses a call without one.
+        maxOutputTokens: 1024,
+        maxRetries: 0,
+        abortSignal: ctx.signal,
+      });
+      // ready settles once the first model call starts; a failure before any model
+      // call only rejects result.response, so race the two.
+      const failed = Promise.resolve(result.response).then(() => undefined);
+      failed.catch(() => {});
+      await Promise.race([ready, failed]);
       return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream }) });
     },
   };

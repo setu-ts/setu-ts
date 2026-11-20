@@ -100,6 +100,8 @@ export function productsService(ctx: IRequestContext): ProductsService {
         (product) => product.name.toLowerCase() === input.name.toLowerCase(),
       );
       // A caller error: pageAction shows its detail in the form, an API route answers 409.
+      // Check-then-write is not atomic: a real store needs a unique index on the name,
+      // with its duplicate-key error mapped to this same conflict.
       if (taken) return Promise.reject(conflict(\`A product named \${input.name} already exists.\`));
       const product: Product = { id: crypto.randomUUID(), ...input };
       catalogue.set(product.id, product);
