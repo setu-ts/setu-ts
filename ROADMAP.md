@@ -17290,7 +17290,7 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
   building on the REST and full-stack scaffolds, scored by hidden tests and a browser probe.
 
 A prior-decision audit then withdrew two rows and reworded 27. That leaves 172 open or partial rows
-(11 High, 56 Medium, 105 Low), including the remainders of M139 (X3-3, V12-8, V12-14, V12-15) and
+(11 High, 57 Medium, 104 Low), including the remainders of M139 (X3-3, V12-8, V12-14, V12-15) and
 M140 (V12-65, V12-70, V12-75, V12-82, V12-85, V12-111, V12-120, V12-125, V12-130). They are grouped
 by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its reasons.
 
@@ -17307,7 +17307,7 @@ by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its 
 | --------- | ------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M143a** | design | sessions and shared caches                      | V13-111, V13-112, V13-135, V13-136, V13-20, V13-34, V13-60, V13-137                                                                                                                                 | `session-plugin`, `react-router-plugin`, `http-security-plugin`, `kernel`, `cli` (full-stack template)                                                                                            |
 | **M143b** | fix    | a first command that fails                      | V13-36, V13-140, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161, V13-166, V13-168                                                                                                    | `cli`, `telemetry-plugin`, `database-plugin` (packaging)                                                                                                                                          |
-| **M143c** | design | calls between services that hang or pile up     | V13-101, X3-3, V13-23, V13-24, V13-43, V13-102, V13-103, V13-104, V13-25, V13-52, V13-54                                                                                                            | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`, `realtime-backplane-plugin`, `common`                                                                                   |
+| **M143c** | design | calls between services that hang or pile up     | V13-101, X3-3, V13-23, V13-24, V13-25, V13-43, V13-102, V13-103, V13-104, V13-52, V13-54                                                                                                            | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`, `realtime-backplane-plugin`, `common`                                                                                   |
 | **M143d** | fix    | `adopt` and workspace output                    | V13-121, V13-144, V13-16, V13-22, V12-111, V13-153, V13-45, V13-46, V13-125, V13-163, V13-164, V13-179, V13-180, V13-181                                                                            | `cli` (workspace, `adopt`)                                                                                                                                                                        |
 | **M143e** | fix    | `add` wiring that is incomplete                 | V13-15, V13-37, V12-75, V13-149, V13-150, V13-151, V13-152, V13-155, V13-6, V13-21, V13-30, V13-44, V12-82, V13-167, V13-170, V13-171, V13-172, V13-176, V13-182                                    | `cli` (`add`)                                                                                                                                                                                     |
 | **M143f** | fix    | `generate` output that is wrong or unwired      | V13-14, V12-65, V12-70, V13-147, V13-186, V13-17, V13-18, V13-156, V13-159, V13-165, V13-185, V13-187, V13-188, V12-85                                                                              | `cli` (`generate`)                                                                                                                                                                                |
@@ -17320,13 +17320,17 @@ by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its 
 | **M143m** | design | options and small gaps in integrations          | V13-192, V13-2, V13-4, V13-5, V13-64, V13-119, V13-131, V12-131, V12-132, V13-193, V12-8, V12-15                                                                                                    | `react-router-plugin`, `auth-plugin`, `storage-plugin`, `mail-plugin`, `worker-pool-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`, `localization-plugin`, `full-stack-starter`, `common` |
 | **M143n** | docs   | documentation                                   | V13-28, V13-29, V13-106, V13-123, V13-124, V13-183, V13-1, V13-3, V13-19, V13-31, V13-35, V13-105, V13-126, V13-128, V13-134, V13-138, V13-160, V13-178, V13-184, V13-191, V12-14, V13-129, V13-130 | `docs/upgrading.md`, package READMEs and agent cards, `PUBLIC_API.md`, the website                                                                                                                |
 
-**Sequence.** The letters run in order, a to n, because the order decides what is safe first. M143a
-leads: it is the only letter whose rows harm an application's users, it crosses a trust boundary,
-and it is **security-audited** before it merges. M143b follows with the commands that fail outright.
-M143a to M143d hold all eleven High rows, so if the release must be cut short, the cut falls on the
-late letters, which hold none. M143c and M143h to M143m can start beside the CLI letters, since they
-touch other packages; the CLI letters (b, d, e, f, g, k) run one at a time, because they share
-files. M143n batches the documentation last.
+**Sequence.** The letters run in order, a to n, with one exception: **M143g runs before M143e and
+M143f** (maintainer, 2026-11-21). The order decides what is safe first. M143a leads: it is the only
+letter whose rows harm an application's users, it crosses a trust boundary, and it is
+**security-audited** before it merges. M143b follows with the commands that fail outright. M143a to
+M143d hold all eleven High rows, so if the release must be cut short, the cut falls on the late
+letters, which hold none. M143c and M143h to M143m can start beside the CLI letters, since they
+touch other packages. The CLI letters run one at a time, because they share files, in the order b,
+d, g, e, f, k. M143g goes ahead of the `add` and `generate` letters because their rows are wiring
+that is missing or wrong, which is what `setu check` exists to catch, and three of its own rows
+(V13-47, V13-48, V13-49) are misses of exactly that: with the gate fixed first, each later wiring
+fix has a failing `setu check` as its test. M143n batches the documentation last.
 
 **Gates for the whole milestone.** Beside each letter's own gates:
 
@@ -17384,11 +17388,12 @@ failure-rate option on the breaker.
 - **X3-3** — Backplane publisher loses frames on a real disconnect (M139f fix incomplete).
 - **V13-23** — Draining member answers 503, not REFUSED_STREAM; calls fail.
 - **V13-24** — grpcClient single session pins all calls to one replica.
+- **V13-25** — grpcClient ejects an instance only on a refused connection; reset, closed and
+  non-HTTP/2 peers count as healthy.
 - **V13-43** — Stop during backplane-waiting start leaks sockets, later listens.
 - **V13-102** — Empty Consul read after restart replaces warm cache.
 - **V13-103** — Random Consul registration id leaves orphan entries after restart.
 - **V13-104** — Circuit breaker only counts absolute failures, no rate option.
-- **V13-25** — Lost gRPC peer yields Canceled/Internal; reported healthy.
 - **V13-52** — Hung Kubernetes API logged as AbortError, not probe bound.
 - **V13-54** — Backplane startup unbounded with injected client pair.
 
