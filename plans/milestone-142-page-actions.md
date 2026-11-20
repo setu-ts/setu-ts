@@ -367,8 +367,8 @@ e2e run asserts no "SSR request failed" line for a refused request.
   scan a template's substitutions at all. The finder is `lexApiFetches` beside `lexImportSpecifiers`
   (`utils/import-specifiers.ts`), on the same tokenizer, which reads `${…}` as code; it runs on
   esbuild's output, and each call is mapped to its source line through esbuild's source map
-  (`page-fetch.ts`, `originalLineAt`). Matched hosts: bare `fetch`, `window.`, `globalThis.`,
-  `self.`.
+  (`page-fetch.ts`, `createLineMapper`, decoded once per page). Matched hosts: bare `fetch`,
+  `window.`, `globalThis.`, `self.`.
 
 ### 3.13 Generated test support for pages
 
@@ -529,3 +529,85 @@ build, generated tests and start, and answers its advertised pages.
 - The OpenAPI-document defects V13-56…V13-65 (§0.1).
 - Migrating Mohor's own pages to actions; that is application work after 0.14.0.
 - Writing `pagePolicies` into `setu.config.ts` from the generator.
+
+## 10. Design security review
+
+**Status:** completed 2026-11-20, AFTER implementation. The committed-tree audit of `b6a31218e`
+found the plan had none (its finding F0, blocking); this section is that review, written from the
+design decisions above, and the audit is re-run against it. It does not restate the audit's results
+as obligations met.
+
+**Reviewed flows.**
+
+1. A browser posts a form to a page action (document POST to `/<path>?index`, or `.data?index` when
+   hydrated): session form-CSRF middleware → `requireUser` route middleware → action → `parse` →
+   `pageAction(create)` → 303 redirect, or the refusal's detail rendered in the form.
+2. A loader or resource route calls a service through `serviceCall`: success passes through; a 4xx
+   status hint becomes an RFC 9457 `Response`; anything else is rethrown to React Router.
+3. Sign-out: GET `/logout` (guarded page, form token) → POST `/logout` → `session.clear()` +
+   `regenerate()` → 303 `/login`.
+4. CSV export (example): guarded resource route → `serviceCall(list)` → `text/csv` attachment.
+5. Auth plugin: the sign-in, SAML and RFC 9728 metadata routes gain only
+   `schema: { excludeFromDocument: true }`.
+6. `setu check` reads every page under `app/` (developer-controlled text) through esbuild and the
+   W007 lexer; `setu g module --page` writes test support files beside the developer's own.
+
+**Assets.** The signed-in session and its CSRF token; the module's data (the products catalogue);
+server-side error text (messages, `cause`, hint `details` and `problem.extensions`, 5xx details);
+response headers; the developer's own files under `test/support/`; the CLI's run time on a project.
+
+**Attackers.**
+
+- A cross-site page driving the victim's browser (CSRF on the action, the sign-out and the export).
+- An anonymous client reaching the action, the export and `/logout` without signing in.
+- A signed-in user submitting hostile form values (blank, non-decimal or huge prices; names that are
+  HTML, or spreadsheet formulas in the export).
+- A client reading refusal bodies for server internals.
+- A contributor's page source that is hostile to the scanner (deep nesting, many findings,
+  unterminated literals).
+- A local file the CLI would overwrite or follow (a project's own support file, a symlink).
+
+**Approved budgets.** W007 runs in time linear in the page's length and findings (pages are capped
+at 1 MiB by the existing page walk). The form-CSRF read is bounded by `runtime.maxBodyBytes` (1 MiB
+by default), shared by every route.
+
+**Obligations on the committed-tree audit.**
+
+1. Plant canaries in an error's message, `cause`, hint `details`, `problem.extensions` and a 5xx
+   detail; prove none reaches a `serviceCall` body or header or a `pageAction` result, and that a
+   5xx, a plain fault and a hostile hint getter each stay an opaque 500.
+2. Prove a CRLF or markup in a refusal detail cannot inject a header, and that `instance` carries
+   the page's path only (no query, no `.data` suffix).
+3. On the template's and the example's products action, `/logout` and the export: no, wrong or
+   another session's token is refused (document and `.data`); an anonymous request is redirected on
+   the loader, the action, the export and `/logout`; a body over the limit is refused before the
+   action.
+4. Every invalid price is refused; a duplicate's detail is rendered escaped; an export cell starting
+   `=`, `+`, `-`, `@`, tab or CR is prefixed; the export is `private, no-store`.
+5. Sign-out without its token leaves the user signed in; with it, the new cookie is signed out.
+6. The auth-route change alters only the OpenAPI listing: status, guards, redirects, cookies and
+   headers are identical before and after.
+7. `createOnly` never opens, rewrites or (on rollback) deletes an existing file, and refuses a link
+   at a write target; `ownedMarker` files are refused when the developer's file lacks the marker.
+8. W007 terminates on hostile source, reports an unreadable page (E018) rather than passing it, and
+   meets the linear budget (growth ratio for 4x the findings well under 16x).
+9. Each control above has a negative control: remove it and observe the probe fail.
+
+**Findings table.**
+
+| #   | Threat                                                | Resolution (a claim the audit checks)                                                            |
+| --- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| T1  | Server internals in a refusal body                    | `serviceCall` writes only the hint's `title`/`problem.type`/`detail`, status and the page path   |
+| T2  | CSRF on action, sign-out or export                    | the session plugin's form-CSRF check runs before every page action; forms post `_csrf`           |
+| T3  | Anonymous writes or downloads                         | `requireUser` on the products page, `/logout` and the export (loader and action)                 |
+| T4  | Hostile prices                                        | `parse` accepts only `^\d{1,9}(\.\d{1,2})?$`                                                     |
+| T5  | Formula injection in the CSV                          | `csvField` prefixes `'` to a value starting `=`, `+`, `-`, `@`, tab or CR                        |
+| T6  | Sign-out that does not end the session                | `clear()` then `regenerate()`; a copied cookie-held session is documented as not revoked         |
+| T7  | Behaviour change hidden in a docs-only auth change    | only `schema.excludeFromDocument` is added; handlers and middleware unchanged                    |
+| T8  | CLI overwriting or following a developer's file       | `createOnly` keeps any existing file; `ownedMarker` refuses a file without the marker            |
+| T9  | Scanner cost or crash on hostile page source          | one-pass source-map decode (`createLineMapper`); tokenizer refusal → E018                        |
+| T10 | Raising `maxBodyBytes` for uploads widens every route | `docs/pages.md` says the limit is global and the form-CSRF read buffers up to it before policies |
+
+**Audit F1 and F2 (2026-11-20), resolved before the re-audit:** F1 (W007 mapping quadratic in
+findings) → `createLineMapper` decodes the map once per page, with a growth-ratio test; F2
+(`docs/pages.md` upload advice) → the paragraph now says the limit applies to every route.

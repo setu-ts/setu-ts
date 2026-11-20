@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../../src/cli.ts';
-import { originalLineAt, pageApiFetches } from '../../../src/diagnostics/page-fetch.ts';
+import { createLineMapper, pageApiFetches } from '../../../src/diagnostics/page-fetch.ts';
 import { scanPageImports } from '../../../src/diagnostics/page-imports.ts';
 import { lexApiFetches } from '../../../src/utils/import-specifiers.ts';
 import { createFakeFs, createRecorder } from '../../fixtures/fake-fs.ts';
@@ -135,20 +135,40 @@ describe('W007 page-fetches-own-api', () => {
   });
 });
 
+/** One lookup through a fresh mapper. */
+function lineAt(mappings: string, emitted: string, offset: number): number {
+  return createLineMapper(mappings, emitted)(offset);
+}
+
 describe('the W007 building blocks', () => {
   it('lexApiFetches refuses source it cannot tokenize', () => {
     expect(lexApiFetches("fetch('/api/x")).toBeUndefined();
     expect(pageApiFetches(PAGE, "fetch('/api/x", '')).toBe('unreadable');
   });
 
-  it('originalLineAt falls back to line 1 without a mapping and stops at a bad character', () => {
-    expect(originalLineAt('', 'a\nb', 2)).toBe(1);
+  it('the line mapper falls back to line 1 without a mapping and stops at a bad character', () => {
+    expect(lineAt('', 'a\nb', 2)).toBe(1);
     // AACA: column 0, source 0, line +1, column 0 — so line 2 of the original.
-    expect(originalLineAt(';AACA', 'a\nb', 2)).toBe(2);
+    expect(lineAt(';AACA', 'a\nb', 2)).toBe(2);
     // A segment outside Base64 ends the read with what was found before it.
-    expect(originalLineAt(';AACA,!', 'a\nbc', 3)).toBe(2);
-    expect(originalLineAt(';!', 'a\nb', 2)).toBe(1);
+    expect(lineAt(';AACA,!', 'a\nbc', 3)).toBe(2);
+    expect(lineAt(';!', 'a\nb', 2)).toBe(1);
     // A column before the line's first mapping has no mapping of its own.
-    expect(originalLineAt(';EACA', 'a\nbcd', 2)).toBe(1);
+    expect(lineAt(';EACA', 'a\nbcd', 2)).toBe(1);
+  });
+
+  it('maps a page with many calls in linear time, not once per call over the whole map', async () => {
+    const page = (count: number) =>
+      `export async function load() {\n${"  await fetch('/api/x');\n".repeat(count)}}\n`;
+    const timed = async (count: number) => {
+      const started = performance.now();
+      expect(await fetchesIn(page(count))).toHaveLength(count);
+      return performance.now() - started;
+    };
+    await timed(500);
+    const small = await timed(1_000);
+    const large = await timed(4_000);
+    // Four times the calls: about four times the work, where a per-call decode was about sixteen.
+    expect(large / small).toBeLessThan(10);
   });
 });

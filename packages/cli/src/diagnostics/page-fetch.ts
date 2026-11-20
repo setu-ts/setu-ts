@@ -52,37 +52,55 @@ function decodeSegment(segment: string): number[] | undefined {
 }
 
 /**
- * The original line of an offset in esbuild's output, read from its source map.
+ * Decodes a source map once into an offset-to-original-line lookup.
  *
- * Uses the last mapping on the offset's generated line that starts at or
- * before its column. Falls back to line 1 when the map has none, so a finding
- * is never dropped.
+ * Each generated line keeps its mapped segments as `[column, sourceLine]`
+ * pairs in column order, so a lookup costs a binary search over line starts
+ * plus a scan of one line: a page with many findings is mapped in linear time,
+ * not once per finding over the whole map. A segment outside Base64 ends the
+ * decode with what was read before it.
  *
  * @param mappings - The source map's `mappings` field
  * @param emitted - The emitted code
- * @param offset - An offset into `emitted`
- * @returns The 1-based original line
+ * @returns The 1-based original line of an offset into `emitted`, line 1 when unmapped
  */
-export function originalLineAt(mappings: string, emitted: string, offset: number): number {
-  const before = emitted.slice(0, offset);
-  const targetLine = before.split('\n').length - 1;
-  const targetColumn = offset - (before.lastIndexOf('\n') + 1);
+export function createLineMapper(mappings: string, emitted: string): (offset: number) => number {
+  const lineStarts = [0];
+  for (let i = 0; i < emitted.length; i++) if (emitted.charCodeAt(i) === 10) lineStarts.push(i + 1);
+  const segments: (readonly (readonly [number, number])[])[] = [];
   let sourceLine = 0;
-  let found: number | undefined;
-  const lines = mappings.split(';');
-  for (let line = 0; line < lines.length && line <= targetLine; line++) {
+  decode: for (const line of mappings.split(';')) {
+    const mapped: (readonly [number, number])[] = [];
+    segments.push(mapped);
     let column = 0;
-    for (const segment of lines[line]!.split(',')) {
+    for (const segment of line.split(',')) {
       if (segment === '') continue;
       const fields = decodeSegment(segment);
-      if (fields === undefined) return (found ?? 0) + 1;
+      if (fields === undefined) break decode;
       column += fields[0]!;
       // Source-line deltas run across every segment, mapped or not.
-      if (fields.length >= 4) sourceLine += fields[2]!;
-      if (line === targetLine && column <= targetColumn && fields.length >= 4) found = sourceLine;
+      if (fields.length >= 4) {
+        sourceLine += fields[2]!;
+        mapped.push([column, sourceLine]);
+      }
     }
   }
-  return (found ?? 0) + 1;
+  return (offset) => {
+    let low = 0;
+    let high = lineStarts.length - 1;
+    while (low < high) {
+      const middle = (low + high + 1) >> 1;
+      if (lineStarts[middle]! <= offset) low = middle;
+      else high = middle - 1;
+    }
+    const column = offset - lineStarts[low]!;
+    let found: number | undefined;
+    for (const [start, line] of segments[low] ?? []) {
+      if (start > column) break;
+      found = line;
+    }
+    return (found ?? 0) + 1;
+  };
 }
 
 /**
@@ -100,9 +118,10 @@ export function pageApiFetches(
 ): readonly PageApiFetch[] | 'unreadable' {
   const calls = lexApiFetches(emitted);
   if (calls === undefined) return 'unreadable';
+  const lineOf = createLineMapper(mappings, emitted);
   return calls.map((call) => ({
     path,
-    line: originalLineAt(mappings, emitted, call.start),
+    line: lineOf(call.start),
     target: call.target,
   }));
 }

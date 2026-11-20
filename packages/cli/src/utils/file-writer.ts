@@ -95,6 +95,14 @@ export interface GeneratedFile {
    */
   readonly createOnly?: boolean;
   /**
+   * With {@linkcode managed}: the first line the CLI writes into this file.
+   * The file is rewritten only while it is absent or its contents on disk still
+   * start with this line; a file at the path without it is the developer's, so
+   * {@linkcode findExisting} reports it as a collision and the write is refused.
+   * A file that cannot be read as UTF-8 text is treated as the developer's.
+   */
+  readonly ownedMarker?: string;
+  /**
    * The file holds, or is a local env file that will hold, a generated secret, so a file this
    * write CREATES is owner-only (`0600`).
    * An existing file keeps the mode it has: the operator's choice. Honoured by the
@@ -342,6 +350,8 @@ export function firstDuplicatePath(files: readonly GeneratedFile[]): string | un
  *
  * A file marked {@linkcode GeneratedFile.managed} is skipped: the CLI generated
  * it and regenerates it, so rewriting it destroys nothing the developer authored.
+ * One that also names an {@linkcode GeneratedFile.ownedMarker} is reported when
+ * the file on disk does not start with that marker.
  * A create-only file is never a collision: an existing path is kept untouched.
  *
  * @param fs - The filesystem to probe
@@ -354,7 +364,11 @@ export async function findExisting(
 ): Promise<readonly string[]> {
   const existing: string[] = [];
   for (const file of files) {
-    if (file.managed === true) continue;
+    if (file.managed === true) {
+      if (file.ownedMarker !== undefined && !(await stillOwned(fs, file.path, file.ownedMarker)))
+        existing.push(file.path);
+      continue;
+    }
     try {
       await fs.stat(file.path);
       if (file.createOnly !== true) existing.push(file.path);
@@ -365,6 +379,24 @@ export async function findExisting(
     }
   }
   return existing;
+}
+
+/**
+ * Reports whether a managed path is absent or still starts with the CLI's marker.
+ *
+ * @param fs - The filesystem to read through
+ * @param path - The managed path
+ * @param marker - The first line the CLI writes into it
+ * @returns `false` when a file there was written by someone else, or cannot be read as text
+ */
+async function stillOwned(fs: IFileSystem, path: string, marker: string): Promise<boolean> {
+  let text: string | undefined;
+  try {
+    text = await readExistingText(fs, path);
+  } catch {
+    return false;
+  }
+  return text === undefined || text.startsWith(marker);
 }
 
 /**
