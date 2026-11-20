@@ -171,4 +171,21 @@ describe('the W007 building blocks', () => {
     // Four times the calls: about four times the work, where a per-call decode was about sixteen.
     expect(large / small).toBeLessThan(10);
   });
+
+  it('maps many calls on one emitted line (an array literal) in linear time too', async () => {
+    const page = (count: number) =>
+      `export const all = [${Array.from({ length: count }, (_, i) => `fetch('/api/${i}')`).join(',')}];\n`;
+    const timed = async (count: number) => {
+      const started = performance.now();
+      const found = await fetchesIn(page(count));
+      expect(found).toHaveLength(count);
+      expect(found.every((call) => call.line === 1)).toBe(true);
+      return performance.now() - started;
+    };
+    await timed(2_000);
+    const small = await timed(4_000);
+    const large = await timed(16_000);
+    // A scan of the line's segments per call was about sixteen times the work here.
+    expect(large / small).toBeLessThan(10);
+  });
 });

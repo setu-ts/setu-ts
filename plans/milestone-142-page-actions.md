@@ -610,4 +610,7 @@ by default), shared by every route.
 
 **Audit F1 and F2 (2026-11-20), resolved before the re-audit:** F1 (W007 mapping quadratic in
 findings) → `createLineMapper` decodes the map once per page, with a growth-ratio test; F2
-(`docs/pages.md` upload advice) → the paragraph now says the limit applies to every route.
+(`docs/pages.md` upload advice) → the paragraph now says the limit applies to every route. Re-audit
+of `941f67eff` (2026-11-20): F3 (W007 lookup still quadratic when many findings share one emitted
+line) → the line's segments are binary-searched, and a one-line array growth test fails (13.7x) with
+the old linear scan.

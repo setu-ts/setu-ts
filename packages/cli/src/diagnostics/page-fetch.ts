@@ -56,7 +56,7 @@ function decodeSegment(segment: string): number[] | undefined {
  *
  * Each generated line keeps its mapped segments as `[column, sourceLine]`
  * pairs in column order, so a lookup costs a binary search over line starts
- * plus a scan of one line: a page with many findings is mapped in linear time,
+ * and one over that line's segments: a page with many findings is mapped in linear time,
  * not once per finding over the whole map. A segment outside Base64 ends the
  * decode with what was read before it.
  *
@@ -94,10 +94,19 @@ export function createLineMapper(mappings: string, emitted: string): (offset: nu
       else high = middle - 1;
     }
     const column = offset - lineStarts[low]!;
+    // The last mapping at or before the column, by binary search: many findings
+    // can share one emitted line (an array literal), so a scan would be quadratic.
+    const mapped = segments[low] ?? [];
+    let first = 0;
+    let last = mapped.length - 1;
     let found: number | undefined;
-    for (const [start, line] of segments[low] ?? []) {
-      if (start > column) break;
-      found = line;
+    while (first <= last) {
+      const middle = (first + last) >> 1;
+      const [start, line] = mapped[middle]!;
+      if (start <= column) {
+        found = line;
+        first = middle + 1;
+      } else last = middle - 1;
     }
     return (found ?? 0) + 1;
   };
