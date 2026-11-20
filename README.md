@@ -64,6 +64,9 @@ opinion vs. flexibility.**
   replace what you do not like.
 - 🏢 **Enterprise capabilities** — Authentication, RBAC, CQRS, domain and integration events,
   multi-tenancy, audit logging, secrets management, and more.
+- 🤖 **Direction for coding agents** — Built for applications written with AI coding agents: the CLI
+  wires what it installs, a read-only gate checks the wiring, and every project carries a brief of
+  verified facts for the agent to read.
 
 Without becoming heavyweight. Without forcing opinions. Without locking you in.
 
@@ -71,17 +74,41 @@ Without becoming heavyweight. Without forcing opinions. Without locking you in.
 
 ## Core Principles
 
-| Principle               | What It Means                                                                                                        |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Plugin-first**        | Every capability — logging, database, auth, validation — is a plugin. The kernel ships with zero features.           |
-| **Runtime independent** | No package except the runtime plugin uses runtime-specific APIs. Business logic never touches `process.env` or `fs`. |
-| **Optional DI**         | Dependency injection is a plugin, not a requirement. Use it if you want it; skip it if you do not.                   |
-| **Optional decorators** | Decorators are a plugin, not a requirement. Every feature has a complete programmatic API.                           |
-| **Explicit APIs**       | No magic. No hidden globals. No reflection required. Everything is explicit and inspectable.                         |
-| **Type safety**         | Strict TypeScript throughout. No `any` in public APIs. Full type inference for services, config, and routes.         |
-| **Tree-shakeable**      | Every package uses ES modules and subpath exports. You ship only what you use.                                       |
-| **Production ready**    | Built for scale: graceful shutdown, distributed locking, circuit breakers, audit trails, and observability.          |
-| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, domain events.       |
+| Principle               | What It Means                                                                                                                                                                          |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Plugin-first**        | Every capability — logging, database, auth, validation — is a plugin. The kernel ships with zero features.                                                                             |
+| **Runtime independent** | No package except the runtime plugin uses runtime-specific APIs. Business logic never touches `process.env` or `fs`.                                                                   |
+| **Optional DI**         | Dependency injection is a plugin, not a requirement. Use it if you want it; skip it if you do not.                                                                                     |
+| **Optional decorators** | Decorators are a plugin, not a requirement. Every feature has a complete programmatic API.                                                                                             |
+| **Explicit APIs**       | No magic. No hidden globals. No reflection required. Everything is explicit and inspectable.                                                                                           |
+| **Type safety**         | Strict TypeScript throughout. No `any` in public APIs. Full type inference for services, config, and routes.                                                                           |
+| **Tree-shakeable**      | Every package uses ES modules and subpath exports. You ship only what you use.                                                                                                         |
+| **Production ready**    | Built for scale: graceful shutdown, distributed locking, circuit breakers, audit trails, and observability.                                                                            |
+| **Enterprise focused**  | Patterns that large organizations need: multi-tenancy, feature flags, secrets management, CQRS, domain events.                                                                         |
+| **Built for agents**    | The framework does work a coding agent would otherwise guess at: commands that wire what they install, a gate that verifies the result, and verified facts shipped with every package. |
+
+---
+
+## Built for Coding Agents
+
+Setu-TS is designed for applications that are built with AI coding agents. An agent has no training
+data for a new framework, so it guesses from the frameworks it knows. Setu-TS replaces the guess
+with something the agent can read, run and verify.
+
+| What the agent gets             | How                                                                                                                                                                                                                                                   |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A brief of verified facts       | `setu agents` writes `AGENTS.md` from the project's real state: its installed packages, code style, runtime and scripts. `setu agents --check` fails a CI job when the brief is missing or out of date.                                               |
+| A card with every package       | Every published library package ships an `AGENT_CARD.md` in its npm tarball: how to add the package, what it provides, and examples that compile.                                                                                                     |
+| Commands instead of hand-wiring | `setu add` installs a package at the CLI's own version, so a project's framework packages stay on one version, and registers it. `setu generate` writes code that is already registered. Where the CLI cannot safely edit, it prints the exact lines. |
+| A gate that checks the result   | `setu check` reads the project without starting it and reports anything that is not wired, each finding under a stable id. Every generated project runs it from its `check` script.                                                                   |
+| A preview and a clear outcome   | Commands that write, such as `new`, `add` and `generate`, accept `--dry-run`, and every command exits with a documented code: success, runtime error, usage error or cancelled.                                                                       |
+| Operations as commands          | A workspace's shared broker, a member's RPC style, image builds and Kubernetes deployment are CLI commands, not files the agent has to write.                                                                                                         |
+
+The same design serves people: what an agent can verify, a reviewer can verify too.
+
+Setu-TS also has plugins for applications that are themselves agents: routes exposed as MCP tools,
+durable agent runs, vector search and usage quotas. Those are features of your application. This
+section is about how the application gets built.
 
 ---
 
@@ -184,6 +211,8 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | Feature         | Status | Package                                                      | Description                                                                                                        |
 | --------------- | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
 | CLI             | ✅     | `cli`                                                        | `setu` — project scaffolding and plugin-aware code generation                                                      |
+| Agent briefs    | ✅     | `cli`                                                        | `setu agents` — an `AGENTS.md` brief generated from the project, beside an agent card in every library package     |
+| Wiring gate     | ✅     | `cli`                                                        | `setu check` — a read-only check that everything generated or added is registered                                  |
 | Client SDK      | ✅     | `sdk`                                                        | HTTP client with retry, circuit breaker, OpenAPI codegen                                                           |
 | Test utilities  | ✅     | `testing`                                                    | `createTestApp`, mock plugins/registry, fixtures, stream reads                                                     |
 | Starter bundles | ✅     | `rest-starter`, `microservice-starter`, `full-stack-starter` | `createRestApp`, `createMicroserviceApp`, `createFullStackApp` — pre-wired plugin sets with per-plugin option arms |
@@ -441,6 +470,8 @@ Practical means:
   incrementally. No steep learning curve. No all-or-nothing commitment.
 - **Maintainability over cleverness** — The codebase should be readable, testable, and maintainable
   for years. No magic. No hidden globals. No clever tricks that sacrifice clarity.
+- **Built with agents** — A coding agent should be able to build, change and verify a Setu-TS
+  application from the framework's own commands, briefs and checks, without guessing.
 
 This is a framework designed to be adopted incrementally, extended safely, and trusted in
 production.
