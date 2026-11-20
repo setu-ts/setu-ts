@@ -1,24 +1,220 @@
 import { spawn } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import {
+  accessSync,
+  constants,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { delimiter, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable, Writable } from 'node:stream';
 
-/** Reserve and release an ephemeral IPv4 port before a socket test binds it. */
-export async function unusedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((accept, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', accept);
+/**
+ * The first and last port a test may be given. The range sits below the range an
+ * operating system assigns from on its own (Linux 32768–60999, macOS and Windows
+ * 49152–65535), so no outgoing connection and no listener on port `0` is ever
+ * handed one of these.
+ */
+export const TEST_PORT_RANGE: { readonly first: number; readonly last: number } = {
+  first: 20_000,
+  last: 32_767,
+};
+
+/** A claim this old belongs to no running test, whatever its process id says. */
+const STALE_CLAIM_MS = 6 * 60 * 60 * 1000;
+
+/** What a port allocator reads from its host; tests replace each part. */
+export interface PortAllocatorOptions {
+  /** The directory holding one claim file per port, shared by every test process. */
+  readonly directory: string;
+  /** The first port of the range. */
+  readonly first: number;
+  /** The last port of the range. */
+  readonly last: number;
+  /** The claiming process id. */
+  readonly pid?: number;
+  /** Whether a process id belongs to a running process. */
+  readonly alive?: (pid: number) => boolean;
+  /** The wall clock, in milliseconds, compared with a claim file's modification time. */
+  readonly now?: () => number;
+  /** Whether a listener can bind the port right now. */
+  readonly bindable?: (port: number) => Promise<boolean>;
+  /** A number in `[0, 1)` choosing where a search starts. */
+  readonly random?: () => number;
+}
+
+/** Hands out ports no other test process is using or about to use. */
+export interface PortAllocator {
+  /** One free, claimed port. */
+  port(): Promise<number>;
+  /** The first of `count` consecutive free, claimed ports. */
+  range(count: number): Promise<number>;
+  /** Drops every claim this allocator holds. */
+  release(): void;
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
+}
+
+/** `process.kill(pid, 0)` delivers nothing: it only reports whether the process exists. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: the process exists and belongs to someone else.
+    return errorCode(error) === 'EPERM';
+  }
+}
+
+function canBind(port: number): Promise<boolean> {
+  return new Promise((accept) => {
+    const server = createServer();
+    server.once('error', () => accept(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => accept(true)));
   });
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Expected a TCP address');
-  await new Promise<void>((accept, reject) =>
-    server.close((error) => (error ? reject(error) : accept())),
-  );
-  return address.port;
+}
+
+/**
+ * Builds a port allocator over a claims directory.
+ *
+ * Asking the operating system for a free port (`listen(0)`), closing it and binding
+ * the number later is a race: the system draws from the same range for every
+ * outgoing connection and every other test, so the port can be taken before the
+ * test's server starts (the "address already in use" failures in CI). Here a port
+ * comes from a range the system never assigns from, and is claimed with an
+ * exclusively created file, so two test processes cannot be given the same one.
+ * A claim lasts until its process exits; one left by a killed process is taken
+ * over once that process is gone.
+ *
+ * @param options - The claims directory, the range, and replaceable host parts
+ * @returns The allocator
+ */
+export function createPortAllocator(options: PortAllocatorOptions): PortAllocator {
+  const { directory, first, last } = options;
+  const pid = options.pid ?? process.pid;
+  const alive = options.alive ?? processAlive;
+  const now = options.now ?? Date.now;
+  const bindable = options.bindable ?? canBind;
+  const random = options.random ?? Math.random;
+  const span = last - first + 1;
+  const held = new Set<number>();
+  const file = (port: number): string => join(directory, String(port));
+
+  /** A claim is stale when its process is gone or it is older than any test run. */
+  function stale(port: number): boolean {
+    let owner: number;
+    let modified: number;
+    try {
+      owner = Number(readFileSync(file(port), 'utf8'));
+      modified = statSync(file(port)).mtimeMs;
+    } catch (error) {
+      // Released between the failed create and this read: its owner is alive.
+      if (errorCode(error) === 'ENOENT') return false;
+      throw error;
+    }
+    if (now() - modified > STALE_CLAIM_MS) return true;
+    return Number.isInteger(owner) && owner > 0 && !alive(owner);
+  }
+
+  function claim(port: number): boolean {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        writeFileSync(file(port), String(pid), { flag: 'wx' });
+        held.add(port);
+        return true;
+      } catch (error) {
+        if (errorCode(error) !== 'EEXIST') throw error;
+        if (!stale(port)) return false;
+        rmSync(file(port), { force: true });
+      }
+    }
+    return false;
+  }
+
+  function drop(port: number): void {
+    held.delete(port);
+    rmSync(file(port), { force: true });
+  }
+
+  /** Claims and bind-checks `count` ports from `base`, or leaves nothing behind. */
+  async function take(base: number, count: number): Promise<boolean> {
+    const taken: number[] = [];
+    for (let port = base; port < base + count; port++) {
+      const claimed = claim(port);
+      if (claimed) taken.push(port);
+      if (!claimed || !(await bindable(port))) {
+        for (const each of taken) drop(each);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async function range(count: number): Promise<number> {
+    mkdirSync(directory, { recursive: true });
+    const bases = span - count + 1;
+    const start = Math.floor(random() * Math.max(bases, 1));
+    for (let offset = 0; offset < bases; offset++) {
+      const base = first + ((start + offset) % bases);
+      if (await take(base, count)) return base;
+    }
+    throw new Error('no free test port');
+  }
+
+  return {
+    port: () => range(1),
+    range,
+    release() {
+      for (const port of [...held]) drop(port);
+    },
+  };
+}
+
+let shared: PortAllocator | undefined;
+
+/** The allocator every test process shares, releasing its claims when the process exits. */
+function sharedAllocator(): PortAllocator {
+  if (shared === undefined) {
+    const allocator = createPortAllocator({
+      directory: join(tmpdir(), 'setu-ts-test-ports'),
+      ...TEST_PORT_RANGE,
+    });
+    process.once('exit', () => allocator.release());
+    shared = allocator;
+  }
+  return shared;
+}
+
+/**
+ * A port for a server the test starts later, in this process or a child.
+ *
+ * It is claimed for this process until the process exits, so no other test is given
+ * it, and it lies outside the range the operating system assigns from, so nothing
+ * else is either. A port that is requested and never bound refuses connections.
+ *
+ * @returns A free TCP port
+ */
+export function unusedPort(): Promise<number> {
+  return sharedAllocator().port();
+}
+
+/**
+ * A run of `count` consecutive free ports, for a workspace whose members bind
+ * `base`, `base + 1`, ….
+ *
+ * @param count - How many consecutive ports the caller binds
+ * @returns The first port of the run
+ */
+export function unusedPortRange(count: number): Promise<number> {
+  return sharedAllocator().range(count);
 }
 
 /** All temporary test artifacts stay below the workspace's ignored scratch directory. */

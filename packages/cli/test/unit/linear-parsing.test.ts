@@ -1,9 +1,10 @@
 /**
  * `setu check` parses files a pull request controls, so every parser on its path must
  * stay linear. Each shape below held `check` for seconds to minutes at 1 MiB before the
- * M118 audit (F1, F3); the budget is far above the measured time and far below that:
- * tens of milliseconds locally, about a second on a CI runner with coverage in the parallel
- * phase, against 18-49 s (F3) and minutes (F1) for the expressions these replaced.
+ * M118 audit (F1, F3). Each test checks the answer at 1 MiB and then the growth from
+ * 256 KiB to 1 MiB: a linear parser takes about 4 times as long, the replaced
+ * expressions took about 16. A time limit is not used, because it fails a linear parser
+ * on a slow runner (2,030 ms against a 2,000 ms limit, once, under coverage).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -11,16 +12,12 @@ import { declarationSpecifiers } from '../../src/diagnostics/barrel-drift.ts';
 import { moduleActive, withoutImports } from '../../src/diagnostics/modules.ts';
 import { maskComments, maskSourceCode } from '../../src/devtool/sources.ts';
 import { exportsSymbol } from '../../src/seams/seam-spec.ts';
+import { expectLinearGrowth } from '../fixtures/linear-growth.ts';
 
 const MIB = 1024 * 1024;
-const BUDGET_MS = 2000;
-const fill = (unit: string): string => unit.repeat(Math.floor(MIB / unit.length));
-
-function timed<T>(run: () => T): { readonly value: T; readonly ms: number } {
-  const start = performance.now();
-  const value = run();
-  return { value, ms: performance.now() - start };
-}
+/** The smaller input of each growth check; the larger is the full 1 MiB. */
+const QUARTER = MIB / 4;
+const fill = (unit: string, bytes = MIB): string => unit.repeat(Math.floor(bytes / unit.length));
 
 /** The two masked views `diagnoseBarrels` hands the parser. */
 function masked(text: string): { readonly source: string; readonly code: string } {
@@ -34,51 +31,79 @@ function specifiers(text: string): readonly string[] {
 }
 
 describe('parsers on the check path stay linear at 1 MiB', () => {
-  for (const [name, text] of [
-    ['blank lines', '\n'.repeat(MIB)],
-    ['unclosed import braces', fill('\nimport {')],
-    ['repeated import keywords', fill('import ')],
-    ['unclosed export braces', fill('export{')],
-    ['keywords after long whitespace', fill(`import${' '.repeat(57)}\n`)],
+  for (const [name, unit] of [
+    ['blank lines', '\n'],
+    ['unclosed import braces', '\nimport {'],
+    ['repeated import keywords', 'import '],
+    ['unclosed export braces', 'export{'],
+    ['keywords after long whitespace', `import${' '.repeat(57)}\n`],
   ] as const) {
     it(`parses barrel declarations: ${name}`, () => {
-      // Masked outside the timer: the budget measures the parser alone, and the
+      expect(specifiers(fill(unit))).toEqual([]);
+      // Masked outside the timer: the growth measures the parser alone, and the
       // masking pass (shared with every other check-path read) is not the subject.
-      const { source, code } = masked(text);
-      const { value, ms } = timed(() => declarationSpecifiers(source, code));
-      expect(value).toEqual([]);
-      expect(ms).toBeLessThan(BUDGET_MS);
+      expectLinearGrowth(
+        name,
+        (bytes) => {
+          const { source, code } = masked(fill(unit, bytes));
+          return () => declarationSpecifiers(source, code);
+        },
+        QUARTER,
+      );
     });
   }
 
-  it('still finds every declaration of a legitimate 1 MiB barrel in budget', () => {
+  it('still finds every declaration of a legitimate 1 MiB barrel in linear time', () => {
     const line = "import { registerARoutes } from './a.controller.ts';\n";
-    const { source, code } = masked(fill(line));
-    const { value, ms } = timed(() => declarationSpecifiers(source, code));
-    expect(value).toHaveLength(Math.floor(MIB / line.length));
-    expect(ms).toBeLessThan(BUDGET_MS);
+    expect(specifiers(fill(line))).toHaveLength(Math.floor(MIB / line.length));
+    expectLinearGrowth(
+      'legitimate barrel',
+      (bytes) => {
+        const { source, code } = masked(fill(line, bytes));
+        return () => declarationSpecifiers(source, code);
+      },
+      QUARTER,
+    );
   });
 
   it('strips imports from a config of repeated import keywords', () => {
     const text = fill('import ');
-    const { value, ms } = timed(() => withoutImports(text));
-    expect(value).toBe(text);
-    expect(ms).toBeLessThan(BUDGET_MS);
+    expect(withoutImports(text)).toBe(text);
+    expectLinearGrowth(
+      'withoutImports',
+      (bytes) => {
+        const part = fill('import ', bytes);
+        return () => withoutImports(part);
+      },
+      QUARTER,
+    );
   });
 
   for (const unit of ['MODULES ', 'MODULES = [ ']) {
     it(`reads class-based activation from repeated ${JSON.stringify(unit)}`, () => {
-      const { value, ms } = timed(() => moduleActive(fill(unit), 'OrdersModule', 'class-based'));
-      expect(value).toBe(false);
-      expect(ms).toBeLessThan(BUDGET_MS);
+      expect(moduleActive(fill(unit), 'OrdersModule', 'class-based')).toBe(false);
+      expectLinearGrowth(
+        `moduleActive ${JSON.stringify(unit)}`,
+        (bytes) => {
+          const part = fill(unit, bytes);
+          return () => moduleActive(part, 'OrdersModule', 'class-based');
+        },
+        QUARTER,
+      );
     });
   }
 
   for (const unit of ['export{', 'export { a }\n']) {
     it(`checks artifact exports in repeated ${JSON.stringify(unit)}`, () => {
-      const { value, ms } = timed(() => exportsSymbol(fill(unit), 'registerOrdersRoutes'));
-      expect(value).toBe(false);
-      expect(ms).toBeLessThan(BUDGET_MS);
+      expect(exportsSymbol(fill(unit), 'registerOrdersRoutes')).toBe(false);
+      expectLinearGrowth(
+        `exportsSymbol ${JSON.stringify(unit)}`,
+        (bytes) => {
+          const part = fill(unit, bytes);
+          return () => exportsSymbol(part, 'registerOrdersRoutes');
+        },
+        QUARTER,
+      );
     });
   }
 });

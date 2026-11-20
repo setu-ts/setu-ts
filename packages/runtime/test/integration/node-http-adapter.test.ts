@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeHttpAdapter } from '../../src/adapters/node/node-http-adapter.ts';
 
 /**
- * Finds a free TCP port by binding one and releasing it.
+ * A free TCP port, claimed for this test process by the shared helper.
  */
 function findFreePort(): Promise<number> {
   return nodeUnusedPort();
