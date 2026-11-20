@@ -230,6 +230,15 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     expect(h.err.text()).toContain('/products and /products/:id');
     expect(h.fs.writes.length).toBeGreaterThan(0);
   });
+  it('prints no route notice for a page-only module, which writes no kernel route', async () => {
+    const failing = () => Promise.resolve({ code: 127, stdout: '', stderr: '\nmissing CLI\n' });
+    const pageOnly = harness(undefined, failing);
+    expect(await pageOnly.run(['g', 'module', 'orders', '--page'])).toBe(0);
+    expect(pageOnly.err.text()).not.toContain('Notice: cannot check React Router pages');
+    const withApi = harness(undefined, failing);
+    expect(await withApi.run(['g', 'module', 'notes', '--page', '--api'])).toBe(0);
+    expect(withApi.err.text()).toContain('/api/notes and /api/notes/:id');
+  });
   it('never invokes React Router for projects without its plugin or unrelated schematics', async () => {
     for (const [plugins, schematic] of [
       [[], 'route'],

@@ -15,8 +15,7 @@ pnpm --dir apps/full-stack run start      # runs the built dist/main.js; build f
 The layout, theme toggle, `components/ui` Button and Card, the Dockerfile, `test/app.test.ts`,
 `test/e2e/` and `test/support/` are what the scaffold writes, unchanged. The Dockerfile is the one a standalone project builds with its own lockfile: here the app's `@setu-ts/*` dependencies are `workspace:^` links, so it does not build inside this repository, and the root images do not cover full-stack ([Container images](../../docs/deployment.md#container-images)). The example's own additions
 are the memory database and its startup seed (called from `main.ts` and `dev.ts`), the development
-session-secret fallback, the duplicate-name refusal in the products service, the CSV download at
-`/products/export`, the `/forbidden` route, `smoke.ts`, `test/removal.test.ts` and the browser
+session-secret fallback, the CSV download at `/products/export`, the `/forbidden` route, `smoke.ts`, `test/removal.test.ts` and the browser
 harness.
 
 ## What the smoke check proves

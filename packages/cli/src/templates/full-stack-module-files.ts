@@ -85,9 +85,10 @@ export function productsService(ctx: IRequestContext): ProductsService {
     parse: (value) => {
       const name = typeof value.name === 'string' ? value.name.trim() : '';
       if (name.length === 0) return 'A non-empty name is required.';
-      const price = typeof value.price === 'string' ? Number(value.price) : Number.NaN;
-      if (!Number.isFinite(price) || price < 0) return 'The price must be a number of 0 or more.';
-      return { name, priceCents: Math.round(price * 100) };
+      // A decimal amount with at most two places: Number() alone reads '' as 0 and '0x10' as 16.
+      const price = typeof value.price === 'string' ? value.price.trim() : '';
+      if (!/^\\d{1,9}(\\.\\d{1,2})?$/.test(price)) return 'The price must be an amount such as 4.99.';
+      return { name, priceCents: Math.round(Number(price) * 100) };
     },
     list() {
       logger.debug('products: listing');

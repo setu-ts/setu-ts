@@ -148,6 +148,18 @@ describe('serviceCall through the real request handler', { skip: rrModule === nu
     expect(handled).toEqual([]);
   });
 
+  it("a client navigation's .data request names the page's path in instance", async () => {
+    const handled: unknown[] = [];
+    const response = await handler(
+      handled,
+      [],
+    )(new Request('http://localhost/export/7.data?_routes=routes%2Forders.export'));
+    const text = await response.text();
+    expect(text).toContain('/export/7');
+    expect(text).not.toContain('/export/7.data');
+    expect(handled).toEqual([]);
+  });
+
   it('a plain throw in the same loader is a logged 500, for contrast', async () => {
     const handled: unknown[] = [];
     const create = rrModule!.createRequestHandler as (b: unknown, mode: string) => Handler;

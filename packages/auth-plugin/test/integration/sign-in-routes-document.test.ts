@@ -14,6 +14,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { AuthPlugin, requireAuth } from '../../src/index.ts';
 import { BASE, buildSignInApp } from '../fixtures/sign-in-app.ts';
+import { buildSamlApp, generateSigningKey, PROVIDER } from '../fixtures/saml-idp.ts';
 
 let app: IKernelApplication | undefined;
 
@@ -77,5 +78,23 @@ describe('sign-in routes in the OpenAPI document', () => {
     expect(refused.headers.get('www-authenticate')).toBe(
       'Bearer resource_metadata="https://api.test/.well-known/oauth-protected-resource/mcp"',
     );
+  });
+
+  it('lists no SAML route while its login, ACS and metadata still answer', async () => {
+    const harness = await buildSamlApp(await generateSigningKey(), {
+      plugins: [OpenApiPlugin({ title: 'SAML', version: '1.0.0' })],
+    });
+    app = harness.app;
+
+    const response = await app.inject({ method: 'GET', url: `${BASE}/openapi.json` });
+    const paths = Object.keys((response.json() as { paths: Record<string, unknown> }).paths);
+    expect(paths.filter((path) => path.startsWith('/auth'))).toEqual([]);
+    expect(paths).toContain('/me');
+
+    const login = await app.fetch(new Request(`${BASE}/auth/${PROVIDER}/login`));
+    expect(login.status).toBe(302);
+    const metadata = await app.fetch(new Request(`${BASE}/auth/${PROVIDER}/metadata`));
+    expect(metadata.status).toBe(200);
+    expect(await metadata.text()).toContain('EntityDescriptor');
   });
 });

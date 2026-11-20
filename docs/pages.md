@@ -7,7 +7,8 @@ own `/api` routes: those are for callers outside the app, such as another servic
 or a script with a bearer token.
 
 The `full-stack` template and the [full-stack example](../apps/full-stack/README.md) follow this
-guide. `setu generate module <name> --page` writes a page in this shape, and `setu check` warns
+guide. `setu generate module <name> --page` writes a page with a loader, an action and a CSRF form;
+wrap its `create` in `pageAction` to show a service refusal in the form. `setu check` warns
 (`setu.W007`) when a module under `app/` calls `fetch` on a path under `/api/`.
 
 ## Forms: an action and `pageAction`
@@ -62,7 +63,8 @@ React Router answers any error thrown from a loader or an action with 500, excep
 `Response`. `serviceCall(request, work)` turns a refusal into that `Response`: RFC 9457 Problem
 Details with the refusal's status, `content-type: application/problem+json` and
 `cache-control: private, no-store`, and a body of `type`, `title`, `status`, `detail` and `instance`
-(the request's path). Any other error is rethrown, so a fault stays a fault.
+(the page's path, without React Router's `.data` suffix). Any other error is rethrown, so a fault
+stays a fault.
 
 ```ts
 import { getService, serviceCall, type RouterLoadContext } from '@setu-ts/react-router-plugin';
@@ -99,9 +101,10 @@ export function refusalDetail(error: unknown): string | undefined {
 A refusal thrown as a `Response` is not a server fault, so React Router does not pass it to the
 server entry's `handleError`, and nothing logs it as one.
 
-`serviceCall` carries the refusal's status and detail, not its headers. A refusal that needs one,
-such as a quota's `Retry-After`, comes from a request-bound service that writes the kernel's own
-error response and hands it back as a `Response` (see [Streams](#streams-a-resource-route-action)).
+`serviceCall` carries the refusal's status and detail, not its headers, its `details` or its problem
+type's extension members. A refusal that needs one, such as a quota's `Retry-After`, comes from a
+request-bound service that writes the kernel's own error response and hands it back as a `Response`
+(see [Streams](#streams-a-resource-route-action)).
 
 ## Uploads
 
@@ -240,11 +243,13 @@ export function action({ context }: { context: RouterLoadContext }) {
 ```
 
 `clear()` drops the signed-in user and `regenerate()` gives the browser a new session id and CSRF
-token. An application signing in through the auth plugin calls its session service's `signOut(ctx)`
-from a request-bound service instead. The header links to the sign-out page rather than rendering
-the form itself: a loader on the layout would give it the token, but React Router renders a child
-route's middleware refusal at the highest route with a loader, so every child's refusal would move
-up to the layout's error boundary.
+token. With the session plugin's default cookie-held session this does not revoke a copy of the old
+cookie; use its store strategy, or the auth plugin's `signIn.sessionStamp`, when sign-out must end
+every copy. An application signing in through the auth plugin calls its session service's
+`signOut(ctx)` from a request-bound service instead. The header links to the sign-out page rather
+than rendering the form itself: a loader on the layout would give it the token, but React Router
+renders a child route's middleware refusal at the highest route with a loader, so every child's
+refusal would move up to the layout's error boundary.
 
 ## Testing pages
 

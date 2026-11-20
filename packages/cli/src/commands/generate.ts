@@ -549,12 +549,14 @@ export async function runGenerateCommand(
       }
     }
     const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner(), deps.fs);
+    // A page-only module writes no kernel route, so it has nothing to shadow.
+    const writesController = schematicName !== 'module' || !page || api;
     if (!pages.ok) {
-      deps.error(
-        `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
-      );
+      if (writesController)
+        deps.error(
+          `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
+        );
     } else {
-      const writesController = schematicName !== 'module' || !page || api;
       const shadowed = writesController
         ? pages.paths.find((path) => kernelShadows(base, path))
         : undefined;

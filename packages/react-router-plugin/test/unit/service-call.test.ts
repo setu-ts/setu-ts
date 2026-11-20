@@ -57,6 +57,39 @@ describe('serviceCall', () => {
     });
   });
 
+  it("names the page's path in instance for its .data request, root included", async () => {
+    for (const [url, instance] of [
+      ['http://localhost/orders/7.data?_routes=routes%2Forders', '/orders/7'],
+      ['http://localhost/orders/7.data?index', '/orders/7'],
+      ['http://localhost/orders/_.data', '/orders'],
+      ['http://localhost/_.data', '/'],
+      ['http://localhost/', '/'],
+    ] as const) {
+      const response = await serviceCall(new Request(url), () =>
+        Promise.reject(notFound('Order 7 does not exist.')),
+      ).catch((error: unknown) => error as Response);
+      expect(((await response.json()) as { instance: string }).instance).toBe(instance);
+    }
+  });
+
+  it('carries no problem extensions or details, as documented', async () => {
+    const error = withHttpStatusHint(new Error('internal'), {
+      status: 429,
+      title: 'Too Many Requests',
+      detail: 'Try again later.',
+      details: { errors: ['x'] },
+      problem: {
+        type: 'https://example.test/quota',
+        title: 'Quota exceeded',
+        extensions: { 'retry-after': 30 },
+      },
+    });
+    const response = (await thrown(() => Promise.reject(error))) as Response;
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(['detail', 'instance', 'status', 'title', 'type']);
+    expect(response.headers.get('retry-after')).toBeNull();
+  });
+
   it('rethrows a 5xx HttpError, a 5xx hint and an unknown error untouched', async () => {
     const fault = new HttpError(503, 'Database unavailable');
     const hinted = withHttpStatusHint(new Error('x'), {

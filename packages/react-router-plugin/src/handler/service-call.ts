@@ -10,13 +10,19 @@
  *
  * @module
  */
-import { httpStatusHintOf } from '@setu-ts/common';
-import type { HttpStatusHint } from '@setu-ts/common';
+import { fallbackErrorHint } from '@setu-ts/common';
 
-/** Reads the caller-error hint of a thrown value: a status from 400 to 499. */
-function refusalOf(error: unknown): HttpStatusHint | undefined {
-  const hint = httpStatusHintOf(error);
-  return hint !== undefined && hint.status < 500 ? hint : undefined;
+/**
+ * The page's own path for `instance`: a client navigation or a hydrated form
+ * reaches the loader at `<path>.data` (`/_.data` for the root), which React
+ * Router hands the loader unchanged.
+ */
+function pagePath(request: Request): string {
+  const { pathname } = new URL(request.url);
+  if (pathname === '/_.data') return '/';
+  return pathname.endsWith('/_.data')
+    ? pathname.slice(0, -'/_.data'.length)
+    : pathname.replace(/\.data$/, '');
 }
 
 /**
@@ -27,9 +33,11 @@ function refusalOf(error: unknown): HttpStatusHint | undefined {
  * does) is thrown as an RFC 9457 Problem Details `Response`: the hint's status,
  * `content-type: application/problem+json`, `cache-control: private, no-store`,
  * and a body of `type`, `title`, `status`, `detail` and `instance` (the
- * request's path). A resource route returns it as is; a page's error boundary
- * receives it as a route error response with that status. Any other error,
- * a 5xx included, is rethrown untouched.
+ * page's path, without React Router's `.data` suffix). The hint's
+ * `problem.extensions`, its `details` and any headers (a quota's
+ * `Retry-After`) are not carried. A resource route returns it as is; a page's
+ * error boundary receives it as a route error response with that status. Any
+ * other error, a 5xx included, is rethrown untouched.
  *
  * @typeParam T - The service call's result
  * @param request - The loader's or action's request, for `instance`
@@ -51,7 +59,8 @@ export async function serviceCall<T>(request: Request, work: () => Promise<T>): 
   try {
     return await work();
   } catch (error) {
-    const hint = refusalOf(error);
+    // The one caller-error rule: the hint the kernel's own fallback serves.
+    const hint = fallbackErrorHint(error);
     if (hint === undefined) throw error;
     throw new Response(
       JSON.stringify({
@@ -59,7 +68,7 @@ export async function serviceCall<T>(request: Request, work: () => Promise<T>): 
         title: hint.problem?.title ?? hint.title,
         status: hint.status,
         detail: hint.detail,
-        instance: new URL(request.url).pathname,
+        instance: pagePath(request),
       }),
       {
         status: hint.status,
@@ -119,7 +128,7 @@ export async function pageAction<T>(
   try {
     return { ok: true, intent, value: await work() };
   } catch (error) {
-    const hint = refusalOf(error);
+    const hint = fallbackErrorHint(error);
     if (hint === undefined) throw error;
     return { ok: false, intent, error: hint.detail, status: hint.status };
   }

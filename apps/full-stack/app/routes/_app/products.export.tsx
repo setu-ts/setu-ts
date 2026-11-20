@@ -7,9 +7,15 @@ import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
 /** The download is behind sign-in, like the page that links to it. */
 export const middleware = [requireUser];
 
-/** Quotes one CSV field (RFC 4180): quotes doubled, and quotes around every field. */
+/**
+ * Quotes one CSV field (RFC 4180): quotes doubled, and quotes around every
+ * field. A value a spreadsheet would run as a formula (starting `=`, `+`, `-`,
+ * `@`, a tab or a carriage return) gets a leading `'`, so a product named
+ * `=HYPERLINK(…)` opens as text for whoever downloads the file.
+ */
 function csvField(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 /**

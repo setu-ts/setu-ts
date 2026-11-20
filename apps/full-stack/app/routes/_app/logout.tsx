@@ -28,6 +28,10 @@ export function loader({ context }: { context: AppLoadContext }) {
  * signed-in user, and `regenerate()` gives the browser a new session id and
  * CSRF token. An application on the auth plugin's sign-in calls its session
  * service's `signOut(ctx)` from a request-bound service instead.
+ *
+ * With the default cookie-held session this does not revoke a copy of the old
+ * cookie; use the session plugin's store strategy, or the auth plugin's
+ * `signIn.sessionStamp`, when sign-out must end every copy.
  */
 export function action({ context }: { context: AppLoadContext }) {
   const session = getSession(context);

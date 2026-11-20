@@ -26,10 +26,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`@setu-ts/auth-plugin` (M142).** The sign-in login, callback and logout routes and the RFC 9728
-  protected-resource metadata route leave the OpenAPI document (`excludeFromDocument`): they are
-  browser redirects, a form post and a discovery document a client finds from a `401`'s
-  `WWW-Authenticate`, not API operations. They still answer as before.
+- **`@setu-ts/auth-plugin` (M142).** The sign-in login, callback and logout routes, the SAML login,
+  ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the OpenAPI
+  document (`excludeFromDocument`): they are browser redirects, a form post and a discovery document
+  a client finds from a `401`'s `WWW-Authenticate`, not API operations. They still answer as before.
 - **`@setu-ts/cli` (M142).** `setu g module <name> --page` writes a guarded page loader, action and
   CSRF form, and no longer writes `/api/<name>` routes. Pass `--page --api` to generate both;
   without `--page`, the API remains the default. The generated service parses input for both write

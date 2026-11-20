@@ -38,10 +38,10 @@ layout's error boundary.
 
 ### Auth routes leave the OpenAPI document (`@setu-ts/auth-plugin`)
 
-The sign-in login, callback and logout routes and the protected-resource metadata route are no
-longer listed in the OpenAPI document; they still answer. A client finds the metadata from the
-`resource_metadata` parameter of a `401`'s `WWW-Authenticate` header. An
-`openapi.exclude: ['/auth/logout']` entry is no longer needed.
+The sign-in login, callback and logout routes, the SAML login, ACS and metadata routes, and the
+protected-resource metadata route are no longer listed in the OpenAPI document; they still answer. A
+client finds the metadata from the `resource_metadata` parameter of a `401`'s `WWW-Authenticate`
+header. An `openapi.exclude: ['/auth/logout']` entry is no longer needed.
 
 ### `setu.W007` (`@setu-ts/cli`)
 

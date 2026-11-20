@@ -5709,10 +5709,12 @@ app.router.get('/api/health', (ctx) => {
   status hint (every 4xx `HttpError` carries one) is thrown instead as a `Response`: the hint's
   status, `content-type: application/problem+json`, `cache-control: private, no-store`, and a body
   of `type` (the hint's `problem.type`, else `about:blank`), `title` (the hint's `problem.title`,
-  else its `title`), `status`, `detail` and `instance` (the request's path); no `message` field. Any
-  other error, a 5xx included, is rethrown untouched. React Router returns the `Response` from a
-  resource route as is, and hands it to a page's error boundary as a route error response with that
-  status (its `data` is the JSON text); it is not passed to the server entry's `handleError`.
+  else its `title`), `status`, `detail` and `instance` (the page's path, without React Router's
+  `.data` suffix); no `message` field, and the hint's `problem.extensions`, `details` and any
+  headers are not carried. Any other error, a 5xx included, is rethrown untouched. React Router
+  returns the `Response` from a resource route as is, and hands it to a page's error boundary as a
+  route error response with that status (its `data` is the JSON text); it is not passed to the
+  server entry's `handleError`.
 - `pageAction<T>(intent: string, work: () => Promise<T>): Promise<PageActionResult<T>>` (since
   0.14.0) — runs one intent of a page's action: `{ ok: true, intent, value }`, or for an error
   carrying a 4xx status hint `{ ok: false, intent, error: <the hint's detail>, status }`. Any other
