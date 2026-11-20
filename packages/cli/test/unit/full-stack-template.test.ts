@@ -413,7 +413,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
       }
     }
     expect(contentsOf('app/routes/_app/products._index.tsx')).toMatch(
-      /^import \{ getService \} from '@setu-ts\/react-router-plugin';$/m,
+      /^import \{ getService, pageAction \} from '@setu-ts\/react-router-plugin';$/m,
     );
   });
 

@@ -35,8 +35,7 @@ export default function AppLayout() {
         <span className="font-semibold">Setu-TS</span>
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          {/* A page, not a loader here: a layout loader would move every child
-              route's middleware refusal up to this layout's error boundary. */}
+          {/* A link, not a form: see app/routes/_app/logout.tsx. */}
           <Link to="/logout" className="text-sm underline-offset-4 hover:underline">
             Sign out
           </Link>

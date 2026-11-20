@@ -6,7 +6,14 @@ import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getCsrfToken, getSession } from '~/server/session.server.ts';
 import { requireUser } from '~/server/require-user.server.ts';
 
-/** Only a signed-in visitor has anything to sign out of; others go to /login. */
+/**
+ * Only a signed-in visitor has anything to sign out of; others go to /login.
+ *
+ * Sign-out is this page, which the layout links to, because the form needs a
+ * CSRF token: a loader on the layout could supply it, but React Router renders
+ * a child route's middleware refusal at the highest route with a loader, so
+ * every child's refusal would move up to the layout's error boundary.
+ */
 export const middleware = [requireUser];
 
 /** Hands the sign-out form its CSRF token. */

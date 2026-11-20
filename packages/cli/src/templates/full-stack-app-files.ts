@@ -441,8 +441,7 @@ export default function AppLayout() {
         <span className='font-semibold'>Setu-TS</span>
         <div className='flex items-center gap-3'>
           <ThemeToggle />
-          {/* A page, not a loader here: a layout loader would move every child
-              route's middleware refusal up to this layout's error boundary. */}
+          {/* A link, not a form: see app/routes/_app/logout.tsx. */}
           <Link to='/logout' className='text-sm underline-offset-4 hover:underline'>
             Sign out
           </Link>
@@ -672,7 +671,14 @@ import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getCsrfToken, getSession } from '~/server/session.server.ts';
 import { requireUser } from '~/server/require-user.server.ts';
 
-/** Only a signed-in visitor has anything to sign out of; others go to /login. */
+/**
+ * Only a signed-in visitor has anything to sign out of; others go to /login.
+ *
+ * Sign-out is this page, which the layout links to, because the form needs a
+ * CSRF token: a loader on the layout could supply it, but React Router renders
+ * a child route's middleware refusal at the highest route with a loader, so
+ * every child's refusal would move up to the layout's error boundary.
+ */
 export const middleware = [requireUser];
 
 /** Hands the sign-out form its CSRF token. */
