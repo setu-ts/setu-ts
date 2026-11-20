@@ -170,7 +170,7 @@ const NEW: ICommandFlagSpec = spec(
 /** `setu generate` for a schematic: the schematic word plus one name. */
 const GENERATE: ICommandFlagSpec = spec(
   'generate',
-  ['dir', 'dry-run', 'runtime', 'module', 'adopt-controllers', 'page', 'yes', 'y'],
+  ['dir', 'dry-run', 'runtime', 'module', 'adopt-controllers', 'page', 'api', 'yes', 'y'],
   [],
   {
     fixed: 2,

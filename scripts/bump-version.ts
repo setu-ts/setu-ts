@@ -254,8 +254,8 @@ export function isTestPath(path: string): boolean {
 /**
  * Whether a path is a milestone plan. A plan records what was true when it was
  * written, so a version it names is history — moving it makes the record false.
- * Plans live only on `develop` (completed ones are deleted, and the release
- * branch removes the rest), so no released tree depends on them. `check:versions`
+ * Plans live only on `develop` (completed ones under `plans/archive/`, and the
+ * release branch removes all of `plans/`), so no released tree depends on them. `check:versions`
  * reads no Markdown, so the two agree.
  *
  * @param path - A repository-relative path

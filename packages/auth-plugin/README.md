@@ -1127,7 +1127,9 @@ the login form does: the login route's loader returns `getCsrfToken(context)` fr
 `~/server/session.server.ts`, and the form renders it as
 `<input type='hidden' name='_csrf' value={csrfToken} />`. With `signIn.providers: []`, the plugin
 also installs `POST <basePath>/logout` (default `/auth/logout`), so a form posting there with the
-`_csrf` field needs no account-service method. The template itself does not ship a sign-out route.
+`_csrf` field needs no account-service method. The template ships its own sign-out page at `/logout`
+(`app/routes/_app/logout.tsx`), whose action clears and regenerates the session; an application on
+this plugin's sign-in calls `signOut(ctx)` from a request-bound service there instead.
 
 ### Ending every session of a user
 

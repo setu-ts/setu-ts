@@ -8,6 +8,9 @@ import { PRODUCTS } from './products.token.ts';
  * Resolves the same request-bound service the products page reads with
  * `getService`, so the page and the API cannot disagree.
  *
+ * For callers outside the app: the products page reads through its loader and
+ * writes through its action, never through these routes.
+ *
  * Not behind sign-in: the page's `requireUser` guard covers the page only.
  * Add authentication here before these routes serve real data.
  */

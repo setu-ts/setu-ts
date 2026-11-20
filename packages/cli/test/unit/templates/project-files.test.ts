@@ -909,6 +909,7 @@ describe('the routes a generated README lists', () => {
     expect(pathsOf('full-stack')).toEqual([
       '/',
       '/products',
+      '/logout',
       '/login',
       '/api/products',
       ...PLUGIN_PATHS,

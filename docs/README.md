@@ -35,6 +35,10 @@ building production-ready applications with our plugin-first, runtime-independen
   - Dependency injection
   - Custom decorators
 
+- [Pages that write through actions](./pages.md)
+  - Forms, refusals, uploads, downloads, streams and sign-out in a full-stack page
+  - Testing a page the way the browser drives it
+
 - [Authorization](./authorization.md)
   - Roles versus policies, and where attribute rules go
   - Route guards, `@RequirePolicy`, and checks inside a handler

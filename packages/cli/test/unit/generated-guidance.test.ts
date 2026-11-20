@@ -64,6 +64,13 @@ function harness() {
 }
 
 describe('generated code and guidance', () => {
+  it('names --api on the --page help line and documents the flag', async () => {
+    const h = harness();
+    expect(await h.run(['g', '--help'])).toBe(0);
+    expect(h.out.lines.find((line) => line.startsWith('  --page'))).toContain('--api');
+    expect(h.out.text()).toContain('  --api');
+    expect(commandFlagsFor('generate', undefined)!.documented).toContain('api');
+  });
   it('registers validation on minimal and diagnoses its missing registration', async () => {
     expect(ZERO_CONFIG_WIRINGS.get('validation-plugin')).toEqual({ symbol: 'ValidationPlugin' });
     const installed = new Set(['validation-plugin']);
@@ -341,7 +348,7 @@ describe('generated code and guidance', () => {
     const files = generateFullStackModule(names, { runtime: 'node' });
     const controller = text(files, 'src/modules/order-created/order-created.controller.ts');
     expect(controller).toContain("import { badRequest, notFound } from '@setu-ts/exceptions'");
-    expect(controller).toContain("throw badRequest('A non-empty name is required.')");
+    expect(controller).toContain('throw badRequest(input)');
     expect(controller).toContain("throw notFound('OrderCreated not found.')");
     const unit = text(files, 'src/modules/order-created/order-created.test.ts');
     expect(unit).toContain('orderCreatedService(createTestContext())');

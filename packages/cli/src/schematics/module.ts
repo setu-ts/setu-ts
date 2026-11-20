@@ -10,7 +10,7 @@ import {
 } from '../seams/modules.ts';
 import { moduleService, moduleRoutes, moduleSchemas, moduleController } from './module-files.ts';
 import { renderModuleTest, renderModuleE2e, renderTestServer } from './test-harness.ts';
-import { generateFullStackModule } from './module-full-stack.ts';
+import { API_REQUIRES_PAGE, generateFullStackModule } from './module-full-stack.ts';
 
 function classModule(names: DerivedNames): string {
   return `import { Module } from '@setu-ts/decorator-plugin';
@@ -43,13 +43,17 @@ export function generateModule(
   options: ModuleOptions,
 ): readonly GeneratedFile[] {
   const classBased = generatorMode(options.plugins) === 'class-based';
-  // M130 §3.6: a full-stack (functional-only) project gets the request-bound
-  // module shape behind /api/<name>, and `--page` adds its React Router page.
+  if (options.api === true && options.page !== true) throw new Error(API_REQUIRES_PAGE);
+  if (options.page === true && (!options.plugins.has('react-router-plugin') || classBased)) {
+    throw new Error('--page needs a functional full-stack project (react-router-plugin).');
+  }
+  // Full-stack pages and optional API controllers share a request-bound service.
   if (options.plugins.has('react-router-plugin') && !classBased)
     return generateFullStackModule(names, {
       runtime: options.runtime,
       ...(options.modules === undefined ? {} : { modules: options.modules }),
       ...(options.page === undefined ? {} : { page: options.page }),
+      ...(options.api === undefined ? {} : { api: options.api }),
     });
   const dir = `${MODULES_DIR}/${names.kebab}`;
   const validation = options.plugins.has('validation-plugin');

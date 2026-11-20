@@ -27,14 +27,19 @@ const CACHE_CONTROL = 'public, max-age=300';
  * @returns Nothing
  */
 export function registerMetadataRoute(router: IRouterApi, compiled: CompiledResourceServer): void {
-  router.get(compiled.metadataPath, (ctx) => {
-    ctx.response.status(200);
-    ctx.response.header('cache-control', CACHE_CONTROL);
-    ctx.response.header('access-control-allow-origin', '*');
-    // `text()` owns the body and sets text/plain; the document's media type is
-    // set after it so the assignment is the last writer.
-    const result = ctx.response.text(compiled.body);
-    ctx.response.header('content-type', 'application/json; charset=utf-8');
-    return result;
+  router.get(compiled.metadataPath, {
+    // A client finds this document from a 401's `resource_metadata` or at its
+    // well-known address (RFC 9728 §3, §5), not from the OpenAPI document.
+    schema: { excludeFromDocument: true },
+    handler: (ctx) => {
+      ctx.response.status(200);
+      ctx.response.header('cache-control', CACHE_CONTROL);
+      ctx.response.header('access-control-allow-origin', '*');
+      // `text()` owns the body and sets text/plain; the document's media type is
+      // set after it so the assignment is the last writer.
+      const result = ctx.response.text(compiled.body);
+      ctx.response.header('content-type', 'application/json; charset=utf-8');
+      return result;
+    },
   });
 }

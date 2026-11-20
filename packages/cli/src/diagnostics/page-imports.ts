@@ -28,6 +28,7 @@ import {
   type LexedImports,
 } from '../utils/import-specifiers.ts';
 import { maskComments } from '../devtool/sources.ts';
+import { pageApiFetches, type PageApiFetch } from './page-fetch.ts';
 import { normalizeRelative } from '../utils/artifact-path.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
@@ -286,6 +287,8 @@ export async function scanPageSource(
 interface LexedPage {
   readonly source: string;
   readonly emitted: string;
+  /** The emitted code's source-map `mappings`, for W007's original lines. */
+  readonly mappings: string;
   readonly lexed: Extract<LexedImports, { kind: 'ok' }>;
 }
 
@@ -300,20 +303,22 @@ interface LexedPage {
  */
 async function lexPage(path: string, source: string): Promise<LexedPage | 'unreadable'> {
   let emitted: string;
+  let mappings: string;
   try {
-    emitted = (
-      await transform(source, {
-        loader: loaderFor(path),
-        format: 'esm',
-        jsx: 'automatic',
-        tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
-      })
-    ).code;
+    const result = await transform(source, {
+      loader: loaderFor(path),
+      format: 'esm',
+      jsx: 'automatic',
+      sourcemap: 'external',
+      tsconfigRaw: { compilerOptions: { verbatimModuleSyntax: true } },
+    });
+    emitted = result.code;
+    mappings = (JSON.parse(result.map) as { mappings: string }).mappings;
   } catch {
     return 'unreadable';
   }
   const lexed = lexImportSpecifiers(emitted);
-  return lexed.kind === 'ok' ? { source, emitted, lexed } : 'unreadable';
+  return lexed.kind === 'ok' ? { source, emitted, mappings, lexed } : 'unreadable';
 }
 
 /**
@@ -594,12 +599,15 @@ export class SharedLoads<T> {
 /** The result of scanning a project's pages. */
 export interface PageImportScan {
   readonly violations: readonly PageImportViolation[];
+  /** `fetch` calls of the application's own `/api/` (W007). */
+  readonly fetches: readonly PageApiFetch[];
   /** Pages the lexer could not read, reported rather than passed. */
   readonly unreadable: readonly string[];
 }
 
 /**
- * Scans page modules under `app/` for kernel value imports, excluding React Router
+ * Scans page modules under `app/` for kernel value imports and for `fetch` calls of
+ * the application's own `/api/` (W007), excluding React Router
  * `.server` files and directories only after realpath confirms containment in `app/`.
  * A project without
  * `app/` has no pages and yields nothing.
@@ -610,6 +618,7 @@ export interface PageImportScan {
  */
 export async function scanPageImports(fs: IFileSystem, dir: string): Promise<PageImportScan> {
   const violations: PageImportViolation[] = [];
+  const fetches: PageApiFetch[] = [];
   const walk: PageWalk = { fs, dir, pages: [], unreadable: [], directories: 0 };
   await pageFiles(walk, 'app');
   const unreadable = walk.unreadable.sort();
@@ -644,6 +653,11 @@ export async function scanPageImports(fs: IFileSystem, dir: string): Promise<Pag
         : await resolvePage(page.path, lexed, root, resolveToken);
     if (result === 'unreadable') unreadable.push(page.path);
     else violations.push(...result);
+    if (lexed !== undefined && lexed !== 'unreadable') {
+      // The lexer already read this output for imports, so it cannot refuse it here.
+      const calls = pageApiFetches(page.path, lexed.emitted, lexed.mappings);
+      if (calls !== 'unreadable') fetches.push(...calls);
+    }
   }
-  return { violations, unreadable };
+  return { violations, fetches, unreadable };
 }

@@ -111,6 +111,9 @@ function flowRoute(flow: (ctx: IRequestContext) => Promise<FlowOutcome>) {
     ],
     handler: (ctx: IRequestContext) =>
       ctx.response.redirect(String(ctx.state.get(REDIRECT_STATE_KEY)), 302),
+    // A browser redirect and the identity provider's form post, not API
+    // operations: neither is listed in the OpenAPI document.
+    schema: { excludeFromDocument: true },
   };
 }
 
@@ -531,12 +534,16 @@ function registerMetadata(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void
   const { provider, SAML } = loaded;
   // Built once: the descriptor depends only on configuration.
   let document: Uint8Array | null = null;
-  deps.router.get(provider.metadataPath, (ctx) => {
-    if (document === null) {
-      const saml = new SAML(buildLibraryConfig(provider, INERT_CACHE));
-      document = new TextEncoder().encode(saml.generateServiceProviderMetadata(null));
-    }
-    return ctx.response.header('Content-Type', SAML_METADATA_CONTENT_TYPE).send(document);
+  deps.router.get(provider.metadataPath, {
+    // The identity provider reads this XML document; it is not an API operation.
+    schema: { excludeFromDocument: true },
+    handler: (ctx) => {
+      if (document === null) {
+        const saml = new SAML(buildLibraryConfig(provider, INERT_CACHE));
+        document = new TextEncoder().encode(saml.generateServiceProviderMetadata(null));
+      }
+      return ctx.response.header('Content-Type', SAML_METADATA_CONTENT_TYPE).send(document);
+    },
   });
 }
 

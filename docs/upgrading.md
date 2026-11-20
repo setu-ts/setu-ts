@@ -10,6 +10,45 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Module pages (`@setu-ts/cli`)
+
+`setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
+`/api/<name>` routes. Pass `--page --api` when callers outside the app also need those routes.
+Without `--page`, the API remains the default; `--api` requires `--page`. The generated API now
+trims the name through the service's shared `parse` method, and refuses a name of only spaces. The
+page's e2e test signs in through `test/support/sign-in.ts`, which `setu` writes once and never
+overwrites; once the application replaces the placeholder sign-in, change `signIn` there to match.
+Existing modules are untouched.
+
+### Refusals in pages (`@setu-ts/react-router-plugin`)
+
+A 4xx `HttpError` thrown from a loader or action used to answer 500. Wrap the call in
+`serviceCall(request, work)` to keep its status, or `pageAction(intent, work)` in an action to show
+it in the form. See [Pages that write through actions](./pages.md).
+
+### Sign-out and the products action (`@setu-ts/cli` full-stack template)
+
+A new full-stack project's products page adds a product through its action, and `/logout` is a
+guarded page whose form posts to its action. An existing project keeps its files; copy
+`app/routes/_app/logout.tsx` and the header's Sign out link from a fresh scaffold to adopt them.
+Keep the link: a loader on the layout would move every child route's middleware refusal up to the
+layout's error boundary.
+
+### Auth routes leave the OpenAPI document (`@setu-ts/auth-plugin`)
+
+The sign-in login, callback and logout routes, the SAML login, ACS and metadata routes, and the
+protected-resource metadata route are no longer listed in the OpenAPI document; they still answer. A
+client finds the metadata from the `resource_metadata` parameter of a `401`'s `WWW-Authenticate`
+header. An `openapi.exclude: ['/auth/logout']` entry is no longer needed.
+
+### `setu.W007` (`@setu-ts/cli`)
+
+`setu check` warns when a page calls `fetch` on its own `/api/…`. Move the write to the page's
+action and the read to its loader, or silence `setu.W007` in `.setu-ts/check.json` for a page that
+calls an API it also publishes on purpose. `setu check --strict` fails on it.
+
 ## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 
 import { ThemeToggle } from '~/components/theme-toggle.tsx';
 import { APP_NAV, isActive } from '~/lib/nav-utils.ts';
@@ -33,7 +33,13 @@ export default function AppLayout() {
         className="flex h-14 shrink-0 items-center justify-between border-b px-6"
       >
         <span className="font-semibold">Setu-TS</span>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          {/* A link, not a form: see app/routes/_app/logout.tsx. */}
+          <Link to="/logout" className="text-sm underline-offset-4 hover:underline">
+            Sign out
+          </Link>
+        </div>
       </header>
       <nav
         aria-label="Mobile navigation"

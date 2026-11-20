@@ -405,7 +405,7 @@ export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => 
 `;
 
 const appLayout = `import { useEffect, useRef } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { Link, NavLink, Outlet, useLocation } from 'react-router';
 
 import { ThemeToggle } from '~/components/theme-toggle.tsx';
 import { APP_NAV, isActive } from '~/lib/nav-utils.ts';
@@ -439,7 +439,13 @@ export default function AppLayout() {
         className='flex h-14 shrink-0 items-center justify-between border-b px-6'
       >
         <span className='font-semibold'>Setu-TS</span>
-        <ThemeToggle />
+        <div className='flex items-center gap-3'>
+          <ThemeToggle />
+          {/* A link, not a form: see app/routes/_app/logout.tsx. */}
+          <Link to='/logout' className='text-sm underline-offset-4 hover:underline'>
+            Sign out
+          </Link>
+        </div>
       </header>
       <nav
         aria-label='Mobile navigation'
@@ -548,20 +554,22 @@ export default function IndexRoute() {
   );
 }
 `;
-const productsRoute = `import { useLoaderData } from 'react-router';
-import { getService } from '@setu-ts/react-router-plugin';
+const productsRoute = `import { Form, redirect, useActionData, useLoaderData } from 'react-router';
+import { getService, pageAction } from '@setu-ts/react-router-plugin';
 
+import { Button } from '~/components/ui/button.tsx';
 import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
-import { getCurrentUser } from '~/server/session.server.ts';
+import { getCsrfToken, getCurrentUser } from '~/server/session.server.ts';
 import { requireUser } from '~/server/require-user.server.ts';
 import type { Product } from '~kernel/modules/products/products.types.ts';
 import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
 
 /**
- * Route middleware: runs before the loader, and sends a visitor who is not
- * signed in to /login. See \`app/server/require-user.server.ts\` for how this
- * layer differs from the kernel middleware \`setu generate middleware\` writes.
+ * Route middleware: runs before the loader and the action, and sends a visitor
+ * who is not signed in to /login. See \`app/server/require-user.server.ts\` for
+ * how this layer differs from the kernel middleware \`setu generate middleware\`
+ * writes.
  */
 export const middleware = [requireUser];
 
@@ -578,7 +586,29 @@ export async function loader({ context }: { context: AppLoadContext }) {
   // redirects before the loader runs when there is no user.
   const user = getCurrentUser(context);
   const products = await getService(context, PRODUCTS).list();
-  return { products, total: products.length, signedInAs: user.email };
+  return {
+    products,
+    total: products.length,
+    signedInAs: user.email,
+    csrfToken: getCsrfToken(context),
+  };
+}
+
+/**
+ * Adds a product from the form, through the same service as the loader.
+ *
+ * The page writes through this action, never through \`/api/products\`. A
+ * validation message or a refusal (a duplicate name answers 409 in the service)
+ * comes back to the form; a fault goes to the error boundary. On success the
+ * redirect reloads the list, so a reload does not post again.
+ */
+export async function action({ request, context }: { request: Request; context: AppLoadContext }) {
+  const form = await request.formData();
+  const products = getService(context, PRODUCTS);
+  const input = products.parse({ name: form.get('name'), price: form.get('price') });
+  if (typeof input === 'string') return { error: input };
+  const result = await pageAction('create', () => products.create(input));
+  return result.ok ? redirect('/products', 303) : { error: result.error };
 }
 
 /** Formats a price in minor units for display. */
@@ -587,7 +617,8 @@ function formatPrice(product: Product): string {
 }
 
 export default function ProductsRoute() {
-  const { products, total, signedInAs } = useLoaderData<typeof loader>();
+  const { products, total, signedInAs, csrfToken } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
 
   return (
     <Card>
@@ -601,6 +632,90 @@ export default function ProductsRoute() {
             </li>
           ))}
         </ul>
+        <Form method='post' className='grid gap-3 sm:grid-cols-[1fr_8rem_auto] sm:items-end'>
+          <input type='hidden' name='_csrf' value={csrfToken} />
+          <label className='grid gap-2 text-sm font-medium'>
+            Name
+            <input
+              name='name'
+              required
+              className='h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs'
+            />
+          </label>
+          <label className='grid gap-2 text-sm font-medium'>
+            Price
+            <input
+              name='price'
+              type='number'
+              min='0'
+              step='0.01'
+              required
+              className='h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs'
+            />
+          </label>
+          <Button type='submit'>Add product</Button>
+        </Form>
+        {actionData?.error
+          ? <p role='alert' className='text-sm text-destructive'>{actionData.error}</p>
+          : null}
+      </CardContent>
+    </Card>
+  );
+}
+`;
+const logoutRoute = `import { Form, redirect, useLoaderData } from 'react-router';
+
+import { Button } from '~/components/ui/button.tsx';
+import { Card, CardContent } from '~/components/ui/card.tsx';
+import type { AppLoadContext } from '~/lib/load-context.ts';
+import { getCsrfToken, getSession } from '~/server/session.server.ts';
+import { requireUser } from '~/server/require-user.server.ts';
+
+/**
+ * Only a signed-in visitor has anything to sign out of; others go to /login.
+ *
+ * Sign-out is this page, which the layout links to, because the form needs a
+ * CSRF token: a loader on the layout could supply it, but React Router renders
+ * a child route's middleware refusal at the highest route with a loader, so
+ * every child's refusal would move up to the layout's error boundary.
+ */
+export const middleware = [requireUser];
+
+/** Hands the sign-out form its CSRF token. */
+export function loader({ context }: { context: AppLoadContext }) {
+  return { csrfToken: getCsrfToken(context) };
+}
+
+/**
+ * Signs out. A POST, so a link or a prefetch cannot sign anyone out, and the
+ * session plugin's form-CSRF check has already passed when this runs. It ends
+ * the session the way the login action starts it: \`clear()\` drops the
+ * signed-in user, and \`regenerate()\` gives the browser a new session id and
+ * CSRF token. An application on the auth plugin's sign-in calls its session
+ * service's \`signOut(ctx)\` from a request-bound service instead.
+ *
+ * With the default cookie-held session this does not revoke a copy of the old
+ * cookie; use the session plugin's store strategy, or the auth plugin's
+ * \`signIn.sessionStamp\`, when sign-out must end every copy.
+ */
+export function action({ context }: { context: AppLoadContext }) {
+  const session = getSession(context);
+  session.clear();
+  session.regenerate();
+  return redirect('/login', 303);
+}
+
+export default function LogoutRoute() {
+  const { csrfToken } = useLoaderData<typeof loader>();
+
+  return (
+    <Card>
+      <CardContent className='grid gap-4'>
+        <h1 className='text-2xl font-semibold'>Sign out</h1>
+        <Form method='post' className='flex gap-3'>
+          <input type='hidden' name='_csrf' value={csrfToken} />
+          <Button type='submit'>Sign out</Button>
+        </Form>
       </CardContent>
     </Card>
   );
@@ -712,6 +827,7 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/components/layouts/LoginLayout.tsx', contents: loginLayout },
   { path: 'app/routes/_app/_index.tsx', contents: indexRoute },
   { path: 'app/routes/_app/products._index.tsx', contents: productsRoute },
+  { path: 'app/routes/_app/logout.tsx', contents: logoutRoute },
   { path: 'app/routes/_auth/login.tsx', contents: loginRoute },
 ];
 
@@ -763,7 +879,7 @@ public files in \`public/\`.
   return `## Modules and pages
 
 Business logic lives in kernel modules under \`src/modules/<name>/\`: the service, its types, its
-token and its \`/api/<name>\` routes. \`src/modules/products/\` is the example. A module registers its
+token and its \`/api/<name>\` routes or a page action. \`src/modules/products/\` is the example. A module registers its
 service per request (\`requestService\`), so a page and the API share one instance within a request.
 
 Pages live in \`app/\`: \`routes/\`, \`components/\`, client-safe \`lib/\` and server-only \`server/\` (the
@@ -777,15 +893,23 @@ import { PRODUCTS } from '~kernel/modules/products/products.token.ts';
 const products: readonly Product[] = await getService(context, PRODUCTS).list();
 \`\`\`
 
+A page writes through its own \`action\`, never through its \`/api\` routes. The products page adds a
+product with \`pageAction\`, which returns a refusal (a duplicate name answers 409 in the service) to
+the form, and the header's Sign out opens \`app/routes/_app/logout.tsx\`, whose form posts to its action. Use
+\`serviceCall\` in a loader or a resource route so a refusal keeps its status instead of answering
+500. \`/api\` routes are for callers outside the app.
+
 \`app/\` imports kernel code only through \`~kernel/*\`, and only types and \`*.token.ts\` modules:
 \`setu check\` refuses any other value import (setu.E017), except in React Router .server modules, so no server code reaches the browser
-bundle. Keep a token file to its token. Add a module, and optionally its page, with
-\`${invocation} generate module <name> --page\`.
+bundle. Keep a token file to its token. Add a module with
+\`${invocation} generate module <name>\` (\`/api/<name>\` routes), or with \`--page\` (a page whose
+action writes through the service, and no \`/api\` routes); add \`--api\` to \`--page\` for both.
 
 ## Calling the API
 
 Every unsafe request (POST, PUT, PATCH, DELETE) passes the session's CSRF check, \`/api\` included.
-Browser code sends the page's token in an \`x-csrf-token\` header with the session cookie. A client
+A page's form posts the token as its \`_csrf\` field. Other browser code sends it in an
+\`x-csrf-token\` header with the session cookie. A client
 outside the browser authenticates with a bearer token once an \`auth\` arm is configured: the CSRF
 check exempts bearer-authenticated requests. Without an auth arm, a plain POST answers 403 by
 design.

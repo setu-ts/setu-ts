@@ -17207,6 +17207,72 @@ the changed development entry; every changed file at the 90% per-file bar.
 
 ---
 
+## Milestone 142: Page Actions in the Module Generator
+
+**Package(s):** `packages/cli`, `packages/react-router-plugin`, `packages/auth-plugin`,
+`apps/full-stack`; docs. (Widened 2026-11-20, items 6–11.)
+
+**Source:** the Mohor demo on published `0.13.0` (2026-11-18). Its pages make about 40 calls to its
+own `/api/…` routes, and the question was whether an SSR project should need a JSON API at all for
+its pages' own writes. M141 removed the framework reason (route middleware now reaches a React
+Router action through `pagePolicies`), but the generator still teaches the old shape.
+
+**The problem.** `setu g module <name> --page` writes a page that reads through a `loader` and
+`getService`, and gives it no `action`. Every module also gets `/api/<name>` routes. So the only
+write path Setu generates for a page is a browser `fetch` to a kernel route, with a CSRF header and
+a second place to put validation. A reader of a Setu full-stack project learns to build a JSON API
+for every page.
+
+**What ships.** Compared first with Rails (`rails g scaffold` writes HTML forms and controller
+actions; JSON is the API-mode choice), Phoenix (`mix phx.gen.html` and `mix phx.gen.json` are
+separate generators), Laravel and AdonisJS (`make:controller --resource`, with `--api` for an API
+controller) and React Router's own guidance (pages read in `loader` and write in `action`):
+
+1. **`--page` writes an `action`.** The page gets a `<Form method="post">` that creates a record
+   through the same request-bound service as the loader (`getService`), with the session's CSRF
+   field. It redirects back to the page on success and shows the reason on invalid input. Its
+   comment names the route id to use in `pagePolicies` to guard the action.
+2. **The `/api` routes become opt-in on a page module.** `--page` alone writes no controller.
+   `--page --api` writes both, sharing one service. `g module` without `--page` is unchanged: such a
+   module is reached only through its API.
+3. **One validation rule.** The service gains `parse(value)`, which the action and the controller
+   both call, so an input rule is never written twice.
+4. **The generated tests follow.** The module's e2e test signs in, posts the page's action, reads
+   the record back on the page, and checks the invalid-input and missing-CSRF answers. With `--api`,
+   the API test is generated too.
+5. **The brief and docs teach the rule:** pages write through actions; an `/api` route is for
+   callers outside the app.
+
+**Widened (2026-11-20).** Migrating Mohor to page actions showed the generator was one of several
+things that pushed a full-stack application to an `/api` route: a service refusal thrown in a loader
+or action answered 500, files and streams had no page-side recipe, the template had no write and no
+sign-out, and nothing helped a test drive a page. So M142 also ships:
+
+6. **Refusals keep their status.** `react-router-plugin` gains `serviceCall(request, work)` (a
+   service refusal rethrown as its own status with Problem Details, for loaders, actions and
+   resource routes) and `pageAction(intent, work)` (a refusal shown in the form).
+7. **The template practises it.** The products page creates through its action; a `/logout` page
+   action signs out.
+8. **Browser and discovery routes leave the API document.** The auth plugin's login, callback and
+   logout routes and its RFC 9728 metadata route (`/.well-known/oauth-protected-resource`) declare
+   `excludeFromDocument`; clients find the metadata from the `401` challenge, not the document.
+9. **`setu check` warns (`setu.W007`)** when a page `fetch`es its own `/api/…`.
+10. **Pages are testable as pages.** A generated `test/support/pages.ts` posts a form and reads a
+    page's loader data the way the browser does.
+11. **The guide and the example.** A new `docs/pages.md` covers forms, refusals, uploads, downloads,
+    images, streams, sign-out and tests; `docs/ai.md` serves its stream from a page;
+    `apps/full-stack` creates through its page, downloads a CSV from a resource route and signs out
+    through an action.
+
+**Gate:** a scaffolded full-stack project with `g module --page` (and with `--page --api`) passes
+its own check, build and generated tests; the page action creates a record that the page then shows;
+`setu sync` keeps a page-only module's index without a controller; the template creates and signs
+out through actions with `setu check` at 0 warnings; a refusal in a resource route and a page loader
+keeps its status through a real React Router build; `check:apps` and `check:browser` pass for
+`apps/full-stack`; every changed file at the 90% per-file bar.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                                                                                                                                                                   |
@@ -17493,3 +17559,4 @@ the changed development entry; every changed file at the 90% per-file bar.
 | 140d      | ✅     | cli + vector-store-plugin — what the generators write, the agent brief, and vector-store readiness                                                                                                                                                                                        |
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
 | 141       | ✅     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |
+| 142       | ✅     | cli + react-router-plugin + auth-plugin + apps/full-stack — pages that never need the app's own `/api`: generator actions, refusals keep their status, template and example practise it, `setu.W007`                                                                                      |

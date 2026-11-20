@@ -28,6 +28,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'programmatic-api', label: 'Programmatic API' },
       { slug: 'decorators', label: 'Decorators' },
       { slug: 'mvc', label: 'MVC pattern' },
+      { slug: 'pages', label: 'Pages and actions' },
     ],
   },
   {

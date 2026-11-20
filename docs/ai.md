@@ -153,6 +153,68 @@ wire format is already implemented by the SDK. The example smoke reads the resul
 result before committing HTTP headers, so an initial quota refusal can answer 429. A failure after
 streaming has begun is a stream failure; the HTTP status has already been sent.
 
+## From a full-stack page
+
+A full-stack page streams the same response from a resource route instead of a kernel route (see
+[Pages that write through actions](./pages.md#streams-a-resource-route-action)). The work that needs
+the kernel request context (the quota, the budget scope, `ctx.signal`) moves into a request-bound
+service, which hands the route a web `Response`. The module's `index.ts` creates the quota resolver
+once, when the application registers the module, with
+`services.register(TOKEN, requestService(createPageChatService(chatQuota())))`, so each application
+keeps its own quota store:
+
+```typescript
+import { createUIMessageStreamResponse, streamText, toUIMessageStream } from 'ai';
+import type { IRequestContext } from '@setu-ts/common';
+import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import { budgetedModel, requestScope } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
+import type { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
+
+/** What the page's chat route calls. */
+export interface PageChatService {
+  /** The answer to `useChat`'s request body, as a UI message stream. */
+  answer(prompt: string): Promise<Response>;
+}
+
+/**
+ * The chat service factory for one application: `quota` is that application's resolver.
+ * The service it returns holds the request context a React Router action does not have.
+ */
+export function createPageChatService(
+  quota: ReturnType<typeof chatQuota>,
+): (ctx: IRequestContext) => PageChatService {
+  return (ctx) => ({
+    async answer(prompt) {
+      const { models } = ctx.services.get<IChatModelsService>(CHAT_MODELS);
+      const { model, ready } = budgetedModel(requestScope(ctx), models, quota(ctx));
+      const result = streamText({
+        model,
+        prompt,
+        // The budget estimates a call from its output bound and refuses a call without one.
+        maxOutputTokens: 1024,
+        maxRetries: 0,
+        abortSignal: ctx.signal,
+      });
+      // ready settles once the first model call starts; a failure before any model
+      // call only rejects result.response, so race the two.
+      const failed = Promise.resolve(result.response).then(() => undefined);
+      failed.catch(() => {});
+      await Promise.race([ready, failed]);
+      return createUIMessageStreamResponse({ stream: toUIMessageStream({ stream: result.stream }) });
+    },
+  });
+}
+```
+
+The route is an action-only module under `app/routes/` that reads the body and returns
+`getService(context, TOKEN).answer(prompt)`. React Router returns the `Response` as is. A quota
+refusal from `ready` is a 429 `QuotaExceededError`; to give the page the same Problem Details and
+`Retry-After` an API caller gets, catch it in the service, write it with
+`respondQuotaExceeded(ctx, error)`, and return `ctx.response.snapshot()`'s status, headers and body
+as a `Response`. The form-CSRF check reads the `x-csrf-token` header, so pass the page's token in
+the headers of `useChat`'s transport.
+
 ## Bounded tools with trusted identity
 
 ```typescript

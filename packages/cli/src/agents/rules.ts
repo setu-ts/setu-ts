@@ -127,13 +127,13 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'full-stack',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime !== 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Dev: start:dev (Vite in-process; no build). Production: run build then start on Node, Deno and Bun. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/. Guard a page action with `pagePolicies` (route id, `on: "action"`), never path middleware.',
+    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Dev: start:dev (Vite in-process; no build). Production: run build then start on Node, Deno and Bun. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/. Pages write through their `action` (`<Form>`/`useFetcher`; refusals: `pageAction`, `serviceCall`); files and streams: resource routes. `/api` is for outside callers (`g module --page --api`). Guard actions with `pagePolicies` (route id, `on: "action"`), not path middleware.',
   },
   {
     id: 'full-stack-workers',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime === 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/. Guard a page action with `pagePolicies` (route id, `on: "action"`), never path middleware.',
+    text: 'Routes: app/routes/. Loaders resolve services with `getService(context, TOKEN)` from `@setu-ts/react-router-plugin`; context keys carry only non-service values such as the session and CSRF token. No module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/. Pages write through their `action` (`<Form>`/`useFetcher`; refusals: `pageAction`, `serviceCall`); files and streams: resource routes. `/api` is for outside callers (`g module --page --api`). Guard actions with `pagePolicies` (route id, `on: "action"`), not path middleware.',
   },
   {
     id: 'messaging',

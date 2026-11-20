@@ -255,7 +255,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   },
   routes: [
     { path: '/', purpose: 'the home page, server-rendered by React Router' },
-    { path: '/products', purpose: 'a page behind sign-in; it redirects to `/login`' },
+    {
+      path: '/products',
+      purpose: 'a page behind sign-in (it redirects to `/login`) whose form adds a product',
+    },
+    { path: '/logout', purpose: 'the sign-out page; its form posts to its action' },
     { path: '/login', purpose: 'the sign-in form' },
     { path: '/api/products', purpose: 'the products module API, the same service the page reads' },
   ],

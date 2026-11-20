@@ -363,7 +363,7 @@ it('runs the deno full-stack scaffold check task', { timeout: 900_000 }, async (
 // The Deno half is the one that caught generated imports `deno fmt` reorders.
 for (const target of ['deno', 'bun'] as const) {
   it(
-    `g module --page keeps a ${target} full-stack project formatted, checked and tested`,
+    `g module --page (and --page --api) keeps a ${target} full-stack project formatted, checked and tested`,
     { timeout: 900_000 },
     async () => {
       expect(
@@ -371,6 +371,7 @@ for (const target of ['deno', 'bun'] as const) {
       ).toBe(0);
       const project = `${root}/shop`;
       expect(await run(['g', 'module', 'articles', '--page', '--dir', project])).toBe(0);
+      expect(await run(['g', 'module', 'notes', '--page', '--api', '--dir', project])).toBe(0);
       const overlay = await startOverlay();
       try {
         if (target === 'deno') {
@@ -1581,8 +1582,46 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
         const signedIn = await get('/products', cookiesOf(submitted));
         const planted = await get('/products', cookiesOf(loginPage));
         await planted.body?.cancel();
+        const signedInBody = await signedIn.text();
+
+        // The products page writes through its action with the rotated token, a
+        // duplicate comes back to the form, and Sign out ends the session.
+        let cookie = cookiesOf(signedIn) || cookiesOf(submitted);
+        // A RegExp from a string: a quote-bearing regex literal misleads the manifest scanner.
+        const rotated = new RegExp('name="_csrf"\\s+value="([^"]+)"').exec(signedInBody)?.[1] ?? '';
+        const post = async (path: string, fields: Record<string, string>) => {
+          const response = await fetch(`${origin}${path}`, {
+            method: 'POST',
+            redirect: 'manual',
+            headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ _csrf: rotated, ...fields }),
+          });
+          cookie = cookiesOf(response) || cookie;
+          return response;
+        };
+        const created = await post('/products?index', { name: 'Gadget', price: '5' });
+        await created.body?.cancel();
+        const listed = await get('/products', cookie);
+        const listedBody = await listed.text();
+        const duplicate = await post('/products?index', { name: 'Standard plan', price: '1' });
+        const duplicateBody = await duplicate.text();
+        const signedOut = await post('/logout', {});
+        await signedOut.body?.cancel();
+        const afterSignOut = await get('/products', cookie);
+        await afterSignOut.body?.cancel();
 
         return {
+          created: { status: created.status, location: created.headers.get('location') },
+          listed: listedBody.includes('Gadget') && listedBody.includes('$5.00'),
+          duplicate: {
+            status: duplicate.status,
+            refused: duplicateBody.includes('A product named Standard plan already exists.'),
+          },
+          signedOut: { status: signedOut.status, location: signedOut.headers.get('location') },
+          afterSignOut: {
+            status: afterSignOut.status,
+            location: afterSignOut.headers.get('location'),
+          },
           audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('server-timing')),
           landing: landing.status,
           anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
@@ -1592,7 +1631,7 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
           beforeId: loginPage.headers.get('x-session-id'),
           afterId: submitted.headers.get('x-session-id'),
           plantedStatus: planted.status,
-          signedIn: { status: signedIn.status, body: await signedIn.text() },
+          signedIn: { status: signedIn.status, body: signedInBody },
         };
       });
 
@@ -1613,6 +1652,15 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
       expect(result.signedIn.status).toBe(200);
       expect(result.signedIn.body).toContain('Signed in as');
       expect(result.signedIn.body).toContain('ada@example.com');
+      // The page action creates, redirects, and refuses a duplicate in place.
+      expect(result.created).toEqual({ status: 303, location: '/products' });
+      expect(result.listed).toBe(true);
+      expect(result.duplicate).toEqual({ status: 200, refused: true });
+      // Sign-out is an action; afterwards the guarded page sends the visitor to sign in.
+      expect(result.signedOut).toEqual({ status: 303, location: '/login' });
+      expect(result.afterSignOut).toEqual({ status: 302, location: '/login' });
+      // A refusal returned to the form is not a fault: nothing logs it.
+      expect(output).not.toContain('SSR request failed');
     },
   );
 });

@@ -103,6 +103,12 @@ export type Finding =
       readonly reason: PageImportReason;
     }
   | { readonly kind: 'page-unreadable'; readonly path: string }
+  | {
+      readonly kind: 'page-fetches-own-api';
+      readonly path: string;
+      readonly line: number;
+      readonly target: string;
+    }
   | { readonly kind: 'duplicate-name'; readonly family: string; readonly paths: readonly string[] }
   | { readonly kind: 'silence-unmatched'; readonly entry: string };
 
@@ -317,6 +323,8 @@ export async function diagnoseProject(
   for (const violation of pages.violations)
     findings.push({ kind: 'page-kernel-value-import', ...violation });
   for (const path of pages.unreadable) findings.push({ kind: 'page-unreadable', path });
+  // M142 §3.12: a page writes through its action, not through the app's own /api.
+  for (const call of pages.fetches) findings.push({ kind: 'page-fetches-own-api', ...call });
   if (configRead.kind === 'source') findings.push(...unregisteredPluginFindings(config, installed));
   const starter = composingStarter(config);
   const classified = referenceDiagnosis(config);

@@ -99,6 +99,7 @@ export const GUIDES = [
   'docs/ai.md',
   'docs/mcp.md',
   'docs/retrieval.md',
+  'docs/pages.md',
 ] as const;
 
 /** The committed snippet compiler configuration used for all fence compilation. */
@@ -938,6 +939,38 @@ export async function writeProjectStubs(scratchDir: string): Promise<void> {
   await mkdir(`${parent}/fence-aliases/app/server`, { recursive: true });
   await writeFile(`${parent}/fence-aliases/kernel/modules/account/account.token.ts`, accountToken);
   await writeFile(`${parent}/fence-aliases/app/server/context-keys.server.ts`, contextKeys);
+  // docs/pages.md: an orders module's token and a chat module's token, as
+  // `setu g module` writes them, plus the template's session accessors.
+  const ordersToken =
+    "import { requestServiceToken } from '@setu-ts/common';\n" +
+    'export interface Order {\n' +
+    '  readonly id: string;\n' +
+    '  readonly name: string;\n' +
+    '}\n' +
+    'export interface OrdersService {\n' +
+    '  parse(value: { readonly name?: unknown }): { readonly name: string } | string;\n' +
+    '  list(): Promise<readonly Order[]>;\n' +
+    '  create(input: { readonly name: string }): Promise<Order>;\n' +
+    '  attach(id: string, file: File): Promise<void>;\n' +
+    '  invoice(id: string): Promise<Uint8Array>;\n' +
+    '}\n' +
+    "export const ORDERS = requestServiceToken<OrdersService>('module.orders');\n";
+  const chatToken =
+    "import { requestServiceToken } from '@setu-ts/common';\n" +
+    'export interface ChatService {\n' +
+    '  answer(body: unknown): Promise<Response>;\n' +
+    '}\n' +
+    "export const CHAT = requestServiceToken<ChatService>('module.chat');\n";
+  const sessionAccess =
+    "import type { ISession } from '@setu-ts/common';\n" +
+    "import type { RouterLoadContext } from '@setu-ts/react-router-plugin';\n" +
+    'export declare function getSession(context: RouterLoadContext): ISession;\n' +
+    'export declare function getCsrfToken(context: RouterLoadContext): string;\n';
+  await mkdir(`${parent}/fence-aliases/kernel/modules/orders`, { recursive: true });
+  await mkdir(`${parent}/fence-aliases/kernel/modules/chat`, { recursive: true });
+  await writeFile(`${parent}/fence-aliases/kernel/modules/orders/orders.token.ts`, ordersToken);
+  await writeFile(`${parent}/fence-aliases/kernel/modules/chat/chat.token.ts`, chatToken);
+  await writeFile(`${parent}/fence-aliases/app/server/session.server.ts`, sessionAccess);
 }
 
 /**

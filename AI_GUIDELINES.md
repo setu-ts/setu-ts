@@ -1068,13 +1068,14 @@ findings as **inline review comments on specific lines**. Answer them the same w
 5. **A summary comment is optional and additional** — never a substitute for the per-thread replies.
    Use one only to state the round's overall result and the gate evidence.
 
-6. **A plan is corrected normally while it exists, and deleted when its milestone ships.** A
+6. **A plan is corrected normally while it is open, and archived when its milestone ships.** A
    milestone plan under `plans/` belongs to a milestone under construction; a plan that misstates a
    contract will produce wrong code, so §16.5's verify-first rule applies to it like any file. The
-   milestone's own PR deletes the plan when it flips the status — there is no `plans/archive/` — so
-   a finding against a plan that PR deletes is declined with that reason, and any half of it that
-   lands on the implementation (a symbol the plan names that the barrel never exported, say) is
-   fixed. Plans and `ROADMAP.md` live on `develop` only and never reach `main`.
+   milestone's own PR moves the plan to `plans/archive/` when it flips the status, so a finding
+   against a plan that PR archives is declined with that reason, and any half of it that lands on
+   the implementation (a symbol the plan names that the barrel never exported, say) is fixed. Plans
+   (archive included) and `ROADMAP.md` live on `develop` only; the release branch removes them, so
+   they never reach `main`.
 
 The same rules apply to a human reviewer's inline comments.
 
