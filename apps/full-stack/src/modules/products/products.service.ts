@@ -27,6 +27,13 @@ export interface ProductsService {
  * @param ctx - The kernel request context
  * @returns The request's products service
  */
+/**
+ * Creates run one at a time in this process: the duplicate check awaits a read,
+ * so two concurrent creates could otherwise both pass it. Several processes on
+ * one database still need a unique index on the name (see `create`).
+ */
+let creating: Promise<unknown> = Promise.resolve();
+
 export function productsService(ctx: IRequestContext): ProductsService {
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   const repository = () =>
@@ -50,15 +57,20 @@ export function productsService(ctx: IRequestContext): ProductsService {
       logger.debug('products: listing');
       return list();
     },
-    async create(input) {
-      const taken = (await list()).some(
-        (product) => product.name.toLowerCase() === input.name.toLowerCase(),
-      );
-      // A caller error: pageAction shows its detail in the form, an API route answers 409.
-      // Check-then-write is not atomic: a real store needs a unique index on the name,
-      // with its duplicate-key error mapped to this same conflict.
-      if (taken) throw conflict(`A product named ${input.name} already exists.`);
-      return repository().create({ id: crypto.randomUUID(), ...input });
+    create(input) {
+      const next = creating.then(async () => {
+        const taken = (await list()).some(
+          (product) => product.name.toLowerCase() === input.name.toLowerCase(),
+        );
+        // A caller error: pageAction shows its detail in the form, an API route answers 409.
+        // Across processes check-then-write is not atomic: a real store needs a unique index
+        // on the name, with its duplicate-key error mapped to this same conflict.
+        if (taken) throw conflict(`A product named ${input.name} already exists.`);
+        return repository().create({ id: crypto.randomUUID(), ...input });
+      });
+      // A refusal must not stop the next create from running.
+      creating = next.catch(() => undefined);
+      return next;
     },
   };
 }

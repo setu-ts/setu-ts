@@ -8,12 +8,13 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, type IRequestContext } from '@setu-ts/common';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApp } from './setu.config.ts';
 import type { Product } from './src/modules/products/products.types.ts';
 import { seedProducts } from './src/modules/products/products.seed.ts';
+import { productsService } from './src/modules/products/products.service.ts';
 
 const ORIGIN = 'http://full-stack.test';
 
@@ -250,6 +251,37 @@ describe('full-stack example', () => {
     const invalid = await postForm('/products?index', session, { _csrf: session.token, name: ' ' });
     assert.equal(invalid.status, 200);
     assert.ok((await invalid.text()).includes('A non-empty name is required.'));
+  });
+
+  it('refuses one of two concurrent creates with the same name', async () => {
+    // A repository that holds each read until two reads wait (or 50 ms pass), so
+    // both creates read before either writes unless the service queues them.
+    const rows: Product[] = [];
+    const waiting: (() => void)[] = [];
+    const release = () => waiting.splice(0).forEach((resume) => resume());
+    const repository = {
+      findAll: () =>
+        new Promise<readonly Product[]>((resolve) => {
+          waiting.push(() => resolve([...rows]));
+          if (waiting.length >= 2) release();
+          else setTimeout(release, 50);
+        }),
+      create: (row: Product) => {
+        rows.push(row);
+        return Promise.resolve(row);
+      },
+    };
+    const services = {
+      get: (token: string) =>
+        token === CAPABILITIES.DATABASE
+          ? { getRepository: () => repository }
+          : app.services.get(token),
+    };
+    const service = productsService({ services } as unknown as IRequestContext);
+    const input = { name: 'Concurrent', priceCents: 300 };
+    const settled = await Promise.allSettled([service.create(input), service.create(input)]);
+    assert.deepEqual(settled.map((result) => result.status).sort(), ['fulfilled', 'rejected']);
+    assert.equal(rows.length, 1);
   });
 
   it('downloads the catalogue as CSV from a resource route, behind sign-in', async () => {
