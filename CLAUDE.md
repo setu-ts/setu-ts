@@ -860,7 +860,7 @@ here.
 - **Milestone 142** (`packages/cli` — page actions in the module generator: `g module --page` writes
   a loader, an action and a CSRF form with no `/api` controller, `--page --api` adds the controller,
   and the service's trimming `parse` is the one input rule; widened 2026-11-20 to refusals in pages,
-  the template, `apps/full-stack`, `setu.W007` and `docs/pages.md`) — in progress.
+  the template, `apps/full-stack`, `setu.W007` and `docs/pages.md`) — complete (PR pending).
 - **Next milestone** — not yet chosen.
 
 ## Verification (run before declaring any work done)

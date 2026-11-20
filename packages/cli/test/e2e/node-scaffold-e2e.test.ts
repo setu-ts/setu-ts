@@ -118,6 +118,7 @@ function expectedFor(path: string, host: string): Partial<Served> & Record<strin
     case '/greetings/Setu':
       return { status: 200, landed: path, ...has('Setu') };
     case '/products':
+    case '/logout':
       // Behind sign-in: it must redirect, and land on the sign-in form.
       return { status: 200, landed: '/login', ...has('<form') };
     case '/login':

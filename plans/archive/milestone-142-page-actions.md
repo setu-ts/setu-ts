@@ -1,9 +1,7 @@
 # Milestone 142 — Page actions in the module generator (`@setu-ts/cli`)
 
-> **Status:** In progress — reopened 2026-11-20 and expanded (§0.1, §3.7–§3.15). §3.1–§3.6 are
-> implemented on the branch (commits `a119042af`…`f17c16474`). Branch: `feat/m142-page-actions`.
-> `main` and `develop` are protected — all work (implementation + fixes) stays on this one branch
-> until it merges via a single PR into `develop`.
+> **Status:** Complete — 2026-11-20. §3.1–§3.15 implemented, verified and security-audited (§10;
+> audit passed at `735d15884`). Branch: `feat/m142-page-actions`.
 
 ## 0. Objective & scope
 
