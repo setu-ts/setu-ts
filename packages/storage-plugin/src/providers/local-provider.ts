@@ -224,8 +224,11 @@ export class LocalStorageProvider implements StorageProvider {
     const resolved = await this.#resolvePath(path);
     try {
       return await this.#fs!.readFile(resolved);
-    } catch {
-      return null;
+    } catch (error) {
+      // Only an absent file is `null` (a 404); a permission or I/O failure
+      // rejects.
+      if (isFsNotFound(error)) return null;
+      throw error;
     }
   }
 

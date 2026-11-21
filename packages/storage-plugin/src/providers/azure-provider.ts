@@ -246,7 +246,9 @@ export function adaptAzureModule(
             generateSasUrl: (sasOptions) => {
               const generate = blob.generateSasUrl;
               if (generate === undefined) {
-                return Promise.reject(new RangeError('this blob client cannot sign'));
+                return Promise.reject(
+                  new RangeError('this blob client holds no shared key to sign with'),
+                );
               }
               return bound('getSignedUrl', () => generate.call(blob, sasOptions));
             },
@@ -299,8 +301,6 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
  */
 export class AzureBlobProvider implements StorageProvider {
   #client: IAzureBlobClient | null = null;
-  /** `true` when the client was injected: its calls are bounded here, by race. */
-  #injected = false;
   readonly #options: AzureBlobProviderOptions;
   readonly #now: (() => number) | undefined;
   readonly #deadline: StorageDeadline;
@@ -351,13 +351,11 @@ export class AzureBlobProvider implements StorageProvider {
         );
       }
       this.#client = injected;
-      this.#injected = true;
       this.#installProbe();
       return Promise.resolve();
     }
     return loadAzureModule().then((mod) => {
       this.#client = adaptAzureModule(mod, this.#options, this.#deadline);
-      this.#injected = false;
       this.#installProbe();
     });
   }
@@ -413,9 +411,9 @@ export class AzureBlobProvider implements StorageProvider {
   ): Promise<T> {
     this.#assertConnected();
     try {
-      return this.#injected
-        ? await runBounded(this.#deadline, 'azure', operation, run)
-        : await run();
+      // The whole call, the body read included; the adapted client also hands
+      // each SDK operation the bound's signal.
+      return await runBounded(this.#deadline, 'azure', operation, run);
     } catch (error) {
       if (notFound !== undefined && isAzureNotFound(error)) return notFound.value;
       throw toStorageError(error, 'azure', operation);
@@ -536,8 +534,11 @@ export class AzureBlobProvider implements StorageProvider {
           expiresOn: new Date(now() + options.expiresIn * 1000),
         });
       } catch (error) {
-        // The SDK refuses with a RangeError when the client holds no shared key.
-        if (error instanceof RangeError) throw signingRefusal();
+        // The SDK refuses with a RangeError naming the shared key when the
+        // client holds none; any other error (a bad expiry) passes through.
+        if (error instanceof RangeError && /shared key/i.test(error.message)) {
+          throw signingRefusal(error);
+        }
         throw error;
       }
     });
@@ -570,9 +571,10 @@ export class AzureBlobProvider implements StorageProvider {
 }
 
 /** The refusal for a client that cannot sign a SAS URL. */
-function signingRefusal(): Error {
+function signingRefusal(cause?: unknown): Error {
   return new Error(
     'AzureBlobProvider.getSignedUrl requires an account key (accountName + accountKey, or a connection string containing AccountKey); managed-identity user-delegation SAS is not supported',
+    cause === undefined ? undefined : { cause },
   );
 }
 

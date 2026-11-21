@@ -18,6 +18,7 @@ import {
   httpStatusHintOf,
   parseFormBody,
   respondWithError,
+  uploadMetadataOf,
   withUploadMetadata,
 } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
@@ -263,12 +264,21 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
   };
   // The brand describes what this middleware accepts, so a documentation
   // generator can show the route's multipart body; it changes no behaviour.
-  return withUploadMetadata(middleware, {
+  // Options the brand cannot describe are refused here, so a generator never
+  // silently loses the body.
+  const branded = withUploadMetadata(middleware, {
     fieldname,
     maxBytes: maxSize,
     ...(maxFiles === undefined ? {} : { maxFiles }),
     ...(allowedMimeTypes === undefined ? {} : { mimeTypes: allowedMimeTypes }),
   });
+  if (uploadMetadataOf(branded) === undefined) {
+    throw new RangeError(
+      'createUploadMiddleware: fieldname must be a non-empty string, maxSize and maxFiles ' +
+        'positive integers, and allowedMimeTypes an array of strings',
+    );
+  }
+  return branded;
 }
 
 /**

@@ -1,8 +1,8 @@
 /**
  * The `exists()` / `delete()` contract (V13-245), one table for every cloud
  * provider: `false` only for a definite not-found answer; an outage or a
- * refused credential rejects, classified; S3/B2 resolve `true` for an absent
- * key because `DeleteObject` cannot tell.
+ * refused credential rejects, classified; S3/B2 check with `HEAD` first, so an
+ * absent key is `false` there too.
  *
  * Each provider is driven through its real adapter over a fake SDK module, so
  * the adapter's own handling is what is tested.
@@ -131,7 +131,7 @@ const CONFORMANCE: readonly (readonly [
     s3Provider,
     {
       present: [true, true],
-      absent: [false, true],
+      absent: [false, false],
       outage: ['unavailable', 'unavailable'],
       refused: ['named', 'named'],
     },
@@ -213,5 +213,25 @@ describe('local provider: only an absent file is "not there" (V13-245)', () => {
     fault = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     await expect(provider.exists('a.txt')).rejects.toThrow('EACCES');
     await expect(provider.delete('a.txt')).rejects.toThrow('EACCES');
+  });
+});
+
+describe('local get: only an absent file is null (review fix)', () => {
+  it('rejects a permission error instead of answering 404', async () => {
+    const { LocalStorageProvider } = await import('../../src/providers/local-provider.ts');
+    let fault: Error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    const fs = {
+      stat: () => Promise.resolve({ size: 0 }),
+      readFile: () => Promise.reject(fault),
+      writeFile: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      readdir: () => Promise.resolve([]),
+    } as unknown as import('@setu-ts/common').IFileSystem;
+    const provider = new LocalStorageProvider(fs, { rootDir: '/root' }, () => 'node');
+    await provider.connect();
+    expect(await provider.get('a.txt')).toBeNull();
+    fault = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    await expect(provider.get('a.txt')).rejects.toThrow('EACCES');
   });
 });

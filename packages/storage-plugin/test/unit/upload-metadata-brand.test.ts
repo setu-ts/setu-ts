@@ -33,3 +33,11 @@ describe('createUploadMiddleware upload brand (V13-58)', () => {
     expect(metadata).not.toHaveProperty('mimeTypes');
   });
 });
+
+describe('createUploadMiddleware refuses options its brand cannot describe', () => {
+  for (const options of [{ maxSize: 0 }, { maxSize: 1.5 }, { maxFiles: 0 }, { fieldname: '' }]) {
+    it(`refuses ${JSON.stringify(options)}`, () => {
+      expect(() => createUploadMiddleware(options)).toThrow(RangeError);
+    });
+  }
+});

@@ -447,6 +447,16 @@ describe('AzureBlobProvider with an injected SDK-shaped client (V13-233)', () =>
     );
   });
 
+  it('passes a RangeError that is not about the shared key through (a bad expiry)', async () => {
+    const service = new FakeService();
+    service.blob.generateSasUrl = () => Promise.reject(new RangeError('Invalid time value'));
+    const provider = new AzureBlobProvider({ containerName: 'c', client: service }, () => NOW);
+    await provider.connect();
+    await expect(provider.getSignedUrl('k', { expiresIn: 60 })).rejects.toThrow(
+      'Invalid time value',
+    );
+  });
+
   it("maps the SDK's no-shared-key RangeError to the account-key refusal", async () => {
     const service = new FakeService();
     service.blob.generateSasUrl = () =>

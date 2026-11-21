@@ -237,7 +237,7 @@ describe.skipIf(S3 === undefined)('s3 on MinIO', () => {
     return name;
   }
 
-  it('round-trips; delete of an absent key is true, exists false (V13-245)', async () => {
+  it('round-trips; delete of an absent key is false, exists false (V13-245)', async () => {
     const provider = new S3Provider({
       bucket: await bucket(),
       region: 'us-east-1',
@@ -247,7 +247,7 @@ describe.skipIf(S3 === undefined)('s3 on MinIO', () => {
     });
     await provider.connect();
     await roundTrip(provider, 'docs/a.txt');
-    expect(await provider.delete('docs/a.txt')).toBe(true);
+    expect(await provider.delete('docs/a.txt')).toBe(false);
     await provider.put('signed.txt', encoder.encode('presigned'));
     expect(
       await (await fetch(await provider.getSignedUrl('signed.txt', { expiresIn: 60 }))).text(),

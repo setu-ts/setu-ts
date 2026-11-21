@@ -114,10 +114,14 @@ export function createProvider(
             "'us-west-004') or options.endpoint",
         );
       }
-      const region = b2Opts.region;
-      const endpoint =
-        b2Opts.endpoint ??
-        (region === undefined ? undefined : `https://s3.${region}.backblazeb2.com`);
+      // A Backblaze endpoint names its region (`s3.<region>.backblazeb2.com`),
+      // which SigV4 signs with; any other endpoint signs with `us-east-1`, as
+      // an S3-compatible server expects.
+      const region =
+        b2Opts.region ??
+        /^https?:\/\/s3\.([a-z0-9-]+)\.backblazeb2\.com/i.exec(b2Opts.endpoint ?? '')?.[1] ??
+        'us-east-1';
+      const endpoint = b2Opts.endpoint ?? `https://s3.${region}.backblazeb2.com`;
       return new S3Provider(
         {
           region,

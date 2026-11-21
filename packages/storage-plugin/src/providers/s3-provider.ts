@@ -192,9 +192,17 @@ export function adaptAwsS3Module(
         throw error;
       }
     },
-    // S3's DeleteObject answers 204 whether or not the key existed, so a
-    // delete the store accepted is `true`; every failure rejects.
+    // S3's DeleteObject answers 204 whether or not the key existed, so the key
+    // is checked with HEAD first: an absent key is `false`, as on every other
+    // provider. An object removed between the two requests still answers
+    // `true`. A failure of either request rejects.
     async delete(path: string): Promise<boolean> {
+      try {
+        await send('delete', new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }));
+      } catch (error) {
+        if (isS3NotFound(error)) return false;
+        throw error;
+      }
       await send('delete', new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }));
       return true;
     },
@@ -310,8 +318,6 @@ export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
  */
 export class S3Provider implements StorageProvider {
   #client: IS3Backend | null = null;
-  /** `true` when the client was injected: its calls are bounded here, by race. */
-  #injected = false;
   readonly #options: S3ProviderOptions;
   readonly #deadline: StorageDeadline;
   readonly #name: string;
@@ -335,16 +341,16 @@ export class S3Provider implements StorageProvider {
   }
 
   /**
-   * Runs one client call: bounded here for an injected client (the adapted
-   * client bounds its own SDK calls), and classified on rejection.
+   * Runs one client call under the bound and classifies its rejection. The
+   * bound covers the whole call, the body read included; the adapted client
+   * also hands each SDK request the bound's signal, so an expired bound aborts
+   * the request it holds.
    */
   async #call<T>(operation: StorageOperation, run: (client: IS3Backend) => Promise<T>): Promise<T> {
     this.#assertConnected();
     const client = this.#client!;
     try {
-      return this.#injected
-        ? await runBounded(this.#deadline, this.#name, operation, () => run(client))
-        : await run(client);
+      return await runBounded(this.#deadline, this.#name, operation, () => run(client));
     } catch (error) {
       throw toStorageError(error, this.#name, operation);
     }
@@ -363,7 +369,6 @@ export class S3Provider implements StorageProvider {
         );
       }
       this.#client = injected;
-      this.#injected = true;
       return;
     }
     this.#client = adaptAwsS3Module(
@@ -372,7 +377,6 @@ export class S3Provider implements StorageProvider {
       this.#deadline,
       this.#name,
     );
-    this.#injected = false;
   }
 
   /** Disconnect is a no-op for S3 (connectionless HTTP client). */
@@ -439,11 +443,12 @@ export class S3Provider implements StorageProvider {
 
   /**
    * Deletes an object from S3. S3's `DeleteObject` answers alike whether or
-   * not the key existed, so an accepted delete resolves `true` for an absent
-   * key too; an outage or a refused credential rejects.
+   * not the key existed, so the adapted client checks with `HEAD` first and
+   * resolves `false` for an absent key, the answer every provider gives; an
+   * outage or a refused credential rejects.
    *
    * @param path - Object key
-   * @returns `true` when the store accepted the delete
+   * @returns `true` if an object was deleted
    */
   delete(path: string): Promise<boolean> {
     return this.#call('delete', (client) => client.delete(path));
