@@ -80,8 +80,15 @@ class RequestContext implements IRequestContext {
   #slotKey: object | undefined;
   #slotValue: unknown;
   #slotOverflow: { readonly key: object; readonly value: unknown }[] | undefined;
+  readonly #onAbort: ((ctx: IRequestContext) => void) | undefined;
 
-  constructor(request: IRequest, registry: ServiceRegistry, runtime: IRuntimeServices) {
+  constructor(
+    request: IRequest,
+    registry: ServiceRegistry,
+    runtime: IRuntimeServices,
+    onAbort?: (ctx: IRequestContext) => void,
+  ) {
+    this.#onAbort = onAbort;
     this.request = request;
     this.#registry = registry;
     this.#runtime = runtime;
@@ -195,7 +202,35 @@ class RequestContext implements IRequestContext {
       void runDeferred([cleanup], this.#registry);
       return;
     }
-    (this.#deferred ??= []).push(cleanup);
+    if (this.#deferred === undefined) {
+      this.#deferred = [];
+      this.#watchAbort();
+    }
+    this.#deferred.push(cleanup);
+  }
+
+  /**
+   * Runs pending cleanups once if the request's own signal aborts before the
+   * response settled — a handler that never settles because the client (or
+   * a caller's deadline) went away. Attached only on the first `defer`, and
+   * only when the adapter's request carries a signal: the `signal` getter is
+   * never read here, because it allocates a controller for a request with
+   * none.
+   */
+  #watchAbort(): void {
+    const signal = this.request.signal;
+    if (signal === undefined) return;
+    const aborted = (): void => {
+      if (this.#completed) return;
+      const cleanups = this.takeDeferred();
+      this.#onAbort?.(this);
+      if (cleanups !== undefined) void runDeferred(cleanups, this.#registry);
+    };
+    if (signal.aborted) {
+      queueMicrotask(aborted);
+      return;
+    }
+    signal.addEventListener('abort', aborted, { once: true });
   }
 
   /** Internal completion handoff; no list is allocated for an unused request. */
@@ -219,6 +254,7 @@ class RequestContext implements IRequestContext {
  * @param registry - The application-scoped service registry (a child is created
  *   on first `ctx.services` read)
  * @param runtime - Runtime services for uuid and hrtime
+ * @param onAbort - Called once when the request's signal ran pending cleanups
  * @returns The request context handle
  * @since 0.11.0
  * @internal
@@ -227,9 +263,10 @@ export function createRequestContext(
   request: IRequest,
   registry: ServiceRegistry,
   runtime: IRuntimeServices,
+  onAbort?: (ctx: IRequestContext) => void,
 ): RequestContextHandle {
   sealRequestIdentity(request);
-  const ctx = new RequestContext(request, registry, runtime);
+  const ctx = new RequestContext(request, registry, runtime, onAbort);
   return {
     ctx,
     setParams(next: Record<string, string>): void {

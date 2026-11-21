@@ -71,7 +71,10 @@ export function runDeferred(
 
 /**
  * Wraps a streaming body without prefetching. Cleanup and drain accounting run
- * once when the source ends, errors, or the consumer cancels.
+ * once when the source ends, errors, or the consumer cancels — or, when a
+ * signal is given and there is cleanup to run, when that signal aborts first
+ * (a client that left on a runtime that never cancels the body, such as
+ * workerd). On abort the source is cancelled after the cleanups start.
  *
  * @param body - Source streaming body
  *
@@ -80,6 +83,10 @@ export function runDeferred(
  * @param registry - Optional failure reporting capability source
  *
  * @param complete - Releases in-flight accounting after cleanup
+ *
+ * @param signal - The request's own signal, when the adapter supplied one
+ *
+ * @param onAbort - Called once when the signal, not the stream, ran the cleanups
  *
  * @returns The wrapped streaming body
  *
@@ -92,6 +99,8 @@ export function wrapDeferredStream(
   cleanups: DeferredCleanup[],
   registry: IServiceRegistry,
   complete: () => void,
+  signal?: AbortSignal,
+  onAbort?: () => void,
 ): ReadableStream<Uint8Array> {
   const finish = (): void | Promise<void> => {
     const pending = runDeferred(cleanups, registry);
@@ -103,8 +112,21 @@ export function wrapDeferredStream(
   const once = (): void | Promise<void> => {
     if (completed) return;
     completed = true;
+    signal?.removeEventListener('abort', aborted);
     return finish();
   };
+  function aborted(): void {
+    if (completed) return;
+    onAbort?.();
+    void once();
+    reader.cancel(signal?.reason).catch(() => {});
+  }
+  // A listener only when there is work it could run early: an abort with no
+  // cleanup changes nothing the stream's own cancel would not.
+  if (signal !== undefined && cleanups.length > 0) {
+    if (signal.aborted) aborted();
+    else signal.addEventListener('abort', aborted, { once: true });
+  }
   return new ReadableStream<Uint8Array>(
     {
       async pull(controller): Promise<void> {

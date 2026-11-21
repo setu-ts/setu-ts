@@ -384,7 +384,11 @@ export interface IRequestContext {
    * is sent immediately and cleanup waits for the running handler — even past
    * shutdown: a handler still running when `stop()`'s drain bound expires has
    * its cleanup run when it settles, after `stop()` returned. Streaming
-   * responses also wait for end, error, or cancellation.
+   * responses also wait for end, error, or cancellation. Whichever comes
+   * first, a client that leaves also runs them: when the adapter's request
+   * carries an `AbortSignal`, its abort runs pending cleanups once (on
+   * Cloudflare Workers the signal needs the `enable_request_signal`
+   * compatibility flag before the 2026-11-17 compatibility date).
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
    * continues with the next cleanup. Later settlement is ignored. Synchronous

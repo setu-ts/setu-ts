@@ -29,8 +29,13 @@ function isEmptyChunk(value: unknown): boolean {
  * Every non-empty chunk passes through unchanged and in order; completion,
  * errors and cancellation reach the source exactly as before.
  *
+ * A source error is handed once to `onError` (the kernel logs it with the
+ * request in scope) and then re-raised, so the adapter still aborts the
+ * response.
+ *
  * @param body - The handler's streamed body
  * @param runtime - Supplies the timer that yields between empty chunks
+ * @param onError - Told once about a source error before it is re-raised
  * @returns A stream with no empty chunks
  *
  * @internal
@@ -38,6 +43,7 @@ function isEmptyChunk(value: unknown): boolean {
 export function guardEmptyChunks(
   body: ReadableStream<Uint8Array>,
   runtime: IRuntimeServices,
+  onError?: (error: unknown) => void,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   const nextTurn = (): Promise<void> =>
@@ -48,7 +54,13 @@ export function guardEmptyChunks(
     {
       async pull(controller): Promise<void> {
         for (;;) {
-          const chunk = await reader.read();
+          let chunk: ReadableStreamReadResult<Uint8Array>;
+          try {
+            chunk = await reader.read();
+          } catch (error) {
+            onError?.(error);
+            throw error;
+          }
           if (chunk.done) {
             controller.close();
             return;

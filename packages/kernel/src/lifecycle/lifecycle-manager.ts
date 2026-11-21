@@ -74,6 +74,8 @@ export class LifecycleManager implements ILifecycleApi {
   readonly #shutdown: VoidHook[] = [];
   readonly #close: VoidHook[] = [];
   #observer: LifecycleObserver | undefined;
+  /** Set once a start was cancelled: late close hooks go here, every other registration is dropped. */
+  #lateClose: ((fn: VoidHook) => void) | undefined;
 
   /**
    * Installs the diagnostics observer for hook invocations. Pass `undefined`
@@ -86,39 +88,64 @@ export class LifecycleManager implements ILifecycleApi {
     this.#observer = observer;
   }
 
+  /**
+   * Switches the manager into its post-cancellation mode, after `stop()`
+   * cancelled a `start()` whose plugin work may still be running. From now on
+   * a close hook is handed to `runLateClose` at once, so a resource that work
+   * connects late is still released; every other registration is ignored,
+   * because the phase it belongs to will never run.
+   *
+   * @param runLateClose - Runs one late close hook
+   */
+  cancelRegistrations(runLateClose: (fn: VoidHook) => void): void {
+    this.#lateClose = runLateClose;
+  }
+
   onRegister(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#register.push(fn);
   }
 
   onInit(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#init.push(fn);
   }
 
   onBootstrap(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#bootstrap.push(fn);
   }
 
   onRequest(fn: (ctx: IRequestContext) => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#request.push(fn);
   }
 
   onResponse(fn: (ctx: IRequestContext) => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#response.push(fn);
   }
 
   onError(fn: (error: Error, ctx: IRequestContext) => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#error.push(fn);
   }
 
   onStopping(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#stopping.push(fn);
   }
 
   onShutdown(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) return;
     this.#shutdown.push(fn);
   }
 
   onClose(fn: () => void | Promise<void>): void {
+    if (this.#lateClose !== undefined) {
+      this.#lateClose(fn);
+      return;
+    }
     this.#close.push(fn);
   }
 

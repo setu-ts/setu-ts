@@ -255,6 +255,7 @@ export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding
 
 // Runtime abstraction
 export type {
+  FatalErrorOrigin,
   IDnsResolver,
   IFileSystem,
   IHttpAdapter,

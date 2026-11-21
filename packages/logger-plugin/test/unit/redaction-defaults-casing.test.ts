@@ -77,6 +77,7 @@ describe('default logger redaction casing', () => {
       pinoRedact = options.redact;
       return pino;
     };
+    let inbound: Record<string, unknown> | undefined;
     const pinoApp = createApplication({
       plugins: [RuntimePlugin(), LoggerPlugin({ transport: 'pino', pinoFactory })],
     });
@@ -84,11 +85,13 @@ describe('default logger redaction casing', () => {
       await pinoApp.start();
       const logger = pinoApp.services.get<ILogger>(CAPABILITIES.LOGGER);
       logger.info('inbound', headers);
+      // Read before stop(), which writes its own lines through the same logger.
+      inbound = pinoRecord;
     } finally {
       await pinoApp.stop();
     }
     expect(pinoRedact).toBeUndefined();
-    expect(pinoRecord).toMatchObject({ authorization: '[Redacted]', cookie: '[Redacted]' });
+    expect(inbound).toMatchObject({ authorization: '[Redacted]', cookie: '[Redacted]' });
   });
 
   it('redacts normalized authorization and cookie headers through both transports', async () => {

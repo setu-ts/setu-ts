@@ -12,7 +12,7 @@ import type {
   LogLevel,
   LogMetadata,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, setUpgradeIntent } from '@setu-ts/common';
 
 import { createRequestLoggerMiddleware } from '../../src/middleware/request-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -321,6 +321,47 @@ describe('createRequestLoggerMiddleware', () => {
     const completed = logger.entries.find((e) => e.message === 'request completed');
     expect(completed).toBeDefined();
     expect(completed!.metadata.status).toBe(404);
+  });
+
+  it('logs 101 for an accepted WebSocket upgrade (V13-223)', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    const { ctx } = createFakeContext(logger);
+    await middleware(ctx, async () => {
+      setUpgradeIntent(ctx.request, {
+        sink: { onOpen: () => {}, onMessage: () => {}, onClose: () => {}, onError: () => {} },
+      });
+    });
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata.status).toBe(101);
+    expect(completed!.metadata).not.toHaveProperty('aborted');
+  });
+
+  it('logs 499 and aborted for a client that left, not the 500 the handler set (V13-110)', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    const client = new AbortController();
+    const { ctx } = createFakeContext(logger, {
+      request: { ...createFakeRequest('GET', '/page'), signal: client.signal },
+    });
+    await middleware(ctx, async () => {
+      client.abort();
+      ctx.response.status(500).send('render failed');
+    });
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
+  });
+
+  it('keeps the served status while the request signal is live', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    const client = new AbortController();
+    const { ctx } = createFakeContext(logger, {
+      request: { ...createFakeRequest('GET', '/page'), signal: client.signal },
+    });
+    await middleware(ctx, async () => {
+      ctx.response.status(500).send('render failed');
+    });
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata.status).toBe(500);
+    expect(completed!.metadata).not.toHaveProperty('aborted');
   });
 
   it('logs the default 200 status when the handler sets none', async () => {

@@ -29,15 +29,24 @@ export type ServerHandle = unknown;
 /**
  * A process-termination signal an application can shut down gracefully on.
  *
- * Deliberately narrow. These two are the signals an orchestrator actually
- * sends — Kubernetes and `docker stop` send `SIGTERM`, a terminal sends
- * `SIGINT` — and they are the only two every non-edge runtime this framework
- * targets can register for. Widening the union would promise handling for
- * signals that are unavailable, unmaskable, or platform-specific.
+ * Deliberately narrow. These are the signals an application is actually sent
+ * when it is meant to end: Kubernetes and `docker stop` send `SIGTERM`, a
+ * terminal sends `SIGINT` on Ctrl+C, and a closed terminal or a lost SSH
+ * session sends `SIGHUP`. All three can be registered on Node, Bun and Deno
+ * on POSIX. Widening the union further would promise handling for signals
+ * that are unavailable, unmaskable, or platform-specific.
  *
- * @since 0.3.0
+ * @since 0.3.0 (`'SIGHUP'` since 0.14.0)
  */
-export type RuntimeSignal = 'SIGTERM' | 'SIGINT';
+export type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP';
+
+/**
+ * How an error escaped every handler and is ending the process: thrown and
+ * not caught, or a rejected promise nobody handled.
+ *
+ * @since 0.14.0
+ */
+export type FatalErrorOrigin = 'uncaughtException' | 'unhandledRejection';
 
 /**
  * File metadata returned by {@linkcode IFileSystem.stat}.
@@ -450,6 +459,36 @@ export interface IRuntimeServices {
    * @since 0.3.0
    */
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
+
+  /**
+   * Observes an error that is about to end the process: an uncaught exception
+   * or an unhandled rejection. The handler runs before the process dies, so a
+   * structured logger can record why it died.
+   *
+   * It OBSERVES only. The process still ends with the runtime's own exit code
+   * and the runtime still prints its own report on stderr; registering a
+   * handler never keeps a process alive. Node uses
+   * `uncaughtExceptionMonitor`; Deno the global `error` and
+   * `unhandledrejection` events, without `preventDefault()`; Bun
+   * `uncaughtExceptionMonitor` for thrown errors and, because a Bun
+   * `unhandledRejection` listener would otherwise suppress the crash, an
+   * `unhandledRejection` listener that rethrows the reason unless the
+   * application registered its own. A crash is reported once per process.
+   *
+   * Absent on Cloudflare Workers, where an exception ends a request, not the
+   * isolate. A handler that throws is ignored.
+   *
+   * @param handler - Called with the error and how it escaped
+   * @returns Removes the handler
+   * @example
+   * ```typescript
+   * const stop = runtime.onFatalError?.((error, origin) => {
+   *   logger.fatal('Process failed', { origin, error: describeError(error) });
+   * });
+   * ```
+   * @since 0.14.0
+   */
+  onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
 }
 
 /**
@@ -495,6 +534,23 @@ export interface IHttpAdapter {
    * @param handle - The server handle returned by `listen`
    */
   close(handle: ServerHandle): Promise<void>;
+  /**
+   * Starts the drain: tells clients with persistent connections that this
+   * server is going away, while every request already in flight continues.
+   * The kernel calls it once, as `stop()` begins draining, before
+   * {@linkcode IHttpAdapter.close}.
+   *
+   * The Node adapter sends HTTP/2 `GOAWAY` on every open session (a client
+   * then opens new streams elsewhere; a stream it opened after the `GOAWAY`
+   * is refused without being processed) and closes idle HTTP/1.1
+   * keep-alive connections. Bun serving HTTP/2 runs on the Node adapter.
+   * Absent on Deno, whose `Deno.serve` gives no session control, and on
+   * Workers, which has no server to drain.
+   *
+   * @param handle - The server handle returned by `listen`
+   * @since 0.14.0
+   */
+  beginDrain?(handle: ServerHandle): void;
   /**
    * Installs a WebSocket upgrade router. The adapter stores the router but does
    * not consult it: since M70a the kernel's terminal handler resolves

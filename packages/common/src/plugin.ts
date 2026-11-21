@@ -424,6 +424,18 @@ export interface StartOptions {
   readonly port?: number;
   /** Bind address (defaults to all interfaces). */
   readonly hostname?: string;
+  /**
+   * The longest `stop()` waits for in-flight requests to finish before it
+   * closes the server, in milliseconds. A whole number from 0 to
+   * 2 147 483 647; `0` does not wait. `start()` refuses any other value with a
+   * `TypeError` before a plugin registers. Defaults to 10 000.
+   *
+   * Keep it below the time your orchestrator allows between `SIGTERM` and
+   * `SIGKILL`, less any pre-stop delay and the time your shutdown hooks need.
+   *
+   * @since 0.14.0
+   */
+  readonly drainTimeoutMs?: number;
 }
 
 /** Options for in-process dispatch through the application's request pipeline.
@@ -557,6 +569,17 @@ export interface IPluginContext {
   readonly options: Readonly<Record<string, unknown>>;
   /** The owning application. */
   readonly app: IApplication;
+  /**
+   * Aborts when `stop()` is called before `start()` has finished. A plugin
+   * that waits during startup (connecting to a backend in `register()` or an
+   * `onInit` hook) can pass it to that wait so the start ends promptly.
+   *
+   * The kernel always sets it. It is optional only so a context built by a
+   * test helper need not supply one.
+   *
+   * @since 0.14.0
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**

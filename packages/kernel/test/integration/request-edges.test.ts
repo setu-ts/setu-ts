@@ -1,0 +1,312 @@
+/**
+ * Request-path behaviours that differed between runtimes or were silent:
+ * implicit `HEAD` on `GET` routes, cleanup when the client leaves, a failed
+ * response stream logged once, and streamed RPC replies holding the drain.
+ *
+ * @module
+ */
+import { describe, expect, it } from 'vitest';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IGrpcService, IPlugin, IPluginContext, RpcReply } from '@setu-ts/common';
+
+import { createApplication } from '../../src/index.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { runtimePlugin } from '../fixtures/runtime-plugin.ts';
+import { recordingLogger, withMessage } from '../fixtures/recording-logger.ts';
+import type { LogCall } from '../fixtures/recording-logger.ts';
+
+const encoder = new TextEncoder();
+
+/** Lets pending promise callbacks run. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A body the test feeds by hand; never ends unless told to. */
+function manualStream(onCancel?: () => void): {
+  stream: ReadableStream<Uint8Array>;
+  push: (text: string) => void;
+  close: () => void;
+} {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c;
+    },
+    cancel() {
+      onCancel?.();
+    },
+  });
+  return {
+    stream,
+    push: (text) => controller.enqueue(encoder.encode(text)),
+    close: () => controller.close(),
+  };
+}
+
+describe('implicit HEAD on GET routes (V13-113)', () => {
+  it('answers HEAD from a GET route with its headers and no body', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    app.router.get('/doc', (ctx) => {
+      ctx.response.header('x-doc', 'yes').json({ hello: 'world' });
+    });
+    await app.start();
+    const get = await app.inject({ method: 'GET', url: '/doc' });
+    const head = await app.inject({ method: 'HEAD', url: '/doc' });
+    expect(head.statusCode).toBe(200);
+    expect(head.body).toBeNull();
+    expect(head.headers.get('x-doc')).toBe('yes');
+    expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
+    expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
+
+    const dispatched = await app.dispatch!(new Request('http://localhost/doc', { method: 'HEAD' }));
+    expect(dispatched.status).toBe(200);
+    expect(await dispatched.text()).toBe('');
+  });
+
+  it('cancels a streamed GET body under HEAD so its cleanup runs', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    let cancelled = false;
+    let cleaned = 0;
+    app.router.get('/feed', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned++;
+      });
+      ctx.response.stream(
+        manualStream(() => {
+          cancelled = true;
+        }).stream,
+      );
+    });
+    await app.start();
+    const head = await app.inject({ method: 'HEAD', url: '/feed' });
+    await flush();
+    expect(head.body).toBeNull();
+    expect(cancelled).toBe(true);
+    expect(cleaned).toBe(1);
+  });
+
+  it('prefers an explicit HEAD route at equal rank, and a specific GET over a catch-all HEAD', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    app.router.get('/same', (ctx) => {
+      ctx.response.header('x-from', 'get').send('g');
+    });
+    app.router.head('/same', (ctx) => {
+      ctx.response.header('x-from', 'head').send('');
+    });
+    app.router.get('/assets/*', (ctx) => {
+      ctx.response.header('x-from', 'asset').send('a');
+    });
+    app.router.head('/*', (ctx) => {
+      ctx.response.header('x-from', 'catch-all').send('');
+    });
+    await app.start();
+    expect((await app.inject({ method: 'HEAD', url: '/same' })).headers.get('x-from')).toBe('head');
+    expect((await app.inject({ method: 'HEAD', url: '/assets/a.js' })).headers.get('x-from')).toBe(
+      'asset',
+    );
+    expect((await app.inject({ method: 'HEAD', url: '/other' })).headers.get('x-from')).toBe(
+      'catch-all',
+    );
+    // GET is unaffected by HEAD routes.
+    expect((await app.inject({ method: 'GET', url: '/same' })).body).toBe('g');
+  });
+});
+
+describe('cleanup when the client leaves (V13-200)', () => {
+  it('runs the cleanup of a handler that never settles when the request aborts', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    let cleaned = 0;
+    app.router.get('/hang', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned++;
+      });
+      return new Promise<void>(() => {});
+    });
+    await app.start();
+    const client = new AbortController();
+    void app.dispatch!(new Request('http://localhost/hang', { signal: client.signal }));
+    await flush();
+    expect(cleaned).toBe(0);
+    client.abort();
+    await flush();
+    expect(cleaned).toBe(1);
+    expect(withMessage(calls, 'Request aborted before completion')[0]?.metadata).toMatchObject({
+      method: 'GET',
+      path: '/hang',
+    });
+  });
+
+  it('runs the cleanup of a stream the client stops reading without cancelling', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    let cleaned = 0;
+    let sourceCancelled = false;
+    app.router.get('/stream', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned++;
+      });
+      const body = manualStream(() => {
+        sourceCancelled = true;
+      });
+      body.push('first');
+      ctx.response.stream(body.stream);
+    });
+    await app.start();
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/stream', { signal: client.signal }),
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    // workerd's shape: the client is gone, the body is never cancelled.
+    client.abort();
+    await flush();
+    expect(cleaned).toBe(1);
+    expect(sourceCancelled).toBe(true);
+  });
+
+  it('runs a cleanup once when the request aborts after the response settled', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    let cleaned = 0;
+    app.router.get('/quick', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned++;
+      });
+      ctx.response.send('ok');
+    });
+    await app.start();
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/quick', { signal: client.signal }),
+    );
+    expect(await response.text()).toBe('ok');
+    client.abort();
+    await flush();
+    expect(cleaned).toBe(1);
+  });
+
+  it('logs nothing for an abort of a request that deferred nothing', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    app.router.get('/hang', () => new Promise<void>(() => {}));
+    await app.start();
+    const client = new AbortController();
+    void app.dispatch!(new Request('http://localhost/hang', { signal: client.signal }));
+    await flush();
+    client.abort();
+    await flush();
+    expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(0);
+  });
+});
+
+describe('a failed response stream (V13-256)', () => {
+  it('logs the failure once against the request and still errors the body', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    app.router.get('/broken', (ctx) => {
+      let sent = false;
+      ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(encoder.encode('a'));
+              return;
+            }
+            controller.error(new Error('source failed'));
+          },
+        }),
+      );
+    });
+    await app.start();
+    const response = await app.dispatch!(new Request('http://localhost/broken'));
+    await expect(response.text()).rejects.toThrow('source failed');
+    const lines = withMessage(calls, 'Response stream failed');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({
+      level: 'error',
+      metadata: { method: 'GET', path: '/broken', status: 200, error: 'Error: source failed' },
+    });
+    expect(typeof lines[0]?.metadata?.['requestId']).toBe('string');
+  });
+});
+
+describe('streamed RPC replies hold the drain (V13-23)', () => {
+  /** A gRPC double answering every call with the given streamed body. */
+  function grpcReplying(body: ReadableStream<Uint8Array>): IPlugin {
+    const service = {
+      available: true,
+      addService: () => undefined,
+      claims: () => true,
+      handleRequest: () => Promise.resolve(new Response(null)),
+      handleRpc: (): Promise<RpcReply> =>
+        Promise.resolve({ status: 200, headers: new Headers(), body }),
+    } as unknown as IGrpcService;
+    return {
+      name: 'fake-grpc',
+      version: '1.0.0',
+      provides: [CAPABILITIES.GRPC],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.GRPC, service);
+      },
+    };
+  }
+
+  /** A runtime plugin over a fake with a manual clock. */
+  function fakeRuntime(fake: ReturnType<typeof createFakeRuntime>): IPlugin {
+    return {
+      name: 'fake-runtime',
+      version: '1.0.0',
+      provides: [CAPABILITIES.RUNTIME],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+      },
+    };
+  }
+
+  async function stopsWithin(
+    fake: ReturnType<typeof createFakeRuntime>,
+    stopping: Promise<void>,
+  ): Promise<boolean> {
+    let done = false;
+    void stopping.then(() => {
+      done = true;
+    });
+    for (let i = 0; i < 4; i++) {
+      fake.tick(50);
+      await flush();
+    }
+    return done;
+  }
+
+  it('keeps stop() waiting until a streamed RPC reply ends', async () => {
+    const fake = createFakeRuntime();
+    const body = manualStream();
+    body.push('message');
+    const app = createApplication({ plugins: [fakeRuntime(fake), grpcReplying(body.stream)] });
+    await app.start();
+    const response = await app.dispatch!(
+      new Request('http://localhost/pkg.Svc/Watch', { method: 'POST' }),
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    const stopping = app.stop();
+    expect(await stopsWithin(fake, stopping)).toBe(false);
+    body.close();
+    await reader.read();
+    expect(await stopsWithin(fake, stopping)).toBe(true);
+  });
+
+  it('does not hold the drain for a plain streamed route', async () => {
+    const fake = createFakeRuntime();
+    const app = createApplication({ plugins: [fakeRuntime(fake)] });
+    const body = manualStream();
+    app.router.get('/events', (ctx) => {
+      ctx.response.stream(body.stream);
+    });
+    await app.start();
+    await app.dispatch!(new Request('http://localhost/events'));
+    expect(await stopsWithin(fake, app.stop())).toBe(true);
+  });
+});

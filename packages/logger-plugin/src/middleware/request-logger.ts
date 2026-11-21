@@ -17,6 +17,7 @@ import {
   createPathMatcher,
   ERROR_RESPONDER_STATE_KEY,
   fallbackErrorStatus,
+  upgradeIntentOf,
 } from '@setu-ts/common';
 
 import { NoopLogger } from '../loggers/noop-logger.ts';
@@ -40,6 +41,10 @@ export interface RequestLoggerOptions {
 
 /** Default slow-request threshold in milliseconds. */
 const DEFAULT_SLOW_THRESHOLD = 5000;
+/** Logged for an accepted WebSocket upgrade, which the adapter answers after this middleware. */
+const SWITCHING_PROTOCOLS = 101;
+/** Logged when the client left before the response: the access-log "client closed request" code. */
+const CLIENT_CLOSED_REQUEST = 499;
 
 /**
  * Creates middleware that logs completion at info and arrival at debug.
@@ -95,12 +100,24 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
       const duration = runtime.hrtime() - start;
       // On a throw, errorHandler serves only after this finally has unwound.
       // Its pure rule predicts that response while the snapshot is still 200.
-      const status = errorStatus ?? readStatus(ctx);
+      // An accepted upgrade is answered 101 on the wire after this middleware
+      // returns; a client that left received nothing, so its line must not
+      // read as a 5xx (499 is the access-log code for "client closed request").
+      // `ctx.request.signal`, not `ctx.signal`: the getter allocates a
+      // controller for a request whose adapter supplied none.
+      const upgraded = upgradeIntentOf(ctx.request) !== undefined;
+      const aborted = !upgraded && ctx.request.signal?.aborted === true;
+      const status = upgraded
+        ? SWITCHING_PROTOCOLS
+        : aborted
+          ? CLIENT_CLOSED_REQUEST
+          : (errorStatus ?? readStatus(ctx));
       requestLogger.info('request completed', {
         method: ctx.request.method,
         path,
         status,
         duration,
+        ...(aborted ? { aborted: true } : {}),
       });
       if (!errored && duration > threshold) {
         requestLogger.warn('slow request', {
