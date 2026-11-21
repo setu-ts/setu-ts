@@ -530,9 +530,8 @@ silent without a logger.
 signal API. It is **optional in two directions**, and both matter: Cloudflare Workers omits it
 because an isolate is evicted rather than signalled, and the Deno adapter omits it **on Windows**,
 where registering for `SIGTERM` throws. Call it as `runtime.onSignal?.(...)` — a present key means
-"this runtime can register one", never "this platform raises signals".
-`RuntimeSignal` is `'SIGTERM' | 'SIGINT' | 'SIGHUP'`; `SIGHUP` is what a closed terminal or a lost
-session sends.
+"this runtime can register one", never "this platform raises signals". `RuntimeSignal` is
+`'SIGTERM' | 'SIGINT' | 'SIGHUP'`; `SIGHUP` is what a closed terminal or a lost session sends.
 
 `onFatalError` observes an uncaught exception or an unhandled rejection that is about to end the
 process, and returns a function that removes the handler. It never keeps the process alive: the

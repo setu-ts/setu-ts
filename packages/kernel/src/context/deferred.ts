@@ -115,8 +115,8 @@ export function wrapDeferredStream(
     signal?.removeEventListener('abort', aborted);
     return finish();
   };
+  // `once()` removes this listener, so it never runs after completion.
   function aborted(): void {
-    if (completed) return;
     onAbort?.();
     void once();
     reader.cancel(signal?.reason).catch(() => {});
