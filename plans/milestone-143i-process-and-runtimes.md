@@ -175,7 +175,8 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   with `http2` set the runtime plugin already runs Bun on the Node adapter, which brings Node's
   `beginDrain`. Deno omits the member: `Deno.serve` gives no session control. Because the ROADMAP
   outcome ("a draining member refuses new gRPC streams") then does not hold on Deno, the Deno
-  adapter states it once at `listen` when TLS (and so h2) is configured, through `reportError`:
+  adapter states it once at `listen` whenever `http2` is configured (`Deno.serve` answers h2c on any
+  listener and h2 under TLS), through `reportError`:
   `{ level: 'warn', msg: 'HTTP/2 clients are not sent GOAWAY when this Deno server drains; calls during the drain get 503' }`.
   A throw from `beginDrain` is caught and logged at `warn`; it never stops the shutdown.
 - **Why:** after GOAWAY a conforming client opens new streams on another connection, and a stream it
@@ -187,7 +188,7 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   and a stream opened after GOAWAY is refused (`NGHTTP2_REFUSED_STREAM` or the GOAWAY session
   error); `kernel/test/unit/shutdown-drain.test.ts` — the kernel calls `beginDrain` once, after
   stopping hooks, and survives a throwing one; `runtime/test/unit/deno-http-adapter.test.ts` — the
-  Deno line once with TLS, never without.
+  Deno line once with `http2`, never without.
 
 ### 3.7 A stop during start cancels the start (V13-43, kernel half)
 
@@ -273,7 +274,7 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   as Bun's `websocket.maxPayloadLength` so the number is the adapter's own; Deno's is
   `64 * 1024 * 1024` (fixed by Deno); Node has none (`ws` takes the sink's limit). On Bun and Deno,
   the first handshake whose `sink.maxMessageBytes` is `0` or above the ceiling reports once per
-  process, through `reportError`:
+  server, through `reportError`:
   `{ level: 'warn', msg: 'WebSocket message limit exceeds the runtime ceiling', configured, ceiling, platform }`.
   The ceiling is not raised: a global raise on Bun would let any socket send frames up to it while
   the plugin checks its own limit only after receipt. No `common` member is added for this.
@@ -292,25 +293,25 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   aborting. The abort listener is attached lazily, on the first `ctx.defer` call, and only when the
   adapter's request carries a signal (`ctx.request` signal, never the allocating `ctx.signal`), so a
   request that defers nothing pays nothing. On abort before settle the kernel runs the cleanups (the
-  same LIFO, the same per-cleanup bound), releases the request from the drain once they finish, and
-  logs `'Request aborted before completion'` at `info` with `{ requestId, method, path }` when a
-  logger is registered. This covers a streamed body the isolate itself produces and a non-streaming
-  handler that never settles (the service-binding deadline case). A request that deferred nothing
-  gets no line from the kernel; with §3.9 the request logger records it as 499 wherever its
-  `finally` runs. On workerd the signal needs the `enable_request_signal` compatibility flag before
-  the 2026-11-17 compatibility date — the template half is M143j's. Asynchronous cleanups on workerd
-  may also need the isolate kept alive (`waitUntil`), which the kernel cannot reach: the workerd
-  proof measures a sync and an async cleanup, and any shortfall goes to M143o.
+  same LIFO, the same per-cleanup bound) — the drain release stays with the settle path, since a
+  request whose handler never settles is the drain's own concern — and logs
+  `'Request aborted before completion'` at `info` with `{ requestId, method, path }` when a logger
+  is registered. This covers a streamed body the isolate itself produces and a non-streaming handler
+  that never settles (the service-binding deadline case). A request that deferred nothing gets no
+  line from the kernel; with §3.9 the request logger records it as 499 wherever its `finally` runs.
+  On workerd the signal needs the `enable_request_signal` compatibility flag before the 2026-11-17
+  compatibility date — the template half is M143j's. Asynchronous cleanups on workerd may also need
+  the isolate kept alive (`waitUntil`), which the kernel cannot reach: the workerd proof measures a
+  sync and an async cleanup, and any shortfall goes to M143o.
 - **Why:** workerd tears the request down without calling `cancel()`; the signal is the only notice.
   Measured on develop with local `wrangler dev`: no flag, no cleanup and no signal; with the flag,
   the signal fires and the cleanup still does not run.
-- **Test home:** `kernel/test/unit/deferred-abort.test.ts` (abort runs cleanups once and releases
-  the drain; abort after settle does nothing; a non-streaming handler that never settles still runs
-  its cleanups on abort; no listener is attached without `defer`);
-  `runtime/test/integration/stream-signal.test.ts` — on a real Node server (Bun and Deno arms
-  guarded on the binary) a fully read stream runs its cleanups once, after the last chunk, so no
-  runtime aborts the signal early, and a client that leaves runs them once; verification on local
-  `wrangler dev` (§7), recorded in the PR.
+- **Test home:** `kernel/test/unit/deferred-abort.test.ts` (abort runs cleanups once; abort after
+  settle does nothing; a non-streaming handler that never settles still runs its cleanups on abort;
+  no listener is attached without `defer`); `runtime/test/integration/stream-signal.test.ts` — on a
+  real Node server (Bun and Deno arms guarded on the binary) a fully read stream runs its cleanups
+  once, after the last chunk, so no runtime aborts the signal early, and a client that leaves runs
+  them once; verification on local `wrangler dev` (§7), recorded in the PR.
 
 ### 3.13 Bun idle streams (V13-42)
 

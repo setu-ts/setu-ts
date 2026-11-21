@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i).** A process that dies from an
+  uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`, through
+  the registered logger: `IRuntimeServices.onFatalError` observes the error without changing how the
+  process ends (Node, Deno and Bun; absent on Workers). `app.stop()` logs `Server stopping`,
+  `Shutdown drain finished` (with `remaining` and `timedOut`) and `Server stopped`.
+  `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000). `RuntimeSignal` adds
+  `'SIGHUP'`. `IHttpAdapter.beginDrain` lets the Node adapter send HTTP/2 `GOAWAY` when the drain
+  begins. `IPluginContext.signal` aborts when `stop()` is called during `start()`, which now rejects
+  with `StartCancelledError` (new, `@setu-ts/kernel`). `WorkerRunOptions.signal` is the cancel
+  signal the worker pool honours (V13-131). V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -27,6 +37,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/kernel` (M143i).** Every `GET` route answers `HEAD` with the `GET`'s headers and no
+  body; an explicit `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all
+  `HEAD` (V13-113). A request's `ctx.defer` cleanups also run when its own signal aborts first, so a
+  client that leaves on workerd, or a handler that never settles, still runs them, with a
+  `Request aborted before completion` line (V13-200). A failed response stream is logged once,
+  `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or gRPC-Web
+  reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()` cancels the
+  start: its close hooks run, a close hook registered later runs at once, and the application never
+  listens (V13-43).
+- **`@setu-ts/runtime` (M143i).** Node answers a refused WebSocket upgrade with the framework's
+  response (status, reason phrase, headers, body), as Bun and Deno do; `rejectRawUpgrade` takes its
+  reason phrases from a status table (V13-53). Bun keeps a quiet response stream open past its 10 s
+  idle timeout (V13-42). Bun and Deno report once, at the first handshake whose limit is unlimited
+  or above their ceiling (Bun 16 MiB, Deno 64 MiB), that the runtime cannot honour it (V13-41). A
+  failed response stream is cut off without the runtime printing it on Node, Bun and Deno, and Node
+  no longer writes `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2
+  states at listen that it sends no `GOAWAY` when draining.
+- **`@setu-ts/logger-plugin` (M143i).** The request log records `101` for an accepted WebSocket
+  upgrade (V13-223), and `499` with `aborted: true` for a client that left (the logger-plugin half
+  of V13-110).
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

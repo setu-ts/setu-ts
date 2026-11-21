@@ -241,6 +241,23 @@ kernel now serves 4xx hints with standard titles and explicit details at warn; u
 5xx-hinted failures retain its opaque 500/error fallback. The body cap's omission does not remove a
 native runtime's own limit.
 
+## Runtime differences, stated (since 0.14.0)
+
+| Behaviour                       | Node                                  | Bun                                          | Deno                                         |
+| ------------------------------- | ------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| Uncaught exception or rejection | `onFatalError` observes, crash kept   | `onFatalError` observes, crash kept          | `onFatalError` observes, crash kept          |
+| Drain start (`beginDrain`)      | HTTP/2 `GOAWAY`, idle HTTP/1.1 closed | through the Node adapter when `http2` is set | none; stated once at `listen` with `http2`   |
+| Refused WebSocket upgrade       | the pipeline's response, whole        | the pipeline's response                      | the pipeline's response                      |
+| WebSocket per-message ceiling   | none (the sink's limit)               | 16 MiB, reported once if the limit is higher | 64 MiB, reported once if the limit is higher |
+| Quiet response stream           | stays open                            | stays open (idle timeout off for streams)    | stays open                                   |
+| Response stream that fails      | connection cut, nothing printed       | connection cut, nothing printed              | connection cut, nothing printed              |
+
+A failed stream is logged once by the kernel, `Response stream failed`, through the application's
+logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (internal); the exported
+`rejectRawUpgrade(socket, status)` still answers the fixed refusals, with the reason phrase from a
+status table and an empty one for a status the table does not name. The ceiling and Deno's drain
+statements go through the adapter's `reportError` channel.
+
 ## Exports
 
 ### `@setu-ts/runtime`

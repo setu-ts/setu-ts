@@ -12,6 +12,36 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
+
+- **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
+  bound. Keep it below the orchestrator's grace period minus any pre-stop delay and the time the
+  shutdown hooks need: with the generated 30 s grace and 5 s pre-stop sleep, 20 000 leaves 5 s.
+- **SIGHUP.** `RuntimeSignal` now includes `'SIGHUP'`. Add it to an entry's signal loop so a closed
+  terminal stops the application cleanly. An exhaustive `switch` over `RuntimeSignal` needs a new
+  arm.
+- **A stop during start.** `start()` rejects with `StartCancelledError` when `stop()` is called
+  before it finishes, and `stop()` resolves without running `onStopping` or `onShutdown` (the start
+  never finished); close hooks still run. An entry that logs every start failure should treat
+  `StartCancelledError` as a clean stop. A plugin that waits at startup can pass `ctx.signal` to the
+  wait.
+- **gRPC streams hold the drain.** A streamed RPC reply in flight at `stop()` now finishes before
+  the server closes, up to the drain bound. Other streams (SSE) are released as before.
+- **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
+  `Process failed` (fatal), `Response stream failed`, `Request aborted before completion` and
+  `Startup cancelled` come through the registered logger. The request log records `101` for an
+  upgrade and `499` with `aborted: true` for a client that left, where it recorded `200` and the
+  handler's status.
+- **HEAD.** Every `GET` route answers `HEAD`. Remove a hand-written `HEAD` route that only repeated
+  its `GET`.
+- **Node refused upgrades.** A refused WebSocket upgrade on Node carries the response the pipeline
+  produced (for example a Problem Details 401) instead of a bare status line, and `rejectRawUpgrade`
+  writes `401 Unauthorized` (not `401 Bad Request`), with an empty reason phrase for a status it
+  does not name.
+- **Workers.** `ctx.defer` cleanups run when a client leaves only if the request's signal fires: add
+  `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the compatibility date
+  is before 2026-11-17.
+
 ### Module pages (`@setu-ts/cli`)
 
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no

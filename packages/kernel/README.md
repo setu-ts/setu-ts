@@ -20,17 +20,33 @@ deno add npm:@setu-ts/kernel
 
 ## What's Inside
 
-| Area              | Exports                                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `app.diagnostics` reader (opt-in) |
-| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                         |
-| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                          |
-| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                           |
-| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                       |
-| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                            |
+| Area              | Exports                                                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `StartCancelledError`, `app.diagnostics` reader (opt-in) |
+| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                                                |
+| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                                                 |
+| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                                                  |
+| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                                              |
+| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                                                   |
 
-Only the seven public exports listed above are part of the public API; all concrete classes are
+Only the eight public exports listed above are part of the public API; all concrete classes are
 internal.
+
+## Stopping, crashes and HEAD (since 0.14.0)
+
+- `app.start({ port, drainTimeoutMs })` sets how long `stop()` waits for in-flight requests (default
+  10 000 ms). A streamed gRPC, Connect or gRPC-Web reply holds the drain until it ends; other
+  streams do not.
+- With a logger registered, `stop()` logs `Server stopping`, `Shutdown drain finished` (with
+  `remaining` and `timedOut`) and `Server stopped`; an uncaught exception or unhandled rejection
+  while the application runs logs one `fatal` line, `Process failed`, and the process still ends as
+  it would have.
+- `stop()` during `start()` cancels the start: `ctx.signal` aborts, `start()` rejects with
+  `StartCancelledError`, the close hooks run and the application never listens.
+- Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank.
+- `ctx.defer` cleanups also run when the request's signal aborts first, logged as
+  `Request aborted before completion`; a failed response stream is logged once as
+  `Response stream failed`.
 
 <!-- version:history -->
 
@@ -143,6 +159,7 @@ package fits the plugin architecture.
 | Export                          | Kind      |
 | ------------------------------- | --------- |
 | `createApplication`             | function  |
+| `StartCancelledError`           | class     |
 | `ApplicationOptions`            | interface |
 | `IKernelApplication`            | interface |
 | `InjectRequest`                 | interface |

@@ -122,7 +122,10 @@ Since 0.11.0, `createRequestLoggerMiddleware(options)` emits one `info` entry pe
 to emit both arrival and completion again. When the child's exposed level excludes debug, the
 middleware skips building arrival metadata; if no level is readable, it delegates filtering to
 `debug()`. Slow requests still add a `warn` entry and thrown errors retain their predicted
-completion status. Durations use the monotonic clock (`runtime.hrtime()`), never a wall-clock epoch.
+completion status. Since 0.14.0 an accepted WebSocket upgrade is recorded as `status: 101`, and a
+request whose client left before the response (its signal aborted) as `status: 499` with
+`aborted: true`, whatever status the handler set. Durations use the monotonic clock
+(`runtime.hrtime()`), never a wall-clock epoch.
 
 The request logger records `method` and the concrete `path` (no query string) on every record it
 writes: `request completed` at `info` (with `status` and `duration`), `request received` at `debug`,
