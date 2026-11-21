@@ -98,6 +98,33 @@ origin call per process. `CacheService.getOrSet()` applies the same per-store co
 programmatic read-through calls; the capability is typed as `ICacheStore`, so narrow it with
 `instanceof CacheService` first.
 
+### Per-visitor responses are never shared
+
+`cacheMiddleware` stores nothing that belongs to one visitor:
+
+- A response is not stored when its `Cache-Control` holds `private` or `no-store`, when its `Vary`
+  names `Cookie` or `Authorization`, or when it sets a cookie (as before), whatever the request.
+- A request carrying `Authorization`, or a credential cookie, is **credentialed**. It is served a
+  `HIT` only from an entry stored with `Cache-Control: public`, never shares an origin run with
+  another request, and its own response is stored only when that response says `public` and passes
+  the checks above. A bearer API that marks its responses `public` without `Vary: Authorization` is
+  still cached.
+
+The middleware cannot know which cookie identifies a visitor, so by default **any cookie** makes a
+request credentialed. An application whose every visitor carries an unrelated cookie (analytics,
+consent) gets nothing shared-cached until it marks responses `public` or names its session cookie in
+`credentialCookies`:
+
+```typescript
+cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['setu_session'] });
+```
+
+`credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a page that
+reads the session, carries a CSRF token or belongs to a signed-in visitor is marked `private` or
+`Vary: Cookie`, so it is never stored whichever side of the session middleware the cache runs on.
+Register `cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a
+cached anonymous page is replayed before any session work.
+
 ## Exports
 
 | Export                       | Kind      |

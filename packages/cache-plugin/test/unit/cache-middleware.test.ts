@@ -4,12 +4,17 @@ import { describe, expect, it } from 'vitest';
 import type {
   HandlerResult,
   ICacheStore,
+  IPluginContext,
   IRequestContext,
   IServiceRegistry,
   ITenant,
 } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
+import type { CacheMiddlewareOptions } from '../../src/interfaces/index.ts';
 import { cacheMiddleware } from '../../src/middleware/cache-middleware.ts';
+import { CachePlugin } from '../../src/plugin/cache-plugin.ts';
 
 describe('cacheMiddleware', () => {
   function createFakeStore(): {
@@ -697,5 +702,222 @@ describe('cacheMiddleware', () => {
       const setCalls = calls.filter((c) => c.method === 'set');
       expect(setCalls.length).toBe(0);
     });
+  });
+});
+
+describe('cacheMiddleware — per-visitor responses', () => {
+  type Handler = (ctx: IRequestContext) => HandlerResult | Promise<HandlerResult>;
+
+  async function appWith(
+    handler: Handler,
+    options: CacheMiddlewareOptions = {},
+  ): Promise<{ app: Awaited<ReturnType<typeof start>>; calls: () => number }> {
+    let count = 0;
+    const app = await start(async (ctx) => {
+      count += 1;
+      return await handler(ctx);
+    }, options);
+    return { app, calls: () => count };
+  }
+
+  async function start(handler: Handler, options: CacheMiddlewareOptions) {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CachePlugin({ store: 'memory' }),
+        {
+          name: 'per-visitor-route',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.middleware.add(cacheMiddleware({ ttlSeconds: 60, ...options }));
+            ctx.router.get('/page', handler);
+          },
+        },
+      ],
+    });
+    await app.start();
+    return app;
+  }
+
+  const get = (headers: Record<string, string> = {}) =>
+    ({ method: 'GET', url: 'http://localhost/page', headers }) as const;
+
+  const plain: Handler = (ctx) => ctx.response.text('page');
+  const withCacheControl =
+    (value: string): Handler =>
+    (ctx) =>
+      ctx.response.header('cache-control', value).text('page');
+
+  it.each([
+    ['private', withCacheControl('private, max-age=60')],
+    ['no-store', withCacheControl('no-store')],
+    ['private with a field list', withCacheControl('private="set-cookie", max-age=60')],
+    [
+      'Vary: Cookie',
+      (ctx: IRequestContext) => ctx.response.header('vary', 'Accept, Cookie').text('page'),
+    ],
+    [
+      'Vary: Authorization',
+      (ctx: IRequestContext) => ctx.response.header('vary', 'authorization').text('page'),
+    ],
+  ] as const)('never stores a response marked %s', async (_name, handler) => {
+    const { app, calls } = await appWith(handler);
+    try {
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('still stores and replays an anonymous page', async () => {
+    const { app, calls } = await appWith(plain);
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it.each([
+    ['an Authorization header', { authorization: 'Bearer t' }],
+    ['any cookie', { cookie: 'theme=dark' }],
+  ] as const)(
+    'a request carrying %s is neither stored nor served a non-public entry',
+    async (_n, headers) => {
+      const { app, calls } = await appWith(plain);
+      try {
+        await app.inject(get(headers));
+        expect(calls()).toBe(1);
+        // Nothing was stored for the credentialed request...
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(2);
+        // ...and the anonymous entry now stored is not replayed to it.
+        const again = await app.inject(get(headers));
+        expect(again.headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(3);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it('a credentialed request is replayed a HIT from a public entry', async () => {
+    const { app, calls } = await appWith(withCacheControl('public, max-age=60'));
+    try {
+      await app.inject(get());
+      const hit = await app.inject(get({ cookie: 'setu_session=abc' }));
+      expect(hit.headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('stores a credentialed public response without Vary: Cookie (a bearer API)', async () => {
+    const { app, calls } = await appWith(withCacheControl('public, max-age=60'));
+    try {
+      await app.inject(get({ authorization: 'Bearer t' }));
+      expect((await app.inject(get({ authorization: 'Bearer u' }))).headers.get('x-cache')).toBe(
+        'HIT',
+      );
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('does not store a credentialed public response that varies on Cookie', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Cookie' }).text('p'),
+    );
+    try {
+      await app.inject(get({ cookie: 'a=1' }));
+      await app.inject(get({ cookie: 'a=1' }));
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('with credentialCookies only the named cookies make a request credentialed', async () => {
+    const { app, calls } = await appWith(plain, { credentialCookies: ['setu_session'] });
+    try {
+      await app.inject(get({ cookie: 'theme=dark' }));
+      expect((await app.inject(get({ cookie: 'consent=yes' }))).headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+      const named = await app.inject(get({ cookie: 'theme=dark; setu_session=abc' }));
+      expect(named.headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('with credentialCookies: [] only Authorization counts', async () => {
+    const { app, calls } = await appWith(plain, { credentialCookies: [] });
+    try {
+      await app.inject(get({ cookie: 'setu_session=abc' }));
+      expect((await app.inject(get({ cookie: 'setu_session=xyz' }))).headers.get('x-cache')).toBe(
+        'HIT',
+      );
+      expect((await app.inject(get({ authorization: 'Bearer t' }))).headers.get('x-cache')).toBe(
+        'MISS',
+      );
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a credentialed request never joins an anonymous flight, and never leads one', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+    });
+    try {
+      // Anonymous leader, credentialed concurrent request: the credentialed one runs its own origin.
+      const leader = app.inject(get());
+      const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      release();
+      const [a, c] = await Promise.all([leader, credentialed]);
+      expect(a.body).toBe('anonymous');
+      expect(c.body).toBe('setu_session=abc');
+      expect(c.headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('an anonymous request does not join a credentialed request in flight', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+    });
+    try {
+      const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
+      const anonymous = app.inject(get());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      release();
+      const [c, a] = await Promise.all([credentialed, anonymous]);
+      expect(c.body).toBe('setu_session=abc');
+      expect(a.body).toBe('anonymous');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
   });
 });
