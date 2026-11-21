@@ -4,6 +4,7 @@ import {
   constants,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -43,8 +44,8 @@ export interface PortAllocatorOptions {
   readonly alive?: (pid: number) => boolean;
   /** The wall clock, in milliseconds, compared with a claim file's modification time. */
   readonly now?: () => number;
-  /** Whether a listener can bind the port right now. */
-  readonly bindable?: (port: number) => Promise<boolean>;
+  /** Why a listener cannot bind the port right now, or `undefined` when it can. */
+  readonly bindError?: (port: number) => Promise<Error | undefined>;
   /** A number in `[0, 1)` choosing where a search starts. */
   readonly random?: () => number;
 }
@@ -63,22 +64,26 @@ function errorCode(error: unknown): unknown {
   return typeof error === 'object' && error !== null ? Reflect.get(error, 'code') : undefined;
 }
 
-/** `process.kill(pid, 0)` delivers nothing: it only reports whether the process exists. */
+/**
+ * `process.kill(pid, 0)` delivers nothing: it only reports whether the process exists.
+ * Only "no such process" means gone. A process owned by someone else (`EPERM`) is
+ * running, and a runtime that refuses the question (Deno without the grant) has not
+ * said the process is gone, so its claim is kept.
+ */
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM: the process exists and belongs to someone else.
-    return errorCode(error) === 'EPERM';
+    return errorCode(error) !== 'ESRCH';
   }
 }
 
-function canBind(port: number): Promise<boolean> {
+function bindFailure(port: number): Promise<Error | undefined> {
   return new Promise((accept) => {
     const server = createServer();
-    server.once('error', () => accept(false));
-    server.listen(port, '127.0.0.1', () => server.close(() => accept(true)));
+    server.once('error', (error) => accept(error));
+    server.listen(port, '127.0.0.1', () => server.close(() => accept(undefined)));
   });
 }
 
@@ -91,8 +96,8 @@ function canBind(port: number): Promise<boolean> {
  * test's server starts (the "address already in use" failures in CI). Here a port
  * comes from a range the system never assigns from, and is claimed with an
  * exclusively created file, so two test processes cannot be given the same one.
- * A claim lasts until its process exits; one left by a killed process is taken
- * over once that process is gone.
+ * A claim lasts until {@linkcode PortAllocator.release} or until its process is
+ * gone; a claim left by a process that no longer exists is taken over.
  *
  * @param options - The claims directory, the range, and replaceable host parts
  * @returns The allocator
@@ -102,41 +107,68 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
   const pid = options.pid ?? process.pid;
   const alive = options.alive ?? processAlive;
   const now = options.now ?? Date.now;
-  const bindable = options.bindable ?? canBind;
+  const bindError = options.bindError ?? bindFailure;
   const random = options.random ?? Math.random;
   const span = last - first + 1;
   const held = new Set<number>();
   const file = (port: number): string => join(directory, String(port));
+  let takeovers = 0;
+  let refusal: Error | undefined;
 
-  /** A claim is stale when its process is gone or it is older than any test run. */
-  function stale(port: number): boolean {
-    let owner: number;
+  function create(port: number): boolean {
+    try {
+      writeFileSync(file(port), String(pid), { flag: 'wx' });
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') throw error;
+      return false;
+    }
+    held.add(port);
+    return true;
+  }
+
+  /** The content of a claim whose process is gone or which outlived any test run. */
+  function staleClaim(port: number): string | undefined {
+    let content: string;
     let modified: number;
     try {
-      owner = Number(readFileSync(file(port), 'utf8'));
+      content = readFileSync(file(port), 'utf8');
       modified = statSync(file(port)).mtimeMs;
     } catch (error) {
       // Released between the failed create and this read: its owner is alive.
+      if (errorCode(error) === 'ENOENT') return undefined;
+      throw error;
+    }
+    const owner = Number(content);
+    const gone = Number.isInteger(owner) && owner > 0 && !alive(owner);
+    return gone || now() - modified > STALE_CLAIM_MS ? content : undefined;
+  }
+
+  /**
+   * Takes over a stale claim. The stale file is moved aside first, which only one
+   * process can do, and is checked again after the move: another process may have
+   * taken the claim over between this process's check and its move, and that fresh
+   * claim is put back.
+   */
+  function takeOver(port: number, stale: string): boolean {
+    const aside = `${file(port)}.${pid}.${takeovers++}`;
+    try {
+      renameSync(file(port), aside);
+    } catch (error) {
       if (errorCode(error) === 'ENOENT') return false;
       throw error;
     }
-    if (now() - modified > STALE_CLAIM_MS) return true;
-    return Number.isInteger(owner) && owner > 0 && !alive(owner);
+    if (readFileSync(aside, 'utf8') !== stale) {
+      renameSync(aside, file(port));
+      return false;
+    }
+    rmSync(aside);
+    return create(port);
   }
 
   function claim(port: number): boolean {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        writeFileSync(file(port), String(pid), { flag: 'wx' });
-        held.add(port);
-        return true;
-      } catch (error) {
-        if (errorCode(error) !== 'EEXIST') throw error;
-        if (!stale(port)) return false;
-        rmSync(file(port), { force: true });
-      }
-    }
-    return false;
+    if (create(port)) return true;
+    const stale = staleClaim(port);
+    return stale !== undefined && takeOver(port, stale);
   }
 
   function drop(port: number): void {
@@ -150,7 +182,9 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
     for (let port = base; port < base + count; port++) {
       const claimed = claim(port);
       if (claimed) taken.push(port);
-      if (!claimed || !(await bindable(port))) {
+      const refused = claimed ? await bindError(port) : undefined;
+      if (refused !== undefined) refusal = refused;
+      if (!claimed || refused !== undefined) {
         for (const each of taken) drop(each);
         return false;
       }
@@ -160,13 +194,15 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
 
   async function range(count: number): Promise<number> {
     mkdirSync(directory, { recursive: true });
+    refusal = undefined;
     const bases = span - count + 1;
     const start = Math.floor(random() * Math.max(bases, 1));
     for (let offset = 0; offset < bases; offset++) {
       const base = first + ((start + offset) % bases);
       if (await take(base, count)) return base;
     }
-    throw new Error('no free test port');
+    // A host that refuses every bind is not a full range: say why the last one failed.
+    throw new Error('no free test port', refusal === undefined ? {} : { cause: refusal });
   }
 
   return {
@@ -180,13 +216,16 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
 
 let shared: PortAllocator | undefined;
 
-/** The allocator every test process shares, releasing its claims when the process exits. */
+/** The allocator every test process shares. */
 function sharedAllocator(): PortAllocator {
   if (shared === undefined) {
     const allocator = createPortAllocator({
       directory: join(tmpdir(), 'setu-ts-test-ports'),
       ...TEST_PORT_RANGE,
     });
+    // Reached by a process that ends on its own. Vitest ends its workers with a
+    // signal, which runs no exit handler: there `test/setup/release-ports.ts` releases
+    // after each test file.
     process.once('exit', () => allocator.release());
     shared = allocator;
   }
@@ -196,11 +235,14 @@ function sharedAllocator(): PortAllocator {
 /**
  * A port for a server the test starts later, in this process or a child.
  *
- * It is claimed for this process until the process exits, so no other test is given
- * it, and it lies outside the range the operating system assigns from, so nothing
- * else is either. A port that is requested and never bound refuses connections.
+ * It is claimed for this process until {@linkcode releaseTestPorts} runs or the
+ * process is gone, so no other test is given it, and it lies outside the range the
+ * operating system assigns from, so nothing else is either. A port that is requested
+ * and never bound refuses connections.
  *
  * @returns A free TCP port
+ * @throws {Error} `no free test port`, with the last bind error as its cause, when
+ *   the whole range is claimed or cannot be bound
  */
 export function unusedPort(): Promise<number> {
   return sharedAllocator().port();
@@ -212,12 +254,18 @@ export function unusedPort(): Promise<number> {
  *
  * @param count - How many consecutive ports the caller binds
  * @returns The first port of the run
+ * @throws {Error} `no free test port`, as {@linkcode unusedPort} does
  */
 export function unusedPortRange(count: number): Promise<number> {
   return sharedAllocator().range(count);
 }
 
-/** All temporary test artifacts stay below the workspace's ignored scratch directory. */
+/** Drops every port claim this process holds; the Vitest setup file calls it after each test file. */
+export function releaseTestPorts(): void {
+  shared?.release();
+}
+
+/** Temporary test directories stay below the workspace's ignored scratch directory. */
 export async function tempDir(options: { prefix?: string; dir?: string } = {}): Promise<string> {
   const base = options.dir ?? fileURLToPath(new URL('../.tmp/node-tests/', import.meta.url));
   await mkdir(base, { recursive: true });

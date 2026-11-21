@@ -47,23 +47,25 @@ export function skipAfterTests(reason: string): void {
  * processes: two smoke checks started at the same moment could draw the same port.
  *
  * @returns A free TCP port
- * @throws {Error} If twenty draws in a row are already bound
+ * @throws {Error} If twenty draws in a row cannot be bound; its `cause` is the last bind error
  */
 export async function freePort(): Promise<number> {
+  let refusal: Error | undefined;
   for (let attempt = 0; attempt < 20; attempt++) {
     const port = 20_000 + Math.floor(Math.random() * 12_768);
     const server = createServer();
-    const bound = await new Promise<boolean>((resolve) => {
-      server.once('error', () => resolve(false));
-      server.listen(port, '127.0.0.1', () => resolve(true));
+    refusal = await new Promise<Error | undefined>((resolve) => {
+      server.once('error', (error) => resolve(error));
+      server.listen(port, '127.0.0.1', () => resolve(undefined));
     });
-    if (!bound) continue;
+    if (refusal !== undefined) continue;
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
     return port;
   }
-  throw new Error('No free loopback port between 20000 and 32767.');
+  // Twenty refusals in a row are more likely a host that cannot bind than twenty taken ports.
+  throw new Error('No free loopback port between 20000 and 32767.', { cause: refusal });
 }
 
 /** Options for {@link startHost}. */

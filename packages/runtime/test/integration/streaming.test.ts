@@ -16,7 +16,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
 import type { IPlugin, IPluginContext, IRequestContext } from '@setu-ts/common';
 
-/** Bind a port, release it, return the port number. */
+/** A free port, claimed for this test process by the shared helper. */
 function findFreePort(): Promise<number> {
   return nodeUnusedPort();
 }

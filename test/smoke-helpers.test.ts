@@ -70,7 +70,10 @@ describe('freePort', () => {
       expect(random).toHaveBeenCalledTimes(2);
 
       random.mockReset().mockReturnValue(drawing(taken));
-      await expect(freePort()).rejects.toThrow('No free loopback port between 20000 and 32767.');
+      await expect(freePort()).rejects.toMatchObject({
+        message: 'No free loopback port between 20000 and 32767.',
+        cause: { code: 'EADDRINUSE' },
+      });
       expect(random).toHaveBeenCalledTimes(20);
     } finally {
       await new Promise<void>((resolve) => occupant.close(() => resolve()));

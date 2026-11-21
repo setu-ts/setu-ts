@@ -25,7 +25,7 @@ import { createFakeLoadContextFactory } from '../fixtures/fake-handler.ts';
 
 type RouterMethod = (p: string, h: RouteHandler) => void;
 
-/** Bind an ephemeral port, release it, return the number. */
+/** A free port, claimed for this test process by the shared helper. */
 function findFreePort(): Promise<number> {
   return nodeUnusedPort();
 }

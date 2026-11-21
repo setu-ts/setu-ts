@@ -20,7 +20,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 
 import { SsePlugin } from '../../src/index.ts';
 
-/** Bind a port, release it, return the port number. */
+/** A free port, claimed for this test process by the shared helper. */
 function findFreePort(): Promise<number> {
   return nodeUnusedPort();
 }

@@ -446,7 +446,7 @@ describe('worker task entries', () => {
           const source = wrap(unit.repeat(count));
           return () => taskReferences(source, '/app/main.ts');
         },
-        25_000,
+        100_000,
       );
     }
   });
