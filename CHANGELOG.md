@@ -25,8 +25,39 @@ All notable changes to this project are documented here. The format follows
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
 
+- **`@setu-ts/common` (M143r).** `StorageObjectNotFoundError` (a `404` status hint, the key in
+  `message` only) and the upload brand `UPLOAD_METADATA` / `withUploadMetadata` /
+  `uploadMetadataOf`, which `createUploadMiddleware` now carries so a documentation generator can
+  see a multipart route.
+- **Provider options (M143r; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
+  `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
+  `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault) and the `ses` and `sendgrid`
+  mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the key form) and
+  `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm; `connectionTimeoutMs`,
+  `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP; `exposeCatalogues.keyPrefixes` on
+  the localization catalogue route.
+- **Readiness probes (M143r; V13-215, the lane half).** The `gcs` and `azure` storage arms, the
+  `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each reads
+  reachable when the backend answers below `500`.
+
 ### Changed
 
+- **BREAKING — provider arms (M143r; `@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`,
+  `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`; V13-232,
+  V13-233, V13-234, V13-235, V13-217, V13-245, V13-248, V13-4, V13-193, V13-257).** LaunchDarkly
+  receives `waitForInitialization({ timeout })` (it was passed `timeoutSeconds`, which the SDK does
+  not read, so an unreachable LaunchDarkly held startup forever); `initTimeoutSeconds` must be above
+  `0`. Azure storage reads `connectionString` through `fromConnectionString`, signs SAS URLs with
+  the SDK's `generateSasUrl` (an encoded name, the client's own host) and keeps an injected
+  `BlobServiceClient` as given. GCS signed URLs expire in epoch milliseconds (they were always in
+  1970), the GCS arm turns the SDK's own retry off (a retried `502`/`503` download ended the process
+  on 7.x and 8.x), and `getStream` waits for the first chunk, so an absent object is `null`. An
+  outage on a storage or secrets arm rejects with a `503`/`504` (`BackendUnavailableError`,
+  `BackendOutcomeUnknownError`, `SecretProviderUnavailableError`); other failures name the provider.
+  `exists`/`delete` reject on an outage instead of answering "not there", on every provider, `local`
+  included. A missing object is `StorageObjectNotFoundError` (`404`). `b2` with neither `region` nor
+  `endpoint` refuses to start. `createUploadMiddleware` answers a disallowed type `415`. An SMTP
+  `contentId` attachment is sent inline. Slack posts the subject in bold before the body.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

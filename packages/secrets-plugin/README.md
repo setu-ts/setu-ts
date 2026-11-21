@@ -5,13 +5,13 @@ a pluggable provider with a read-through cache.
 
 Providers:
 
-| Provider                   | `provider` id | Backend                                     | Dependency                                         |
-| -------------------------- | ------------- | ------------------------------------------- | -------------------------------------------------- |
-| `EnvProvider` (default)    | `env`         | Environment, then optional config snapshot  | none (every runtime, incl. Cloudflare Workers)     |
-| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption) | lazy `@aws-sdk/client-secrets-manager` (or inject) |
-| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                          | lazy `@google-cloud/secret-manager` (or inject)    |
-| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                             | lazy `@azure/keyvault-secrets` (or inject)         |
-| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`          | none (zero-dependency, Workers-compatible)         |
+| Provider                   | `provider` id | Backend                                     | Dependency                                                     |
+| -------------------------- | ------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| `EnvProvider` (default)    | `env`         | Environment, then optional config snapshot  | none (every runtime, incl. Cloudflare Workers)                 |
+| `AwsKmsProvider`           | `aws-kms`     | AWS Secrets Manager (KMS-backed encryption) | lazy `@aws-sdk/client-secrets-manager` (or inject)             |
+| `GcpSecretManagerProvider` | `gcp`         | GCP Secret Manager                          | lazy `@google-cloud/secret-manager` (or inject)                |
+| `AzureKeyVaultProvider`    | `azure`       | Azure Key Vault                             | lazy `@azure/keyvault-secrets` + `@azure/identity` (or inject) |
+| `HashiCorpVaultProvider`   | `vault`       | HashiCorp Vault KV v2 over `fetch`          | none (zero-dependency, Workers-compatible)                     |
 
 No cloud SDK is a hard dependency: a provider either receives an injected client facade through
 options, or lazily imports the SDK at `connect()` time (AI_GUIDELINES §12.2). Secrets are never
@@ -23,8 +23,13 @@ logged.
 import { SecretsPlugin } from '@setu-ts/secrets-plugin';
 ```
 
-Install the SDK only for the provider you choose (e.g.
-`deno add npm:@aws-sdk/client-secrets-manager`). `env` and `vault` need nothing.
+Install the SDK only for the provider you choose. `env` and `vault` need nothing.
+
+| `provider` | Install                                                      |
+| ---------- | ------------------------------------------------------------ |
+| `aws-kms`  | `npm install @aws-sdk/client-secrets-manager`                |
+| `gcp`      | `npm install @google-cloud/secret-manager`                   |
+| `azure`    | `npm install @azure/keyvault-secrets @azure/identity` (both) |
 
 ## Usage
 
@@ -147,6 +152,26 @@ existing handling (a plain `Error`; an unparseable body is one too): `404` reads
 other error status rejects with a plain `Error`. A value outside `0`–`2147483647` is refused with a
 `RangeError` when the application starts.
 
+**The cloud arms are bounded too (since 0.14.0).** `aws-kms`, `gcp` and `azure` read the same
+`options.requestTimeoutMs` (default `5000`), which covers the SDK's own retries. A call that fails
+on the network, does not answer in time, gets a `5xx`, or (on `gcp`) a gRPC `UNAVAILABLE` or
+`DEADLINE_EXCEEDED` rejects with `SecretProviderUnavailableError` (`503`); any other failure, such
+as a refused credential, rejects with an `Error` whose message starts
+`<ProviderClass> <get|set> failed:`, so the masked `500` names the backend in the log. Their lazily
+adapted clients report readiness with a listing call that reads no value — `ListSecrets`
+(`MaxResults: 1`), `listSecrets` (`pageSize: 1`), `listPropertiesOfSecrets` (one page of one) — and
+read **reachable** whenever the backend answers, a refused credential included, because a
+least-privilege credential may lack the list permission.
+
+**Azure at `localhost`.** The Key Vault SDK refuses a vault whose authentication challenge does not
+name the vault's own domain, which an emulator at `localhost` cannot satisfy. Set
+`options.disableChallengeResourceVerification: true` for an emulator or a test vault only: the check
+is what keeps a bearer token from being sent to a host that is not the vault.
+
+These arms were run against local stand-ins only — LocalStack (Secrets Manager), Lowkey Vault (Key
+Vault) and, for `gcp`, a server that never answers and a closed port; no live AWS, Google or Azure
+account was used.
+
 **Since M101a** a secret name is checked and encoded before it reaches the URL. Each `/`-separated
 segment is percent-encoded, so `app db/pass` is read from `app%20db/pass`, and a name with an empty,
 `.` or `..` segment (`../../sys/health`, `a//b`, `a/`) is refused before any request is sent: it
@@ -194,20 +219,21 @@ SecretsPlugin({
 
 ## Options
 
-| Option                                               | Provider                | Description                                                                                                                      |
-| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                   |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                          |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                         |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                              |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                   |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                               |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).    |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                   |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, and KV mount.                                                                                       |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected client facade (bypasses lazy import).                                                                                   |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                   |
-| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. An outage rejects with `SecretProviderUnavailableError` (`503`). |
+| Option                                               | Provider                           | Description                                                                                                                     |
+| ---------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                                  | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                  |
+| `options.cacheTtl`                                   | all                                | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                         |
+| `options.prefix`                                     | `env`                              | Prefix prepended to the derived env key.                                                                                        |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`                          | AWS client config (ignored when `client` injected).                                                                             |
+| `options.endpoint`                                   | `aws-kms`                          | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                  |
+| `options.projectId`                                  | `gcp`                              | GCP project id for resource paths.                                                                                              |
+| `options.endpoint`                                   | `gcp`                              | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).   |
+| `options.vaultUrl`                                   | `azure`                            | Key Vault URL.                                                                                                                  |
+| `options.address` / `token` / `mount`                | `vault`                            | Vault server address, token, and KV mount.                                                                                      |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure`            | Injected client facade (bypasses lazy import).                                                                                  |
+| `options.http`                                       | `vault`                            | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                  |
+| `options.requestTimeoutMs`                           | `vault`, `aws-kms`, `gcp`, `azure` | Bound on one backend call in ms; `0` disables. Default `5000`. An outage rejects with `SecretProviderUnavailableError` (`503`). |
+| `options.disableChallengeResourceVerification`       | `azure`                            | Turn off the SDK's challenge-domain check; emulator or test vault only. Default `false`.                                        |
 
 ## API
 
@@ -237,13 +263,13 @@ found_ — which reads as a problem with the secret being written rather than wi
 The divergence is documented here rather than removed: making `set()` mean one thing is the
 ROADMAP's X20-3, a contract question deliberately ungrouped from this one.
 
-| Provider        | `set()` on an existing secret | `set()` on a name that does not exist                                                               | Verified against a real backend                        |
-| --------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `env`           | rejects                       | rejects                                                                                             | yes — `readonly-status.test.ts` pins the `501` refusal |
-| `vault` (KV v2) | writes a new version          | **creates** the secret                                                                              | yes — real HashiCorp Vault (X20)                       |
-| `aws-kms`       | writes a new version          | **refuses** — `PutSecretValueCommand` requires the secret to exist; the provider has no create path | yes — real LocalStack (X20 addendum)                   |
-| `gcp`           | adds a new version            | **refuses** — `addSecretVersion` requires the secret container to pre-exist                         | no — no local emulator; stated, not claimed            |
-| `azure`         | writes a new version          | **creates** the secret                                                                              | no — no local emulator; stated, not claimed            |
+| Provider        | `set()` on an existing secret | `set()` on a name that does not exist                                                               | Verified against a real backend                                     |
+| --------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `env`           | rejects                       | rejects                                                                                             | yes — `readonly-status.test.ts` pins the `501` refusal              |
+| `vault` (KV v2) | writes a new version          | **creates** the secret                                                                              | yes — real HashiCorp Vault (X20)                                    |
+| `aws-kms`       | writes a new version          | **refuses** — `PutSecretValueCommand` requires the secret to exist; the provider has no create path | yes — real LocalStack (X20 addendum)                                |
+| `gcp`           | adds a new version            | **refuses** — `addSecretVersion` requires the secret container to pre-exist                         | stand-in only — floci-gcp (X123), `5 NOT_FOUND`                     |
+| `azure`         | writes a new version          | **creates** the secret                                                                              | stand-in only — Lowkey Vault (X123 and this package's guarded test) |
 
 The second column is the finding: an application that assumes `set()` creates is correct for `vault`
 and `azure`, and wrong for `aws-kms` and `gcp`. On those two, create the secret out of band (or

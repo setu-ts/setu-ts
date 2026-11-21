@@ -86,6 +86,28 @@ never the bytes. There is no framework size limit: the provider refuses an overs
 40 MB, SendGrid at 30 MB, SMTP at the server's own limit). SES needs an `@aws-sdk/client-sesv2`
 release whose `SendEmailCommand` accepts `Content.Simple.Attachments`.
 
+## Bounds, endpoints and faults
+
+- `ses` and `sendgrid` bound each send, and the readiness probe, with `options.requestTimeoutMs`
+  (default `15000`, `0` disables). A send that does not settle in time rejects with
+  `BackendOutcomeUnknownError` (`504`): the message may have gone out, so retry with care. A refused
+  connection rejects with `BackendUnavailableError` (`503`).
+- `ses` takes `options.endpoint` (a private endpoint, or a local stand-in); without it the SDK
+  addresses AWS. Its readiness probe is SES v2 `GetAccount` and reads reachable when SES answers
+  below `500`.
+- A SendGrid refusal's message carries SendGrid's own first error text after the status, for the
+  log; the response stays a masked `500`.
+- `smtp` takes `connectionTimeoutMs`, `greetingTimeoutMs` and `socketTimeoutMs`, passed to
+  nodemailer only when set. nodemailer caches a host's DNS answer for 5 minutes, so a server that
+  moves to a new address stays unreachable until then; `dnsTtlMs` makes the provider resolve the
+  host through the runtime's DNS at most that often and connect to the address found, still
+  verifying the host as the TLS server name. It is refused with an injected `transport` and on a
+  runtime without DNS.
+
+SES v2 has no local stand-in on this machine (LocalStack community answers `501`), so the `ses` arm
+was proved only against an in-test capture server: what it sends and where, not that SES accepts it.
+No live AWS or SendGrid account was used.
+
 ## Options
 
 | Option      | Type                                     | Default | Description                                                                                                                                  |

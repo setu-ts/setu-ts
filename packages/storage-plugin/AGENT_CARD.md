@@ -38,8 +38,8 @@ const url = await storage.getSignedUrl('avatars/user-1', { expiresIn: 3600 });
 
 ## Behaviour the types do not show
 
-- `maxSize` is bytes per file and defaults to 10485760; oversized files or bodies answer 413.
-  Disallowed types and too many files answer 400.
+- `maxSize` is bytes per file and defaults to 10485760; oversized files or bodies answer 413. A
+  disallowed type answers 415; too many files 400. Outages reject (503/504).
 - Upload field names must match; the default `fieldname` is `'file'`. Non-multipart requests pass
   through without uploading anything.
 - `get` rejects for a missing key. Memory stores bytes only, dropping content type and metadata; its

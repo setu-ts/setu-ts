@@ -4,8 +4,9 @@ Feature flags with pluggable backends. Registers the **synchronous** `IFeatureFl
 `CAPABILITIES.FEATURE_FLAGS` (`'feature-flags'`).
 
 No eager imports, and the built-in providers (`config`, `memory`, `database`) need no npm package at
-all. The `launchdarkly` provider lazy-loads `@launchdarkly/node-server-sdk`, which npm therefore
-installs alongside this package; nothing imports it unless you select that provider. See
+all. The `launchdarkly` provider lazy-loads `@launchdarkly/node-server-sdk`, an optional peer the
+application installs (`npm install @launchdarkly/node-server-sdk`); nothing imports it unless you
+select that provider. See
 [Optional npm drivers](https://setu-ts.dev/docs/plugins/#optional-npm-drivers) for what that means
 on npm versus Deno.
 
@@ -109,13 +110,13 @@ evicts the least recently used snapshot. An evicted user behaves like a first-ti
 while a background refill runs. Direct construction accepts the same limit as the third argument:
 `new LaunchDarklyProvider(config, logger, maxCachedContexts)`.
 
-| Option               | Type                      | Default | Description                                                                                  |
-| -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------- |
-| `sdkKey`             | `string`                  | —       | Required unless `client` is injected.                                                        |
-| `client`             | `ILaunchDarklyClient`     | —       | Prebuilt client; the SDK module is never loaded.                                             |
-| `fallbackValue`      | `boolean`                 | `false` | Value for an unloaded context; also the SDK default in `isEnabledAsync`.                     |
-| `initTimeoutSeconds` | `number`                  | `5`     | Initial connection wait. A timeout leaves the provider degraded rather than failing startup. |
-| `ldOptions`          | `Record<string, unknown>` | —       | Forwarded verbatim as the SDK `init()` second argument.                                      |
+| Option               | Type                      | Default | Description                                                                                                                                                                                                                                                                               |
+| -------------------- | ------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sdkKey`             | `string`                  | —       | Required unless `client` is injected.                                                                                                                                                                                                                                                     |
+| `client`             | `ILaunchDarklyClient`     | —       | Prebuilt client; the SDK module is never loaded.                                                                                                                                                                                                                                          |
+| `fallbackValue`      | `boolean`                 | `false` | Value for an unloaded context; also the SDK default in `isEnabledAsync`.                                                                                                                                                                                                                  |
+| `initTimeoutSeconds` | `number`                  | `5`     | Initial connection wait, passed to the SDK as `timeout` and enforced as a deadline on the wait and the startup snapshot, so an unreachable LaunchDarkly cannot hold startup. A timeout leaves the provider degraded rather than failing startup. Must be above `0` and at most `2147483`. |
+| `ldOptions`          | `Record<string, unknown>` | —       | Forwarded verbatim as the SDK `init()` second argument.                                                                                                                                                                                                                                   |
 
 ## Exports
 

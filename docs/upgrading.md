@@ -12,6 +12,30 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
+
+- **Outages are errors.** `exists()` and `delete()` reject on an outage or a refused credential on
+  every storage provider; code that treated `false` as "not there" during an outage now sees the
+  error. S3 and B2 still resolve `delete()` `true` for an absent key.
+- **Status codes.** A storage or cloud-secrets outage answers `503` (a write that may have been
+  applied, `504`) instead of a masked `500`; a missing object read with `get`/`getStream` answers
+  `404` (`StorageObjectNotFoundError`). Catch those classes rather than matching error messages: an
+  unclassified failure's message now starts `storage-plugin (<provider>): <call> failed:` or
+  `<ProviderClass> <get|set> failed:`.
+- **Time bounds.** Cloud calls are bounded by `requestTimeoutMs` (storage 30 s, secrets 5 s, SES and
+  SendGrid 15 s). Raise it for large storage transfers, or set `0` to keep the old unbounded call.
+- **GCS.** The SDK's own retry is off, so a `5xx` answers at once; retry in the caller. A provider
+  constructed directly needs `now` for `getSignedUrl`. A custom `endpoint` sends credentials unless
+  `endpointAuth: false`.
+- **Azure storage.** `connectionString` now works as documented; a SAS-URL passed as
+  `connectionString` is no longer accepted (use the SAS connection-string form).
+- **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
+- **Uploads.** A disallowed MIME type answers `415` instead of `400`.
+- **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
+  `timeout`, not `timeoutSeconds`. `initTimeoutSeconds: 0` is refused.
+- **Slack.** A notification's `subject` is now part of the posted text.
+- **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`.
+
 ### Module pages (`@setu-ts/cli`)
 
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
