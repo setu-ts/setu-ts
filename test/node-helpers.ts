@@ -4,7 +4,6 @@ import {
   constants,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -96,8 +95,20 @@ function bindFailure(port: number): Promise<Error | undefined> {
  * test's server starts (the "address already in use" failures in CI). Here a port
  * comes from a range the system never assigns from, and is claimed with an
  * exclusively created file, so two test processes cannot be given the same one.
- * A claim lasts until {@linkcode PortAllocator.release} or until its process is
- * gone; a claim left by a process that no longer exists is taken over.
+ *
+ * A claim lasts until {@linkcode PortAllocator.release}. Two things end it early,
+ * and each lets another caller take the claim over:
+ *
+ * - its process no longer exists (a worker that was killed never releases);
+ * - it is more than six hours old, whatever its process id says. This covers a hung
+ *   process and a process id that was reused, at the cost that a process still
+ *   using a port after six hours can lose its claim.
+ *
+ * A takeover holds a per-port marker file while it checks the claim again and
+ * replaces it. Only a marker holder removes another process's claim, and only after
+ * finding it stale while holding the marker, so a live claim is never removed,
+ * hidden or overwritten. A marker left by a crashed process only keeps that one port
+ * from being taken over.
  *
  * @param options - The claims directory, the range, and replaceable host parts
  * @returns The allocator
@@ -112,7 +123,6 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
   const span = last - first + 1;
   const held = new Set<number>();
   const file = (port: number): string => join(directory, String(port));
-  let takeovers = 0;
   let refusal: Error | undefined;
 
   function create(port: number): boolean {
@@ -126,49 +136,49 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
     return true;
   }
 
-  /** The content of a claim whose process is gone or which outlived any test run. */
-  function staleClaim(port: number): string | undefined {
-    let content: string;
+  /** Whether the port's claim belongs to a process that is gone, or outlived any test run. */
+  function stale(port: number): boolean {
+    let owner: number;
     let modified: number;
     try {
-      content = readFileSync(file(port), 'utf8');
+      owner = Number(readFileSync(file(port), 'utf8'));
       modified = statSync(file(port)).mtimeMs;
     } catch (error) {
       // Released between the failed create and this read: its owner is alive.
-      if (errorCode(error) === 'ENOENT') return undefined;
-      throw error;
-    }
-    const owner = Number(content);
-    const gone = Number.isInteger(owner) && owner > 0 && !alive(owner);
-    return gone || now() - modified > STALE_CLAIM_MS ? content : undefined;
-  }
-
-  /**
-   * Takes over a stale claim. The stale file is moved aside first, which only one
-   * process can do, and is checked again after the move: another process may have
-   * taken the claim over between this process's check and its move, and that fresh
-   * claim is put back.
-   */
-  function takeOver(port: number, stale: string): boolean {
-    const aside = `${file(port)}.${pid}.${takeovers++}`;
-    try {
-      renameSync(file(port), aside);
-    } catch (error) {
       if (errorCode(error) === 'ENOENT') return false;
       throw error;
     }
-    if (readFileSync(aside, 'utf8') !== stale) {
-      renameSync(aside, file(port));
+    if (now() - modified > STALE_CLAIM_MS) return true;
+    return Number.isInteger(owner) && owner > 0 && !alive(owner);
+  }
+
+  /**
+   * Replaces a stale claim with this process's. The marker admits one process at a
+   * time, and the claim is checked again while it is held: an earlier holder may
+   * have replaced the stale claim with a live one.
+   */
+  function takeOver(port: number): boolean {
+    const marker = `${file(port)}.taking`;
+    try {
+      writeFileSync(marker, String(pid), { flag: 'wx' });
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') throw error;
       return false;
     }
-    rmSync(aside);
-    return create(port);
+    try {
+      if (!stale(port)) return false;
+      rmSync(file(port), { force: true });
+      return create(port);
+    } finally {
+      rmSync(marker, { force: true });
+    }
   }
 
   function claim(port: number): boolean {
+    // Never the port this allocator already gave out, however old its claim is.
+    if (held.has(port)) return false;
     if (create(port)) return true;
-    const stale = staleClaim(port);
-    return stale !== undefined && takeOver(port, stale);
+    return stale(port) && takeOver(port);
   }
 
   function drop(port: number): void {

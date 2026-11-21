@@ -26,6 +26,16 @@ import {
 } from '../node-helpers.ts';
 import type { PortAllocatorOptions } from '../node-helpers.ts';
 
+/** The process id written in a port's claim file, or `undefined` when nothing claims it. */
+function claimOwner(directory: string, port: number): string | undefined {
+  try {
+    return readFileSync(join(directory, String(port)), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 /** Binds the port for real, so a returned number is proven usable. */
 async function bindAndClose(port: number): Promise<void> {
   const server = createServer();
@@ -53,10 +63,11 @@ describe('Node test host helpers', () => {
       expect(existsSync(join(claims, String(port)))).toBe(true);
       await bindAndClose(port);
     }
-    // What the Vitest setup file runs after each test file.
+    // What the Vitest setup file runs after each test file. Another test process may
+    // claim a released port at once, so the check is on the owner, not on the file.
     releaseTestPorts();
     for (const port of [first, second, base, base + 1, base + 2]) {
-      expect(existsSync(join(claims, String(port)))).toBe(false);
+      expect(claimOwner(claims, port)).not.toBe(String(process.pid));
     }
   });
 });
@@ -108,7 +119,8 @@ describe('the test port allocator', () => {
     });
     writeSync(join(directory, '100'), '7');
     expect(await ports.port()).toBe(100);
-    expect(asked).toEqual([7]);
+    // Once before the takeover and once more while it holds the marker.
+    expect(asked).toEqual([7, 7]);
     expect(readFileSync(join(directory, '100'), 'utf8')).toBe('4242');
   });
   it('takes over a claim older than any test run, even from a running process', async () => {
@@ -118,8 +130,9 @@ describe('the test port allocator', () => {
     utimesSync(join(directory, '100'), old, old);
     expect(await ports.port()).toBe(100);
   });
-  it('keeps a claim another process took over between the check and the move', async () => {
+  it('never removes a claim that became live before the takeover checked it again', async () => {
     const directory = await tempDir({ prefix: 'ports-' });
+    let asked = 0;
     const ports = createPortAllocator({
       directory,
       first: 100,
@@ -127,18 +140,36 @@ describe('the test port allocator', () => {
       pid: 4242,
       random: () => 0,
       bindError: () => Promise.resolve(undefined),
-      // While this allocator decides that process 7 is gone, process 9 takes the claim over.
+      // Process 7 is gone at the first look. Before the takeover looks again, process 9
+      // has taken the claim over, and process 9 is running.
       alive: (owner) => {
+        asked += 1;
         if (owner === 7) writeSync(join(directory, '100'), '9');
-        return false;
+        return owner === 9;
       },
     });
     writeSync(join(directory, '100'), '7');
     expect(await ports.port()).toBe(101);
+    expect(asked).toBe(2);
     expect(readFileSync(join(directory, '100'), 'utf8')).toBe('9');
+    // The marker is gone, so the port can be taken over once process 9 is.
     expect(claimed(directory)).toEqual(['100', '101']);
   });
-  it('skips a stale claim that is gone by the time it is moved', async () => {
+  it('leaves a stale claim alone while another process is taking it over', async () => {
+    const { directory, ports } = await allocator({ alive: () => false });
+    writeSync(join(directory, '100'), '7');
+    writeSync(join(directory, '100.taking'), '9');
+    expect(await ports.port()).toBe(101);
+    expect(readFileSync(join(directory, '100'), 'utf8')).toBe('7');
+    expect(claimed(directory)).toEqual(['100', '100.taking', '101']);
+  });
+  it('leaves no marker behind after a takeover', async () => {
+    const { directory, ports } = await allocator({ alive: () => false });
+    writeSync(join(directory, '100'), '7');
+    expect(await ports.port()).toBe(100);
+    expect(claimed(directory)).toEqual(['100']);
+  });
+  it('skips a stale claim that is gone by the time it is taken over', async () => {
     const directory = await tempDir({ prefix: 'ports-' });
     const ports = createPortAllocator({
       directory,
@@ -148,7 +179,7 @@ describe('the test port allocator', () => {
       random: () => 0,
       bindError: () => Promise.resolve(undefined),
       alive: () => {
-        rmSync(join(directory, '100'));
+        rmSync(join(directory, '100'), { force: true });
         return false;
       },
     });
@@ -156,12 +187,27 @@ describe('the test port allocator', () => {
     expect(await ports.port()).toBe(101);
     expect(claimed(directory)).toEqual(['101']);
   });
-  it('reports a stale claim it cannot move instead of treating the port as taken', async () => {
-    const { directory, ports } = await allocator({ alive: () => false });
-    writeSync(join(directory, '100'), '7');
-    // A directory already sits where the stale claim would be moved aside.
-    mkdirSync(join(directory, '100.4242.0'));
-    await expect(ports.port()).rejects.toMatchObject({ code: 'EISDIR' });
+  // Root ignores directory permissions, so there is no write to refuse.
+  it.skipIf(process.getuid?.() === 0)(
+    'reports a takeover it cannot start instead of treating the port as taken',
+    async () => {
+      const { directory, ports } = await allocator({ alive: () => false });
+      writeSync(join(directory, '100'), '7');
+      chmodSync(directory, 0o555);
+      try {
+        await expect(ports.port()).rejects.toMatchObject({ code: 'EACCES' });
+      } finally {
+        chmodSync(directory, 0o755);
+      }
+    },
+  );
+  it('does not give out a port it still holds, however old its own claim is', async () => {
+    const { directory, ports } = await allocator({ first: 100, last: 100 });
+    expect(await ports.port()).toBe(100);
+    const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
+    utimesSync(join(directory, '100'), old, old);
+    await expect(ports.port()).rejects.toThrow('no free test port');
+    expect(readFileSync(join(directory, '100'), 'utf8')).toBe('4242');
   });
   it('asks the operating system whether the claiming process still exists', async () => {
     const ended = spawnProcess(process.execPath, { args: ['-e', ''] });
@@ -263,10 +309,11 @@ describe('the test port allocator', () => {
       `const { unusedPort } = await import(${JSON.stringify(helper)});` +
         `process.stdout.write(String(await unusedPort())); ${after}`,
     ];
-    const clean = await run(process.execPath, { args: args('') });
-    const released = Number(new TextDecoder().decode(clean.stdout));
+    const clean = spawnProcess(process.execPath, { args: args('') });
+    const released = Number(new TextDecoder().decode((await clean.output()).stdout));
     expect(released).toBeGreaterThanOrEqual(TEST_PORT_RANGE.first);
-    expect(existsSync(join(claims, String(released)))).toBe(false);
+    // Released by the child's exit handler; another test process may hold it by now.
+    expect(claimOwner(claims, released)).not.toBe(String(clean.pid));
 
     const killed = spawnProcess(process.execPath, { args: args('setInterval(() => {}, 1000);') });
     const port = Number(new TextDecoder().decode((await killed.stdout!.getReader().read()).value));
@@ -278,7 +325,8 @@ describe('the test port allocator', () => {
       killed.kill('SIGKILL');
       await killed.status;
     }
-    expect(existsSync(join(claims, String(port)))).toBe(true);
+    // A killed process releases nothing: its claim is still there, under its id.
+    expect(claimOwner(claims, port)).toBe(String(killed.pid));
     const ports = createPortAllocator({ directory: claims, first: port, last: port });
     try {
       expect(await ports.port()).toBe(port);
