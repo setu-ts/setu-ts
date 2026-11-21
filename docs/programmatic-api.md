@@ -496,6 +496,7 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 
 ```typescript
 type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP';
+type FatalErrorOrigin = 'uncaughtException' | 'unhandledRejection';
 
 interface IRuntimeServices {
   reportError?(record: Readonly<Record<string, unknown>>): void;

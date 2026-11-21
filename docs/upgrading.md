@@ -16,7 +16,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 - **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
   bound. Keep it below the orchestrator's grace period minus any pre-stop delay and the time the
-  shutdown hooks need: with the generated 30 s grace and 5 s pre-stop sleep, 20 000 leaves 5 s.
+  shutdown hooks need; `PUBLIC_API.md` ("The two drain numbers, in one place") gives the default and
+  the value a generated project passes, with the arithmetic.
 - **SIGHUP.** `RuntimeSignal` now includes `'SIGHUP'`. Add it to an entry's signal loop so a closed
   terminal stops the application cleanly. An exhaustive `switch` over `RuntimeSignal` needs a new
   arm.

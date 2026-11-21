@@ -257,6 +257,14 @@ interface StartOptions {
 
 The drain bound is `StartOptions.drainTimeoutMs`; there is no other shutdown option.
 
+**The two drain numbers, in one place.** The bound must fit inside the orchestrator's grace period
+(the time between `SIGTERM` and `SIGKILL`) minus the pre-stop delay and the time the shutdown and
+close hooks need. The library default is **10 000 ms**, which fits a 30 s grace with room to spare.
+The entry `setu new` generates passes **20 000 ms** (from 0.14.0): the generated Kubernetes
+manifests give 30 s of grace and a 5 s pre-stop sleep, leaving 25 s, of which 20 s drain and 5 s
+close the server and run the hooks. Change any one of the grace period, the pre-stop sleep or
+`drainTimeoutMs`, and recheck the other two.
+
 ### Usage
 
 ```typescript

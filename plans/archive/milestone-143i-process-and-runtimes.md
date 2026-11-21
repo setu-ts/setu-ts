@@ -513,3 +513,77 @@ Hand-over, per row, to the letters that own the other half:
   (SIGHUP, `drainTimeoutMs`, the new log lines, streams holding the drain);
   `docs/programmatic-api.md:642` and `docs/ai.md:190` on `ctx.signal` needing
   `enable_request_signal` on Workers.
+
+## 10. Compared with (sibling code and established frameworks)
+
+Added 2026-11-22 after implementation, at the maintainer's request. Facts are from official docs or
+source (URLs below); "not confirmed" means no primary source said it. A row marked **question** was
+put to the maintainer because the frameworks split, or agree on something other than this plan; all
+three were decided on 2026-11-22.
+
+| Decision                                   | This plan                                                                                      | Repository siblings                                                                                                                      | Established frameworks                                                                                                                                                                                                                                                                                  | Verdict                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Uncaught exception / unhandled rejection   | Observe, log one `fatal` line through the logger, process still exits as before (§3.1)         | No package installs a handler (the row's finding)                                                                                        | Node exits 1 by default and calls resuming unsafe; Fastify says crash; close-with-grace hands the error to a callback and always exits; JVM ends the thread                                                                                                                                             | Matches: crash kept, observation only                    |
+| SIGHUP as a shutdown signal                | In `RuntimeSignal`; the generated entry adds it (M143j)                                        | The CLI's own `main.ts` handles SIGINT only                                                                                              | NestJS `enableShutdownHooks()` and close-with-grace include SIGHUP; the JVM runs shutdown hooks on it; .NET `ConsoleLifetime` does not list it; Go exits on it with no handler                                                                                                                          | Matches the majority                                     |
+| Drain bound and its default                | `StartOptions.drainTimeoutMs`, default 10 000 ms (§3.4)                                        | Generated Kubernetes: 30 s grace, 5 s pre-stop; Deno adapter `close` waits at most 1 s                                                   | Spring Boot 30 s; ASP.NET Core `ShutdownTimeout` 30 s; Kubernetes grace 30 s; close-with-grace 10 s; Fastify and Go have no built-in bound                                                                                                                                                              | **Decided** — keep 10 s (below)                          |
+| Draining HTTP/2 / gRPC server, new streams | GOAWAY to every session at drain start, in-flight streams finish, later sessions closed (§3.6) | `grpcClient` retries only a refused stream                                                                                               | grpc-go `GracefulStop` and grpc-java `shutdown()` refuse new RPCs and let in-flight ones finish (grpc-go with a two-step GOAWAY + PING); Kestrel sends a preliminary GOAWAY; Envoy GOAWAY on drain; Node `session.close()` refuses new streams                                                          | Matches (single GOAWAY, as Node's `session.close()`)     |
+| Implicit `HEAD` for `GET` routes           | Every `GET` route answers `HEAD` with its headers and no body (§3.10)                          | `static-plugin` answers `HEAD`; `react-router-plugin` routes `HEAD` on its catch-all                                                     | Express, Fastify (`exposeHeadRoutes` true), Hono, Spring MVC and Go 1.22 `ServeMux` all answer `HEAD` from `GET`                                                                                                                                                                                        | Matches                                                  |
+| Explicit `HEAD` beside a `GET`             | Ranked together; explicit `HEAD` wins at equal rank, a more specific `GET` beats it (§3.10)    | —                                                                                                                                        | Express and Fastify: explicit `HEAD` wins only if registered before the `GET`; Hono never matches an explicit `HEAD`; Go: most specific pattern wins (HEAD vs GET not confirmed)                                                                                                                        | **Decided** — keep rank-based (below)                    |
+| Refused WebSocket upgrade                  | Node writes the pipeline's whole response (§3.8)                                               | Bun and Deno adapters already return the pipeline's response                                                                             | `ws` `abortHandshake` writes status, headers and body; Bun and Deno return the application's `Response`; gorilla/websocket and coder/websocket write an HTTP error response                                                                                                                             | Matches                                                  |
+| WebSocket size limit beyond the runtime    | Ceiling not raised; reported once per server at the first handshake asking for more (§3.11)    | `WebSocketPlugin` default 1 MiB, enforced after receipt                                                                                  | `ws` 100 MiB, close 1009; Bun 16 MB, close 1009; Deno fixed 64 MiB, not configurable; uWS 16 KiB; gorilla unlimited; coder 32 KiB                                                                                                                                                                       | Matches (no framework silently raises a runtime ceiling) |
+| Quiet response stream on Bun               | `server.timeout(request, 0)` for streamed responses (§3.13)                                    | SSE heartbeat 30 s by default                                                                                                            | Bun's docs recommend `server.timeout(req, 0)` for SSE; Node's request timeouts cover the inbound request; Deno has no such timeout; Go's `WriteTimeout` caps a stream only when set                                                                                                                     | Matches                                                  |
+| Request-log status for a client that left  | `499` with `aborted: true`; the line is written before the adapter sends anything (§3.9)       | Telemetry span (`telemetry-plugin`, CLI lane) records the snapshot status: `500` + span error for the same request, `200` for an upgrade | Before any response: nginx 499 (`NGX_HTTP_CLIENT_CLOSED_REQUEST`), Caddy `reverse_proxy` 499, ASP.NET Core 499 (`Status499ClientClosedRequest`); Envoy 0 + `DC`; HAProxy -1 or 400 with `C*` state; pino-http `null` + "request aborted"; morgan `-`. After headers went out, most keep the real status | **Decided** — keep 499 (below)                           |
+
+Sources: https://nodejs.org/api/process.html ·
+https://raw.githubusercontent.com/fastify/fastify/main/docs/Reference/Errors.md ·
+https://raw.githubusercontent.com/mcollina/close-with-grace/main/README.md ·
+https://raw.githubusercontent.com/nestjs/nest/master/packages/common/enums/shutdown-signal.enum.ts ·
+https://docs.oracle.com/en/java/javase/21/docs/specs/man/java.html ·
+https://learn.microsoft.com/en-us/dotnet/core/extensions/generic-host · https://pkg.go.dev/os/signal
+· https://docs.spring.io/spring-boot/reference/web/graceful-shutdown.html ·
+https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.hosting.hostoptions ·
+https://kubernetes.io/docs/concepts/workloads/pods/pod-termination/ · https://pkg.go.dev/net/http ·
+https://raw.githubusercontent.com/grpc/grpc-go/master/server.go ·
+https://grpc.github.io/grpc-java/javadoc/io/grpc/Server.html · https://nodejs.org/api/http2.html ·
+https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/operations/draining ·
+https://expressjs.com/en/5x/api/router ·
+https://raw.githubusercontent.com/fastify/fastify/main/docs/Reference/Server.md ·
+https://raw.githubusercontent.com/honojs/hono/main/src/hono-base.ts ·
+https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller/ann-requestmapping.html
+· https://raw.githubusercontent.com/websockets/ws/master/lib/websocket-server.js ·
+https://bun.com/docs/runtime/http/websockets ·
+https://docs.deno.com/api/deno/~/Deno.upgradeWebSocket ·
+https://pkg.go.dev/github.com/gorilla/websocket · https://pkg.go.dev/github.com/coder/websocket ·
+https://raw.githubusercontent.com/denoland/deno/main/ext/websocket/lib.rs ·
+https://bun.com/docs/runtime/http/server · https://nodejs.org/api/http.html ·
+https://raw.githubusercontent.com/nginx/nginx/master/src/http/ngx_http_request.h ·
+https://raw.githubusercontent.com/caddyserver/caddy/master/modules/caddyhttp/reverseproxy/reverseproxy.go
+·
+https://raw.githubusercontent.com/dotnet/aspnetcore/main/src/Http/Http.Abstractions/src/StatusCodes.cs
+·
+https://raw.githubusercontent.com/envoyproxy/envoy/main/docs/root/configuration/advanced/substitution_formatter.rst
+· https://raw.githubusercontent.com/haproxy/haproxy/master/doc/configuration.txt ·
+https://raw.githubusercontent.com/pinojs/pino-http/master/logger.js
+
+### Decided by the maintainer (2026-11-22: "Go with your recommendations on all of them")
+
+1. **Drain default.** Spring Boot, ASP.NET Core and Kubernetes default to 30 s; close-with-grace to
+   10 s; Fastify and Go have none. Decision: keep 10 s. The bound must fit inside the orchestrator's
+   grace period minus the pre-stop sleep and the hooks, and a 30 s default would overrun the
+   generated 30 s grace; the generated entry sets 20 000 (M143j).
+2. **Explicit `HEAD` beside a `GET`.** Express and Fastify let an explicit `HEAD` win only when it
+   is registered first; Hono never uses it. Decision: keep rank-based (explicit `HEAD` wins at equal
+   rank, a more specific `GET` beats a catch-all `HEAD`): it is order-independent like the rest of
+   the kernel's ranking, and it is what makes react-router's assets answer `HEAD` with no plugin
+   change.
+3. **499 for a client that left.** Before any response is sent, nginx, Caddy and ASP.NET Core log
+   499; Envoy logs 0 with `DC`, HAProxy -1 or 400, the Node loggers no code. The request log line is
+   written before the adapter sends anything, so an aborted request there is that case. Decision:
+   keep `499` with `aborted: true`; the telemetry span is to agree (a CLI-lane half:
+   `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade).
+
+The drain decision also asked that the library default and the generated value be stated together,
+with the reason, in one place: `PUBLIC_API.md`, "The two drain numbers, in one place"; the
+`StartOptions.drainTimeoutMs` JSDoc and the upgrade note point there. The telemetry half (499 and an
+unset span status for an aborted request, 101 for an upgrade intent) belongs to M143k, as a new half
+for the ROADMAP.
