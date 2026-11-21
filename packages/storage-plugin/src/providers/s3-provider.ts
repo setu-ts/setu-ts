@@ -14,7 +14,13 @@ import type { PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IS3Backend, StorageProvider } from '../interfaces/index.ts';
 import type { StorageDeadline, StorageOperation } from './fault.ts';
-import { resolveRequestTimeout, runBounded, toStorageError } from './fault.ts';
+import {
+  answeredStatus,
+  destroyOnAbort,
+  resolveRequestTimeout,
+  runBounded,
+  toStorageError,
+} from './fault.ts';
 import { createBoundedNodeStream, looksLikeNodeReadable } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
@@ -151,11 +157,20 @@ export function adaptAwsS3Module(
   const presignerMod = mod.presigner;
   const client = new s3Mod.S3Client(buildS3Config(options));
   // Every SDK call runs under the bound and receives its signal, so an expired
-  // bound also aborts the request the SDK is holding.
-  const send = (operation: StorageOperation, command: unknown): Promise<unknown> =>
-    runBounded(deadline, provider, operation, (signal) =>
-      client.send(command, { abortSignal: signal }),
-    );
+  // bound also aborts the request the SDK is holding. A caller that owns the
+  // bound (`S3Provider`) passes its own signal instead.
+  const bounded = <T>(
+    operation: StorageOperation,
+    signal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> =>
+    signal === undefined ? runBounded(deadline, provider, operation, run) : run(signal);
+  const send = (
+    operation: StorageOperation,
+    command: unknown,
+    signal?: AbortSignal,
+  ): Promise<unknown> =>
+    bounded(operation, signal, (abortSignal) => client.send(command, { abortSignal }));
 
   return {
     async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
@@ -174,35 +189,32 @@ export function adaptAwsS3Module(
         }),
       );
     },
-    async get(path: string): Promise<Uint8Array | null> {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res: any = await send(
-          'get',
-          new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
-        );
-        // Real SDK v3 Body is an SdkStreamMixin with transformToByteArray().
-        if (res.Body && typeof res.Body.transformToByteArray === 'function') {
-          return await res.Body.transformToByteArray();
+    get(path: string, signal?: AbortSignal): Promise<Uint8Array | null> {
+      // The body is read under the same bound as the request, and destroyed
+      // when the bound expires, so a stalled body releases its connection.
+      return bounded('get', signal, async (abortSignal) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const res: any = await client.send(
+            new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
+            { abortSignal },
+          );
+          destroyOnAbort(res.Body, abortSignal);
+          // Real SDK v3 Body is an SdkStreamMixin with transformToByteArray().
+          if (res.Body && typeof res.Body.transformToByteArray === 'function') {
+            return (await res.Body.transformToByteArray()) as Uint8Array;
+          }
+          // Fallback: already a Uint8Array or translatable.
+          return res.Body instanceof Uint8Array ? res.Body : new Uint8Array(res.Body);
+        } catch (error) {
+          if (isS3NotFound(error)) return null;
+          throw error;
         }
-        // Fallback: already a Uint8Array or translatable.
-        return res.Body instanceof Uint8Array ? res.Body : new Uint8Array(res.Body);
-      } catch (error) {
-        if (isS3NotFound(error)) return null;
-        throw error;
-      }
+      });
     },
-    // S3's DeleteObject answers 204 whether or not the key existed, so the key
-    // is checked with HEAD first: an absent key is `false`, as on every other
-    // provider. An object removed between the two requests still answers
-    // `true`. A failure of either request rejects.
+    // S3's DeleteObject answers 204 whether or not the key existed; `S3Provider`
+    // checks presence with `head` first so an absent key answers `false`.
     async delete(path: string): Promise<boolean> {
-      try {
-        await send('delete', new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }));
-      } catch (error) {
-        if (isS3NotFound(error)) return false;
-        throw error;
-      }
       await send('delete', new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }));
       return true;
     },
@@ -228,12 +240,16 @@ export function adaptAwsS3Module(
         ),
       );
     },
-    async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    async getStream(
+      path: string,
+      signal?: AbortSignal,
+    ): Promise<ReadableStream<Uint8Array> | null> {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const res: any = await send(
           'getStream',
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
+          signal,
         );
         // Real SDK v3 Body is an SdkStreamMixin with transformToWebStream().
         if (res.Body && typeof res.Body.transformToWebStream === 'function') {
@@ -342,15 +358,20 @@ export class S3Provider implements StorageProvider {
 
   /**
    * Runs one client call under the bound and classifies its rejection. The
-   * bound covers the whole call, the body read included; the adapted client
-   * also hands each SDK request the bound's signal, so an expired bound aborts
-   * the request it holds.
+   * bound covers the whole call, the body read included, and its signal is
+   * handed to the client: the adapted client aborts its request and destroys
+   * a body still streaming when the bound expires.
    */
-  async #call<T>(operation: StorageOperation, run: (client: IS3Backend) => Promise<T>): Promise<T> {
+  async #call<T>(
+    operation: StorageOperation,
+    run: (client: IS3Backend, signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     this.#assertConnected();
     const client = this.#client!;
     try {
-      return await runBounded(this.#deadline, this.#name, operation, () => run(client));
+      return await runBounded(this.#deadline, this.#name, operation, (signal) =>
+        run(client, signal),
+      );
     } catch (error) {
       throw toStorageError(error, this.#name, operation);
     }
@@ -438,7 +459,7 @@ export class S3Provider implements StorageProvider {
    * @returns The object bytes, or `null`
    */
   get(path: string): Promise<Uint8Array | null> {
-    return this.#call('get', (client) => client.get(path));
+    return this.#call('get', (client, signal) => client.get(path, signal));
   }
 
   /**
@@ -450,7 +471,18 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if an object was deleted
    */
-  delete(path: string): Promise<boolean> {
+  async delete(path: string): Promise<boolean> {
+    // Presence is a read of its own: its timeout is a 503 (nothing was sent).
+    // A 403 there means the credential may not see absent keys (HeadObject
+    // without `s3:ListBucket`), so presence is unknown and the delete goes on.
+    let present: boolean;
+    try {
+      present = await this.#call('exists', (client) => client.head(path));
+    } catch (error) {
+      if (!(error instanceof Error) || answeredStatus(error.cause) !== 403) throw error;
+      present = true;
+    }
+    if (!present) return false;
     return this.#call('delete', (client) => client.delete(path));
   }
 
@@ -484,6 +516,6 @@ export class S3Provider implements StorageProvider {
    * @returns A `ReadableStream`, or `null` if absent
    */
   getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
-    return this.#call('getStream', (client) => client.getStream(path));
+    return this.#call('getStream', (client, signal) => client.getStream(path, signal));
   }
 }

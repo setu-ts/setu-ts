@@ -441,6 +441,14 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
     expect(() => new SmtpProvider({ host: 'h', socketTimeoutMs: 30_000 })).not.toThrow();
   });
 
+  it('a disconnect while nodemailer loads sticks', async () => {
+    const provider = new SmtpProvider({ host: 'smtp.x.test' });
+    const connecting = provider.connect();
+    await provider.disconnect();
+    await expect(connecting).rejects.toThrow(/not connected/);
+    expect(provider.isReady()).toBe(false);
+  });
+
   it('refuses dnsTtlMs without a host', () => {
     expect(
       () =>
@@ -487,6 +495,10 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
 
   it('a disconnect while a DNS refresh is in flight sticks', async () => {
     let release: (addresses: string[]) => void = () => undefined;
+    let asked: () => void = () => undefined;
+    const lookupStarted = new Promise<void>((resolve) => {
+      asked = resolve;
+    });
     const provider = new SmtpProvider(
       { host: 'smtp.x.test', port: 1, dnsTtlMs: 1000 },
       {
@@ -494,6 +506,7 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
           resolveHost: () =>
             new Promise<string[]>((resolve) => {
               release = resolve;
+              asked();
             }),
           resolveSrv: () => Promise.resolve([]),
         },
@@ -501,7 +514,7 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
       },
     );
     const connecting = provider.connect();
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await lookupStarted;
     await provider.disconnect();
     release(['127.0.0.1']);
     await expect(connecting).rejects.toThrow(/not connected/);
@@ -557,7 +570,10 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
       http: () => Promise.resolve(new Response(slowBody, { status: 400 })),
     });
     await provider.connect();
+    const started = performance.now();
     const error = await provider.send(mail).catch((e: unknown) => e);
+    // One bound covers the send and the error text.
+    expect(performance.now() - started).toBeLessThan(380);
     expect(error).not.toBeInstanceOf(BackendOutcomeUnknownError);
     expect((error as Error).message).toBe('SendGrid send failed: HTTP 400');
   });
@@ -577,5 +593,13 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
     );
     expect(client.isHealthy).toBeUndefined();
     await client.sendEmail(mail);
+  });
+});
+
+describe('SendGrid reason cannot forge a log line', () => {
+  it('replaces control characters', async () => {
+    expect(
+      await sendGridReason(new Response(JSON.stringify({ errors: [{ message: 'bad\r\nkey' }] }))),
+    ).toBe('bad  key');
   });
 });

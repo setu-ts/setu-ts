@@ -35,9 +35,18 @@ describe('createUploadMiddleware upload brand (V13-58)', () => {
 });
 
 describe('createUploadMiddleware refuses options its brand cannot describe', () => {
-  for (const options of [{ maxSize: 0 }, { maxSize: 1.5 }, { maxFiles: 0 }, { fieldname: '' }]) {
-    it(`refuses ${JSON.stringify(options)}`, () => {
-      expect(() => createUploadMiddleware(options)).toThrow(RangeError);
+  for (const [options, message] of [
+    [{ maxSize: 0 }, /maxSize must be a whole number of bytes of at least 1/],
+    [{ maxSize: 1.5 }, /maxSize must be a whole number of bytes of at least 1/],
+    [{ maxFiles: 0 }, /maxFiles must be a whole number of at least 1/],
+    [{ fieldname: '' }, /fieldname must be a non-empty string/],
+    [
+      { allowedMimeTypes: 'image/png' as unknown as readonly string[] },
+      /allowedMimeTypes must be an array of strings/,
+    ],
+  ] as const) {
+    it(`refuses ${JSON.stringify(options)} naming the rule`, () => {
+      expect(() => createUploadMiddleware(options)).toThrow(message);
     });
   }
 });

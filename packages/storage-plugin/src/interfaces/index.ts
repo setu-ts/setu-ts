@@ -284,11 +284,13 @@ export interface AzureBlobProviderOptions {
  */
 export interface IS3Backend {
   put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
-  get(path: string): Promise<Uint8Array | null>;
+  /** `signal` (since 0.14.0) aborts the read when the provider's bound expires. */
+  get(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
   delete(path: string): Promise<boolean>;
   head(path: string): Promise<boolean>;
   getSignedUrl(path: string, expiresIn: number): Promise<string>;
-  getStream(path: string): Promise<ReadableStream<Uint8Array> | null>;
+  /** `signal` (since 0.14.0) aborts obtaining the stream when the bound expires. */
+  getStream(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array> | null>;
 }
 
 /**
@@ -360,13 +362,13 @@ export interface UploadedFile {
  * @since 0.1.0
  */
 export interface UploadMiddlewareOptions {
-  /** Form field name to extract (default `'file'`). */
+  /** Form field name to extract (default `'file'`); a non-empty string. */
   fieldname?: string;
-  /** Maximum per-file size in bytes (default 10 MB). */
+  /** Maximum per-file size in bytes (default 10 MB); a whole number of at least 1. */
   maxSize?: number;
-  /** Allowed MIME-type allow-list (optional). */
+  /** Allowed MIME-type allow-list (optional); a disallowed type answers `415`. */
   allowedMimeTypes?: readonly string[];
-  /** Maximum number of files (default unlimited). */
+  /** Maximum number of files (default unlimited); a whole number of at least 1. */
   maxFiles?: number;
   /**
    * Hard ceiling, in bytes, on the request body this middleware will PARSE

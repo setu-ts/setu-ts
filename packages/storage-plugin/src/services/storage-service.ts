@@ -12,6 +12,7 @@ import type {
   StorageDiagnosticsOperation,
 } from '@setu-ts/common';
 import { StorageObjectNotFoundError } from '@setu-ts/common';
+import { assertStorageKey } from './storage-key.ts';
 import type { StorageProvider } from '../interfaces/index.ts';
 import type { StorageObservationCollector } from '../diagnostics/storage-observations.ts';
 
@@ -185,6 +186,7 @@ export class StorageService implements IStorage {
    * provider can tell "no attributes given" from "empty attributes given"
    */
   async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     if (collector === undefined) {
       if (options === undefined) {
@@ -214,6 +216,7 @@ export class StorageService implements IStorage {
    * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async get(path: string): Promise<Uint8Array> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     if (collector === undefined) {
       return await this.#readBuffered(path);
@@ -235,6 +238,7 @@ export class StorageService implements IStorage {
    * @returns `true` if an object was deleted
    */
   async delete(path: string): Promise<boolean> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     if (collector === undefined) {
       return this.#provider.delete(path);
@@ -249,6 +253,7 @@ export class StorageService implements IStorage {
    * @returns `true` if present
    */
   async exists(path: string): Promise<boolean> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     if (collector === undefined) {
       return this.#provider.exists(path);
@@ -264,6 +269,7 @@ export class StorageService implements IStorage {
    * @returns The signed URL
    */
   async getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     if (collector === undefined) {
       return this.#provider.getSignedUrl(path, options);
@@ -295,6 +301,7 @@ export class StorageService implements IStorage {
    * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async getStream(path: string): Promise<ReadableStream<Uint8Array>> {
+    assertStorageKey(path);
     const collector = collectors.get(this);
     const streamFn = this.#provider.getStream;
     if (collector === undefined) {

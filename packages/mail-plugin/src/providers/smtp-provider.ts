@@ -296,7 +296,11 @@ export class SmtpProvider implements MailProvider {
       }
       this.#transport = injected;
     } else {
-      this.#module = await loadNodemailerModule();
+      const generation = this.#generation;
+      const module = await loadNodemailerModule();
+      // A disconnect while the module loaded wins: the provider stays closed.
+      if (generation !== this.#generation) throw notConnected();
+      this.#module = module;
       this.#transport = this.#usesDnsTtl()
         ? await this.#refreshTransport()
         : adaptNodemailerModule(this.#module, this.#options);

@@ -159,3 +159,10 @@ describe('runBounded', () => {
     expect(armed).toBe(1000);
   });
 });
+
+describe('a backend message cannot forge a log line', () => {
+  it('control characters in the cause message are replaced', () => {
+    const error = toStorageError(new Error('denied\r\nfake: line\u0000'), 's3', 'get');
+    expect(error.message).toBe('storage-plugin (s3): get failed: denied  fake: line ');
+  });
+});

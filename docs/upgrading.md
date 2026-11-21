@@ -34,7 +34,10 @@ cutting a release renames that heading to the version and is a rename, not a rec
 - **Azure storage.** `connectionString` now works as documented; a SAS-URL passed as
   `connectionString` is no longer accepted (use the SAS connection-string form).
 - **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
-- **Uploads.** A disallowed MIME type answers `415` instead of `400`.
+- **Uploads.** A disallowed MIME type answers `415` instead of `400`. `createUploadMiddleware`
+  throws `RangeError` for `maxSize` or `maxFiles` below 1 or fractional, an empty `fieldname`, or a
+  non-array `allowedMimeTypes`.
+- **Storage keys.** A key with a `.` or `..` path segment is refused with a `400`.
 - **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
   `timeout`, not `timeoutSeconds`. `initTimeoutSeconds: 0` is refused.
 - **Slack.** A notification's `subject` is now part of the posted text.

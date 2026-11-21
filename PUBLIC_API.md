@@ -9276,7 +9276,11 @@ middleware can decline to read; capping the read for every reader needs a stream
 Since 0.14.0 the middleware `createUploadMiddleware` returns is branded with the uploads it accepts
 (`withUploadMetadata` from `@setu-ts/common`: the field name, `maxSize` as `maxBytes`, `maxFiles`,
 `allowedMimeTypes` as `mimeTypes`), so a documentation generator can describe the route's multipart
-body; the brand changes no behaviour.
+body; the brand itself changes no behaviour. Options it cannot describe are refused when the
+middleware is built (`RangeError` naming the rule: a non-empty `fieldname`, whole-number `maxSize`
+and `maxFiles` of at least 1, `allowedMimeTypes` an array of strings). Since 0.14.0 every
+`StorageService` call refuses a key with a `.` or `..` path segment with a `400` hint (fixed
+detail); the Azure provider, used directly, refuses one too.
 
 Since M94b the middleware parses through the request's `formData` accessor (or the same shared
 `parseFormBody` when the request omits it), and a part carrying NO `filename` under the field name

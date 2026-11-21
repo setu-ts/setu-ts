@@ -117,10 +117,7 @@ export function createProvider(
       // A Backblaze endpoint names its region (`s3.<region>.backblazeb2.com`),
       // which SigV4 signs with; any other endpoint signs with `us-east-1`, as
       // an S3-compatible server expects.
-      const region =
-        b2Opts.region ??
-        /^https?:\/\/s3\.([a-z0-9-]+)\.backblazeb2\.com/i.exec(b2Opts.endpoint ?? '')?.[1] ??
-        'us-east-1';
+      const region = b2Opts.region ?? b2RegionFromEndpoint(b2Opts.endpoint) ?? 'us-east-1';
       const endpoint = b2Opts.endpoint ?? `https://s3.${region}.backblazeb2.com`;
       return new S3Provider(
         {
@@ -172,6 +169,25 @@ export function createProvider(
       throw new Error(`Unsupported storage provider: ${unknownProvider}`);
     }
   }
+}
+
+/**
+ * Reads the region from a Backblaze S3 endpoint (`https://s3.<region>.backblazeb2.com`):
+ * the host must be exactly that shape, compared lower-cased. Internal — not
+ * exported from the package barrel.
+ *
+ * @param endpoint - The configured endpoint, if any
+ * @returns The region, or `undefined` for any other endpoint
+ */
+export function b2RegionFromEndpoint(endpoint: string | undefined): string | undefined {
+  if (endpoint === undefined) return undefined;
+  let host: string;
+  try {
+    host = new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  return /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/.exec(host)?.[1];
 }
 
 /**

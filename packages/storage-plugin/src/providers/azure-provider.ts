@@ -10,9 +10,16 @@ import type { PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureBlobClient, StorageProvider } from '../interfaces/index.ts';
 import { createEagerIterableStream } from './provider-stream.ts';
+import { assertStorageKey } from '../services/storage-key.ts';
 import { hasMethods } from './shape.ts';
 import type { StorageDeadline, StorageOperation } from './fault.ts';
-import { answeredBelow500, resolveRequestTimeout, runBounded, toStorageError } from './fault.ts';
+import {
+  answeredBelow500,
+  destroyOnAbort,
+  resolveRequestTimeout,
+  runBounded,
+  toStorageError,
+} from './fault.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
 
@@ -393,6 +400,9 @@ export class AzureBlobProvider implements StorageProvider {
   }
 
   #getBlockBlob(path: string): AzureFacadeBlob {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    assertStorageKey(path);
     const container = this.#client!.getContainerClient(
       this.#options.containerName,
     ) as AzureFacadeContainer;
@@ -400,19 +410,19 @@ export class AzureBlobProvider implements StorageProvider {
   }
 
   /**
-   * Runs one call — bounded here for an injected client (the adapted client
-   * bounds its own SDK calls) — and classifies its rejection. `notFound` names
-   * the value Azure's not-found answer stands for.
+   * Runs one call under the bound — the whole call, a body read included — and
+   * classifies its rejection. `run` receives the bound's signal (a body still
+   * streaming is destroyed when it expires); the adapted client also hands each
+   * SDK operation a signal of its own. `notFound` names the value Azure's
+   * not-found answer stands for.
    */
   async #call<T>(
     operation: StorageOperation,
-    run: () => Promise<T>,
+    run: (signal: AbortSignal) => Promise<T>,
     notFound?: { readonly value: T },
   ): Promise<T> {
     this.#assertConnected();
     try {
-      // The whole call, the body read included; the adapted client also hands
-      // each SDK operation the bound's signal.
       return await runBounded(this.#deadline, 'azure', operation, run);
     } catch (error) {
       if (notFound !== undefined && isAzureNotFound(error)) return notFound.value;
@@ -452,9 +462,12 @@ export class AzureBlobProvider implements StorageProvider {
   get(path: string): Promise<Uint8Array | null> {
     return this.#call<Uint8Array | null>(
       'get',
-      async () => {
+      async (signal) => {
         const result = await this.#getBlockBlob(path).download();
         if (result.deleted === true || result.readableStreamBody === undefined) return null;
+        // A body still streaming when the bound expires is destroyed, so it
+        // releases its connection.
+        destroyOnAbort(result.readableStreamBody, signal);
         // Adapt Node Readable to Uint8Array via async iteration.
         const chunks: Uint8Array[] = [];
         for await (const chunk of result.readableStreamBody as AsyncIterable<Uint8Array>) {

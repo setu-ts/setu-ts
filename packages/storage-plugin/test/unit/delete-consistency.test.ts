@@ -159,3 +159,57 @@ describe('delete() answers the same on every provider', () => {
     });
   }
 });
+
+describe('S3 delete: presence check edge cases', () => {
+  function provider(head: () => Promise<unknown>, deleted: string[]): S3Provider {
+    class Command {
+      constructor(readonly input: { Key: string }) {}
+    }
+    class HeadObjectCommand extends Command {}
+    class DeleteObjectCommand extends Command {}
+    const mod = {
+      s3: {
+        S3Client: class {
+          send(command: Command): Promise<unknown> {
+            if (command instanceof HeadObjectCommand) return head();
+            deleted.push(command.input.Key);
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: Command,
+        GetObjectCommand: Command,
+        DeleteObjectCommand,
+        HeadObjectCommand,
+      },
+      presigner: { getSignedUrl: () => Promise.resolve('') },
+    } as unknown as AwsStorageSdkModule;
+    return new S3Provider({
+      bucket: 'b',
+      requestTimeoutMs: 200,
+      client: adaptAwsS3Module(mod, { bucket: 'b' }),
+    });
+  }
+
+  it('a 403 on the check (no s3:ListBucket) still deletes and answers true', async () => {
+    const deleted: string[] = [];
+    const p = provider(
+      () =>
+        Promise.reject(
+          Object.assign(new Error('Forbidden'), { $metadata: { httpStatusCode: 403 } }),
+        ),
+      deleted,
+    );
+    await p.connect();
+    expect(await p.delete('k')).toBe(true);
+    expect(deleted).toEqual(['k']);
+  });
+
+  it('a timeout during the check is a 503 and nothing is deleted', async () => {
+    const { BackendUnavailableError } = await import('@setu-ts/common');
+    const deleted: string[] = [];
+    const p = provider(() => new Promise(() => undefined), deleted);
+    await p.connect();
+    await expect(p.delete('k')).rejects.toBeInstanceOf(BackendUnavailableError);
+    expect(deleted).toEqual([]);
+  });
+});

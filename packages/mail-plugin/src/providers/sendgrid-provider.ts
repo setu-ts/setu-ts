@@ -174,10 +174,15 @@ export class SendGridProvider implements MailProvider {
     if (!this.#ready) {
       throw new Error('SendGridProvider is not connected');
     }
-    let res: Response;
+    // One bound covers the send and the refusal's error text. The status is
+    // SendGrid's answer, so a refusal whose text is slow is still a refusal:
+    // when the bound expires during the text, the refusal is reported without
+    // it, and the aborted signal releases the connection.
+    let refusedWith: number | undefined;
+    let reason = '';
     try {
-      res = await runMailCall(this.#deadline, 'sendgrid', (signal) =>
-        this.#http(this.#endpoint, {
+      await runMailCall(this.#deadline, 'sendgrid', async (signal) => {
+        const res = await this.#http(this.#endpoint, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${this.#apiKey}`,
@@ -185,23 +190,22 @@ export class SendGridProvider implements MailProvider {
           },
           body: JSON.stringify(toSendGridBody(message)),
           signal,
-        }),
-      );
+        });
+        if (res.status < HTTP_MULTIPLE_CHOICES) {
+          await res.body?.cancel().catch(() => undefined);
+          return;
+        }
+        refusedWith = res.status;
+        reason = await sendGridReason(res);
+      });
     } catch (error) {
-      throw toMailError(error, 'sendgrid');
+      if (refusedWith === undefined) throw toMailError(error, 'sendgrid');
     }
-    if (res.status < HTTP_MULTIPLE_CHOICES) {
-      await res.body?.cancel().catch(() => undefined);
-      return;
+    if (refusedWith !== undefined) {
+      throw new Error(
+        `SendGrid send failed: HTTP ${refusedWith}${reason === '' ? '' : `: ${reason}`}`,
+      );
     }
-    // The status is SendGrid's answer: a refusal stays a refusal even when its
-    // body is slow. The reason is read under its own bound, and is optional.
-    const reason = await runMailCall(this.#deadline, 'sendgrid', () => sendGridReason(res)).catch(
-      () => '',
-    );
-    throw new Error(
-      `SendGrid send failed: HTTP ${res.status}${reason === '' ? '' : `: ${reason}`}`,
-    );
   }
 }
 
@@ -218,7 +222,12 @@ export async function sendGridReason(res: Response): Promise<string> {
   try {
     const body = (await res.json()) as { errors?: readonly { message?: unknown }[] };
     const message = body.errors?.[0]?.message;
-    return typeof message === 'string' ? message.slice(0, MAX_REASON) : '';
+    // Control characters (CR/LF included) are replaced, so the text cannot
+    // forge a log line.
+    return typeof message === 'string'
+      ? // eslint-disable-next-line no-control-regex -- control characters are what it replaces
+        message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, MAX_REASON)
+      : '';
   } catch {
     return '';
   }

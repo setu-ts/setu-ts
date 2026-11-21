@@ -160,7 +160,11 @@ export function toStorageError(
     return new BackendOutcomeUnknownError(label, { cause: error });
   }
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(`${label} failed: ${message.slice(0, MAX_CAUSE_MESSAGE)}`, { cause: error });
+  // Control characters (CR/LF included) are replaced, so a backend's text
+  // cannot forge a log line.
+  // eslint-disable-next-line no-control-regex -- control characters are what it replaces
+  const printable = message.replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return new Error(`${label} failed: ${printable.slice(0, MAX_CAUSE_MESSAGE)}`, { cause: error });
 }
 
 /**
@@ -174,4 +178,21 @@ export function toStorageError(
 export function answeredBelow500(error: unknown): boolean {
   const status = answeredStatus(error);
   return status !== undefined && status < 500;
+}
+
+/**
+ * Destroys a node body stream when the signal aborts, so a read the bound cut
+ * short releases its connection. A body without `destroy` is left alone.
+ *
+ * @param body - The SDK response body
+ * @param signal - The bound's signal
+ */
+export function destroyOnAbort(body: unknown, signal: AbortSignal): void {
+  const destroy = (body as { destroy?: unknown } | null | undefined)?.destroy;
+  if (typeof destroy !== 'function') return;
+  const release = (): void => {
+    (destroy as () => void).call(body);
+  };
+  if (signal.aborted) release();
+  else signal.addEventListener('abort', release, { once: true });
 }

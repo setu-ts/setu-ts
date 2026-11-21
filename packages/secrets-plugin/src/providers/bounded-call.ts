@@ -132,7 +132,11 @@ export function toSecretsError(error: unknown, provider: string, operation: stri
   if (error instanceof SecretProviderUnavailableError) return error;
   if (isSecretsOutage(error)) return new SecretProviderUnavailableError(provider, error);
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(`${provider} ${operation} failed: ${message.slice(0, MAX_CAUSE_MESSAGE)}`, {
+  // Control characters (CR/LF included) are replaced, so a backend's text
+  // cannot forge a log line.
+  // eslint-disable-next-line no-control-regex -- control characters are what it replaces
+  const printable = message.replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return new Error(`${provider} ${operation} failed: ${printable.slice(0, MAX_CAUSE_MESSAGE)}`, {
     cause: error,
   });
 }

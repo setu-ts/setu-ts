@@ -18,7 +18,6 @@ import {
   httpStatusHintOf,
   parseFormBody,
   respondWithError,
-  uploadMetadataOf,
   withUploadMetadata,
 } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
@@ -94,6 +93,40 @@ function assertByteLimit(option: string, value: number): void {
 }
 
 /**
+ * Refuses options the upload brand cannot describe, each with its own message,
+ * so a documentation generator never silently loses the route's body. The
+ * rules are the ones `uploadMetadataOf` reads back by.
+ *
+ * @throws {RangeError} Naming the option that breaks its rule
+ */
+function assertUploadOptions(
+  fieldname: unknown,
+  maxSize: number,
+  maxFiles: number | undefined,
+  allowedMimeTypes: unknown,
+): void {
+  const refuse = (rule: string): never => {
+    throw new RangeError(`createUploadMiddleware: ${rule}`);
+  };
+  if (typeof fieldname !== 'string' || fieldname === '') {
+    refuse('fieldname must be a non-empty string');
+  }
+  if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+    refuse(`maxSize must be a whole number of bytes of at least 1 (received ${maxSize})`);
+  }
+  if (maxFiles !== undefined && (!Number.isSafeInteger(maxFiles) || maxFiles < 1)) {
+    refuse(`maxFiles must be a whole number of at least 1 (received ${maxFiles})`);
+  }
+  if (
+    allowedMimeTypes !== undefined &&
+    (!Array.isArray(allowedMimeTypes) ||
+      !allowedMimeTypes.every((type: unknown) => typeof type === 'string'))
+  ) {
+    refuse('allowedMimeTypes must be an array of strings');
+  }
+}
+
+/**
  * Creates an upload middleware factory.
  *
  * Checks the declared `Content-Length`, reads the body once through
@@ -131,6 +164,7 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
   const allowedMimeTypes = options?.allowedMimeTypes;
   const maxFiles = options?.maxFiles;
   const maxBodyBytes = resolveMaxBodyBytes(maxSize, options?.maxBodyBytes);
+  assertUploadOptions(fieldname, maxSize, maxFiles, allowedMimeTypes);
 
   const middleware: MiddlewareFunction = async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
@@ -266,19 +300,12 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
   // generator can show the route's multipart body; it changes no behaviour.
   // Options the brand cannot describe are refused here, so a generator never
   // silently loses the body.
-  const branded = withUploadMetadata(middleware, {
+  return withUploadMetadata(middleware, {
     fieldname,
     maxBytes: maxSize,
     ...(maxFiles === undefined ? {} : { maxFiles }),
     ...(allowedMimeTypes === undefined ? {} : { mimeTypes: allowedMimeTypes }),
   });
-  if (uploadMetadataOf(branded) === undefined) {
-    throw new RangeError(
-      'createUploadMiddleware: fieldname must be a non-empty string, maxSize and maxFiles ' +
-        'positive integers, and allowedMimeTypes an array of strings',
-    );
-  }
-  return branded;
 }
 
 /**

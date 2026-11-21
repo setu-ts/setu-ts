@@ -277,3 +277,30 @@ describe.skipIf(S3 === undefined)('s3 on MinIO', () => {
     await expect(unreachable.exists('k')).rejects.toBeInstanceOf(BackendUnavailableError);
   });
 });
+
+describe.skipIf(AZURITE === undefined)(
+  'azure on Azurite: a traversing key cannot reach another container',
+  () => {
+    it('get and getSignedUrl of ../<other>/secret.txt are refused', async () => {
+      const { BlobServiceClient } = await import('@azure/storage-blob');
+      const service = BlobServiceClient.fromConnectionString(AZURITE!);
+      const mine = unique().toLowerCase();
+      const other = `${mine}-other`;
+      await service.getContainerClient(mine).create();
+      await service.getContainerClient(other).create();
+      await service
+        .getContainerClient(other)
+        .getBlockBlobClient('secret.txt')
+        .upload('tenant-b', 8);
+      const provider = new AzureBlobProvider(
+        { containerName: mine, connectionString: AZURITE },
+        NOW,
+      );
+      await provider.connect();
+      await expect(provider.get(`../${other}/secret.txt`)).rejects.toThrow(/segment/);
+      await expect(
+        provider.getSignedUrl(`../${other}/secret.txt`, { expiresIn: 60 }),
+      ).rejects.toThrow(/segment/);
+    });
+  },
+);

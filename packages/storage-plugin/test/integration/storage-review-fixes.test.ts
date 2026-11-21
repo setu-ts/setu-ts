@@ -12,12 +12,13 @@ import { BackendUnavailableError } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { S3Provider } from '../../src/providers/s3-provider.ts';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
-import { createProvider } from '../../src/plugin/storage-plugin.ts';
+import { b2RegionFromEndpoint, createProvider } from '../../src/plugin/storage-plugin.ts';
 
 let server: Server;
 let port = 0;
 const authorizations: string[] = [];
 const stalled = new Set<ServerResponse>();
+let closed = 0;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -32,6 +33,9 @@ beforeAll(async () => {
     });
     res.write('a');
     stalled.add(res);
+    res.on('close', () => {
+      closed++;
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as { port: number }).port;
@@ -44,9 +48,15 @@ afterAll(async () => {
 });
 
 async function expectBounded(run: () => Promise<unknown>): Promise<void> {
+  const before = closed;
   const started = performance.now();
   await expect(run()).rejects.toBeInstanceOf(BackendUnavailableError);
   expect(performance.now() - started).toBeLessThan(5000);
+  // The stalled body is destroyed, so the connection is released.
+  for (let i = 0; i < 40 && closed === before; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  expect(closed).toBeGreaterThan(before);
 }
 
 describe('a body that stalls after its headers is bounded (V13-216)', () => {
@@ -105,6 +115,19 @@ describe('b2 with only an endpoint (V13-248)', () => {
     await provider.connect();
     await provider.get('k').catch(() => undefined);
     expect(authorizations[0]).toMatch(/\/us-east-1\/s3\/aws4_request/);
+  });
+
+  it('b2RegionFromEndpoint reads an exact Backblaze host only', () => {
+    for (const [endpoint, region] of [
+      ['https://s3.us-west-004.backblazeb2.com', 'us-west-004'],
+      ['https://S3.US-WEST-004.BACKBLAZEB2.COM/', 'us-west-004'],
+      ['https://s3.us-west-004.backblazeb2.com.example.net', undefined],
+      ['http://127.0.0.1:9000', undefined],
+      ['not a url', undefined],
+      [undefined, undefined],
+    ] as const) {
+      expect(b2RegionFromEndpoint(endpoint)).toBe(region);
+    }
   });
 
   it('reads the region from a Backblaze endpoint', () => {

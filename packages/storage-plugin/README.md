@@ -129,7 +129,7 @@ The cloud arms share one bound and take an endpoint:
 | ------------------ | -------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `requestTimeoutMs` | `s3`, `b2`, `gcs`, `azure` | `30000`                                       | Bound on each call, the SDK's own retries included. `0` disables it. Raise it for large `put`/`get`; `getStream` is bounded only until the stream is handed back. |
 | `endpoint`         | `s3`, `b2`                 | AWS                                           | S3-compatible endpoint (MinIO, R2, B2). Requests use path-style addressing.                                                                                       |
-| `endpoint`         | `gcs`                      | Google                                        | Passed to the SDK as `apiEndpoint`. `STORAGE_EMULATOR_HOST`, when set, overrides it.                                                                              |
+| `endpoint`         | `gcs`                      | Google                                        | Passed to the SDK as `apiEndpoint`. `STORAGE_EMULATOR_HOST`, when set, overrides it — and credentials follow it, so set `endpointAuth: false` with an emulator.   |
 | `endpointAuth`     | `gcs`                      | `true`                                        | Send credentials to a custom `endpoint`. The SDK sends none to one unless told to; set `false` only for an emulator that checks none.                             |
 | `endpoint`         | `azure`                    | `https://<accountName>.blob.core.windows.net` | Blob service URL for the `accountName` + `accountKey` form. A `connectionString` carries its own endpoint.                                                        |
 
@@ -202,7 +202,13 @@ An outage is an error, never "not there". On every cloud arm:
 - `exists` resolves `false` only when the backend answers that the object is absent; `delete`
   resolves `false` only when the object was absent. S3 and B2 cannot tell from their delete answer,
   so they check with a `HEAD` first; an object removed between that check and the delete still
-  resolves `true`. Any other failure rejects. Every provider gives the same `delete()` answer.
+  resolves `true`. A credential without `s3:ListBucket` gets `403` for an absent key on that check,
+  so presence is unknown and the delete goes ahead and resolves `true`. Any other failure rejects.
+  Every provider gives the same `delete()` answer.
+- A key with a `.` or `..` path segment is refused with a `400` on every provider: on Azure the SDK
+  resolves `..` in the blob URL, so such a key could reach another container.
+- `local` `get` resolves `null` (`404`) only for an absent file; a permission or I/O failure
+  rejects.
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/
   `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
   `delete` with `BackendUnavailableError` when the request was refused before it was sent and

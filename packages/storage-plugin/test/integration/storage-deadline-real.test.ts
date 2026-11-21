@@ -93,7 +93,8 @@ describe('requestTimeoutMs bounds every call on the real SDKs (V13-216)', () => 
       await timed(() => provider.put('k', new Uint8Array([1]))),
       BackendOutcomeUnknownError,
     );
-    expectBounded(await timed(() => provider.delete('k')), BackendOutcomeUnknownError);
+    // S3's delete checks presence first; a hang there is a read (nothing sent).
+    expectBounded(await timed(() => provider.delete('k')), BackendUnavailableError);
   });
 
   it('gcs: a read is a 503 and a write a 504 within the bound', async () => {
