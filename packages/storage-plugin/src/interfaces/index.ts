@@ -165,8 +165,22 @@ export interface S3ProviderOptions {
   accessKeyId?: string;
   /** AWS secret access key. */
   secretAccessKey?: string;
-  /** Custom S3-compatible endpoint (R2, MinIO, B2). */
+  /**
+   * Custom S3-compatible endpoint (R2, MinIO, B2). For `'b2'`, `region` or
+   * `endpoint` is required.
+   */
   endpoint?: string;
+  /**
+   * Bound on each backend call, in milliseconds, including the SDK's own
+   * retries: a read that does not settle in time rejects with
+   * `BackendUnavailableError` (`503`), a write with `BackendOutcomeUnknownError`
+   * (`504`). `0` disables the bound; anything outside `0`–`2147483647` throws
+   * `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /**
    * An implementation of the S3 backend, bypassing the lazy SDK import.
    *
@@ -183,6 +197,32 @@ export interface GcsProviderOptions {
   projectId?: string;
   /** Bucket name. */
   bucket: string;
+  /**
+   * API endpoint, such as a private endpoint or an emulator
+   * (`http://127.0.0.1:4443`), passed to the SDK as `apiEndpoint`.
+   * `STORAGE_EMULATOR_HOST`, when set, overrides it.
+   *
+   * @since 0.14.0
+   */
+  endpoint?: string;
+  /**
+   * Whether credentials are sent to a custom `endpoint` (the SDK sends none
+   * unless told to). Set `false` only for an emulator that checks none.
+   *
+   * @default true
+   * @since 0.14.0
+   */
+  endpointAuth?: boolean;
+  /**
+   * Bound on each backend call, in milliseconds: a read that does not settle
+   * in time rejects with `BackendUnavailableError` (`503`), a write with
+   * `BackendOutcomeUnknownError` (`504`). `0` disables the bound; anything
+   * outside `0`–`2147483647` throws `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /** Injected structural client (bypasses lazy import). */
   client?: IGcsClient;
 }
@@ -195,9 +235,30 @@ export interface AzureBlobProviderOptions {
   accountName?: string;
   /** Azure storage account key (required for SAS signing). */
   accountKey?: string;
+  /**
+   * Blob service URL for the `accountName` + `accountKey` form (a sovereign
+   * cloud, a private endpoint, Azurite).
+   *
+   * @default `https://<accountName>.blob.core.windows.net`
+   * @since 0.14.0
+   */
+  endpoint?: string;
+  /**
+   * Bound on each backend call, in milliseconds: a read that does not settle
+   * in time rejects with `BackendUnavailableError` (`503`), a write with
+   * `BackendOutcomeUnknownError` (`504`). `0` disables the bound; anything
+   * outside `0`–`2147483647` throws `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /** Container name. */
   containerName: string;
-  /** Injected structural client (bypasses lazy import). */
+  /**
+   * Injected client — an SDK `BlobServiceClient` works as is (bypasses lazy
+   * import).
+   */
   client?: IAzureBlobClient;
 }
 
@@ -253,7 +314,10 @@ export interface IGcsClient {
  */
 export interface IAzureBlobClient {
   getContainerClient(_name: string): unknown;
-  /** Creates a SAS-signed URL. Added by adaptAzureModule internally. */
+  /**
+   * Creates a SAS-signed URL. Optional: without it the provider signs through
+   * the block blob client's `generateSasUrl`, which an SDK client has.
+   */
   getSignedUrl?(_path: string, _expiresIn: number): Promise<string>;
   /**
    * M70c: resolves when the container is reachable — the real adapter calls the

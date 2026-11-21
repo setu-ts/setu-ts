@@ -11,6 +11,7 @@ import type {
   SignedUrlOptions,
   StorageDiagnosticsOperation,
 } from '@setu-ts/common';
+import { StorageObjectNotFoundError } from '@setu-ts/common';
 import type { StorageProvider } from '../interfaces/index.ts';
 import type { StorageObservationCollector } from '../diagnostics/storage-observations.ts';
 
@@ -210,7 +211,7 @@ export class StorageService implements IStorage {
    *
    * @param path - Object path/key
    * @returns The object bytes
-   * @throws {Error} If the object does not exist
+   * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async get(path: string): Promise<Uint8Array> {
     const collector = collectors.get(this);
@@ -291,7 +292,7 @@ export class StorageService implements IStorage {
    *
    * @param path - Object path/key
    * @returns A `ReadableStream` of object bytes
-   * @throws {Error} If the object does not exist
+   * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async getStream(path: string): Promise<ReadableStream<Uint8Array>> {
     const collector = collectors.get(this);
@@ -300,7 +301,7 @@ export class StorageService implements IStorage {
       if (streamFn !== undefined) {
         const stream = await streamFn.call(this.#provider, path);
         if (stream === null) {
-          throw new Error(`Storage object not found: ${path}`);
+          throw new StorageObjectNotFoundError(path);
         }
         return stream;
       }
@@ -313,7 +314,7 @@ export class StorageService implements IStorage {
         async () => {
           const stream = await streamFn.call(this.#provider, path);
           if (stream === null) {
-            throw new Error(`Storage object not found: ${path}`);
+            throw new StorageObjectNotFoundError(path);
           }
           return stream;
         },
@@ -337,12 +338,12 @@ export class StorageService implements IStorage {
    *
    * @param path - Object path/key
    * @returns The object bytes
-   * @throws {Error} If the object does not exist
+   * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async #readBuffered(path: string): Promise<Uint8Array> {
     const data = await this.#provider.get(path);
     if (data === null) {
-      throw new Error(`Storage object not found: ${path}`);
+      throw new StorageObjectNotFoundError(path);
     }
     return data;
   }
@@ -353,7 +354,7 @@ export class StorageService implements IStorage {
    *
    * @param path - Object path/key
    * @returns A `ReadableStream` of object bytes
-   * @throws {Error} If the object does not exist
+   * @throws {StorageObjectNotFoundError} If the object does not exist (`404`)
    */
   async #readBufferedStream(path: string): Promise<ReadableStream<Uint8Array>> {
     const data = await this.#readBuffered(path);

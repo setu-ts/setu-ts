@@ -13,6 +13,8 @@
 import type { PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IS3Backend, StorageProvider } from '../interfaces/index.ts';
+import type { StorageDeadline, StorageOperation } from './fault.ts';
+import { resolveRequestTimeout, runBounded, toStorageError } from './fault.ts';
 import { createBoundedNodeStream, looksLikeNodeReadable } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
@@ -21,7 +23,7 @@ import { hasMethods } from './shape.ts';
 /** Shape of the S3 SDK client module. */
 export interface AwsSdkModule {
   S3Client: new (config: Record<string, unknown>) => {
-    send(command: unknown): Promise<unknown>;
+    send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
   };
   PutObjectCommand: new (input: Record<string, unknown>) => unknown;
   GetObjectCommand: new (input: Record<string, unknown>) => unknown;
@@ -59,6 +61,17 @@ export interface S3ProviderOptions {
   secretAccessKey?: string | undefined;
   /** Custom endpoint (R2, MinIO, B2). */
   endpoint?: string | undefined;
+  /**
+   * Bound on each backend call, in milliseconds, including the SDK's own
+   * retries. A read that does not settle in time rejects with
+   * `BackendUnavailableError` (`503`), a write with `BackendOutcomeUnknownError`
+   * (`504`). `0` disables the bound; anything outside `0`–`2147483647` throws
+   * `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IS3Backend | undefined;
 }
@@ -84,7 +97,8 @@ export function validateAwsS3Client(client: unknown): boolean {
 function isS3NotFound(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const n = (error as { name?: string }).name;
-  return n === 'NoSuchKey' || n === 'NotFound';
+  const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
+  return n === 'NoSuchKey' || n === 'NotFound' || status === 404;
 }
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
@@ -126,11 +140,22 @@ function buildS3Config(options: S3ProviderOptions): Record<string, unknown> {
  * @param options - S3 connection options
  * @returns The facade wrapping an `S3Client`
  */
-export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOptions): IS3Backend {
+export function adaptAwsS3Module(
+  mod: AwsStorageSdkModule,
+  options: S3ProviderOptions,
+  deadline: StorageDeadline = { timeoutMs: resolveRequestTimeout(options.requestTimeoutMs) },
+  provider = 's3',
+): IS3Backend {
   const bucket = options.bucket;
   const s3Mod = mod.s3;
   const presignerMod = mod.presigner;
   const client = new s3Mod.S3Client(buildS3Config(options));
+  // Every SDK call runs under the bound and receives its signal, so an expired
+  // bound also aborts the request the SDK is holding.
+  const send = (operation: StorageOperation, command: unknown): Promise<unknown> =>
+    runBounded(deadline, provider, operation, (signal) =>
+      client.send(command, { abortSignal: signal }),
+    );
 
   return {
     async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
@@ -138,7 +163,8 @@ export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOp
       // the SDK serializes a present-but-undefined key differently from an
       // absent one on some commands, and an object stored with no explicit
       // content type keeps S3's own default.
-      await client.send(
+      await send(
+        'put',
         new s3Mod.PutObjectCommand({
           Bucket: bucket,
           Key: path,
@@ -151,7 +177,8 @@ export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOp
     async get(path: string): Promise<Uint8Array | null> {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res: any = await client.send(
+        const res: any = await send(
+          'get',
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
         // Real SDK v3 Body is an SdkStreamMixin with transformToByteArray().
@@ -165,35 +192,39 @@ export function adaptAwsS3Module(mod: AwsStorageSdkModule, options: S3ProviderOp
         throw error;
       }
     },
+    // S3's DeleteObject answers 204 whether or not the key existed, so a
+    // delete the store accepted is `true`; every failure rejects.
     async delete(path: string): Promise<boolean> {
-      try {
-        await client.send(new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }));
-        return true;
-      } catch {
-        return false;
-      }
+      await send('delete', new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }));
+      return true;
     },
+    // `false` only for a definite not-found answer; an outage or a refused
+    // credential rejects, so a caller never reads it as "not there".
     async head(path: string): Promise<boolean> {
       try {
-        await client.send(new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }));
+        await send('exists', new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }));
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        if (isS3NotFound(error)) return false;
+        throw error;
       }
     },
-    async getSignedUrl(path: string, expiresIn: number): Promise<string> {
-      // Build a real presigned URL via the presigner.
-      const url = await presignerMod.getSignedUrl(
-        client,
-        new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
-        { expiresIn },
+    getSignedUrl(path: string, expiresIn: number): Promise<string> {
+      // Build a real presigned URL via the presigner (a local signature: the
+      // bound covers the credential resolution it may perform).
+      return runBounded(deadline, provider, 'getSignedUrl', () =>
+        presignerMod.getSignedUrl(
+          client,
+          new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
+          { expiresIn },
+        ),
       );
-      return url;
     },
     async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res: any = await client.send(
+        const res: any = await send(
+          'getStream',
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
         );
         // Real SDK v3 Body is an SdkStreamMixin with transformToWebStream().
@@ -279,13 +310,44 @@ export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
  */
 export class S3Provider implements StorageProvider {
   #client: IS3Backend | null = null;
+  /** `true` when the client was injected: its calls are bounded here, by race. */
+  #injected = false;
   readonly #options: S3ProviderOptions;
+  readonly #deadline: StorageDeadline;
+  readonly #name: string;
 
   /**
    * @param options - S3 connection/injection options
+   * @param internals - The provider name used in fault messages (`'s3'` or
+   *   `'b2'`) and the runtime timer surface; `StoragePlugin` supplies both
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
-  constructor(options?: S3ProviderOptions) {
+  constructor(
+    options?: S3ProviderOptions,
+    internals?: { readonly name?: string; readonly timing?: StorageDeadline['timing'] },
+  ) {
     this.#options = options ?? { bucket: '' };
+    this.#name = internals?.name ?? 's3';
+    this.#deadline = {
+      timeoutMs: resolveRequestTimeout(this.#options.requestTimeoutMs),
+      ...(internals?.timing !== undefined && { timing: internals.timing }),
+    };
+  }
+
+  /**
+   * Runs one client call: bounded here for an injected client (the adapted
+   * client bounds its own SDK calls), and classified on rejection.
+   */
+  async #call<T>(operation: StorageOperation, run: (client: IS3Backend) => Promise<T>): Promise<T> {
+    this.#assertConnected();
+    const client = this.#client!;
+    try {
+      return this.#injected
+        ? await runBounded(this.#deadline, this.#name, operation, () => run(client))
+        : await run(client);
+    } catch (error) {
+      throw toStorageError(error, this.#name, operation);
+    }
   }
 
   /**
@@ -301,9 +363,16 @@ export class S3Provider implements StorageProvider {
         );
       }
       this.#client = injected;
+      this.#injected = true;
       return;
     }
-    this.#client = adaptAwsS3Module(await loadAwsS3Module(), this.#options);
+    this.#client = adaptAwsS3Module(
+      await loadAwsS3Module(),
+      this.#options,
+      this.#deadline,
+      this.#name,
+    );
+    this.#injected = false;
   }
 
   /** Disconnect is a no-op for S3 (connectionless HTTP client). */
@@ -353,12 +422,9 @@ export class S3Provider implements StorageProvider {
    * @param options - Object attributes to record with the bytes
    */
   async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
-    this.#assertConnected();
-    if (options === undefined) {
-      await this.#client!.put(path, data);
-      return;
-    }
-    await this.#client!.put(path, data, options);
+    await this.#call('put', (client) =>
+      options === undefined ? client.put(path, data) : client.put(path, data, options),
+    );
   }
 
   /**
@@ -367,34 +433,31 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns The object bytes, or `null`
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async get(path: string): Promise<Uint8Array | null> {
-    this.#assertConnected();
-    return this.#client!.get(path);
+  get(path: string): Promise<Uint8Array | null> {
+    return this.#call('get', (client) => client.get(path));
   }
 
   /**
-   * Deletes an object from S3.
+   * Deletes an object from S3. S3's `DeleteObject` answers alike whether or
+   * not the key existed, so an accepted delete resolves `true` for an absent
+   * key too; an outage or a refused credential rejects.
    *
    * @param path - Object key
-   * @returns `true` if deleted
+   * @returns `true` when the store accepted the delete
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async delete(path: string): Promise<boolean> {
-    this.#assertConnected();
-    return this.#client!.delete(path);
+  delete(path: string): Promise<boolean> {
+    return this.#call('delete', (client) => client.delete(path));
   }
 
   /**
-   * Reports whether an object exists in S3.
+   * Reports whether an object exists in S3: `false` only when S3 answers
+   * not-found; an outage or a refused credential rejects.
    *
    * @param path - Object key
    * @returns `true` if present
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async exists(path: string): Promise<boolean> {
-    this.#assertConnected();
-    return this.#client!.head(path);
+  exists(path: string): Promise<boolean> {
+    return this.#call('exists', (client) => client.head(path));
   }
 
   /**
@@ -404,21 +467,18 @@ export class S3Provider implements StorageProvider {
    * @param options - Expiry in seconds
    * @returns The presigned URL
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
-    this.#assertConnected();
-    return this.#client!.getSignedUrl(path, options.expiresIn);
+  getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+    return this.#call('getSignedUrl', (client) => client.getSignedUrl(path, options.expiresIn));
   }
 
   /**
-   * Native stream download — zero-copy from S3.
+   * Native stream download — zero-copy from S3. The bound covers obtaining the
+   * stream, not the transfer after it.
    *
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
-    this.#assertConnected();
-    return this.#client!.getStream(path);
+  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    return this.#call('getStream', (client) => client.getStream(path));
   }
 }

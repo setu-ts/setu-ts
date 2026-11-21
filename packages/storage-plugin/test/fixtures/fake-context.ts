@@ -46,6 +46,12 @@ export function createFakeContext(
     env,
     now: (): number => 1_700_000_000_000,
     hrtime: (): number => performance.now(),
+    // A real `IRuntimeServices` always carries timers; the storage probe and
+    // the cloud providers' bounds run on them.
+    setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    clearTimeout: (handle: unknown): void => {
+      clearTimeout(handle as ReturnType<typeof setTimeout>);
+    },
     // A real `IRuntimeServices` ALWAYS reports its platform; omitting it here
     // made this double reject a call the real one answers, which is how a
     // fixture starts testing itself instead of the code.

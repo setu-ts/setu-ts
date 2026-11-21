@@ -173,15 +173,15 @@ describe('createUploadMiddleware — the register probe matrix (X8-3)', () => {
     expect(handlerRan).toBe(true);
   });
 
-  it('should keep a disallowed MIME type a 400, not a 413', async () => {
-    // Size and unacceptability are different faults and must stay
-    // distinguishable on the wire.
+  it('should answer a disallowed MIME type 415, not a 413 (V13-193)', async () => {
+    // Size and media type are different faults and must stay distinguishable
+    // on the wire.
     const { refusal } = await run(
       { maxSize: 4 * MB, allowedMimeTypes: ['image/png'] },
       multipartBody(64),
     );
 
-    expect(refusal).toEqual({ status: 400, title: 'Invalid MIME type' });
+    expect(refusal).toEqual({ status: 415, title: 'Unsupported Media Type' });
   });
 
   it('should keep too-many-files a 400, not a 413', async () => {

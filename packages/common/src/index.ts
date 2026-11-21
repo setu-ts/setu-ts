@@ -249,6 +249,9 @@ export {
   formFileMetadataOf,
 } from './form/form-file-metadata.ts';
 export type { FormFileMetadata } from './form/form-file-metadata.ts';
+// Upload brand (M143r) — what an upload middleware accepts, for documentation generators
+export { UPLOAD_METADATA, uploadMetadataOf, withUploadMetadata } from './form/upload-metadata.ts';
+export type { UploadMetadata } from './form/upload-metadata.ts';
 // Unsupported form encoding (M94b) — the 415-branded rejection every
 // `IRequest.formData?()` producer rejects with
 export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding.ts';
@@ -822,6 +825,8 @@ export {
   toBackendFault,
 } from './errors/backend-fault.ts';
 export type { BackendFault } from './errors/backend-fault.ts';
+// Storage object not found (M143r) — the 404-hinted error every storage backend throws
+export { StorageObjectNotFoundError } from './errors/storage-object-not-found.ts';
 
 export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
 export type {

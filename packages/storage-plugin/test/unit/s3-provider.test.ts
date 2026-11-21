@@ -483,7 +483,8 @@ describe('adaptAwsS3Module', () => {
       },
     } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
     const facade = adaptAwsS3Module(fakeMod, { bucket: 'fb' });
-    expect(await facade.head('blocked')).toBe(false);
+    // Only a not-found answer is `false`; any other failure rejects (V13-245).
+    await expect(facade.head('blocked')).rejects.toThrow('AuthError');
   });
 
   it('buildS3Config with region only', () => {
@@ -1061,7 +1062,7 @@ describe('S3Provider', () => {
     expect(result).toEqual(new Uint8Array([1, 2, 3]));
   });
 
-  it('delete() returns false when SDK rejects', async () => {
+  it('delete() rejects when the SDK rejects (V13-245)', async () => {
     const fakeMod = {
       s3: {
         S3Client: class {
@@ -1104,8 +1105,7 @@ describe('S3Provider', () => {
       },
     } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
     const facade = adaptAwsS3Module(fakeMod, { bucket: 'del-fail-bucket' });
-    const result = await facade.delete('will-fail');
-    expect(result).toBe(false);
+    await expect(facade.delete('will-fail')).rejects.toThrow('network error');
   });
 
   it('isS3NotFound returns false for non-Error values (via get) and re-throws', async () => {

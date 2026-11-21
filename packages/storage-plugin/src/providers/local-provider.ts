@@ -240,8 +240,11 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await this.#fs!.rm(resolved);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // Only an absent file is "not deleted"; a permission or I/O failure
+      // rejects, so a caller never mistakes it for an absent object.
+      if (isFsNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -256,8 +259,9 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await this.#fs!.stat(resolved);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isFsNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -284,4 +288,17 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   // No native getStream — service falls back to buffered wrapping.
+}
+
+/**
+ * Reports whether a file-system error means "no such file": Node's `ENOENT`
+ * code or Deno's `NotFound` error name.
+ *
+ * @param error - The rejection from `runtime.fs`
+ * @returns `true` for an absent file
+ */
+export function isFsNotFound(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, name } = error as { code?: unknown; name?: unknown };
+  return code === 'ENOENT' || name === 'NotFound';
 }

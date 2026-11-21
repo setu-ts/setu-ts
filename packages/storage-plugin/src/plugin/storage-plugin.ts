@@ -12,7 +12,12 @@ import type {
   IStorage,
   IStorageDiagnosticsSource,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCachedProbe,
+  PLUGIN_PRIORITY,
+  resolveProbeTiming,
+} from '@setu-ts/common';
 import type { StoragePluginOptions, StorageProviderType } from '../interfaces/index.ts';
 import type { StorageProvider } from '../interfaces/index.ts';
 import {
@@ -38,6 +43,12 @@ const PLUGIN_NAME = 'storage-plugin';
 /** Default provider backend. */
 const DEFAULT_PROVIDER: StorageProviderType = 'memory';
 
+/** How long one reachability answer is reused, in milliseconds. */
+const PROBE_TTL_MS = 5000;
+
+/** Bound on one reachability probe, in milliseconds. */
+const PROBE_TIMEOUT_MS = 2000;
+
 /**
  * Builds the provider adapter for the configured backend.
  *
@@ -58,6 +69,9 @@ export function createProvider(
   // Wall-clock source for providers that compute signed-URL expiry. `runtime.now()`
   // is the only sanctioned clock outside `packages/runtime` (no direct platform clock).
   const now = (): number => runtime.now();
+  // The runtime's timers, for the cloud providers' `requestTimeoutMs` bound.
+  // Resolved only by the arms that use it.
+  const timing = (): ReturnType<typeof resolveProbeTiming> => resolveProbeTiming(runtime);
 
   switch (config.provider) {
     case undefined:
@@ -71,29 +85,51 @@ export function createProvider(
 
     case 's3': {
       const s3Opts = config.options;
-      return new S3Provider({
-        region: s3Opts.region,
-        bucket: s3Opts.bucket,
-        accessKeyId: s3Opts.accessKeyId,
-        secretAccessKey: s3Opts.secretAccessKey,
-        endpoint: s3Opts.endpoint,
-        client: s3Opts.client,
-      });
+      return new S3Provider(
+        {
+          region: s3Opts.region,
+          bucket: s3Opts.bucket,
+          accessKeyId: s3Opts.accessKeyId,
+          secretAccessKey: s3Opts.secretAccessKey,
+          endpoint: s3Opts.endpoint,
+          requestTimeoutMs: s3Opts.requestTimeoutMs,
+          client: s3Opts.client,
+        },
+        { name: 's3', timing: timing() },
+      );
     }
 
     case 'b2': {
       // Backblaze B2: first-class S3-compatible preset.
+      // Backblaze regions are named like `us-west-004`; there is no default
+      // that is a real Backblaze host, so one of the two must be given.
       const b2Opts = config.options;
-      const region = b2Opts.region ?? 'us-east-1';
-      const endpoint = b2Opts.endpoint ?? `https://s3.${region}.backblazeb2.com`;
-      return new S3Provider({
-        region,
-        bucket: b2Opts.bucket,
-        accessKeyId: b2Opts.accessKeyId,
-        secretAccessKey: b2Opts.secretAccessKey,
-        endpoint,
-        client: b2Opts.client,
-      });
+      if (
+        b2Opts.region === undefined &&
+        b2Opts.endpoint === undefined &&
+        b2Opts.client === undefined
+      ) {
+        throw new Error(
+          "storage-plugin: the 'b2' provider needs options.region (a Backblaze region such as " +
+            "'us-west-004') or options.endpoint",
+        );
+      }
+      const region = b2Opts.region;
+      const endpoint =
+        b2Opts.endpoint ??
+        (region === undefined ? undefined : `https://s3.${region}.backblazeb2.com`);
+      return new S3Provider(
+        {
+          region,
+          bucket: b2Opts.bucket,
+          accessKeyId: b2Opts.accessKeyId,
+          secretAccessKey: b2Opts.secretAccessKey,
+          endpoint,
+          requestTimeoutMs: b2Opts.requestTimeoutMs,
+          client: b2Opts.client,
+        },
+        { name: 'b2', timing: timing() },
+      );
     }
 
     case 'gcs':
@@ -101,9 +137,13 @@ export function createProvider(
         {
           projectId: config.options.projectId,
           bucket: config.options.bucket,
+          endpoint: config.options.endpoint,
+          endpointAuth: config.options.endpointAuth,
+          requestTimeoutMs: config.options.requestTimeoutMs,
           client: config.options.client,
         },
         now,
+        timing(),
       );
 
     case 'azure':
@@ -113,9 +153,12 @@ export function createProvider(
           accountName: config.options.accountName,
           accountKey: config.options.accountKey,
           containerName: config.options.containerName,
+          endpoint: config.options.endpoint,
+          requestTimeoutMs: config.options.requestTimeoutMs,
           client: config.options.client,
         },
         now,
+        timing(),
       );
 
     default: {
@@ -195,15 +238,27 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
       // "we never started" from "the disk/bucket vanished under us". A provider
       // that cannot probe (gcs/azure client without the optional member) is
       // `up` with `data.reachable: 'unknown'`, honestly reporting "we did not
-      // check".
+      // check". The probe is cached and bounded (5 s TTL, 2 s timeout, as in
+      // secrets-plugin), so `/ready` is never held for a provider's
+      // `requestTimeoutMs` and a burst of probes costs one backend call.
+      const isHealthy = provider.isHealthy;
+      const probe =
+        typeof isHealthy === 'function'
+          ? createCachedProbe({
+              probe: () => isHealthy.call(provider),
+              ttlMs: PROBE_TTL_MS,
+              timeoutMs: PROBE_TIMEOUT_MS,
+              ...resolveProbeTiming(ctx.runtime),
+            })
+          : undefined;
       const storageIndicator = async (): Promise<HealthCheckResult> => {
         if (!provider.isReady()) {
           return { status: 'down', data: { provider: providerType, reachable: false } };
         }
-        if (typeof provider.isHealthy !== 'function') {
+        if (probe === undefined) {
           return { status: 'up', data: { provider: providerType, reachable: 'unknown' } };
         }
-        const reachable = await provider.isHealthy();
+        const reachable = await probe();
         if (reachable === false) {
           return { status: 'down', data: { provider: providerType, reachable: false } };
         }

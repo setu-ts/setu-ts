@@ -18,6 +18,7 @@ import {
   httpStatusHintOf,
   parseFormBody,
   respondWithError,
+  withUploadMetadata,
 } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
 
@@ -115,7 +116,8 @@ function assertByteLimit(option: string, value: number): void {
  * Refusals are answered `413` when something was too large — the request body
  * against {@linkcode resolveMaxBodyBytes}, or one file against `maxSize` — and
  * `400` when the request was genuinely malformed or otherwise unacceptable
- * (too many files, a disallowed MIME type, an unparseable body). Both size
+ * (too many files, an unparseable body). A disallowed MIME type answers
+ * `415 Unsupported Media Type`. Both size
  * refusals previously answered `400`, which told a client it had sent
  * something malformed when it had only sent something big.
  *
@@ -129,7 +131,7 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
   const maxFiles = options?.maxFiles;
   const maxBodyBytes = resolveMaxBodyBytes(maxSize, options?.maxBodyBytes);
 
-  return async (ctx, next) => {
+  const middleware: MiddlewareFunction = async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
 
     // Only process multipart requests — the ONE classifier (M94b), which also
@@ -212,8 +214,8 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
         }
         if (allowedMimeTypes && !allowedMimeTypes.includes(file.mimeType)) {
           respondWithError(ctx, {
-            status: 400,
-            title: 'Invalid MIME type',
+            status: 415,
+            title: 'Unsupported Media Type',
             detail: `Type '${file.mimeType}' not allowed`,
           });
           return;
@@ -259,6 +261,14 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
 
     await next();
   };
+  // The brand describes what this middleware accepts, so a documentation
+  // generator can show the route's multipart body; it changes no behaviour.
+  return withUploadMetadata(middleware, {
+    fieldname,
+    maxBytes: maxSize,
+    ...(maxFiles === undefined ? {} : { maxFiles }),
+    ...(allowedMimeTypes === undefined ? {} : { mimeTypes: allowedMimeTypes }),
+  });
 }
 
 /**
