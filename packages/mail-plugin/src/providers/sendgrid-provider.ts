@@ -174,10 +174,10 @@ export class SendGridProvider implements MailProvider {
     if (!this.#ready) {
       throw new Error('SendGridProvider is not connected');
     }
-    let failure: string | undefined;
+    let res: Response;
     try {
-      failure = await runMailCall(this.#deadline, 'sendgrid', async (signal) => {
-        const res = await this.#http(this.#endpoint, {
+      res = await runMailCall(this.#deadline, 'sendgrid', (signal) =>
+        this.#http(this.#endpoint, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${this.#apiKey}`,
@@ -185,20 +185,23 @@ export class SendGridProvider implements MailProvider {
           },
           body: JSON.stringify(toSendGridBody(message)),
           signal,
-        });
-        if (res.status < HTTP_MULTIPLE_CHOICES) {
-          await res.body?.cancel().catch(() => undefined);
-          return undefined;
-        }
-        const reason = await sendGridReason(res);
-        return `SendGrid send failed: HTTP ${res.status}${reason === '' ? '' : `: ${reason}`}`;
-      });
+        }),
+      );
     } catch (error) {
       throw toMailError(error, 'sendgrid');
     }
-    if (failure !== undefined) {
-      throw new Error(failure);
+    if (res.status < HTTP_MULTIPLE_CHOICES) {
+      await res.body?.cancel().catch(() => undefined);
+      return;
     }
+    // The status is SendGrid's answer: a refusal stays a refusal even when its
+    // body is slow. The reason is read under its own bound, and is optional.
+    const reason = await runMailCall(this.#deadline, 'sendgrid', () => sendGridReason(res)).catch(
+      () => '',
+    );
+    throw new Error(
+      `SendGrid send failed: HTTP ${res.status}${reason === '' ? '' : `: ${reason}`}`,
+    );
   }
 }
 

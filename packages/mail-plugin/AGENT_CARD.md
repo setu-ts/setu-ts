@@ -44,13 +44,13 @@ export function registerWelcomeRoutes(router: IRouterApi): void {
   template names or missing placeholder variables reject.
 - Component templates require `CAPABILITIES.VIEW` at registration; an absent provider fails startup.
   Their data is passed as props without the string arm's missing-variable check.
-- Sending resolves when the provider accepts the message; it does not prove recipient delivery.
+- Sending resolves when the provider accepts the message, not on delivery.
 - `attachments: [{ filename, content, contentType?, contentId? }]` takes `Uint8Array` or UTF-8 text;
   a `contentId` makes it inline (`cid:`). Invalid header fields are refused with a TypeError.
 - SMTP: raw sockets (Node, Deno, Bun), peer `nodemailer`; SES: peer `@aws-sdk/client-sesv2`. Others
   run on Workers too.
 - `provider` also selects `'log'`, `'smtp'` or `'ses'`; `send` sends an untemplated message.
-- SMTP uses `host`, `port`, `secure`, `auth` or injected `transport`; SES uses `region`,
-  `accessKeyId`, `secretAccessKey` or injected `client` inside `options`.
+- SMTP: `host`, `port`, `secure`, `auth`, `*TimeoutMs`, `dnsTtlMs` or `transport`; SES: `region`,
+  keys, `endpoint` or `client`. SES/SendGrid `requestTimeoutMs` (15 s) gives a 504.
 - SendGrid's `options.http` replaces its HTTP transport; component templates use `{ view, text? }`
   and cannot mix `view` with `html`.

@@ -97,6 +97,8 @@ export function validateSmtpTransport(transport: unknown): transport is ISmtpTra
  *
  * @param mod - The `nodemailer` module (real or fake)
  * @param options - SMTP connection options
+ * @param address - The address to connect to instead of `options.host` (the
+ *   provider's `dnsTtlMs` resolution); `options.host` stays the TLS server name
  * @returns The transport facade
  */
 export function adaptNodemailerModule(
@@ -156,6 +158,14 @@ export function buildTransportConfig(
     config.socketTimeout = options.socketTimeoutMs;
   }
   return config;
+}
+
+/** The largest delay a runtime timer accepts. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/** The refusal for a call on a provider that is not connected. */
+function notConnected(): Error {
+  return new Error('SmtpProvider is not connected');
 }
 
 /** Reports whether a host is an IP literal (no DNS to re-resolve). */
@@ -220,6 +230,8 @@ export class SmtpProvider implements MailProvider {
   #address: string | undefined;
   /** When `#address` was resolved (monotonic ms), under `dnsTtlMs`. */
   #resolvedAt = Number.NEGATIVE_INFINITY;
+  /** Bumped by `disconnect()`, so a refresh still in flight cannot reconnect. */
+  #generation = 0;
   /**
    * M70c: present only when the transport exposes `verify()`; its absence is
    * *unknown* reachability, not `false` (a minimal injected fake has not told
@@ -233,17 +245,35 @@ export class SmtpProvider implements MailProvider {
    * @param options - SMTP connection/injection options
    * @param runtime - The runtime's resolver and clock, read only for
    *   `dnsTtlMs`; `MailPlugin` supplies them
-   * @throws {Error} When `dnsTtlMs` is set with an injected transport, or
-   *   without a runtime resolver
-   * @throws {RangeError} When `dnsTtlMs` is not a finite number `>= 0`
+   * @throws {Error} When `dnsTtlMs` is set with an injected transport, without
+   *   a `host`, or without a runtime resolver
+   * @throws {RangeError} When `dnsTtlMs` is not a finite number `>= 0`, or a
+   *   timeout option is not a whole number of milliseconds in `1`–`2147483647`
    */
   constructor(options?: SmtpProviderOptions, runtime?: SmtpRuntime) {
     this.#options = options ?? {};
     this.#runtime = runtime;
+    for (const name of ['connectionTimeoutMs', 'greetingTimeoutMs', 'socketTimeoutMs'] as const) {
+      const value = this.#options[name];
+      // nodemailer passes these to `socket.setTimeout`, which throws inside a
+      // socket callback for a negative or infinite value — a process crash —
+      // and silently uses its default for 0 or NaN.
+      if (
+        value !== undefined &&
+        (!Number.isSafeInteger(value) || value < 1 || value > MAX_TIMER_MS)
+      ) {
+        throw new RangeError(
+          `SmtpProvider options.${name} must be a whole number of milliseconds between 1 and ${MAX_TIMER_MS}`,
+        );
+      }
+    }
     const ttl = this.#options.dnsTtlMs;
     if (ttl !== undefined) {
       if (!Number.isFinite(ttl) || ttl < 0) {
         throw new RangeError('SmtpProvider options.dnsTtlMs must be a finite number >= 0');
+      }
+      if (this.#options.host === undefined) {
+        throw new Error('SmtpProvider options.dnsTtlMs needs options.host to resolve');
       }
       if (this.#options.transport !== undefined) {
         throw new Error(
@@ -292,9 +322,22 @@ export class SmtpProvider implements MailProvider {
       return this.#transport;
     }
     const host = this.#options.host!;
-    const addresses = await runtime.dns!.resolveHost(host);
-    const address = addresses[0];
+    const generation = this.#generation;
+    let address: string | undefined;
+    try {
+      address = (await runtime.dns!.resolveHost(host))[0];
+    } catch (error) {
+      // A failed lookup keeps the last good address, as nodemailer's own
+      // resolver does; with none yet, nodemailer resolves the name itself.
+      if (generation !== this.#generation) throw notConnected();
+      if (this.#transport !== null) return this.#transport;
+      if (this.#module === null) throw error;
+      this.#transport = adaptNodemailerModule(this.#module, this.#options);
+      return this.#transport;
+    }
+    if (generation !== this.#generation) throw notConnected();
     if (address === undefined) {
+      if (this.#transport !== null) return this.#transport;
       throw new Error(`SmtpProvider: '${host}' resolved to no address`);
     }
     this.#resolvedAt = now;
@@ -311,7 +354,7 @@ export class SmtpProvider implements MailProvider {
   // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async #currentTransport(): Promise<ISmtpTransport> {
     if (this.#transport === null) {
-      throw new Error('SmtpProvider is not connected');
+      throw notConnected();
     }
     return this.#usesDnsTtl() ? this.#refreshTransport() : this.#transport;
   }
@@ -338,6 +381,7 @@ export class SmtpProvider implements MailProvider {
   }
 
   disconnect(): Promise<void> {
+    this.#generation++;
     this.#transport = null;
     this.#address = undefined;
     this.#resolvedAt = Number.NEGATIVE_INFINITY;

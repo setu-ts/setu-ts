@@ -22,7 +22,8 @@ export interface SesSdkModule {
     send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
   };
   SendEmailCommand: new (input: Record<string, unknown>) => unknown;
-  GetAccountCommand: new (input: Record<string, never>) => unknown;
+  /** Present in `@aws-sdk/client-sesv2`; a fake module without it gets no probe. */
+  GetAccountCommand?: new (input: Record<string, never>) => unknown;
 }
 
 /**
@@ -84,26 +85,28 @@ export function validateSesClient(client: unknown): client is ISesClient {
  * @param options - AWS connection options
  * @returns The facade wrapping a `SESv2Client`
  */
-export function adaptSesModule(
-  mod: SesSdkModule,
-  options: SesProviderOptions,
-  deadline: MailDeadline = resolveMailDeadline(options.requestTimeoutMs, options.timing),
-): ISesClient {
+export function adaptSesModule(mod: SesSdkModule, options: SesProviderOptions): ISesClient {
+  const deadline = resolveMailDeadline(options.requestTimeoutMs, options.timing);
   const client = new mod.SESv2Client(
     buildSesConfig(options.region, options.accessKeyId, options.secretAccessKey, options.endpoint),
   );
   const send = (command: unknown): Promise<unknown> =>
     runMailCall(deadline, 'ses', (abortSignal) => client.send(command, { abortSignal }));
-  return {
+  const GetAccount = mod.GetAccountCommand;
+  const facade: ISesClient = {
     async sendEmail(message: OutgoingMail): Promise<void> {
       await send(new mod.SendEmailCommand(toSesInput(message)));
     },
+  };
+  if (GetAccount === undefined) return facade;
+  return {
+    ...facade,
     // Readiness: `GetAccount` (non-mutating) answered. Any HTTP answer below
     // 500 — a refused credential included — means SES is reachable; a network
     // failure, the bound or a 5xx means it is not.
     async isHealthy(): Promise<boolean> {
       try {
-        await send(new mod.GetAccountCommand({}));
+        await send(new GetAccount({}));
         return true;
       } catch (error) {
         const status = (error as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata
@@ -232,7 +235,7 @@ export class SesProvider implements MailProvider {
       this.#client = injected;
       this.#injected = true;
     } else {
-      this.#client = adaptSesModule(await loadSesModule(), this.#options, this.#deadline);
+      this.#client = adaptSesModule(await loadSesModule(), this.#options);
       this.#injected = false;
     }
     this.#installProbe();

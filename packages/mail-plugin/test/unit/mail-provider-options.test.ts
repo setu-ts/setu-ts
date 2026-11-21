@@ -167,9 +167,11 @@ describe('SMTP dnsTtlMs on real nodemailer (V13-119)', () => {
       expect(second.received).toHaveLength(2);
       expect(lookups).toBe(3);
       expect(await provider.isHealthy!()).toBe(true);
+      // An empty answer keeps the last good address.
       answer = [];
       clock = 5000;
-      await expect(provider.send(mail)).rejects.toThrow(/resolved to no address/);
+      await provider.send(mail);
+      expect(second.received).toHaveLength(3);
       await provider.disconnect();
       await expect(provider.send(mail)).rejects.toThrow(/not connected/);
     } finally {
@@ -424,5 +426,156 @@ describe('SendGrid tolerates a body that cannot be cancelled', () => {
     await provider.connect();
     await expect(provider.send(mail)).resolves.toBeUndefined();
     expect(await provider.isHealthy()).toBe(true);
+  });
+});
+
+describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => {
+  it('refuses a timeout nodemailer cannot use, naming the option', () => {
+    for (const name of ['connectionTimeoutMs', 'greetingTimeoutMs', 'socketTimeoutMs'] as const) {
+      for (const value of [-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]) {
+        expect(() => new SmtpProvider({ host: 'h', [name]: value })).toThrow(
+          new RegExp(`options\\.${name} must be a whole number`),
+        );
+      }
+    }
+    expect(() => new SmtpProvider({ host: 'h', socketTimeoutMs: 30_000 })).not.toThrow();
+  });
+
+  it('refuses dnsTtlMs without a host', () => {
+    expect(
+      () =>
+        new SmtpProvider(
+          { dnsTtlMs: 1 },
+          {
+            dns: { resolveHost: () => Promise.resolve([]), resolveSrv: () => Promise.resolve([]) },
+            hrtime: () => 0,
+          },
+        ),
+    ).toThrow(/needs options\.host/);
+  });
+
+  it('keeps the last good address when a refresh fails, and boots when DNS is down', async () => {
+    const server = await smtpServer('127.0.0.1', 0);
+    let clock = 0;
+    let failing = true;
+    const provider = new SmtpProvider(
+      { host: '127.0.0.1.nip.invalid', port: server.port, dnsTtlMs: 1000 },
+      {
+        dns: {
+          resolveHost: () =>
+            failing ? Promise.reject(new Error('DNS down')) : Promise.resolve(['127.0.0.1']),
+          resolveSrv: () => Promise.resolve([]),
+        },
+        hrtime: () => clock,
+      },
+    );
+    try {
+      // DNS down at boot: connect still succeeds (nodemailer would resolve the name itself).
+      await provider.connect();
+      failing = false;
+      await provider.send(mail);
+      expect(server.received).toEqual(['127.0.0.1']);
+      failing = true;
+      clock = 5000;
+      // The refresh fails: the last good address is kept.
+      await provider.send(mail);
+      expect(server.received).toEqual(['127.0.0.1', '127.0.0.1']);
+    } finally {
+      server.server.close();
+    }
+  }, 20_000);
+
+  it('a disconnect while a DNS refresh is in flight sticks', async () => {
+    let release: (addresses: string[]) => void = () => undefined;
+    const provider = new SmtpProvider(
+      { host: 'smtp.x.test', port: 1, dnsTtlMs: 1000 },
+      {
+        dns: {
+          resolveHost: () =>
+            new Promise<string[]>((resolve) => {
+              release = resolve;
+            }),
+          resolveSrv: () => Promise.resolve([]),
+        },
+        hrtime: () => 0,
+      },
+    );
+    const connecting = provider.connect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await provider.disconnect();
+    release(['127.0.0.1']);
+    await expect(connecting).rejects.toThrow(/not connected/);
+    expect(provider.isReady()).toBe(false);
+  });
+
+  it('connecting by address presents the host as the TLS server name', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { createServer: createTlsServer } = await import('node:tls');
+    const names: (string | false | null)[] = [];
+    const { createSecureContext } = await import('node:tls');
+    const credentials = {
+      key: readFileSync(new URL('../fixtures/tls/other-test.key', import.meta.url)),
+      cert: readFileSync(new URL('../fixtures/tls/other-test.crt', import.meta.url)),
+    };
+    // The client refuses the certificate, so the name is recorded where the
+    // server first sees it: the SNI of the ClientHello.
+    const tlsServer = createTlsServer({
+      ...credentials,
+      SNICallback: (servername, callback) => {
+        names.push(servername);
+        callback(null, createSecureContext(credentials));
+      },
+    });
+    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', resolve));
+    const port = (tlsServer.address() as { port: number }).port;
+    const provider = new SmtpProvider(
+      { host: 'smtp.x.test', port, secure: true, dnsTtlMs: 1000 },
+      {
+        dns: {
+          resolveHost: () => Promise.resolve(['127.0.0.1']),
+          resolveSrv: () => Promise.resolve([]),
+        },
+        hrtime: () => 0,
+      },
+    );
+    try {
+      await provider.connect();
+      // The certificate is for other.test (and self-signed): the send is
+      // refused, never sent to a server that cannot prove it is the host.
+      await expect(provider.send(mail)).rejects.toThrow();
+      expect(names).toContain('smtp.x.test');
+    } finally {
+      await new Promise<void>((resolve) => tlsServer.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('a SendGrid refusal whose body is slow is still a refusal, not a 504', async () => {
+    const slowBody = new ReadableStream<Uint8Array>({ start() {} });
+    const provider = new SendGridProvider({
+      apiKey: 'k',
+      requestTimeoutMs: 200,
+      http: () => Promise.resolve(new Response(slowBody, { status: 400 })),
+    });
+    await provider.connect();
+    const error = await provider.send(mail).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(BackendOutcomeUnknownError);
+    expect((error as Error).message).toBe('SendGrid send failed: HTTP 400');
+  });
+
+  it('SES without GetAccountCommand in the module gets no probe', async () => {
+    const { adaptSesModule } = await import('../../src/providers/ses-provider.ts');
+    const client = adaptSesModule(
+      {
+        SESv2Client: class {
+          send(): Promise<unknown> {
+            return Promise.resolve({});
+          }
+        },
+        SendEmailCommand: class {},
+      } as unknown as import('../../src/providers/ses-provider.ts').SesSdkModule,
+      {},
+    );
+    expect(client.isHealthy).toBeUndefined();
+    await client.sendEmail(mail);
   });
 });

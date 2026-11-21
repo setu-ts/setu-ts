@@ -104,9 +104,9 @@ release whose `SendEmailCommand` accepts `Content.Simple.Attachments`.
   verifying the host as the TLS server name. It is refused with an injected `transport` and on a
   runtime without DNS.
 
-SES v2 has no local stand-in on this machine (LocalStack community answers `501`), so the `ses` arm
-was proved only against an in-test capture server: what it sends and where, not that SES accepts it.
-No live AWS or SendGrid account was used.
+SES v2 has no local stand-in the project's runs could use (LocalStack community answers `501`), so
+the `ses` arm was proved only against an in-test capture server: what it sends and where, not that
+SES accepts it. No live AWS or SendGrid account was used.
 
 ## Options
 
