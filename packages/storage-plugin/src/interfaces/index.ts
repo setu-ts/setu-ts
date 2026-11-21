@@ -200,7 +200,8 @@ export interface GcsProviderOptions {
   /**
    * API endpoint, such as a private endpoint or an emulator
    * (`http://127.0.0.1:4443`), passed to the SDK as `apiEndpoint`.
-   * `STORAGE_EMULATOR_HOST`, when set, overrides it.
+   * `STORAGE_EMULATOR_HOST`, when set, overrides it, and credentials
+   * follow it: set `endpointAuth: false` with an emulator.
    *
    * @since 0.14.0
    */

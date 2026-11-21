@@ -52,7 +52,7 @@ describe('StorageService refuses a traversing key on every operation', () => {
   for (const [name, run] of ops) {
     it(name, async () => {
       const service = new StorageService(new MemoryProvider(() => 0));
-      await expect(run(service, '../x')).rejects.toThrow(/'\.' or '\.\.' segment/);
+      await expect(run(service, '../x')).rejects.toThrow(/path segment/);
     });
   }
 });
@@ -78,7 +78,8 @@ describe('the Azure provider used directly refuses one too', () => {
       () => provider.getSignedUrl('../b/secret.txt', { expiresIn: 60 }),
       () => provider.put('../b/x', new Uint8Array([1])),
     ]) {
-      await expect(run()).rejects.toThrow(/segment/);
+      const error = await run().catch((e: unknown) => e);
+      expect(httpStatusHintOf(error)?.status).toBe(400);
     }
     expect(calls).toBe(0);
   });

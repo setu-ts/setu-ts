@@ -226,7 +226,7 @@ export async function sendGridReason(res: Response): Promise<string> {
     // forge a log line.
     return typeof message === 'string'
       ? // eslint-disable-next-line no-control-regex -- control characters are what it replaces
-        message.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, MAX_REASON)
+        message.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').slice(0, MAX_REASON)
       : '';
   } catch {
     return '';

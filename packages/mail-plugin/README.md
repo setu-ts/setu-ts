@@ -255,6 +255,7 @@ that wants a mail outage to drain its replicas restores the previous behaviour w
 | `SesProviderOptions`      | interface |
 | `SesSdkModule`            | interface |
 | `SmtpProviderOptions`     | interface |
+| `SmtpRuntime`             | interface |
 | `IMailHttp`               | type      |
 | `MailProviderType`        | type      |
 | `MailTemplate`            | type      |

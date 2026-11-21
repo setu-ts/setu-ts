@@ -10,7 +10,7 @@ import type { PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureBlobClient, StorageProvider } from '../interfaces/index.ts';
 import { createEagerIterableStream } from './provider-stream.ts';
-import { assertStorageKey } from '../services/storage-key.ts';
+import { storageKeyRefusal } from '../services/storage-key.ts';
 import { hasMethods } from './shape.ts';
 import type { StorageDeadline, StorageOperation } from './fault.ts';
 import {
@@ -400,9 +400,6 @@ export class AzureBlobProvider implements StorageProvider {
   }
 
   #getBlockBlob(path: string): AzureFacadeBlob {
-    // Checked here too: the provider is exported and can be used directly, and
-    // the SDK resolves a '..' segment before it sends or signs.
-    assertStorageKey(path);
     const container = this.#client!.getContainerClient(
       this.#options.containerName,
     ) as AzureFacadeContainer;
@@ -442,6 +439,10 @@ export class AzureBlobProvider implements StorageProvider {
    * @param options - Object attributes to record with the bytes
    */
   put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     const uploadOptions: Record<string, unknown> = {
       ...(options?.contentType === undefined
         ? {}
@@ -460,6 +461,10 @@ export class AzureBlobProvider implements StorageProvider {
    * @returns The object bytes, or `null`
    */
   get(path: string): Promise<Uint8Array | null> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call<Uint8Array | null>(
       'get',
       async (signal) => {
@@ -487,6 +492,10 @@ export class AzureBlobProvider implements StorageProvider {
    * @returns `true` if deleted
    */
   delete(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call(
       'delete',
       async () => {
@@ -507,6 +516,10 @@ export class AzureBlobProvider implements StorageProvider {
    * @returns `true` if present
    */
   exists(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call('exists', () => this.#getBlockBlob(path).exists(), { value: false });
   }
 
@@ -522,6 +535,10 @@ export class AzureBlobProvider implements StorageProvider {
    *   clock, or its client holds no account key to sign with
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     if (this.#client === null) {
       return Promise.reject(new Error('AzureBlobProvider is not connected. Call connect() first.'));
     }
@@ -570,6 +587,10 @@ export class AzureBlobProvider implements StorageProvider {
    * @returns A `ReadableStream`, or `null` if absent
    */
   getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    // Checked here too: the provider is exported and can be used directly, and
+    // the SDK resolves a '..' segment before it sends or signs.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call<ReadableStream<Uint8Array> | null>(
       'getStream',
       async () => {

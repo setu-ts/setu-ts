@@ -58,7 +58,8 @@ All notable changes to this project are documented here. The format follows
   `SesSdkModule.GetAccountCommand` is optional (a module without it gets no readiness probe).
   `exists`/`delete` reject on an outage instead of answering "not there", on every provider, `local`
   included. `delete()` of an absent key is `false` on every provider; S3 and B2 check with a `HEAD`
-  first. A missing object is `StorageObjectNotFoundError` (`404`). `b2` with neither `region` nor
+  first (a credential without `s3:ListBucket` gets a 403 there, so the delete goes on and answers
+  `true`). A missing object is `StorageObjectNotFoundError` (`404`). `b2` with neither `region` nor
   `endpoint` refuses to start. `createUploadMiddleware` answers a disallowed type `415`. It refuses,
   when built, options its upload brand cannot describe (a `RangeError` naming the rule). A key with
   a `.` or `..` path segment is refused with a `400` on every provider (on Azure such a key could

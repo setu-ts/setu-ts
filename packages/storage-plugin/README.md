@@ -204,7 +204,8 @@ An outage is an error, never "not there". On every cloud arm:
   so they check with a `HEAD` first; an object removed between that check and the delete still
   resolves `true`. A credential without `s3:ListBucket` gets `403` for an absent key on that check,
   so presence is unknown and the delete goes ahead and resolves `true`. Any other failure rejects.
-  Every provider gives the same `delete()` answer.
+  Every provider gives the same `delete()` answer, except S3/B2 under such a credential. An S3/B2
+  `delete` is two requests, each under its own `requestTimeoutMs`.
 - A key with a `.` or `..` path segment is refused with a `400` on every provider: on Azure the SDK
   resolves `..` in the blob URL, so such a key could reach another container.
 - `local` `get` resolves `null` (`404`) only for an absent file; a permission or I/O failure

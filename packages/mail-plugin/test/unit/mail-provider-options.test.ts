@@ -566,14 +566,15 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
     const slowBody = new ReadableStream<Uint8Array>({ start() {} });
     const provider = new SendGridProvider({
       apiKey: 'k',
-      requestTimeoutMs: 200,
+      requestTimeoutMs: 300,
       http: () => Promise.resolve(new Response(slowBody, { status: 400 })),
     });
     await provider.connect();
     const started = performance.now();
     const error = await provider.send(mail).catch((e: unknown) => e);
     // One bound covers the send and the error text.
-    expect(performance.now() - started).toBeLessThan(380);
+    // Two bounds would take 600 ms; one takes about 300.
+    expect(performance.now() - started).toBeLessThan(560);
     expect(error).not.toBeInstanceOf(BackendOutcomeUnknownError);
     expect((error as Error).message).toBe('SendGrid send failed: HTTP 400');
   });
