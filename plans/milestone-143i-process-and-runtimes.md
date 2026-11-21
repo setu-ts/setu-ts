@@ -27,38 +27,45 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                                  | Source (file:line)                                                                                 | Verified surface / fact                                                                                                                                                                                                                                                                            |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RuntimeSignal`                            | `packages/common/src/runtime.ts:40`                                                                | `'SIGTERM' \| 'SIGINT'`; the JSDoc above it gives the reason for the narrow set.                                                                                                                                                                                                                   |
-| `IRuntimeServices.onSignal?`               | `packages/common/src/runtime.ts:452`                                                               | Optional; absent on Workers and on Deno for Windows (`deno-runtime.ts:214-227`). Node `proc.on` (`node-runtime.ts:153`), Bun `proc.on` (`bun-runtime.ts:286`), Deno `addSignalListener` (`deno-runtime.ts:225`). No handler-removal member and no uncaught-error member exist.                     |
-| `IHttpAdapter`                             | `packages/common/src/runtime.ts:468-521`                                                           | `setHandler`, `fetch`, `listen`, `close`, optional `setUpgradeRouter`. No drain or limit member.                                                                                                                                                                                                   |
-| `StartOptions`                             | `packages/common/src/plugin.ts:422-427`                                                            | `port?`, `hostname?` only.                                                                                                                                                                                                                                                                         |
-| `IPluginContext`                           | `packages/common/src/plugin.ts:521`                                                                | No abort signal. `packages/testing` only RECEIVES contexts (`mock-plugin.ts:70`, `override-provider.ts:141`), never builds one, so an optional member breaks no implementor.                                                                                                                       |
-| `IRequestContext.signal`                   | `packages/common/src/http.ts:427`; `packages/kernel/src/context/request-context.ts:153`            | `request.signal ?? new AbortController().signal` — the raw request's signal when the adapter supplies one.                                                                                                                                                                                         |
-| `upgradeIntentOf` / `setUpgradeIntent`     | `packages/common/src/http.ts:702-716`                                                              | Exported from common; the kernel brands the `IRequest` in `#tryUpgrade` (`application.ts:2060`) before the pipeline's `next()` returns to outer middleware.                                                                                                                                        |
-| `ILogger.fatal`                            | `packages/common/src/services/logger.ts:38`                                                        | Exists.                                                                                                                                                                                                                                                                                            |
-| `WebSocketEventSink.maxMessageBytes`       | `packages/common/src/services/websocket.ts:88`                                                     | Per-sink; `0` unlimited; Node passes it to `ws` as `maxPayload` (`node-ws-upgrader.ts:419-425`). `IWebSocketService` exposes no limit (`websocket.ts:424-494`).                                                                                                                                    |
-| Kernel shutdown                            | `packages/kernel/src/application/application.ts:837-931`                                           | `stop()` no-ops only when `!#started`; `#started` is set true at the top of `start()` (`:544`), so a `stop()` during start runs the whole shutdown concurrently with startup. Drain: `#drainRequests` `:2612-2629`, `hrtime() + 10_000`, `MAX_POLLS = 200`. No stop or drain log line.             |
-| Drain accounting of streams                | `application.ts:1886-1922`                                                                         | With no `ctx.defer` cleanup a streamed body releases `#inFlight` at settle time, before the body is read (`:1894-1898`); only bodies with cleanups go through `wrapDeferredStream`. So the drain does not wait for a server stream.                                                                |
-| `wrapDeferredStream`                       | `packages/kernel/src/context/deferred.ts:90-134`                                                   | Runs cleanups on end, error, or consumer `cancel()` — never on the request signal.                                                                                                                                                                                                                 |
-| Drain 503                                  | `application.ts:1084-1102`                                                                         | Pre-pipeline problem 503 while `#stopping`.                                                                                                                                                                                                                                                        |
-| Listening log                              | `application.ts:2549-2564`                                                                         | `logger.info('Server listening', …)`; silent without a logger.                                                                                                                                                                                                                                     |
-| HTTP/2 session close                       | `packages/runtime/src/adapters/node/node-http2-listener.ts:98-120`; `node-http-adapter.ts:263-272` | `trackHttp2Sessions` returns a closer that calls `session.close()` (GOAWAY, in-flight streams finish); the adapter calls it only inside `server.close()`, i.e. after the drain.                                                                                                                    |
-| Router                                     | `packages/kernel/src/router/router.ts:444-467`, `:507-600`                                         | `get` registers `GET` only; `match(method, path)` asks Hono for that method alone, then ranks candidates.                                                                                                                                                                                          |
-| Node refused upgrade                       | `packages/runtime/src/adapters/node/node-http-adapter.ts:536-542`; `node-ws-upgrader.ts:451-462`   | Writes `HTTP/1.1 <status> <reason>` with `Bad Request` for every status but 500/501/503, `Connection: close`, no body, no headers.                                                                                                                                                                 |
-| node-server response error                 | `node_modules/.pnpm/@hono+node-server@2.1.8_hono@4.13.18/…/dist/index.mjs:885-897`, `:786-788`     | `handleResponseError` calls `console.error(e)` unconditionally (no option reaches it); a body stream error reaches it via `writable.destroy(error)`. `writable.on('close', cancel)` cancels the reader cleanly (`:779`).                                                                           |
-| Bun serve                                  | `packages/runtime/src/adapters/bun/bun-http-adapter.ts:204-232`, `:328-339`                        | `fetch(request, server)` callback; `websocket` handlers with no `maxPayloadLength`; no `idleTimeout` and no per-request `server.timeout`.                                                                                                                                                          |
-| Request logger                             | `packages/logger-plugin/src/middleware/request-logger.ts:83-114`, `:169-171`                       | Reads `ctx.response.snapshot().status` after `next()`; ignores `ctx.signal` and the upgrade brand.                                                                                                                                                                                                 |
-| Generated entry signals                    | `packages/cli/src/templates/project-files.ts:795-833`; `full-stack-build-files.ts:480`             | Loops over `['SIGTERM', 'SIGINT']`; no uncaught handler. (Read for §9 only; not edited.)                                                                                                                                                                                                           |
-| Measured on `develop` (`d2ec1aef1`, built) | `.claude/repro/repro1.mjs`, `repro2.mjs` (scratch, uncommitted)                                    | `HEAD /x` → 404 on Node and Deno; a failing response stream prints a raw trace on Node, Bun and Deno with the response already 200; Node's refused upgrade is `401 Bad Request` with no body while Bun and Deno send the 401 JSON body; the request log says `200` for a 101 upgrade on all three. |
+| Reference                                  | Source (file:line)                                                                                 | Verified surface / fact                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RuntimeSignal`                            | `packages/common/src/runtime.ts:40`                                                                | `'SIGTERM' \| 'SIGINT'`; the JSDoc above it gives the reason for the narrow set.                                                                                                                                                                                                                                   |
+| `IRuntimeServices.onSignal?`               | `packages/common/src/runtime.ts:452`                                                               | Optional; absent on Workers and on Deno for Windows (`deno-runtime.ts:214-227`). Node `proc.on` (`node-runtime.ts:153`), Bun `proc.on` (`bun-runtime.ts:286`), Deno `addSignalListener` (`deno-runtime.ts:225`). No handler-removal member and no uncaught-error member exist.                                     |
+| `IHttpAdapter`                             | `packages/common/src/runtime.ts:468-521`                                                           | `setHandler`, `fetch`, `listen`, `close`, optional `setUpgradeRouter`. No drain or limit member.                                                                                                                                                                                                                   |
+| `StartOptions`                             | `packages/common/src/plugin.ts:422-427`                                                            | `port?`, `hostname?` only.                                                                                                                                                                                                                                                                                         |
+| `IPluginContext`                           | `packages/common/src/plugin.ts:521`                                                                | No abort signal. `packages/testing` only RECEIVES contexts (`mock-plugin.ts:70`, `override-provider.ts:141`), never builds one, so an optional member breaks no implementor.                                                                                                                                       |
+| `IRequestContext.signal`                   | `packages/common/src/http.ts:427`; `packages/kernel/src/context/request-context.ts:153`            | `request.signal ?? new AbortController().signal` — the raw request's signal when the adapter supplies one.                                                                                                                                                                                                         |
+| `upgradeIntentOf` / `setUpgradeIntent`     | `packages/common/src/http.ts:702-716`                                                              | Exported from common; the kernel brands the `IRequest` in `#tryUpgrade` (`application.ts:2060`) before the pipeline's `next()` returns to outer middleware.                                                                                                                                                        |
+| `ILogger.fatal`                            | `packages/common/src/services/logger.ts:38`                                                        | Exists.                                                                                                                                                                                                                                                                                                            |
+| `WebSocketEventSink.maxMessageBytes`       | `packages/common/src/services/websocket.ts:88`                                                     | Per-sink; `0` unlimited; Node passes it to `ws` as `maxPayload` (`node-ws-upgrader.ts:419-425`). `IWebSocketService` exposes no limit (`websocket.ts:424-494`).                                                                                                                                                    |
+| Kernel shutdown                            | `packages/kernel/src/application/application.ts:837-931`                                           | `stop()` no-ops only when `!#started`; `#started` is set true at the top of `start()` (`:544`), so a `stop()` during start runs the whole shutdown concurrently with startup. Drain: `#drainRequests` `:2612-2629`, `hrtime() + 10_000`, `MAX_POLLS = 200`. No stop or drain log line.                             |
+| Drain accounting of streams                | `application.ts:1886-1922`                                                                         | With no `ctx.defer` cleanup a streamed body releases `#inFlight` at settle time, before the body is read (`:1894-1898`); only bodies with cleanups, and early-response streams whose handler has not settled (`:1866-1878`), go through `wrapDeferredStream`. So the drain does not wait for a gRPC server stream. |
+| `wrapDeferredStream`                       | `packages/kernel/src/context/deferred.ts:90-134`                                                   | Runs cleanups on end, error, or consumer `cancel()` — never on the request signal.                                                                                                                                                                                                                                 |
+| Drain 503                                  | `application.ts:1084-1102`                                                                         | Pre-pipeline problem 503 while `#stopping`.                                                                                                                                                                                                                                                                        |
+| Listening log                              | `application.ts:2549-2564`                                                                         | `logger.info('Server listening', …)`; silent without a logger.                                                                                                                                                                                                                                                     |
+| HTTP/2 session close                       | `packages/runtime/src/adapters/node/node-http2-listener.ts:98-120`; `node-http-adapter.ts:263-272` | `trackHttp2Sessions` returns a closer that calls `session.close()` (GOAWAY, in-flight streams finish); the adapter calls it only inside `server.close()`, i.e. after the drain.                                                                                                                                    |
+| Router                                     | `packages/kernel/src/router/router.ts:444-467`, `:507-600`                                         | `get` registers `GET` only; `match(method, path)` asks Hono for that method alone, then ranks candidates.                                                                                                                                                                                                          |
+| Node refused upgrade                       | `packages/runtime/src/adapters/node/node-http-adapter.ts:536-542`; `node-ws-upgrader.ts:451-462`   | Writes `HTTP/1.1 <status> <reason>` with `Bad Request` for every status but 500/501/503, `Connection: close`, no body, no headers.                                                                                                                                                                                 |
+| node-server response error                 | `node_modules/.pnpm/@hono+node-server@2.1.8_hono@4.13.18/…/dist/index.mjs:885-897`, `:786-788`     | `handleResponseError` calls `console.error(e)` unconditionally (no option reaches it); a body stream error reaches it via `writable.destroy(error)`. `writable.on('close', cancel)` cancels the reader cleanly (`:779`).                                                                                           |
+| Stream guard                               | `packages/kernel/src/context/stream-guard.ts:38-80`                                                | `guardEmptyChunks(body, runtime)` wraps every streamed body (`application.ts:1874`, `:1890`); it knows nothing of the request.                                                                                                                                                                                     |
+| Request signal cost                        | `packages/kernel/src/context/request-context.ts:145-155`; `application.ts:2116-2124`               | `ctx.signal` allocates an `AbortController` when the request has none; the kernel already avoids extra signal work on the hot path ("about 8% of unary throughput").                                                                                                                                               |
+| Bun HTTP/2                                 | `packages/runtime/src/adapters/bun/bun-http-adapter.ts:327-339`; `runtime-plugin.ts:227-231`       | `BunHttpAdapter` serves `Bun.serve` only; with `http2` set, the runtime plugin runs Bun on the Node adapter. Deno serves h2 through `Deno.serve` (`deno-http-adapter.ts:305-308`) with no session control.                                                                                                         |
+| `rejectRawUpgrade` export                  | `packages/runtime/src/index.ts:82`; runtime README:275                                             | Public; signature `(socket, status)`.                                                                                                                                                                                                                                                                              |
+| Stale shutdown options in `PUBLIC_API.md`  | `PUBLIC_API.md:238-239`                                                                            | Documents `ApplicationOptions.gracefulShutdown?` and `shutdownTimeout?`, which do not exist (V13-129, M143n).                                                                                                                                                                                                      |
+| Generated drain window                     | `packages/cli/src/workspace/k8s.ts:60`, `:213`                                                     | Grace 30 s, `preStopSleepSeconds` 5.                                                                                                                                                                                                                                                                               |
+| Bun serve                                  | `packages/runtime/src/adapters/bun/bun-http-adapter.ts:204-232`, `:328-339`                        | `fetch(request, server)` callback; `websocket` handlers with no `maxPayloadLength`; no `idleTimeout` and no per-request `server.timeout`.                                                                                                                                                                          |
+| Request logger                             | `packages/logger-plugin/src/middleware/request-logger.ts:83-114`, `:169-171`                       | Reads `ctx.response.snapshot().status` after `next()`; ignores `ctx.signal` and the upgrade brand.                                                                                                                                                                                                                 |
+| Generated entry signals                    | `packages/cli/src/templates/project-files.ts:795-833`; `full-stack-build-files.ts:480`             | Loops over `['SIGTERM', 'SIGINT']`; no uncaught handler. (Read for §9 only; not edited.)                                                                                                                                                                                                                           |
+| Measured on `develop` (`d2ec1aef1`, built) | `.claude/repro/repro1.mjs`, `repro2.mjs` (scratch, uncommitted)                                    | `HEAD /x` → 404 on Node and Deno; a failing response stream prints a raw trace on Node, Bun and Deno with the response already 200; Node's refused upgrade is `401 Bad Request` with no body while Bun and Deno send the 401 JSON body; the request log says `200` for a 101 upgrade on all three.                 |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                   | Doc deliverable (same PR)                                                                            |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| C1  | `IRequestContext.defer` JSDoc (`common/src/http.ts:382-399`) promises cleanup on stream end, error or cancellation; on workerd a client leaving triggers none of the three. | The code is brought up to the contract (§3.12); the JSDoc gains "or the request's signal aborting".        | `common/src/http.ts` JSDoc; `PUBLIC_API.md` defer paragraph.                                         |
-| C2  | grpc-plugin README "a server shutting down refuses a call already on the wire" vs the kernel answering 503 for the drain and closing sessions after it.                     | The kernel sends GOAWAY at drain start (§3.6); the README stays, the remaining 503 window is M143c's half. | None in this lane (grpc-plugin README belongs to M143c; §9 names the sentence).                      |
-| C3  | `RuntimeSignal` JSDoc says the two signals are "the only two every non-edge runtime can register for"; SIGHUP is registrable on Node, Bun and Deno-on-POSIX.                | Widen to SIGHUP with the reason written down (§3.2).                                                       | `common/src/runtime.ts` JSDoc; `PUBLIC_API.md`; `docs/deployment.md` shutdown block is M143n's (§9). |
+| #   | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                                                          | Doc deliverable (same PR)                                                                            |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| C1  | `IRequestContext.defer` JSDoc (`common/src/http.ts:382-399`) promises cleanup on stream end, error or cancellation; on workerd a client leaving triggers none of the three. | The code is brought up to the contract (§3.12); the JSDoc gains "or the request's signal aborting".                                               | `common/src/http.ts` JSDoc; `PUBLIC_API.md` defer paragraph.                                         |
+| C2  | grpc-plugin README "a server shutting down refuses a call already on the wire" vs the kernel answering 503 for the drain and closing sessions after it.                     | The kernel sends GOAWAY at drain start (§3.6); the README stays, the remaining 503 window is M143c's half.                                        | None in this lane (grpc-plugin README belongs to M143c; §9 names the sentence).                      |
+| C4  | `PUBLIC_API.md:238-239` documents `gracefulShutdown`/`shutdownTimeout`, which do not exist; this PR adds the real bound, `StartOptions.drainTimeoutMs`.                     | Delete the two stale lines and point at `StartOptions.drainTimeoutMs` in this PR (the `PUBLIC_API.md` half of V13-129; M143n is told it is done). | `PUBLIC_API.md`.                                                                                     |
+| C3  | `RuntimeSignal` JSDoc says the two signals are "the only two every non-edge runtime can register for"; SIGHUP is registrable on Node, Bun and Deno-on-POSIX.                | Widen to SIGHUP with the reason written down (§3.2).                                                                                              | `common/src/runtime.ts` JSDoc; `PUBLIC_API.md`; `docs/deployment.md` shutdown block is M143n's (§9). |
 
 ## 3. Design decisions
 
@@ -67,35 +74,43 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 - **Decision:** `IRuntimeServices` gains an optional
   `onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void`, with
   `type FatalErrorOrigin = 'uncaughtException' | 'unhandledRejection'` in common. It OBSERVES only:
-  the process still dies exactly as before (same exit code, the runtime's own trace still on
-  stderr). It returns an unsubscribe function. Implementations: Node
-  `process.on('uncaughtExceptionMonitor', …)` (under Node's default `--unhandled-rejections=throw`
-  an unhandled rejection arrives there with origin `'unhandledRejection'`); Deno
-  `globalThis.addEventListener('error' | 'unhandledrejection')` without `preventDefault()`; Bun
-  `uncaughtExceptionMonitor` for thrown errors (measured on Bun 1.4.5: it fires, the process still
-  exits 1 with its trace) — but Bun never routes a rejection there, and a Bun `unhandledRejection`
-  listener SUPPRESSES the crash (measured: the process lived and exited 0). So for rejections the
-  Bun adapter adds an `unhandledRejection` listener that calls the handlers and then, when it is the
-  only `unhandledRejection` listener, rethrows the reason so Bun crashes as it would have; when the
-  application has its own listener the rethrow is skipped (the application chose not to crash). The
-  Bun e2e arm proves exit code 1 and a trace on stderr; the JSDoc states the Bun mechanism. Workers
-  omits it (an isolate's exceptions are per request). Each adapter installs ONE process-level
-  listener per mechanism lazily, on the first subscription, keeps the handlers in a set, and removes
-  the process listener when the set empties, so a test suite that starts many applications does not
-  pile listeners onto `process`. The kernel subscribes at the start of `#runStartup` once the
-  runtime resolves and unsubscribes at the end of `stop()` and after a failed start. Its handler
-  resolves the logger at fire time and writes
-  `logger.fatal('Process failed', { origin, error: describeError(error) })`; with no logger it does
-  nothing (the runtime's trace is still printed). A throwing logger is swallowed.
+  the process still dies with the same exit code and the runtime still prints its own report on
+  stderr. It returns an unsubscribe function. Implementations, each measured on 2026-11-22:
+  - Node 24: `process.on('uncaughtExceptionMonitor', …)`; under Node's default
+    `--unhandled-rejections=throw` a rejection arrives there with origin `'unhandledRejection'`.
+  - Deno 2.9.6: `globalThis.addEventListener('error' | 'unhandledrejection')`, no
+    `preventDefault()`; the process still exits 1.
+  - Bun 1.4.5: `uncaughtExceptionMonitor` fires for throws and the process still exits 1; it never
+    fires for rejections, and a Bun `unhandledRejection` listener SUPPRESSES the crash (the process
+    lived and exited 0). So for rejections the Bun adapter adds an `unhandledRejection` listener
+    that calls the handlers and then, when it is the only `unhandledRejection` listener, rethrows
+    the reason so Bun still crashes; when the application has its own listener the rethrow is
+    skipped (the application chose not to crash). The rethrown reason is recorded (an object in a
+    `WeakSet`, a primitive wrapped once in a marked `Error`) and the adapter's monitor skips it, so
+    the crash is reported once, as `'unhandledRejection'`.
+  - Workers omits it (an isolate's exceptions are per request). Each adapter installs ONE
+    process-level listener per mechanism lazily, on the first subscription, keeps the handlers in a
+    set, and removes the process listener when the set empties. A handler that throws is caught and
+    never changes the crash. The kernel subscribes in `#runStartup` as soon as the runtime
+    capability resolves (after the runtime plugin's `register()`; a crash before that point is not
+    observed, and the README says so), and unsubscribes at the end of `stop()` and after a failed or
+    cancelled start. Its handler resolves the logger at fire time and writes
+    `logger.fatal('Process failed', { origin, error: describeError(error) })`; with no logger it
+    does nothing. A throwing logger is swallowed. The line is as durable as the logger's write: the
+    console logger and a synchronous pino destination write before the process exits; a pino
+    worker-thread transport may lose it, which the logger-plugin README states.
 - **Why:** an observer keeps the documented decision that the framework does not take over process
   behaviour (`docs/deployment.md` "Graceful shutdown"), while the JSON pipeline finally sees why the
   process ended. The kernel owns the logger, so the line goes through the same redaction as every
   other line.
 - **Test home:** `runtime/test/unit/fatal-error-observer.test.ts` (per-runtime wiring through
-  injected hosts); `kernel/test/unit/fatal-error-log.test.ts` (subscribe/unsubscribe, log shape);
-  `runtime/test/e2e/fatal-error-process.test.ts` — a real child process on Node (and Bun/Deno where
-  installed, guarded) that throws and that rejects: stdout carries the `fatal` JSON line, exit code
-  and stderr trace match a control without the app.
+  injected hosts, one listener per mechanism, the Bun rethrow rule and its de-duplication);
+  `kernel/test/unit/fatal-error-log.test.ts` (subscribe/unsubscribe, log shape);
+  `runtime/test/e2e/fatal-error-process.test.ts` — a real child process on Node, Bun and Deno (Bun
+  and Deno arms guarded on the binary) that throws and that rejects: exactly one `fatal` JSON line
+  on stdout with the right origin, exit code 1 as in a control child without the app, stderr
+  non-empty and naming the error's message; on Bun, a child whose application has its own
+  `unhandledRejection` listener keeps running.
 
 ### 3.2 SIGHUP (V13-12)
 
@@ -135,17 +150,19 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   with `drainTimeoutMs: 20_000` on a manual clock and is cut at 10 s by default; an invalid value is
   refused before registration.
 
-### 3.5 The drain waits for streamed bodies (V13-23, server-stream half)
+### 3.5 The drain waits for RPC streamed replies (V13-23, server-stream half)
 
-- **Decision:** every streamed body holds its request in `#inFlight` until it ends, errors or is
-  cancelled — not only bodies with `ctx.defer` cleanups. `#settleRequest` routes a streamed body
-  with no cleanups through `wrapDeferredStream(body, [], …, complete)` like the rest. An open SSE
-  stream therefore holds the drain until the stream ends or the bound passes; the drain-finished
-  line (§3.3) reports it as `remaining`.
+- **Decision:** a streamed reply sent by `#sendRpcResponse` (the gRPC, Connect and gRPC-Web path)
+  holds its request in `#inFlight` until the body ends, errors or is cancelled: `#sendRpcResponse`
+  marks the request, and `#settleRequest` routes a marked streamed body with no cleanups through
+  `wrapDeferredStream(body, [], …, complete)`. Other streamed bodies (SSE, page renders, downloads)
+  keep today's accounting, so an open SSE client does not hold every stop for the whole bound — SSE
+  closes its connections only in `onClose`, after the drain (`sse-plugin.ts:139-147`).
 - **Why:** a gRPC server stream in flight at shutdown was cut with CANCEL because the drain had
-  already released it. "Drain" means in-flight responses finish.
-- **Test home:** `kernel/test/unit/shutdown-drain.test.ts` — a streamed body with no `defer` keeps
-  `stop()` waiting until the stream closes.
+  already released it, while counting every stream would make each stop with a live SSE or GraphQL
+  subscription wait the full bound.
+- **Test home:** `kernel/test/unit/shutdown-drain.test.ts` — a fake gRPC service's streamed reply
+  keeps `stop()` waiting until the stream closes; a plain streamed route body does not.
 
 ### 3.6 GOAWAY at drain start (V13-23, kernel half)
 
@@ -154,9 +171,13 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   that sets `#stopping`, after the `onStopping` hooks. Node: closes every tracked HTTP/2 session
   gracefully (`session.close()`: GOAWAY, streams in flight continue) on both the TLS and cleartext
   listeners, and calls `closeIdleConnections()` on the HTTP/1.1 server where the server has it; the
-  later `close()` is unchanged. Bun: the same for whichever HTTP/2 listener M139b gave it, measured;
-  Deno: `Deno.serve` exposes no session control, so Deno omits the member and its JSDoc says so. A
-  throw from `beginDrain` is caught and logged at `warn`; it never stops the shutdown.
+  later `close()` is unchanged. Bun needs no member of its own: `BunHttpAdapter` has no HTTP/2, and
+  with `http2` set the runtime plugin already runs Bun on the Node adapter, which brings Node's
+  `beginDrain`. Deno omits the member: `Deno.serve` gives no session control. Because the ROADMAP
+  outcome ("a draining member refuses new gRPC streams") then does not hold on Deno, the Deno
+  adapter states it once at `listen` when TLS (and so h2) is configured, through `reportError`:
+  `{ level: 'warn', msg: 'HTTP/2 clients are not sent GOAWAY when this Deno server drains; calls during the drain get 503' }`.
+  A throw from `beginDrain` is caught and logged at `warn`; it never stops the shutdown.
 - **Why:** after GOAWAY a conforming client opens new streams on another connection, and a stream it
   opened past the last-stream-id is refused without being processed — the retryable case
   `grpcClient` already handles. The 503 the kernel still answers for a stream that raced the GOAWAY
@@ -165,40 +186,51 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   on a session opened before stop receives GOAWAY at drain start, its in-flight stream completes,
   and a stream opened after GOAWAY is refused (`NGHTTP2_REFUSED_STREAM` or the GOAWAY session
   error); `kernel/test/unit/shutdown-drain.test.ts` — the kernel calls `beginDrain` once, after
-  stopping hooks, and survives a throwing one.
+  stopping hooks, and survives a throwing one; `runtime/test/unit/deno-http-adapter.test.ts` — the
+  Deno line once with TLS, never without.
 
 ### 3.7 A stop during start cancels the start (V13-43, kernel half)
 
 - **Decision:** `start()` owns an `AbortController`; `IPluginContext` gains an optional
   `readonly signal?: AbortSignal` that the kernel always sets and aborts when `stop()` is called
-  before `start()` finishes. While starting, `stop()` does NOT run the shutdown sequence: it aborts
-  the signal and returns a promise that settles when `start()` has unwound. Every awaited startup
-  step (`register()` promises, `runInit`, `runBootstrap`, `adapter.listen`) is raced against the
-  signal, so a hook that never settles cannot hold the stop. On abort `start()` rejects with
+  before `start()` finishes. While starting, `stop()` does NOT run the shutdown sequence (no
+  `onStopping` or `onShutdown` hooks — the start never finished; the upgrade note says so): it
+  aborts the signal and returns a promise that settles when `start()` has unwound. Every awaited
+  startup step (`register()` promises, `runInit`, `runBootstrap`, `adapter.listen`) is raced against
+  the signal, so a hook that never settles cannot hold the stop. On abort `start()` rejects with
   `StartCancelledError` (new, exported from `@setu-ts/kernel`,
   `message: 'start() was cancelled by stop()'`), its existing catch runs the close hooks, a server
   bound by a `listen` that resolved after the abort is closed, and nothing listens later even if a
-  hook resolves afterwards. The kernel logs `'Startup cancelled'` at `warn` when a logger is
-  registered. `stop()` resolves (it does not reject with the cancellation). A second `stop()`
-  returns the same promise.
+  hook resolves afterwards. Plugin work abandoned by the race may keep running: after the abort, a
+  close hook registered through `ctx.lifecycle.onClose` runs at once (a failure logged at `warn`),
+  so a resource connected late is still released; other lifecycle registrations after the abort are
+  ignored. The kernel logs `'Startup cancelled'` at `warn` when a logger is registered. `stop()`
+  resolves (it does not reject with the cancellation). A second `stop()` returns the same promise.
 - **Why:** the sockets leaked because the shutdown ran before the backplane registered its close
-  hook and startup then carried on to `listen`. The plugin half (register the close hook before
-  connecting, honour `ctx.signal`) is M143m's.
+  hook (`realtime-backplane-plugin.ts:129-176`) and startup then carried on to `listen`. Running a
+  late close hook at once closes that leak from the kernel side; honouring `ctx.signal` and
+  registering the hook before connecting is M143m's half.
 - **Test home:** `kernel/test/unit/start-cancel.test.ts` — a plugin whose `onInit` never resolves:
-  `stop()` resolves, `start()` rejects with `StartCancelledError`, the plugin's `onClose` ran,
-  `ctx.signal.aborted` is true, and when the hook later resolves no `listen` happens (fake adapter
-  records calls); 20 cycles leave no listener on a fake adapter.
+  `stop()` resolves, `start()` rejects with `StartCancelledError`, the plugin's earlier `onClose`
+  ran, `ctx.signal.aborted` is true, and when the hook later resolves and registers another
+  `onClose`, that hook runs at once and no `listen` happens (fake adapter records calls); a `listen`
+  resolving after the abort is closed; `onStopping`/`onShutdown` hooks did not run; 20 cycles leave
+  no listener on a fake adapter.
 
 ### 3.8 Node answers a refused upgrade with the framework response (V13-53)
 
-- **Decision:** `rejectRawUpgrade` is replaced, for the "no intent" path, by a writer of the
-  framework response's snapshot onto the raw socket:
-  `HTTP/1.1 <status> <node:http STATUS_CODES reason>`, every snapshot header, `content-length` of
-  the buffered body, `connection: close`, then the body; a streamed body is cancelled and sent as
-  `content-length: 0`. The fixed-status paths (no handler, handshake failure) keep an empty body but
-  take their reason phrase from the same `STATUS_CODES` table.
+- **Decision:** a new internal writer, `writeRawUpgradeResponse(socket, snapshot)` in
+  `node-ws-upgrader.ts`, serialises the framework response's snapshot onto the raw socket:
+  `HTTP/1.1 <status> <node:http STATUS_CODES reason>`; every snapshot header, with each `Set-Cookie`
+  value on its own line (`getSetCookie()`); `transfer-encoding` and `content-length` from the
+  snapshot dropped; `content-length` of the buffered body; `connection: close`; then the body. A
+  streamed body is cancelled and sent as `content-length: 0`. The node adapter's "no intent" path
+  uses it. The exported `rejectRawUpgrade(socket, status)` keeps its signature for the fixed-status
+  paths (no handler, handshake failure) and the empty body, and takes its reason phrase from the
+  same `STATUS_CODES` table (a changed reason phrase is noted in the upgrade guide and README).
 - **Why:** Bun and Deno already send the framework's response; Node's raw socket path dropped it.
-- **Test home:** `runtime/test/unit/node-ws-upgrader.test.ts` (writer bytes);
+- **Test home:** `runtime/test/unit/node-ws-upgrader.test.ts` (writer bytes: reason, two
+  `Set-Cookie` lines, no `transfer-encoding`, length, body; `rejectRawUpgrade` reasons);
   `runtime/test/integration/refused-upgrade-parity.test.ts` — a middleware 401 with a JSON body on a
   raw upgrade request: same status line reason, content type and body on Node as on Bun and Deno
   (Bun/Deno arms guarded on the binary).
@@ -208,7 +240,9 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 - **Decision:** after `next()`, the request logger's status is: `101` when
   `upgradeIntentOf(ctx.request)` is set; else, when `ctx.signal.aborted`, `499` with `aborted: true`
   added to the line; else the error-predicted or snapshot status as today. The message stays
-  `'request completed'`.
+  `'request completed'`. The 101 records the accepted upgrade; a handshake that then fails is
+  reported separately by the adapter (`'WebSocket handshake failed'`,
+  `node-http-adapter.ts:547-557`), which the README states.
 - **Why:** the wire said 101; a client that left received nothing and must not page a 5xx alert. 499
   is the established "client closed request" code in access logs.
 - **Test home:** `logger-plugin/test/unit/request-logger.test.ts`.
@@ -217,51 +251,65 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 
 - **Decision:** `Router.match('HEAD', path)` collects the `HEAD` candidates and the `GET` candidates
   and ranks them together with the existing ranking; at equal rank an explicit `HEAD` route wins. A
-  `GET` definition served for `HEAD` runs its full middleware and handler. For every `HEAD` request
-  the kernel drops the response body in `#settleRequest` (a buffered body becomes `null` with its
-  headers kept; a streamed body is cancelled so its producer and its cleanups run), so an explicit
-  `HEAD` handler that writes a body is also served without one. Applies to `inject()` and
-  `dispatch()` too. The explicit `router.head()` keeps working.
-- **Why:** RFC 9110 §9.1. Ranking together means a specific `GET /assets/*` beats a catch-all
-  `HEAD /*`, so react-router's asset and public-file routes answer `HEAD` with no change in that
-  plugin.
+  `GET` definition served for `HEAD` runs its full middleware and handler, and the response keeps
+  every header the `GET` would carry. Over a real server the kernel leaves the body to the adapter:
+  Node's `http`, Bun and Deno already send no body for `HEAD` and keep the `GET`'s `content-length`.
+  Only `inject()` and `dispatch()`, which have no server, drop the body themselves for a `HEAD`
+  request (headers kept, `content-length` included; a streamed body is cancelled so its producer and
+  cleanups run). The explicit `router.head()` keeps working.
+- **Why:** RFC 9110 §9.1 and §9.3.2 (a `HEAD` response carries the `GET`'s headers). Ranking
+  together means a specific `GET /assets/*` beats a catch-all `HEAD /*`, so react-router's asset and
+  public-file routes answer `HEAD` with no change in that plugin.
 - **Test home:** `kernel/test/unit/router-head.test.ts`;
-  `kernel/test/integration/head-requests.test.ts` (inject: status, headers and empty body; a
-  streamed GET under HEAD runs its `defer`).
+  `kernel/test/integration/head-requests.test.ts` (inject: status, `content-length` equal to the
+  `GET`'s, empty body; a streamed GET under HEAD runs its `defer`);
+  `runtime/test/integration/head-real-server.test.ts` — on a real Node server (Bun and Deno arms
+  guarded) `HEAD` answers 200 with the `GET`'s `content-length` and no body.
 
 ### 3.11 WebSocket size limits across runtimes (V13-41)
 
-- **Decision:** `IHttpAdapter` gains an optional `readonly webSocketMaxMessageBytes?: number` — the
-  runtime's own per-message ceiling: Bun `16 * 1024 * 1024`, passed explicitly as Bun's
-  `maxPayloadLength` so the number is the adapter's and not a hidden default; Deno
-  `64 * 1024 * 1024`; Node absent (no ceiling). `IWebSocketService` gains an optional
-  `readonly maxMessageBytes?: number`. At startup, after bootstrap and before listen, when both are
-  present and the service's limit is `0` or larger than the ceiling, the kernel logs one `warn`:
-  `'WebSocket message limit exceeds the runtime ceiling'` with `{ configured, ceiling, platform }`.
+- **Decision:** the runtime states its ceiling where it learns the configured limit — at the
+  handshake, from `sink.maxMessageBytes`. Bun's ceiling is `16 * 1024 * 1024`, now passed explicitly
+  as Bun's `websocket.maxPayloadLength` so the number is the adapter's own; Deno's is
+  `64 * 1024 * 1024` (fixed by Deno); Node has none (`ws` takes the sink's limit). On Bun and Deno,
+  the first handshake whose `sink.maxMessageBytes` is `0` or above the ceiling reports once per
+  process, through `reportError`:
+  `{ level: 'warn', msg: 'WebSocket message limit exceeds the runtime ceiling', configured, ceiling, platform }`.
   The ceiling is not raised: a global raise on Bun would let any socket send frames up to it while
-  the plugin checks its own limit only after receipt.
-- **Why:** the plugin cannot know the runtime's ceiling and the adapter cannot know the plugin's
-  limit until the first handshake; the kernel holds both at startup. Populating the service's
-  `maxMessageBytes` and the Workers ceiling are M143o's halves.
-- **Test home:** `kernel/test/unit/websocket-ceiling.test.ts` (fake adapter and service: warns for
-  `0` and for above-ceiling, silent at or below, silent when one of the two is absent);
-  `runtime/test/unit/bun-http-adapter.test.ts` (serve receives `maxPayloadLength`, ceiling exposed).
+  the plugin checks its own limit only after receipt. No `common` member is added for this.
+- **Why:** the earlier draft read a limit from `IWebSocketService` that nothing populates and that
+  no scheduled letter would populate; the sink already carries the limit to the adapter. This states
+  it at the first upgrade rather than at process start — the deviation from the ROADMAP's "at
+  startup" wording is named in the PR, because no runtime-lane code knows the limit earlier.
+- **Test home:** `runtime/test/unit/bun-http-adapter.test.ts` and `deno-http-adapter.test.ts` (serve
+  receives `maxPayloadLength`; one report for `0` and for above-ceiling across two handshakes, none
+  at or below).
 
-### 3.12 workerd: cleanup when the client leaves (V13-200, kernel half)
+### 3.12 Cleanup when the client leaves, on every runtime (V13-200, kernel half)
 
-- **Decision:** `wrapDeferredStream` takes the request's `AbortSignal` and runs its `once()` (the
-  cleanups and the drain release) when the signal aborts before the stream finished, then cancels
-  the source reader. The kernel passes `ctx.signal`. Same on every runtime; on Node it is a no-op in
-  practice because `cancel()` already arrives. On workerd this needs `ctx.signal` to fire, which
-  requires the `enable_request_signal` compatibility flag before the 2026-11-17 compatibility date —
-  the template half is M143j's. Asynchronous cleanups on workerd also need the isolate kept alive
-  (`waitUntil`), which the kernel cannot reach — M143o's half if the workerd proof shows an async
-  cleanup cut short.
+- **Decision:** a request's `ctx.defer` cleanups run once, on whichever comes first: the existing
+  settle path (response sent, or stream ended, errored or cancelled), or the request's own signal
+  aborting. The abort listener is attached lazily, on the first `ctx.defer` call, and only when the
+  adapter's request carries a signal (`ctx.request` signal, never the allocating `ctx.signal`), so a
+  request that defers nothing pays nothing. On abort before settle the kernel runs the cleanups (the
+  same LIFO, the same per-cleanup bound), releases the request from the drain once they finish, and
+  logs `'Request aborted before completion'` at `info` with `{ requestId, method, path }` when a
+  logger is registered. This covers a streamed body the isolate itself produces and a non-streaming
+  handler that never settles (the service-binding deadline case). A request that deferred nothing
+  gets no line from the kernel; with §3.9 the request logger records it as 499 wherever its
+  `finally` runs. On workerd the signal needs the `enable_request_signal` compatibility flag before
+  the 2026-11-17 compatibility date — the template half is M143j's. Asynchronous cleanups on workerd
+  may also need the isolate kept alive (`waitUntil`), which the kernel cannot reach: the workerd
+  proof measures a sync and an async cleanup, and any shortfall goes to M143o.
 - **Why:** workerd tears the request down without calling `cancel()`; the signal is the only notice.
-- **Test home:** `kernel/test/unit/deferred.test.ts` (abort runs cleanups once; abort after end does
-  nothing); `runtime/test/integration/stream-signal.test.ts` — on a real Node server (Bun and Deno
-  arms guarded on the binary) a fully read stream runs its cleanups once, after the last chunk, so
-  no runtime aborts the signal early, and a client that leaves runs them once; verification on local
+  Measured on develop with local `wrangler dev`: no flag, no cleanup and no signal; with the flag,
+  the signal fires and the cleanup still does not run.
+- **Test home:** `kernel/test/unit/deferred-abort.test.ts` (abort runs cleanups once and releases
+  the drain; abort after settle does nothing; a non-streaming handler that never settles still runs
+  its cleanups on abort; no listener is attached without `defer`);
+  `runtime/test/integration/stream-signal.test.ts` — on a real Node server (Bun and Deno arms
+  guarded on the binary) a fully read stream runs its cleanups once, after the last chunk, so no
+  runtime aborts the signal early, and a client that leaves runs them once; verification on local
   `wrangler dev` (§7), recorded in the PR.
 
 ### 3.13 Bun idle streams (V13-42)
@@ -277,36 +325,50 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 
 ### 3.14 A failed response stream (V13-256)
 
-- **Decision:** the kernel's stream guard (`guardEmptyChunks`, which wraps every streamed body)
-  catches a source error, logs `'Response stream failed'` at `error` with
-  `{ requestId, method, path, status, error: describeError(error) }` when a logger is registered,
-  and re-raises it so the connection is still aborted. Each adapter then ends the connection on that
-  error without the runtime printing it: Node takes `outgoing` from node-server's fetch `env` and
-  destroys it, ending the body cleanly so node-server's `handleResponseError` never sees an error;
-  Bun and Deno get the measured equivalent; where a runtime prints regardless, the adapter's JSDoc
-  and a one-time startup line say so. The client always sees an aborted response, never a clean end.
-- **Why:** one log line, through the logger and its redaction, on every runtime.
-- **Test home:** `kernel/test/unit/stream-guard.test.ts`;
+- **Decision:** `guardEmptyChunks` gains a third parameter, `onError: (error: unknown) => void`,
+  which the kernel supplies with the request in scope: it logs `'Response stream failed'` at `error`
+  with `{ requestId, method, path, status, error: describeError(error) }` when a logger is
+  registered. The guard calls it once on a source error and re-raises the error. Each adapter then
+  ends the connection without the runtime printing it, by a mechanism measured on 2026-11-22:
+  - Node: the fetch callback takes `outgoing` from node-server's `env`; on a body error the
+    adapter's wrapper destroys `outgoing` and ends its own stream without erroring, so node-server's
+    `handleResponseError` never runs — it would `console.error` the error and write
+    `Error: <message>` into the response body (`index.mjs:885-897`).
+  - Bun: Bun's `error` hook is not called for a body error and Bun prints the error; erroring the
+    response stream with `undefined` instead resets the connection and prints nothing, so the Bun
+    wrapper re-raises as `controller.error(undefined)`.
+  - Deno: `Deno.serve`'s `onError` receives a body error; the adapter passes an `onError` that
+    prints nothing (the kernel has logged) and returns a 500 that Deno discards once headers are
+    sent. The client always sees an aborted response, never a clean end. The earlier
+    `'request completed'` line keeps the status it saw (it is written before the body is read); the
+    new line carries the same `requestId` to tie the two together.
+- **Why:** one log line, through the logger and its redaction, on every runtime, and no error text
+  in a response body.
+- **Test home:** `kernel/test/unit/stream-guard.test.ts` (callback once, error re-raised);
   `runtime/test/integration/stream-failure.test.ts` — a real Node server: no `console.error` call,
-  the logger records the line, the client sees a truncated response (Bun/Deno arms guarded).
+  the logger records the line, the client sees a truncated response whose bytes contain no
+  `Error: source failed`; Bun and Deno arms (guarded) run the same server in a child process and
+  assert empty stderr and a truncated response.
 
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none — every member added to a published interface is optional, and
 `RuntimeSignal` widens a union a caller passes in (an exhaustive `switch` over it in application
-code would need a new arm; noted in `docs/upgrading.md`). Ships in minor `0.14.0`.
+code would need a new arm). Behaviour changes, each in `docs/upgrading.md`: a stop during start no
+longer runs `onStopping`/`onShutdown`; gRPC streamed replies hold the drain; `HEAD` reaches `GET`
+routes; Node's refused upgrade carries the framework response and `rejectRawUpgrade` new reason
+phrases; the request log's 101 and 499. Ships in minor `0.14.0`.
 
-| Exported symbol                           | Kind             | Consumer / real code path that READS it                                             |
-| ----------------------------------------- | ---------------- | ----------------------------------------------------------------------------------- |
-| `FatalErrorOrigin` (common)               | type             | `IRuntimeServices.onFatalError` signature; kernel's handler logs it.                |
-| `IRuntimeServices.onFatalError?` (common) | interface member | Kernel `#runStartup` subscribes; `stop()`/failed start unsubscribes.                |
-| `RuntimeSignal` adds `'SIGHUP'` (common)  | type change      | Generated entries (M143j) and any application `onSignal` call.                      |
-| `StartOptions.drainTimeoutMs?` (common)   | option           | Kernel `#drainRequests`.                                                            |
-| `IHttpAdapter.beginDrain?` (common)       | interface member | Kernel `#runShutdownSequence`.                                                      |
-| `IHttpAdapter.webSocketMaxMessageBytes?`  | interface member | Kernel startup ceiling check (§3.11).                                               |
-| `IWebSocketService.maxMessageBytes?`      | interface member | Kernel startup ceiling check; populated by websocket-plugin (M143o).                |
-| `IPluginContext.signal?` (common)         | interface member | Plugins that await at startup (realtime-backplane-plugin, M143m); kernel aborts it. |
-| `StartCancelledError` (kernel)            | class            | Thrown by `start()`; generated entries tell it from a failure (M143j).              |
+| Exported symbol                           | Kind             | Consumer / real code path that READS it                                                                                |
+| ----------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `FatalErrorOrigin` (common)               | type             | `IRuntimeServices.onFatalError` signature; kernel's handler logs it.                                                   |
+| `IRuntimeServices.onFatalError?` (common) | interface member | Kernel `#runStartup` subscribes; `stop()`/failed start unsubscribes.                                                   |
+| `RuntimeSignal` adds `'SIGHUP'` (common)  | type change      | Generated entries (M143j) and any application `onSignal` call.                                                         |
+| `StartOptions.drainTimeoutMs?` (common)   | option           | Kernel `#drainRequests`.                                                                                               |
+| `IHttpAdapter.beginDrain?` (common)       | interface member | Kernel `#runShutdownSequence`.                                                                                         |
+| `IPluginContext.signal?` (common)         | interface member | Plugins that await at startup (realtime-backplane-plugin, M143m); kernel aborts it.                                    |
+| `StartCancelledError` (kernel)            | class            | Thrown by `start()`; an entry tells a cancelled start from a failure with `instanceof` (the generated entries, M143j). |
+| `rejectRawUpgrade` (runtime, changed)     | function         | Node adapter fixed-status refusals; reason phrases now from `STATUS_CODES`.                                            |
 
 ### 4.1 Options — every option names its consumer
 
@@ -316,30 +378,32 @@ code would need a new arm; noted in `docs/upgrading.md`). Ships in minor `0.14.0
 
 ## 5. Implementation files
 
-| File                                                               | Purpose                                                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `packages/common/src/runtime.ts`                                   | `RuntimeSignal`, `FatalErrorOrigin`, `onFatalError?`, `beginDrain?`, `webSocketMaxMessageBytes?` |
-| `packages/common/src/plugin.ts`                                    | `StartOptions.drainTimeoutMs?`, `IPluginContext.signal?`                                         |
-| `packages/common/src/services/websocket.ts`                        | `IWebSocketService.maxMessageBytes?`                                                             |
-| `packages/common/src/http.ts`                                      | `defer` JSDoc (C1)                                                                               |
-| `packages/common/src/index.ts`                                     | export `FatalErrorOrigin`                                                                        |
-| `packages/kernel/src/application/application.ts`                   | §3.1, §3.3–3.7, §3.10 body drop, §3.11, §3.12 wiring                                             |
-| `packages/kernel/src/application/start-cancelled-error.ts` (new)   | `StartCancelledError`                                                                            |
-| `packages/kernel/src/context/deferred.ts`                          | signal-driven cleanup (§3.12)                                                                    |
-| `packages/kernel/src/context/stream-guard.ts`                      | stream failure log (§3.14)                                                                       |
-| `packages/kernel/src/router/router.ts`                             | `HEAD` falls back to `GET` (§3.10)                                                               |
-| `packages/kernel/src/index.ts`                                     | export `StartCancelledError`                                                                     |
-| `packages/runtime/src/adapters/node/node-runtime.ts`               | `onFatalError` (Node)                                                                            |
-| `packages/runtime/src/adapters/bun/bun-runtime.ts`                 | `onFatalError` (Bun, as measured)                                                                |
-| `packages/runtime/src/adapters/deno/deno-runtime.ts`               | `onFatalError` (Deno)                                                                            |
-| `packages/runtime/src/adapters/node/node-http-adapter.ts`          | `beginDrain`, refused-upgrade writer call, stream-failure handling                               |
-| `packages/runtime/src/adapters/node/node-http2-listener.ts`        | drain closer usable before `close()`                                                             |
-| `packages/runtime/src/adapters/node/node-ws-upgrader.ts`           | response writer for refused upgrades                                                             |
-| `packages/runtime/src/adapters/bun/bun-http-adapter.ts`            | `maxPayloadLength`, ceiling, `server.timeout`, `beginDrain` if Bun has HTTP/2, stream failure    |
-| `packages/runtime/src/adapters/deno/deno-http-adapter.ts`          | ceiling, stream failure                                                                          |
-| `packages/runtime/src/services/cross-runtime.ts`                   | carry `onFatalError` through `mergeRuntimeServices` like `onSignal`                              |
-| `packages/logger-plugin/src/middleware/request-logger.ts`          | §3.9                                                                                             |
-| READMEs of kernel, runtime, common, logger-plugin; `PUBLIC_API.md` | the new members, lines and behaviours                                                            |
+| File                                                               | Purpose                                                                |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `packages/common/src/runtime.ts`                                   | `RuntimeSignal`, `FatalErrorOrigin`, `onFatalError?`, `beginDrain?`    |
+| `packages/common/src/plugin.ts`                                    | `StartOptions.drainTimeoutMs?`, `IPluginContext.signal?`               |
+| `packages/common/src/http.ts`                                      | `defer` JSDoc (C1)                                                     |
+| `packages/common/src/index.ts`                                     | export `FatalErrorOrigin`                                              |
+| `packages/kernel/src/application/application.ts`                   | §3.1, §3.3–3.7, §3.10 inject/dispatch body drop, §3.12, §3.14 callback |
+| `packages/kernel/src/context/request-context.ts`                   | lazy abort listener on first `defer` (§3.12)                           |
+| `packages/kernel/src/application/start-cancelled-error.ts` (new)   | `StartCancelledError`                                                  |
+| `packages/kernel/src/context/deferred.ts`                          | once-guard shared by settle and abort (§3.12)                          |
+| `packages/kernel/src/context/stream-guard.ts`                      | stream failure log (§3.14)                                             |
+| `packages/kernel/src/router/router.ts`                             | `HEAD` falls back to `GET` (§3.10)                                     |
+| `packages/kernel/src/index.ts`                                     | export `StartCancelledError`                                           |
+| `packages/runtime/src/adapters/node/node-runtime.ts`               | `onFatalError` (Node)                                                  |
+| `packages/runtime/src/adapters/bun/bun-runtime.ts`                 | `onFatalError` (Bun, as measured)                                      |
+| `packages/runtime/src/adapters/deno/deno-runtime.ts`               | `onFatalError` (Deno)                                                  |
+| `packages/runtime/src/adapters/node/node-http-adapter.ts`          | `beginDrain`, refused-upgrade writer call, stream-failure handling     |
+| `packages/runtime/src/adapters/node/node-http2-listener.ts`        | drain closer usable before `close()`                                   |
+| `packages/runtime/src/adapters/node/node-ws-upgrader.ts`           | `writeRawUpgradeResponse`; `rejectRawUpgrade` reasons                  |
+| `packages/runtime/src/adapters/bun/bun-http-adapter.ts`            | `maxPayloadLength`, ceiling report, `server.timeout`, stream failure   |
+| `packages/runtime/src/adapters/bun/bun-ws-upgrader.ts`             | ceiling report at the handshake (where the sink is read)               |
+| `packages/runtime/src/adapters/deno/deno-http-adapter.ts`          | ceiling report, `onError`, the no-GOAWAY line                          |
+| `packages/runtime/src/adapters/deno/deno-ws-upgrader.ts`           | ceiling report at the handshake                                        |
+| `packages/runtime/src/services/cross-runtime.ts`                   | carry `onFatalError` through `mergeRuntimeServices` like `onSignal`    |
+| `packages/logger-plugin/src/middleware/request-logger.ts`          | §3.9                                                                   |
+| READMEs of kernel, runtime, common, logger-plugin; `PUBLIC_API.md` | the new members, lines and behaviours                                  |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -351,8 +415,9 @@ code would need a new arm; noted in `docs/upgrading.md`). Ships in minor `0.14.0
 | `kernel/test/unit/start-cancel.test.ts`                   | `application.ts` §3.7, `start-cancelled-error.ts` | As §3.7.                                                                                                                                                             |
 | `kernel/test/unit/router-head.test.ts`                    | `router.ts`                                       | `match('HEAD')` finds GET; explicit HEAD wins at equal rank; specific GET beats catch-all HEAD.                                                                      |
 | `kernel/test/integration/head-requests.test.ts`           | `application.ts` §3.10                            | Empty body, headers kept, streamed body cancelled and its `defer` run.                                                                                               |
-| `kernel/test/unit/websocket-ceiling.test.ts`              | `application.ts` §3.11                            | As §3.11.                                                                                                                                                            |
-| `kernel/test/unit/deferred.test.ts`                       | `deferred.ts`                                     | Abort runs cleanups once and cancels the source; abort after end is a no-op.                                                                                         |
+| `kernel/test/unit/deferred-abort.test.ts`                 | `deferred.ts`, `request-context.ts`               | As §3.12.                                                                                                                                                            |
+| `runtime/test/integration/stream-signal.test.ts`          | (real servers)                                    | As §3.12.                                                                                                                                                            |
+| `runtime/test/integration/head-real-server.test.ts`       | (real servers)                                    | As §3.10.                                                                                                                                                            |
 | `kernel/test/unit/stream-guard.test.ts`                   | `stream-guard.ts`                                 | Source error logged once with request fields and re-raised.                                                                                                          |
 | `runtime/test/unit/fatal-error-observer.test.ts`          | node/bun/deno `*-runtime.ts`, `cross-runtime.ts`  | Each wires its host's mechanism and unsubscribes.                                                                                                                    |
 | `runtime/test/e2e/fatal-error-process.test.ts`            | (real path)                                       | Child process: `fatal` JSON line on stdout, exit code and stderr trace as in the control.                                                                            |
@@ -362,7 +427,8 @@ code would need a new arm; noted in `docs/upgrading.md`). Ships in minor `0.14.0
 | `runtime/test/integration/refused-upgrade-parity.test.ts` | `node-http-adapter.ts` (+ Bun/Deno guarded)       | Same refusal on every runtime installed.                                                                                                                             |
 | `runtime/test/unit/bun-http-adapter.test.ts`              | `bun-http-adapter.ts`                             | `maxPayloadLength`, ceiling, `server.timeout(req, 0)` for streams only, stream failure.                                                                              |
 | `runtime/test/e2e/bun-idle-stream.test.ts`                | (real Bun)                                        | Silent stream open after 15 s.                                                                                                                                       |
-| `runtime/test/unit/deno-http-adapter.test.ts`             | `deno-http-adapter.ts`                            | Ceiling; stream failure handling.                                                                                                                                    |
+| `runtime/test/unit/deno-http-adapter.test.ts`             | `deno-http-adapter.ts`, `deno-ws-upgrader.ts`     | Ceiling report; `onError` prints nothing; the no-GOAWAY line.                                                                                                        |
+| `runtime/test/unit/bun-ws-upgrader.test.ts`               | `bun-ws-upgrader.ts`                              | Ceiling report once.                                                                                                                                                 |
 | `runtime/test/integration/stream-failure.test.ts`         | node adapter (+ Bun/Deno guarded)                 | No raw print, logger line present, client sees truncation.                                                                                                           |
 | `logger-plugin/test/unit/request-logger.test.ts`          | `request-logger.ts`                               | 101 on upgrade intent; 499 + `aborted` on aborted signal; unchanged otherwise.                                                                                       |
 
@@ -392,9 +458,8 @@ child-process crash on all three.
 
 ## 8. Risks & mitigations
 
-- Counting streams in the drain makes `stop()` of an app with an open SSE client wait for the bound
-  → the drain-finished line names `remaining`, the bound is now a setting, and the upgrade note says
-  so.
+- Holding the drain for gRPC streams could slow a stop with a long server stream → the bound caps
+  it, it is a setting now, and the drain-finished line names `remaining`.
 - `uncaughtExceptionMonitor` and Deno's error events are process-global → the kernel unsubscribes on
   stop, so test suites that start many apps do not pile up listeners; a test asserts the count.
 - Racing startup steps against the abort could leave a late `listen` bound → §3.7 closes a handle
@@ -410,20 +475,26 @@ Hand-over, per row, to the letters that own the other half:
 - **M143j (templates):** V13-11 — none needed once the kernel logs (an entry may keep its own
   `console.error` fallback); V13-12 — add `'SIGHUP'` to the signal loops in `project-files.ts`
   (generated `main.ts`) and `full-stack-build-files.ts` (dev server entry); V13-26 — pass
-  `drainTimeoutMs` in the generated `app.start({ … })` at 25 000 (5 s below the generated 30 s grace
-  minus `preStopSleepSeconds` is 25 s); V13-43 — the generated entry's start catch treats
-  `StartCancelledError` as a clean stop (no "Startup failed", exit 0); V13-200 — add
-  `enable_request_signal` to the Workers `wrangler.toml` `compatibility_flags`; V13-110 — the
-  full-stack template's `onError` should not set `didError` when `request.signal.aborted`.
+  `drainTimeoutMs: 20_000` in the generated `app.start({ … })` (30 s grace minus 5 s
+  `preStopSleepSeconds` leaves 25 s; 20 s of drain leaves 5 s for closing the server and the
+  shutdown and close hooks); V13-43 — the generated entry's start catch treats `StartCancelledError`
+  as a clean stop (no "Startup failed", exit 0); V13-200 — add `enable_request_signal` to the
+  Workers `wrangler.toml` `compatibility_flags`; V13-110 — the full-stack template's `onError`
+  should not set `didError` when `request.signal.aborted`.
 - **M143c:** V13-23 — `grpcClient` retries an HTTP 503 answer that carries no `grpc-status` from a
   peer (the kernel's drain 503 for a stream that raced GOAWAY).
 - **M143m:** V13-43 — `realtime-backplane-plugin` registers its close hook before connecting and
   passes `ctx.signal` to the connect wait.
-- **M143o:** V13-41 — `WebSocketService` exposes `maxMessageBytes`; the Workers adapter sets
-  `webSocketMaxMessageBytes` to workerd's ceiling; V13-200 — hand the kernel's abort-time cleanup to
-  `waitUntil` if the workerd proof shows an async cleanup cut short.
+- **M143o:** V13-41 — the Workers upgrader reports workerd's ceiling the way §3.11 does; V13-200 —
+  hand the kernel's abort-time cleanup to `waitUntil` if the workerd proof shows an async cleanup
+  cut short.
+- **ROADMAP corrections (maintainer):** M143j's "Half of a row owned elsewhere" lists only V13-11,
+  V13-12 and V13-200 from M143i; it also needs V13-26 and V13-43 (and V13-11 needs nothing). M143o's
+  list needs V13-41 and V13-200. This letter may edit only its own progress row, so the corrections
+  go in the report.
 - **M143l:** V13-113 — nothing expected (the kernel ranks GET with HEAD); confirm on the full-stack
   app.
-- **M143n:** `docs/deployment.md` shutdown section (SIGHUP, `drainTimeoutMs`, the new log lines,
-  streams holding the drain); `docs/programmatic-api.md:642` and `docs/ai.md:190` on `ctx.signal`
-  needing `enable_request_signal` on Workers.
+- **M143n:** V13-129's `PUBLIC_API.md` half is done here (C4); `docs/deployment.md` shutdown section
+  (SIGHUP, `drainTimeoutMs`, the new log lines, streams holding the drain);
+  `docs/programmatic-api.md:642` and `docs/ai.md:190` on `ctx.signal` needing
+  `enable_request_signal` on Workers.
