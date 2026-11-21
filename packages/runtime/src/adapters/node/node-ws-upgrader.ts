@@ -21,7 +21,12 @@
  * @since 0.2.0
  */
 
-import type { IWebSocketTransport, WebSocketEventSink, WebSocketReadyState } from '@setu-ts/common';
+import type {
+  IWebSocketTransport,
+  ResponseSnapshot,
+  WebSocketEventSink,
+  WebSocketReadyState,
+} from '@setu-ts/common';
 import {
   ABNORMAL_CLOSURE,
   normalizeFrame,
@@ -118,13 +123,21 @@ export interface WsModuleLike {
  */
 export interface RawUpgradeSocket {
   /**
-   * Writes bytes to the socket.
+   * Writes to the socket.
    *
-   * @param data - The bytes to write
+   * @param data - The bytes to write; a string is written as UTF-8 (since
+   * 0.14.0 a refused upgrade also writes its body as bytes)
    */
-  write(data: string): void;
+  write(data: string | Uint8Array): void;
   /** Closes the socket. */
   destroy(): void;
+  /**
+   * Ends the socket after what was written has been flushed. Preferred over
+   * {@linkcode RawUpgradeSocket.destroy} when present, so a refusal's body is
+   * not cut off.
+   * @since 0.14.0
+   */
+  end?(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -441,22 +454,104 @@ export class NodeUpgradeCoordinator {
 }
 
 /**
+ * Reason phrases for the statuses a refused upgrade can carry. A status not
+ * listed is written with an empty reason phrase, which RFC 9112 §4 allows.
+ * A table rather than `node:http`'s `STATUS_CODES`: this module is loaded
+ * wherever the Node adapter is, and must not pull a `node:http` import in.
+ */
+const REASON_PHRASES: Readonly<Record<number, string>> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  402: 'Payment Required',
+  403: 'Forbidden',
+  404: 'Not Found',
+  405: 'Method Not Allowed',
+  406: 'Not Acceptable',
+  407: 'Proxy Authentication Required',
+  408: 'Request Timeout',
+  409: 'Conflict',
+  410: 'Gone',
+  411: 'Length Required',
+  412: 'Precondition Failed',
+  413: 'Payload Too Large',
+  414: 'URI Too Long',
+  415: 'Unsupported Media Type',
+  421: 'Misdirected Request',
+  422: 'Unprocessable Entity',
+  426: 'Upgrade Required',
+  428: 'Precondition Required',
+  429: 'Too Many Requests',
+  431: 'Request Header Fields Too Large',
+  451: 'Unavailable For Legal Reasons',
+  500: 'Internal Server Error',
+  501: 'Not Implemented',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+  504: 'Gateway Timeout',
+};
+
+/** The status line for a status, with its reason phrase where one is known. */
+function statusLine(status: number): string {
+  return `HTTP/1.1 ${status} ${REASON_PHRASES[status] ?? ''}\r\n`;
+}
+
+/**
  * Refuses an upgrade on the raw socket, since there is no `Response` object to
- * return on Node's `upgrade` path.
+ * return on Node's `upgrade` path. Used for the fixed refusals (no handler, a
+ * failed handshake); a refusal the application answered is written whole by
+ * {@linkcode writeRawUpgradeResponse}.
  *
  * @param socket - The raw duplex socket
  * @param status - The HTTP status to answer with
- * @since 0.2.0
+ * @since 0.2.0 (reason phrases from a status table since 0.14.0)
  */
 export function rejectRawUpgrade(socket: RawUpgradeSocket, status: number): void {
-  const reason =
-    status === 503
-      ? 'Service Unavailable'
-      : status === 501
-        ? 'Not Implemented'
-        : status === 500
-          ? 'Internal Server Error'
-          : 'Bad Request';
-  socket.write(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\n\r\n`);
+  socket.write(`${statusLine(status)}Connection: close\r\n\r\n`);
   socket.destroy();
+}
+
+/** Headers the writer computes itself rather than copying from the snapshot. */
+const COMPUTED_HEADERS = new Set([
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'set-cookie',
+]);
+
+/**
+ * Writes the framework's response to a refused upgrade onto the raw socket and
+ * closes it, so Node sends what Bun and Deno send: the status with its reason
+ * phrase, every header (each `Set-Cookie` on its own line), and the body. The
+ * snapshot's own framing headers are replaced by a `content-length` of the
+ * body and `connection: close`. A streamed body is cancelled and sent empty.
+ *
+ * @param socket - The raw duplex socket
+ * @param snapshot - The framework response the pipeline produced
+ * @internal - Not exported from package index
+ */
+export function writeRawUpgradeResponse(
+  socket: RawUpgradeSocket,
+  snapshot: ResponseSnapshot,
+): void {
+  let body: Uint8Array;
+  if (snapshot.streaming) {
+    void snapshot.body.cancel().catch(() => undefined);
+    body = new Uint8Array(0);
+  } else if (snapshot.body === null) {
+    body = new Uint8Array(0);
+  } else if (typeof snapshot.body === 'string') {
+    body = new TextEncoder().encode(snapshot.body);
+  } else {
+    body = snapshot.body;
+  }
+  let head = statusLine(snapshot.status);
+  snapshot.headers.forEach((value, name) => {
+    if (!COMPUTED_HEADERS.has(name)) head += `${name}: ${value}\r\n`;
+  });
+  for (const cookie of snapshot.headers.getSetCookie()) head += `set-cookie: ${cookie}\r\n`;
+  head += `content-length: ${body.length}\r\nconnection: close\r\n\r\n`;
+  socket.write(head);
+  if (body.length > 0) socket.write(body);
+  if (socket.end !== undefined) socket.end();
+  else socket.destroy();
 }

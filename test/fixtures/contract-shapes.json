@@ -175,6 +175,13 @@
       },
       {
         "kind": "method",
+        "name": "onFatalError",
+        "optional": true,
+        "readonly": false,
+        "signature": "onFatalError?(handler:(error:unknown,origin:FatalErrorOrigin)=>void):()=>void"
+      },
+      {
+        "kind": "method",
         "name": "onSignal",
         "readonly": false,
         "optional": true,

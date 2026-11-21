@@ -29,6 +29,7 @@ import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { BunSocketData, BunWebSocketHandlers } from './bun-ws-upgrader.ts';
 import { createBunWebSocketHandlers } from './bun-ws-upgrader.ts';
+import { BUN_WS_MAX_MESSAGE_BYTES, WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
 
 // ---------------------------------------------------------------------------
 // Host seam (existing)
@@ -87,6 +88,12 @@ export interface BunServer {
    * @returns `true` when the upgrade succeeded and no response should be sent
    */
   upgrade?(request: Request, options: { data: BunSocketData; headers?: Headers }): boolean;
+  /**
+   * Sets one request's idle timeout in seconds; `0` disables it. Bun closes a
+   * response quiet for its default idle timeout (10 s) otherwise.
+   * @since 0.14.0
+   */
+  timeout?(request: Request, seconds: number): void;
 }
 
 /**
@@ -97,6 +104,42 @@ export interface BunServer {
  */
 const defaultBunServeHost: BunServeHost = (globalThis as { Bun?: BunServeHost })
   .Bun! as BunServeHost;
+
+/**
+ * Wraps a streamed body so a source failure aborts the response without Bun
+ * printing it. Bun prints a body stream's error (its `error` hook is not called
+ * for one), but a stream errored with `undefined` resets the connection and
+ * prints nothing (measured on Bun 1.4.5). The kernel has already logged the
+ * failure through the application's logger.
+ *
+ * @param body - The response body
+ * @returns The wrapping stream
+ * @internal - Not exported from package index
+ */
+export function abortSilentlyOnSourceError(
+  body: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch {
+          controller.error(undefined);
+          return;
+        }
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Handle
@@ -112,12 +155,18 @@ export class BunHttpServerHandle {
   #server: BunServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   readonly #maxBodyBytes: number | undefined;
+  readonly #ceiling: WebSocketCeilingReport;
 
   /**
    * @param maxBodyBytes - Optional cap on the request-body read
+   * @param reportError - The last-resort error channel, for the ceiling report
    */
-  constructor(maxBodyBytes?: number) {
+  constructor(
+    maxBodyBytes?: number,
+    reportError?: (record: Readonly<Record<string, unknown>>) => void,
+  ) {
     this.#maxBodyBytes = maxBodyBytes;
+    this.#ceiling = new WebSocketCeilingReport(BUN_WS_MAX_MESSAGE_BYTES, 'bun', reportError);
   }
 
   /**
@@ -228,7 +277,12 @@ export class BunHttpServerHandle {
         if (intent !== undefined) {
           return this.#performBunUpgrade(request, server, intent);
         }
-        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+        const snapshot = frameworkResponse.snapshot();
+        if (!snapshot.streaming) return mapSnapshotToWebResponse(snapshot);
+        // A quiet stream (SSE between heartbeats) is not idle: Bun would close
+        // it after 10 s, while Node and Deno never close a response stream.
+        server.timeout?.(request, 0);
+        return mapSnapshotToWebResponse(snapshot, abortSilentlyOnSourceError(snapshot.body));
       };
 
       // Run the framework handler FIRST — middleware pipeline applies
@@ -268,6 +322,7 @@ export class BunHttpServerHandle {
       return new Response(null, { status: 501 });
     }
 
+    this.#ceiling.check(intent.sink);
     const headers = new Headers();
     if (intent.protocol !== undefined) {
       headers.set('sec-websocket-protocol', intent.protocol);
@@ -306,7 +361,7 @@ export class BunHttpAdapter implements IHttpAdapter {
 
   constructor(host?: BunServeHost, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultBunServeHost;
-    this.#handle = new BunHttpServerHandle(options?.maxBodyBytes);
+    this.#handle = new BunHttpServerHandle(options?.maxBodyBytes, options?.reportError);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

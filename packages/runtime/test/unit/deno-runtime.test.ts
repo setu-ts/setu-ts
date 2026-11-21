@@ -368,3 +368,24 @@ describe('createDenoRuntimeServices | onSignal', () => {
     expect('onSignal' in services).toBe(false);
   });
 });
+
+describe('Deno onFatalError (V13-11)', () => {
+  it('wires Deno to the global events it is given, and omits it without them', () => {
+    const fakeDeno = {
+      build: { os: 'linux' },
+      addSignalListener: () => {},
+      env: { toObject: () => ({}) },
+      version: { deno: '2' },
+      hostname: () => 'h',
+    } as unknown as Parameters<typeof createDenoRuntimeServices>[0];
+    const target = new EventTarget();
+    const services = createDenoRuntimeServices(fakeDeno, undefined, undefined, target);
+    const seen = recorder();
+    services.onFatalError!(seen.handler);
+    target.dispatchEvent(Object.assign(new Event('error'), { error: 'boom' }));
+    expect(seen.seen).toEqual([['boom', 'uncaughtException']]);
+    expect(
+      createDenoRuntimeServices(fakeDeno, undefined, undefined, undefined).onFatalError,
+    ).toBeUndefined();
+  });
+});

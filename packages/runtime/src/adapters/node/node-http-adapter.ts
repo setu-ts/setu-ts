@@ -44,6 +44,7 @@ import {
   createUpgradeRequest,
   NodeUpgradeCoordinator,
   rejectRawUpgrade,
+  writeRawUpgradeResponse,
 } from './node-ws-upgrader.ts';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,13 @@ export interface NodeOutgoing {
    * @param headers - The trailer fields
    */
   addTrailers?(headers: Readonly<Record<string, string>>): void;
+  /**
+   * Destroys the response's connection. Present on Node's responses; the
+   * adapter calls it when a streamed body fails, so the client sees the
+   * response cut off rather than ended.
+   * @since 0.14.0
+   */
+  destroy?(): void;
 }
 
 /**
@@ -170,6 +178,18 @@ export interface NodeServer {
    * Stops the server gracefully.
    */
   close(): void;
+  /**
+   * Starts the drain: GOAWAY to every HTTP/2 session, idle HTTP/1.1
+   * connections closed, in-flight requests left to finish. Present on the
+   * HTTP/2 listeners this adapter builds.
+   * @since 0.14.0
+   */
+  drain?(): void;
+  /**
+   * Closes keep-alive connections with no request in flight (`node:http`).
+   * @since 0.14.0
+   */
+  closeIdleConnections?(): void;
 }
 
 /**
@@ -270,6 +290,7 @@ async function serveHttp2(
         closeSessions();
         return closeServer(callback);
       }) as typeof server.close;
+      (server as unknown as NodeServer).drain = closeSessions;
       function ready(): void {
         server.removeListener('error', failed);
         resolve(server);
@@ -335,6 +356,48 @@ export function streamWithTrailers(
       return reader.cancel(reason);
     },
   });
+}
+
+/**
+ * Wraps a streamed body so a source failure ends the connection without
+ * node-server seeing an error. node-server's `handleResponseError` answers a
+ * body error with `console.error(e)` — outside the application's logger and
+ * its redaction — and writes `Error: <message>` into a response whose headers
+ * are not yet sent. The kernel has already logged the failure through the
+ * logger, so here the connection is destroyed and the wrapper ends instead of
+ * erroring: node-server's writer finds a destroyed response, and the client
+ * sees a cut-off response, never a clean end.
+ *
+ * @param body - The response body
+ * @param destroy - Destroys this response's connection
+ * @returns The wrapping stream
+ * @internal - Not exported from package index
+ */
+export function destroyOnSourceError(
+  body: ReadableStream<Uint8Array>,
+  destroy: () => void,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch {
+          destroy();
+          controller.close();
+          return;
+        }
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -537,8 +600,8 @@ export class NodeHttpServerHandle {
 
     if (intent === undefined) {
       // No upgrade intent — the handler returned a normal response (e.g. 401
-      // from auth middleware). Reject the raw upgrade with that status.
-      rejectRawUpgrade(socket, frameworkResponse.snapshot().status);
+      // from auth middleware). Send that response whole, as Bun and Deno do.
+      writeRawUpgradeResponse(socket, frameworkResponse.snapshot());
       return;
     }
 
@@ -680,19 +743,21 @@ export class NodeHttpServerHandle {
     }
     // Trailers only where the request said they reach the client — an HTTP/2
     // stream, whose node-server response is the one with `addTrailers`.
+    if (!snapshot.streaming) return mapSnapshotToWebResponse(snapshot);
+    let body = snapshot.body;
     if (
-      snapshot.streaming &&
       snapshot.trailers !== undefined &&
       frameworkRequest.responseTrailers === true &&
       outgoing?.addTrailers !== undefined
     ) {
-      const addTrailers = outgoing.addTrailers.bind(outgoing);
-      return mapSnapshotToWebResponse(
-        snapshot,
-        streamWithTrailers(snapshot.body, snapshot.trailers, addTrailers),
-      );
+      body = streamWithTrailers(body, snapshot.trailers, outgoing.addTrailers.bind(outgoing));
     }
-    return mapSnapshotToWebResponse(snapshot);
+    if (outgoing?.destroy !== undefined) {
+      body = destroyOnSourceError(body, outgoing.destroy.bind(outgoing));
+    }
+    return body === snapshot.body
+      ? mapSnapshotToWebResponse(snapshot)
+      : mapSnapshotToWebResponse(snapshot, body);
   }
 
   /**
@@ -770,6 +835,22 @@ export class NodeHttpAdapter implements IHttpAdapter {
 
   fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
+  }
+
+  /**
+   * Starts the drain (see `IHttpAdapter.beginDrain`): GOAWAY to every HTTP/2
+   * session, idle HTTP/1.1 keep-alive connections closed.
+   *
+   * @param handle - The handle `listen` returned
+   */
+  beginDrain(handle: ServerHandle): void {
+    if (!isNodeHttpServerHandle(handle)) {
+      throw new Error('Invalid server handle for NodeHttpAdapter');
+    }
+    const server = handle.server;
+    if (server === null) return;
+    if (server.drain !== undefined) server.drain();
+    else server.closeIdleConnections?.();
   }
 
   close(handle: ServerHandle): Promise<void> {

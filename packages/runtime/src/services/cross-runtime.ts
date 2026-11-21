@@ -82,6 +82,7 @@ export function mergeRuntimeServices(
     | 'workers'
     | 'dns'
     | 'onSignal'
+    | 'onFatalError'
     | 'reportError'
   >,
 ): IRuntimeServices {
