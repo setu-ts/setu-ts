@@ -4,10 +4,9 @@
  * `IStorage.get` and `IStorage.getStream` throw when the object is absent.
  * Before this class each storage backend threw a plain `Error`, which
  * `errorHandler` answered as a masked `500`: a client that asked for a key that
- * does not exist was told the server failed. The class lives in `common`
- * because more than one package produces it (`@setu-ts/storage-plugin` and the
- * R2 binding of `@setu-ts/cloudflare-plugin`) and a plugin may not import
- * another plugin.
+ * does not exist was told the server failed. The class lives in `common` so any
+ * storage backend can throw it without importing a plugin; today
+ * `@setu-ts/storage-plugin` does.
  *
  * @module
  */

@@ -26,9 +26,9 @@ All notable changes to this project are documented here. The format follows
   through pages.
 
 - **`@setu-ts/common` (M143r).** `StorageObjectNotFoundError` (a `404` status hint, the key in
-  `message` only) and the upload brand `UPLOAD_METADATA` / `withUploadMetadata` /
-  `uploadMetadataOf`, which `createUploadMiddleware` now carries so a documentation generator can
-  see a multipart route.
+  `message` and on `.key`, never in the served body) and the upload brand `UPLOAD_METADATA` /
+  `withUploadMetadata` / `uploadMetadataOf`, which `createUploadMiddleware` now carries so a
+  documentation generator can see a multipart route.
 - **Provider options (M143r; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
   `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
   `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault) and the `ses` and `sendgrid`

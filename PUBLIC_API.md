@@ -9722,8 +9722,9 @@ through `CAPABILITIES.MAIL`.
 - Each channel reads its own address key out of `to` and throws when it is absent: `to.email`
   (email), `to.phone` (sms), `to.token` (push). Slack's `to.channel` is optional — omitted, the
   webhook's default channel applies. `subject` becomes the mail subject (defaulting to
-  `'(no subject)'`) and the push notification title; SMS and Slack ignore it. Built-in channels do
-  not read `metadata` — it is there for custom `NotificationChannel` implementations.
+  `'(no subject)'`) and the push notification title; Slack leads its text with it in bold; SMS
+  ignores it. Built-in channels do not read `metadata` — it is there for custom
+  `NotificationChannel` implementations.
 - Configuring an `email` channel without a registered `mail` capability throws during `register`, so
   the misconfiguration surfaces at startup rather than at first send.
 - All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
