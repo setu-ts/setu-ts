@@ -41,7 +41,9 @@ const TOKEN_BYTES = 32;
  * named to match the configured `fieldName` (default `_csrf`). Minting marks the
  * session dirty, so the token is committed with the response that carries the
  * form. Every call marks the response `Cache-Control: private, no-store` with
- * `Vary: Cookie`, so no shared cache stores a page carrying a visitor's token.
+ * `Vary: Cookie`, so no shared cache stores a page carrying a visitor's token;
+ * a shared-cacheable `Cache-Control` the application already set is kept with
+ * `Vary: Cookie` added (and the session middleware logs a warning).
  *
  * @param ctx - The request context
  * @returns The token to embed in the form

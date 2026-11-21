@@ -5,7 +5,8 @@
  * A response is per-visitor when any of these signals holds:
  *
  * - **S1** — the request restored a session holding application data (any key other than the
- *   reserved CSRF token and tenant binding). Applied before the handler runs.
+ *   reserved CSRF token and tenant binding). `Cache-Control: private, no-store` is set before the
+ *   handler runs; `Vary: Cookie` follows at the first application read or after the handler.
  * - **S2** — the response carries the session cookie (a written commit or a destroy). Applied at the
  *   first application write, and again after the commit.
  * - **S3** — a CSRF token was read for this request. Applied at the read.
@@ -183,7 +184,10 @@ export class RequestCacheMarking {
    * marks the response at once.
    */
   begin(): void {
-    if (this.#restoredApplicationData) {
+    // A shared-cacheable directive an outer middleware already set is the application's own: it is
+    // left for the after-handler decision rather than replaced.
+    const preset = this.#ctx.response.snapshot().headers.get('cache-control');
+    if (this.#restoredApplicationData && !isSharedStorable(preset)) {
       this.#ctx.response.header('cache-control', PRIVATE_DIRECTIVE);
     }
     this.#session.onFirstWrite(() => markPerVisitor(this.#ctx.response));

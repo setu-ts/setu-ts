@@ -52,13 +52,16 @@ All notable changes to this project are documented here. The format follows
   `restoreRevocationCheck: true` also checks the markers on every store-held restore. Store commits
   write this request's changes onto the current row (`storeCommit: 'changes'`, the new default;
   `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.
+  `SessionService.commit` takes an optional `SessionCommitPolicy` and returns a
+  `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
 - **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a; V13-111, V13-112, V13-20).** A
   signed-in visitor's response, a response setting the session cookie and one carrying a CSRF token
   answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as each is known;
   an anonymous response that read the session varies on `Cookie`. An explicit shared-cacheable
   directive is kept, with one bounded warning per route, unless the response sets the session
-  cookie. A missing asset starts no session. The React Router bridge sets a route's `Cache-Control`
-  instead of appending it.
+  cookie; on a `public` response a refresh-only commit and a new visitor's CSRF-token-only session
+  are not committed, so a form on a page marked `public` fails CSRF. A missing asset starts no
+  session. The React Router bridge sets a route's `Cache-Control` instead of appending it.
 - **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
   `private`, `no-store` or varying on `Cookie`/`Authorization`, and serves a request carrying
   `Authorization` or a credential cookie only from a `public` entry, outside the coalescer. New

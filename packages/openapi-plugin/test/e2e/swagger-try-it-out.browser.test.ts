@@ -103,9 +103,7 @@ let harness: Harness | undefined;
 /** The directory of swagger-ui-dist 5.0.0, the floor of the `^5` peer range. */
 let floorDirectory: string | undefined;
 try {
-  // The alias has no type declarations of its own; the helper is a default-exported function.
-  const specifier: string = 'swagger-ui-dist-floor/absolute-path.js';
-  const mod = (await import(specifier)) as { default: () => string };
+  const mod = await import('swagger-ui-dist-floor/absolute-path.js');
   floorDirectory = mod.default();
 } catch {
   floorDirectory = undefined;

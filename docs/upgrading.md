@@ -77,9 +77,13 @@ CSRF token now carry `Cache-Control: private, no-store` and `Vary: Cookie`; an a
 that read the session carries `Vary: Cookie`. A page that a CDN cached by accident stops being
 cached, which is the intent. To cache a page on purpose, set `Cache-Control` yourself; the plugin
 keeps it unless the response sets the session cookie, and logs one warning per route when it is
-per-visitor. See the session plugin's Caching section. A React Router route's `headers` export now
-replaces `Cache-Control` rather than appending a second value. A new session holding only the CSRF
-token or tenant binding is no longer committed on a `404` that is not a page navigation.
+per-visitor. On such a `public` response the plugin withholds the session cookie for a commit that
+would only refresh the expiry (`rolling`, `idleTimeoutMs`) or only store a new visitor's CSRF token
+or tenant binding: a form on a page you mark `public` now fails CSRF on submit, so remove `public`
+from pages carrying a form. See the session plugin's Caching section. A React Router route's
+`headers` export now replaces `Cache-Control` rather than appending a second value. A new session
+holding only the CSRF token or tenant binding is no longer committed on a `404` that is not a page
+navigation.
 
 ### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
 

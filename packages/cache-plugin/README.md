@@ -116,7 +116,9 @@ consent) gets nothing shared-cached until it marks responses `public` or names i
 `credentialCookies`:
 
 ```typescript
-cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['setu_session'] });
+import { cacheMiddleware } from '@setu-ts/cache-plugin';
+
+export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['setu_session'] });
 ```
 
 `credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a page that

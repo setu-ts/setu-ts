@@ -138,6 +138,17 @@ describe('signals and the after-handler decision', () => {
     expect(lines[0]![1]).toEqual({ method: 'GET', route: '/', signal: 'csrf-token' });
   });
 
+  it('S1 keeps a shared-cacheable directive an outer middleware set before it', () => {
+    const t = makeContext();
+    t.response.header('cache-control', 'public, max-age=3600');
+    const marking = new RequestCacheMarking(t.ctx, SIGNED_IN(), new PublicDirectiveWarnings());
+    marking.begin();
+    expect(t.response.headers.get('cache-control')).toBe('public, max-age=3600');
+    marking.finish('skipped');
+    expect(t.response.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(t.response.headers.get('vary')).toBeNull();
+  });
+
   it('a session-dependent page with a public directive keeps it and gets Vary', () => {
     const r = run({ session: fresh(), directive: PUBLIC, read: true });
     expect([r.cacheControl, r.vary, r.lines]).toEqual([PUBLIC, 'Cookie', []]);

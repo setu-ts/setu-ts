@@ -66,12 +66,14 @@ ends all of that user's sessions on the cookie strategy too. See the auth plugin
 
 On the store strategy, `destroy()` and `regenerate()` stay in force whatever request on that session
 was already in flight. A sign-out writes a marker, `revoked:<id>`, before it deletes the row; a
-regeneration writes `superseded:<old id>`. Every commit to a restored session writes its row and
-then reads the markers, and deletes its own write when one is present, so an in-flight request
-cannot put a signed-out session back. A refused commit sends no cookie. A regeneration whose source
-was signed out while it ran (a sign-in or step-up on another tab) is refused too, so it cannot carry
-the old session's data to a fresh id. Markers are written only for an id that had a row, so
-anonymous `POST /logout` traffic writes nothing; they expire after `maxAge`.
+regeneration writes `superseded:<old id>` (`revoked:<old id>` when it is a logout by `clear()` and
+`regenerate()`, so an in-flight regeneration on the old cookie is refused too). Every commit to a
+restored session writes its row and then reads the markers, and deletes its own write when one is
+present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
+cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
+tab) is refused too, so it cannot carry the old session's data to a fresh id. Markers are written
+only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they expire after
+`maxAge`.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
@@ -448,8 +450,10 @@ visitor. The session middleware marks such a response `Cache-Control: private, n
 `Vary: Cookie` when any of these holds:
 
 - the request restored a session holding application data (a signed-in visitor, or one carrying
-  application keys): marked before the handler runs, so a session read late, an error page, and a
-  cache registered inside the session middleware all see it;
+  application keys): `Cache-Control: private, no-store` is set before the handler runs, so a session
+  read late, an error page, and a cache registered inside the session middleware all see it, and
+  `Vary: Cookie` follows at the first application read or after the handler (an error page carries
+  the `Cache-Control` alone);
 - the response carries the session cookie (a written commit or a destroy): marked at the first
   application write;
 - a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read.
@@ -476,7 +480,11 @@ directive can make a session cookie safe to share:
 - on a shared-cacheable response, a commit that would only refresh the expiry (`rolling`,
   `idleTimeoutMs`) or store a new session's reserved keys (a CSRF mint, a tenant binding) is
   skipped, so a public asset stays public;
-- a public asset fetched by a signed-in visitor keeps its directive and gets no `Vary: Cookie`.
+- a public asset fetched by a signed-in visitor keeps its directive and gets no `Vary: Cookie`; a
+  directive set by an outer middleware (below priority 260) is kept the same way.
+
+So a page you mark `public` gets no session cookie for a new visitor's CSRF token or a `rolling`
+refresh: a form on such a page fails CSRF on submit. Do not mark a page carrying a form `public`.
 
 When it keeps a shared-cacheable directive on a response that read a CSRF token, or that a signed-in
 visitor's request read the session for, it logs one `warn` per route:
@@ -565,9 +573,11 @@ arriving while every session reads as absent.
 | `CsrfFormOptions`               | interface |
 | `MemorySessionStoreDeps`        | interface |
 | `PublishedCsrfConfig`           | interface |
+| `SessionCommitPolicy`           | interface |
 | `SessionCookieOptions`          | interface |
 | `SessionPluginOptions`          | interface |
 | `SessionServiceDeps`            | interface |
+| `SessionCommitOutcome`          | type      |
 | `SessionMode`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it

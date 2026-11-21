@@ -739,6 +739,13 @@ describe('cacheMiddleware — per-visitor responses', () => {
     return app;
   }
 
+  async function bothInOrigin(calls: () => number): Promise<void> {
+    for (let i = 0; i < 1_000 && calls() < 2; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(calls()).toBe(2);
+  }
+
   const get = (headers: Record<string, string> = {}) =>
     ({ method: 'GET', url: 'http://localhost/page', headers }) as const;
 
@@ -886,13 +893,14 @@ describe('cacheMiddleware — per-visitor responses', () => {
       // Anonymous leader, credentialed concurrent request: the credentialed one runs its own origin.
       const leader = app.inject(get());
       const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Release only once BOTH requests are inside the origin: a coalesced joiner never gets there,
+      // so this wait would time out (and the test fail) if one joined the other's flight.
+      await bothInOrigin(calls);
       release();
       const [a, c] = await Promise.all([leader, credentialed]);
       expect(a.body).toBe('anonymous');
       expect(c.body).toBe('setu_session=abc');
       expect(c.headers.get('x-cache')).toBe('MISS');
-      expect(calls()).toBe(2);
     } finally {
       await app.stop();
     }
@@ -910,7 +918,9 @@ describe('cacheMiddleware — per-visitor responses', () => {
     try {
       const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
       const anonymous = app.inject(get());
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Release only once BOTH requests are inside the origin: a coalesced joiner never gets there,
+      // so this wait would time out (and the test fail) if one joined the other's flight.
+      await bothInOrigin(calls);
       release();
       const [c, a] = await Promise.all([credentialed, anonymous]);
       expect(c.body).toBe('setu_session=abc');

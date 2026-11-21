@@ -231,7 +231,9 @@ export class SessionService implements ISessionService {
    */
   async revokeSuperseded(session: Session): Promise<void> {
     if (session.wasRegenerated && this.#hadRow(session)) {
-      await this.#revoke(session.loadedId, 'superseded');
+      // A logout by `clear()` and `regenerate()` that then throws is still a sign-out.
+      const signedOut = holdsOnlyReservedKeys(session.snapshot().data);
+      await this.#revoke(session.loadedId, signedOut ? 'revoked' : 'superseded');
     }
   }
 

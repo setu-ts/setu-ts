@@ -201,6 +201,24 @@ describe('revocation markers', () => {
   });
 });
 
+describe('revokeSuperseded after a logout that throws', () => {
+  it('marks the old id revoked when the session was cleared, so an in-flight regenerate is refused', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const stepUp = makeContext({ headers: { cookie } });
+    const su = await service.load(stepUp.ctx);
+    const logout = await service.load(makeContext({ headers: { cookie } }).ctx);
+    logout.clear();
+    logout.regenerate();
+    await service.revokeSuperseded(logout);
+    expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
+    expect(store.rows.has(`superseded:${id}`)).toBe(false);
+    su.regenerate();
+    expect(await service.commit(stepUp.ctx, su)).toBe('refused');
+  });
+});
+
 describe('the commit fence', () => {
   it('a marker row without its payload does not count', async () => {
     const store = new ScriptedStore();
