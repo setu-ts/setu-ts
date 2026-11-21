@@ -287,21 +287,56 @@ run. No other `docs/` file is touched.
   `.git`-only dir accepted, dry-run refusal, interrupted-run hint kept) and the same file-target and
   non-empty cases through `new --example`.
 
-### 3.10 V13-166 — a warning outside the declared Node range
+### 3.10 V13-166 — a warning in the soft band, a refusal below the hard floor
 
-- **Decision:** `runMain` checks the host Node version once, before dispatch, against a constant
-  `SUPPORTED_NODE` = `^22.23.4 || ^24.22.1 || >=26.12.1` parsed by a small internal comparator (no
-  semver dependency) in `utils/node-version.ts`. Outside the range it writes one stderr line
-  `setu supports Node ^22.23.4 || ^24.22.1 || >=26.12.1; this is Node <v>. Commands may fail; upgrade Node.`
-  and continues (exit code unaffected). Skipped when the process is Bun or Deno
-  (`process.versions.bun`, `globalThis.Deno`). `MainProcess` gains `nodeVersion?: string` (Node host
-  sets it; Bun/Deno leave it undefined), so tests inject versions. A unit test asserts the constant
-  equals `engines.node` in both `packages/cli/package.json` and `packages/create/package.json`.
-- **Why:** a warning, not a refusal: the row asks for the user to be told; the CLI works on some
-  older lines and a hard refusal would block them for no measured fault.
-- **Test home:** `test/unit/node-version.test.ts` (range table incl. 20.20.2, 22.12.0, 22.23.4,
-  23.1.0, 24.22.0, 24.22.1, 26.12.1, 27.0.0); `test/unit/main-node-runtime.test.ts` warning printed
-  / not printed / skipped under Bun.
+- **Decision (maintainer, 2026-11-22, from the §3.11 comparison):** two bands. Below a **hard floor
+  of Node 22.9.0** the CLI refuses with exit 1 and
+  `setu needs Node 22.9.0 or newer; this is Node <v>. Supported: ^22.23.4 || ^24.22.1 || >=26.12.1.`
+  From 22.9.0 up to but outside the declared `engines` range (`SUPPORTED_NODE` =
+  `^22.23.4 || ^24.22.1 || >=26.12.1`) it writes the existing one-line warning and continues (exit
+  code unaffected). The floor check runs in `bin.ts` (and the `create` package's bin) BEFORE any
+  other module is imported: `bin.ts` statically imports only `node:process` and the dependency-free
+  `utils/node-version.ts`, refuses or continues, and only then loads `main.ts` with a dynamic
+  `import()`. Measured on Node 18 the CLI dies on import (`crypto is not defined`), so a check
+  inside `runMain` could never print. The warning stays in `runMain` as built. Both skip Bun and
+  Deno. `HARD_FLOOR_NODE = '22.9.0'` lives beside `SUPPORTED_NODE` with the measurement in its
+  JSDoc.
+- **How the floor was measured (2026-11-22, official `node:<v>-slim` images, the branch's built
+  CLI):** each version ran `setu --version`, `setu new p --template rest --runtime node --yes`, then
+  in `p`: `npm install`, `npm test`, `npm run check`, `npm run build`, `npm start` + `GET /health`.
+
+  | Node              | CLI                                         | `npm test`                                              | check / build | `npm start`                                   |
+  | ----------------- | ------------------------------------------- | ------------------------------------------------------- | ------------- | --------------------------------------------- |
+  | 18.20.8           | crashes on import (`crypto is not defined`) | —                                                       | —             | —                                             |
+  | 20.20.2           | works                                       | fails: `node --test` does not expand the generated glob | pass          | 200                                           |
+  | 21.7.3            | works                                       | fails (exit 9)                                          | pass          | does not start                                |
+  | 22.0.0, 22.8.0    | works                                       | pass                                                    | pass          | `node: bad option: --env-file-if-exists=.env` |
+  | 22.9.0, 22.12.0   | works                                       | pass                                                    | pass          | 200                                           |
+  | 22.23.4 (control) | works                                       | pass                                                    | pass          | 200                                           |
+
+  22.9.0 is the lowest version on which the CLI and a freshly generated project both work; every
+  version below it fails one of the project's own documented commands.
+
+- **Why:** the comparison (§3.11) splits: npm, Vite and the package managers' `engines` checks warn
+  and continue; Angular and pnpm warn in a soft band and refuse below a hard floor; Next.js refuses.
+  The maintainer chose the Angular/pnpm shape, with the floor set by measurement.
+- **Test home:** `test/unit/node-version.test.ts` (range table; floor table incl. 18.20.8, 20.20.2,
+  21.7.3, 22.8.0 refused and 22.9.0, 22.12.0 warned; the constant equals both `engines.node`);
+  `test/unit/main-node-runtime.test.ts` (warning printed / not printed / skipped under Bun); a bin
+  test that spawns the built `bin.js` under a faked version (an injected `process.versions` override
+  through a `--import` preload) and asserts exit 1 with the message and no other output, and that
+  `bin.ts` has no static import besides `node:process` and `node-version.ts`.
+
+### 3.10a Decisions taken from the comparison (maintainer, 2026-11-22)
+
+- **Missing value exits 2** (§3.2): kept. The parsers exit 1, but this CLI documents exit 2 for
+  every usage error and its existing missing-value refusals already exit 2.
+- **`--template=` with an empty value is refused** (§3.2): kept. Parsers accept `''`; no setu option
+  takes an empty value, and before the fix it silently meant "the default".
+- **A held project lock is refused at once, never waited for or taken over** (§3.7): kept, like git.
+  Condition, already met by batch 1 and tested: the refusal names the lock path, says how to clear a
+  stale one, and says when the owner process is gone.
+- **Unsupported Node: soft band and hard floor** (§3.10): changed from warn-only, as above.
 
 ### 3.11 Compared with — sibling commands and established tools
 
@@ -317,15 +352,15 @@ nodejs/node#67642 (open PR, 2026-11-20, "read env files only from Node.js option
 `packages/next/src/bin/next.ts`; Vite `packages/vite/src/node/cli.ts` (`checkNodeVersion`); npm
 `lib/cli/validate-engines.js`; pnpm `pnpm11/pnpm/bin/pnpm.mjs`; dotenv-cli and dotenvx READMEs.
 
-| Decision                                        | This CLI's siblings                                                                                          | Established tools                                                                                                                                                                                                                                                     | Verdict                                                                                                  |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| §3.1 dotenv flag name `--dotenv`                | no other env-file flag                                                                                       | Native binaries (Bun, Deno, Docker) use `--env-file`; Node-launched JS tools avoid it (dotenv-cli `-e`, dotenvx `-f`, Vite `--mode` + `envDir`, Next.js none). Node's open PR #67642 confirms Node reads `--env-file` after the script name. No tool uses `--dotenv`. | Matches the practice of avoiding the name; the spelling is ours.                                         |
-| §3.2 missing value: refuse                      | `--broker`, `--rpc`, `--scope`, `--logger`, `--port` already refuse with exit 2; README: usage errors exit 2 | parseArgs (strict), commander, cac, yargs `requiresArg` refuse; default yargs and npm's nopt silently take `''`.                                                                                                                                                      | Matches the strict parsers.                                                                              |
-| §3.2 missing value: exit code 2                 | exit 2 for every usage error (`README.md:266,485`)                                                           | commander and yargs exit 1; parseArgs and cac leave it to the caller.                                                                                                                                                                                                 | **Diverges** from the parsers; follows this CLI's own documented convention. Question to the maintainer. |
-| §3.2 `--template=` (empty inline value) refused | —                                                                                                            | parseArgs, commander, cac all accept it as `''`.                                                                                                                                                                                                                      | **Diverges**: stricter. No option of this CLI takes an empty value. Question to the maintainer.          |
-| §3.9 non-empty target refused, `.git` tolerated | `generate app` refuses an existing member directory                                                          | create-next-app refuses (exit 1, long allow-list); cargo new refuses an existing path (101); `ng new`/`dotnet new` refuse a conflict unless `--force`; create-vite prompts and cancels non-interactively, tolerating only `.git`.                                     | Matches.                                                                                                 |
-| §3.7 held lock: refuse at once, never take over | no sibling lock                                                                                              | git refuses at once (128), names the lock, never removes it, says when the owner is gone; cargo and Yarn `--mutex` wait (their locks cannot stay stale).                                                                                                              | **Split**; matches git, the tool whose lock a crash can leave behind. Question to the maintainer.        |
-| §3.10 unsupported Node: warn and continue       | no sibling check                                                                                             | npm, Vite, npm/pnpm `engines` handling warn and continue; Next.js refuses (1); Angular and pnpm warn in a soft band and refuse below a hard floor (3, 1).                                                                                                             | **Split**; matches the majority default. Question to the maintainer.                                     |
+| Decision                                        | This CLI's siblings                                                                                          | Established tools                                                                                                                                                                                                                                                     | Verdict                                                                                           |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| §3.1 dotenv flag name `--dotenv`                | no other env-file flag                                                                                       | Native binaries (Bun, Deno, Docker) use `--env-file`; Node-launched JS tools avoid it (dotenv-cli `-e`, dotenvx `-f`, Vite `--mode` + `envDir`, Next.js none). Node's open PR #67642 confirms Node reads `--env-file` after the script name. No tool uses `--dotenv`. | Matches the practice of avoiding the name; the spelling is ours.                                  |
+| §3.2 missing value: refuse                      | `--broker`, `--rpc`, `--scope`, `--logger`, `--port` already refuse with exit 2; README: usage errors exit 2 | parseArgs (strict), commander, cac, yargs `requiresArg` refuse; default yargs and npm's nopt silently take `''`.                                                                                                                                                      | Matches the strict parsers.                                                                       |
+| §3.2 missing value: exit code 2                 | exit 2 for every usage error (`README.md:266,485`)                                                           | commander and yargs exit 1; parseArgs and cac leave it to the caller.                                                                                                                                                                                                 | **Diverges** from the parsers; kept by the maintainer (§3.10a).                                   |
+| §3.2 `--template=` (empty inline value) refused | —                                                                                                            | parseArgs, commander, cac all accept it as `''`.                                                                                                                                                                                                                      | **Diverges**: stricter. No option of this CLI takes an empty value. Question to the maintainer.   |
+| §3.9 non-empty target refused, `.git` tolerated | `generate app` refuses an existing member directory                                                          | create-next-app refuses (exit 1, long allow-list); cargo new refuses an existing path (101); `ng new`/`dotnet new` refuse a conflict unless `--force`; create-vite prompts and cancels non-interactively, tolerating only `.git`.                                     | Matches.                                                                                          |
+| §3.7 held lock: refuse at once, never take over | no sibling lock                                                                                              | git refuses at once (128), names the lock, never removes it, says when the owner is gone; cargo and Yarn `--mutex` wait (their locks cannot stay stale).                                                                                                              | **Split**; matches git, the tool whose lock a crash can leave behind. Question to the maintainer. |
+| §3.10 unsupported Node: warn and continue       | no sibling check                                                                                             | npm, Vite, npm/pnpm `engines` handling warn and continue; Next.js refuses (1); Angular and pnpm warn in a soft band and refuse below a hard floor (3, 1).                                                                                                             | **Split**; matches the majority default. Question to the maintainer.                              |
 
 ## 4. Exported surface — every symbol names its consumer
 
