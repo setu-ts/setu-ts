@@ -61,7 +61,7 @@ export function validateRunnerArgs(args: RunnerArgs, members: readonly string[])
     throw new Error('--shard and --merge refuse the tooling target; pass --no-tooling');
 }
 
-/** Build the Vitest invocation; shard output directories contain blobs only. */
+/** Build the Vitest invocation; shard output directories contain blobs only. A shard also prints its own results. */
 export function vitestArgs(args: RunnerArgs, target: string): string[] {
   return [
     'exec',
@@ -73,6 +73,9 @@ export function vitestArgs(args: RunnerArgs, target: string): string[] {
       ? []
       : [
           `--shard=${args.shard}`,
+          // Both: `blob` alone prints nothing, so a failed shard's log named no test and
+          // the failure could only be read in the job that merges the blobs.
+          '--reporter=default',
           '--reporter=blob',
           // The blob test reporter does not suppress Vitest's partial coverage table.
           '--coverage.reporter=json-summary',

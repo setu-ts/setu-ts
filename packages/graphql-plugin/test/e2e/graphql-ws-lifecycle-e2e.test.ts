@@ -56,7 +56,7 @@ const resolvers: ResolverMap = {
   },
 };
 
-/** Reserves a free port by binding one and releasing it. */
+/** A free port, claimed for this test process by the shared helper. */
 function freePort(): Promise<number> {
   return nodeUnusedPort();
 }

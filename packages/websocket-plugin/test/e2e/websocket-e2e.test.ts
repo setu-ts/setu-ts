@@ -52,7 +52,7 @@ function closed(socket: WebSocket): Promise<void> {
   });
 }
 
-/** Picks a free ephemeral port by binding and immediately releasing one. */
+/** A free port, claimed for this test process by the shared helper. */
 function freePort(): Promise<number> {
   return nodeUnusedPort();
 }

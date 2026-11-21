@@ -8,8 +8,6 @@
  *
  * @module
  */
-import { createServer } from 'node:net';
-import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Code, ConnectError, createClient } from '@connectrpc/connect';
 import type { Client } from '@connectrpc/connect';
@@ -23,17 +21,9 @@ import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const describeNode = describe.skipIf(typeof Deno !== 'undefined');
-
-/** A port nothing is bound to, found by binding 0 and releasing it. */
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
 
 /** Revives one service from an embedded descriptor set through the real runtime. */
 async function revive(base64: string, name: string): Promise<GrpcServiceDefinition> {
@@ -105,7 +95,7 @@ async function start(): Promise<{ port: number; base: string }> {
       }),
     ],
   });
-  const port = await freePort();
+  const port = await unusedPort();
   await app.start({ port, hostname: '127.0.0.1' });
   return { port, base: `http://127.0.0.1:${port}` };
 }

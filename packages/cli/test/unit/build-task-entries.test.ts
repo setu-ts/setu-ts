@@ -3,6 +3,7 @@ import { build } from 'esbuild';
 import type { Plugin } from 'esbuild';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
 import { discoverTasks, taskReferences, taskRewritePlugin } from '../../src/build/task-entries.ts';
+import { expectLinearGrowth } from '../fixtures/linear-growth.ts';
 
 /** Resolves and loads from the fake fs, standing in for esbuild's own disk reads. */
 function resolveFakeFiles(fs: ReturnType<typeof createFakeFs>): Plugin {
@@ -265,13 +266,17 @@ describe('worker task entries', () => {
     ).toEqual(['/app/b.task.ts']);
   });
   it('scans a large file without semicolons in linear time (M139d audit F3)', () => {
-    const source = Array.from(
-      { length: 40_000 },
-      (_, i) => `export type T${i} = { a: string }`,
-    ).join('\n');
-    const started = performance.now();
-    expect(taskReferences(source, '/app/main.ts')).toEqual([]);
-    expect(performance.now() - started).toBeLessThan(1_000);
+    const lines = (count: number): string =>
+      Array.from({ length: count }, (_, i) => `export type T${i} = { a: string }`).join('\n');
+    expect(taskReferences(lines(40_000), '/app/main.ts')).toEqual([]);
+    expectLinearGrowth(
+      'no semicolons',
+      (count) => {
+        const source = lines(count);
+        return () => taskReferences(source, '/app/main.ts');
+      },
+      10_000,
+    );
   });
   it('follows a .js import to its .ts sibling, as esbuild does (review finding 1)', async () => {
     const fs = createFakeFs({
@@ -431,23 +436,18 @@ describe('worker task entries', () => {
   it('pairs delimiters in linear time on unclosed input (CodeRabbit #582 follow-up)', () => {
     // Growth, not a wall-clock bound: CI's coverage instrumentation runs this
     // scan about 8x slower, so an absolute limit fails a linear scan there.
-    // Quadrupling the input quadruples a linear scan (measured 2.6x) and
-    // multiplies a quadratic one by 16 (measured 12.9x for the per-span re-scan).
-    const best = (source: string): number => {
-      let fastest = Infinity;
-      for (let run = 0; run < 3; run++) {
-        const started = performance.now();
-        taskReferences(source, '/app/main.ts');
-        fastest = Math.min(fastest, performance.now() - started);
-      }
-      return fastest;
-    };
+    // Quadrupling the input quadruples a linear scan and multiplies a quadratic
+    // one by 16 (measured 12.9x for the per-span re-scan).
     for (const unit of ['new URL(', '${']) {
       const wrap = (text: string): string => (unit === '${' ? `\`${text}\`` : text);
-      best(wrap(unit.repeat(10_000))); // warm up
-      const small = best(wrap(unit.repeat(100_000)));
-      const large = best(wrap(unit.repeat(400_000)));
-      expect(large / small, unit).toBeLessThan(8);
+      expectLinearGrowth(
+        unit,
+        (count) => {
+          const source = wrap(unit.repeat(count));
+          return () => taskReferences(source, '/app/main.ts');
+        },
+        100_000,
+      );
     }
   });
   it('reads the edges of the code view: unterminated input, regex classes and flags, division', () => {

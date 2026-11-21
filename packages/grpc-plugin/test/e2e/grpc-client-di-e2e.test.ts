@@ -6,8 +6,6 @@
  *
  * @module
  */
-import { createServer } from 'node:net';
-import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DescService } from '@bufbuild/protobuf';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -31,16 +29,9 @@ import { grpcClient, grpcClientProvider } from '../../src/client/grpc-client-hel
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const describeNode = describe.skipIf(typeof Deno !== 'undefined');
-
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
 
 const apps: IKernelApplication[] = [];
 afterEach(async () => {
@@ -75,7 +66,7 @@ async function startServer(echo: DescService): Promise<number> {
       }),
     ],
   });
-  const port = await freePort();
+  const port = await unusedPort();
   await app.start({ port, hostname: '127.0.0.1' });
   apps.push(app);
   return port;
@@ -132,7 +123,7 @@ describeNode('grpcClientProvider — the client by injection', () => {
         DecoratorPlugin({ modules: [QuoteModule] }),
       ],
     });
-    await caller.start({ port: await freePort(), hostname: '127.0.0.1' });
+    await caller.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     apps.push(caller);
 
     const response = await caller.inject({ method: 'GET', url: '/quotes' });
