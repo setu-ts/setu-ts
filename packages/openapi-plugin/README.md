@@ -411,6 +411,31 @@ app.router.post('/login', { schema: { security: [] }, handler });
 app.router.get('/todos/:id', { middleware: [requireAuth()], handler });
 ```
 
+### Try it out with sessions and form CSRF
+
+With `@setu-ts/session-plugin` and its form CSRF (`SessionPlugin({ csrf: {} })`), a signed-in
+browser sends its session cookie on every Try-it-out call, so an unsafe call needs the form-CSRF
+token as well. The bundled Swagger UI sends it: the plugin serves `GET <docs endpoint>/csrf-token`
+(`/docs/csrf-token` by default, left out of the document), and the page installs a request
+interceptor that fetches the token before each same-origin `POST`, `PUT`, `PATCH` or `DELETE` and
+sends it in the configured header (`x-csrf-token` by default). The interceptor leaves every other
+request alone: the spec load, `$ref` resolution, a call to a server on another origin and an OAuth2
+token request to an outside provider never carry the token.
+
+The token route answers `200 { "headerName", "token" }` only for a request that restored a session
+(minting the token if the session has none), marked `private, no-store`. Otherwise, and when form
+CSRF is not installed, it answers `204` with `Cache-Control: no-store` and starts no session.
+
+So a call authenticated by a session cookie, or by a bearer token beside one, passes form CSRF. A
+visitor with no session sends no cookie, so a bearer call is exempt as before; an anonymous unsafe
+call to a route under form CSRF, such as `POST /login`, still needs a session first.
+
+**The docs routes start no session.** The Swagger UI page, the spec and the self-hosted assets mark
+themselves exempt (`CSRF_EXEMPT_STATE_KEY`), so an anonymous visitor gets no session cookie from
+them and a signed-in visitor's `rolling` refresh waits for the next ordinary request. With
+`swagger: { assets: { baseUrl } }` the assets are served by your application, so the exemption does
+not reach them.
+
 ### Deriving it from the guards instead
 
 Declaring `security` per route makes the document a second source of truth that can drift from what
