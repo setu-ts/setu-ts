@@ -308,6 +308,7 @@ export class SmtpProvider implements MailProvider {
   }
 
   /** The transport for the next call, refreshed first under `dnsTtlMs`. */
+  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
   async #currentTransport(): Promise<ISmtpTransport> {
     if (this.#transport === null) {
       throw new Error('SmtpProvider is not connected');

@@ -565,6 +565,7 @@ export class GcsProvider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, `null` if absent, or a rejection
    */
+  // eslint-disable-next-line require-await -- the not-connected refusal and the shape refusal must REJECT, not throw synchronously
   async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     let readable: unknown;
