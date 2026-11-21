@@ -101,6 +101,9 @@ export function configurationFor(member: string) {
       projects: projectsFor(member),
       pool: 'forks',
       maxWorkers: 4,
+      // A worker ends with a signal, so nothing it registered for process exit runs:
+      // port claims are released after each test file instead.
+      setupFiles: [resolve(root, 'test/setup/release-ports.ts')],
       // Code a test hands to Node directly — a worker thread, a module loaded
       // outside Vite — resolves `@setu-ts/*` through Node, which would reach a
       // member's built `dist/` (absent on a fresh checkout, stale after an edit).

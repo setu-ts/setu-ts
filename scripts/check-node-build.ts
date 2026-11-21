@@ -39,7 +39,6 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createServer } from 'node:net';
 import { workspaceMembers } from './lib/workspace.ts';
 import {
   classifyLeg,
@@ -50,6 +49,7 @@ import {
   workersBundleEntry,
   workersBundleMembers,
 } from './node-build-gate.ts';
+import { unusedPort } from '../test/node-helpers.ts';
 
 async function main(): Promise<void> {
   const PACK_DIR = '.tmp/node-pack';
@@ -83,21 +83,6 @@ async function main(): Promise<void> {
     } catch {
       return false;
     }
-  }
-
-  /** A loopback port nothing is listening on. */
-  async function freePort(): Promise<number> {
-    const listener = createServer();
-    await new Promise<void>((resolve, reject) => {
-      listener.once('error', reject);
-      listener.listen(0, '127.0.0.1', resolve);
-    });
-    const address = listener.address();
-    if (address === null || typeof address === 'string') throw new Error('No loopback address');
-    await new Promise<void>((resolve, reject) =>
-      listener.close((error) => (error ? reject(error) : resolve())),
-    );
-    return address.port;
   }
 
   const requireAll = process.argv.slice(2).includes('--require-all');
@@ -196,7 +181,7 @@ async function main(): Promise<void> {
     }
     const { code, output } = await run(
       cmd,
-      [...args, 'boot.mjs', String(await freePort())],
+      [...args, 'boot.mjs', String(await unusedPort())],
       BOOT_DIR,
     );
     legs.push(classifyLeg(name, code, output));
@@ -206,7 +191,7 @@ async function main(): Promise<void> {
   await runLeg('bun', 'bun', [], ['--version']);
 
   await step('esbuild tree-shaking bundle', 'node', ['bundle.mjs'], BOOT_DIR);
-  const bundled = await run('node', ['bundled.mjs', String(await freePort())], BOOT_DIR);
+  const bundled = await run('node', ['bundled.mjs', String(await unusedPort())], BOOT_DIR);
   legs.push(classifyLeg('esbuild / node 24', bundled.code, bundled.output));
 
   const outcome = decideOutcome(legs, requireAll);

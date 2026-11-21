@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import config, {
   configurationFor,
@@ -24,6 +25,14 @@ describe('Vitest configuration', () => {
       expect(configurationFor('packages/common').test?.coverage).toEqual(normal.test?.coverage);
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+  it('releases port claims after every test file, for every member', () => {
+    for (const member of ['packages/common', 'packages/cli', 'tooling']) {
+      const files = configurationFor(member).test?.setupFiles;
+      expect(files).toHaveLength(1);
+      expect(String(files)).toMatch(/\/test\/setup\/release-ports\.ts$/);
+      expect(existsSync(String(files))).toBe(true);
     }
   });
   it('resolves source barrels and subpath exports', () => {

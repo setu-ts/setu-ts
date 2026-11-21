@@ -57,13 +57,15 @@ async function main(): Promise<void> {
   }
 
   /**
-   * Picks a random port in the dynamic range. A bind conflict fails the demo
-   * closed — there is deliberately no scan or fallback.
+   * Picks a random port below the range an operating system assigns from on its
+   * own (Linux 32768–60999, macOS and Windows 49152–65535), so an outgoing
+   * connection cannot already hold it. A bind conflict fails the demo closed —
+   * there is deliberately no scan or fallback.
    *
-   * @returns A port number from 49152 to 65535
+   * @returns A port number from 20000 to 32767
    */
   function randomPort(): number {
-    return 49152 + (crypto.getRandomValues(new Uint16Array(1))[0] % 16384);
+    return 20_000 + (crypto.getRandomValues(new Uint16Array(1))[0] % 12_768);
   }
 
   const sessionId = hex(randomBytes(16));

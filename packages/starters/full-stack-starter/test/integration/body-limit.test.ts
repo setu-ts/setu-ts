@@ -4,23 +4,12 @@
  * it). Before the starter default, both were parsed in full.
  */
 import { request } from 'node:http';
-import { createServer } from 'node:net';
 import { describe, expect, it } from 'vitest';
 
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createFullStackApp } from '../../src/app.ts';
 import { createFullStackAppFromConfig } from '../../src/from-config.ts';
-
-function unusedPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
-    });
-  });
-}
+import { unusedPort } from '../../../../../test/node-helpers.ts';
 
 /** POSTs `bytes` of JSON, declared or chunked, and returns status and body. */
 function post(

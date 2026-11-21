@@ -8,8 +8,6 @@
  *
  * @module
  */
-import { createServer } from 'node:net';
-import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -23,16 +21,9 @@ import { grpcClient } from '../../src/client/grpc-client-helper.ts';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const describeNode = describe.skipIf(typeof Deno !== 'undefined');
-
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
 
 // Revived at run time, so the clients are driven through a narrow view.
 interface EchoClient {
@@ -99,7 +90,7 @@ async function startServer(): Promise<number> {
       }),
     ],
   });
-  const port = await freePort();
+  const port = await unusedPort();
   await app.start({ port, hostname: '127.0.0.1' });
   apps.push(app);
   return port;
@@ -123,7 +114,7 @@ async function startCaller(instances: { id: string; port: number }[]): Promise<I
       GrpcPlugin({ serve: false, clients: { echo: { basePath: '/grpc' } } }),
     ],
   });
-  await app.start({ port: await freePort(), hostname: '127.0.0.1' });
+  await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
   apps.push(app);
   return app;
 }
@@ -159,7 +150,8 @@ describeNode('grpcClient — a member calling another through the plugin', () =>
 
   it('ejects an instance that refuses connections after one failed call', async () => {
     const port = await startServer();
-    const dead = await freePort();
+    // Claimed for this test and never bound, so it refuses every connection.
+    const dead = await unusedPort();
     const caller = await startCaller([
       { id: 'dead', port: dead },
       { id: 'live', port },

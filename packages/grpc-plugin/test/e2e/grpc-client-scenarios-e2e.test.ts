@@ -10,7 +10,7 @@
  * @module
  */
 import { connect, createServer } from 'node:net';
-import type { AddressInfo, Socket } from 'node:net';
+import type { Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { create, createFileRegistry, fromBinary } from '@bufbuild/protobuf';
 import type { DescService } from '@bufbuild/protobuf';
@@ -28,6 +28,7 @@ import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import { ECHO_DESCRIPTOR_BASE64 } from '../fixtures/echo-descriptors.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const describeNode = describe.skipIf(typeof Deno !== 'undefined');
 
@@ -85,14 +86,6 @@ function services(): {
   };
 }
 const SVC = services();
-
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -181,7 +174,7 @@ async function startServer(
       }),
     ],
   });
-  const bound = port ?? (await freePort());
+  const bound = port ?? (await unusedPort());
   await app.start({ port: bound, hostname: '127.0.0.1' });
   apps.push(app);
   return { app, port: bound };
@@ -205,7 +198,7 @@ async function startProxy(
     inbound.on('error', drop).on('close', drop);
     upstream.on('error', drop).on('close', drop);
   });
-  const port = await freePort();
+  const port = await unusedPort();
   await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
   closers.push(
     () =>
@@ -246,7 +239,7 @@ async function startCaller(
       ...(options.extra ?? []),
     ],
   });
-  await app.start({ port: await freePort(), hostname: '127.0.0.1' });
+  await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
   apps.push(app);
   return app;
 }
