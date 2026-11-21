@@ -173,7 +173,7 @@ describe('stop and drain log lines (V13-13)', () => {
     });
     app.router.get('/held', async (ctx) => {
       await held.promise;
-      ctx.response.send('late');
+      return ctx.response.text('late');
     });
     await app.start({ port: 4201, drainTimeoutMs: 100 });
     void app.inject({ method: 'GET', url: '/held' });
@@ -203,7 +203,7 @@ describe('the drain bound is one setting (V13-26)', () => {
     const app = createApplication({ plugins: [runtimeWith(fake)] });
     app.router.get('/held', async (ctx) => {
       await held.promise;
-      ctx.response.send('done');
+      return ctx.response.text('done');
     });
     await app.start({ port: 4202, drainTimeoutMs: 20_000 });
     const response = app.inject({ method: 'GET', url: '/held' });
@@ -221,7 +221,7 @@ describe('the drain bound is one setting (V13-26)', () => {
   it('cuts the drain at 10 s by default', async () => {
     const fake = createFakeRuntime();
     const app = createApplication({ plugins: [runtimeWith(fake)] });
-    app.router.get('/held', () => new Promise<void>(() => {}));
+    app.router.get('/held', () => new Promise<never>(() => {}));
     await app.start({ port: 4203 });
     void app.inject({ method: 'GET', url: '/held' });
     await flush();
@@ -392,7 +392,7 @@ describe('a stop during start cancels the start (V13-43)', () => {
       const app = createApplication({
         plugins: [
           runtimeWith(fake, (ctx) => {
-            ctx.lifecycle.onBootstrap(() => new Promise<void>(() => {}));
+            ctx.lifecycle.onBootstrap(() => new Promise<never>(() => {}));
           }),
         ],
       });

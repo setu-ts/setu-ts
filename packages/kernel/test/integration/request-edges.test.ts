@@ -48,7 +48,7 @@ describe('implicit HEAD on GET routes (V13-113)', () => {
   it('answers HEAD from a GET route with its headers and no body', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     app.router.get('/doc', (ctx) => {
-      ctx.response.header('x-doc', 'yes').json({ hello: 'world' });
+      return ctx.response.header('x-doc', 'yes').json({ hello: 'world' });
     });
     await app.start();
     const get = await app.inject({ method: 'GET', url: '/doc' });
@@ -72,7 +72,7 @@ describe('implicit HEAD on GET routes (V13-113)', () => {
       ctx.defer?.(() => {
         cleaned++;
       });
-      ctx.response.stream(
+      return ctx.response.stream(
         manualStream(() => {
           cancelled = true;
         }).stream,
@@ -89,16 +89,16 @@ describe('implicit HEAD on GET routes (V13-113)', () => {
   it('prefers an explicit HEAD route at equal rank, and a specific GET over a catch-all HEAD', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
     app.router.get('/same', (ctx) => {
-      ctx.response.header('x-from', 'get').send('g');
+      return ctx.response.header('x-from', 'get').text('g');
     });
     app.router.head('/same', (ctx) => {
-      ctx.response.header('x-from', 'head').send('');
+      return ctx.response.header('x-from', 'head').text('');
     });
     app.router.get('/assets/*', (ctx) => {
-      ctx.response.header('x-from', 'asset').send('a');
+      return ctx.response.header('x-from', 'asset').text('a');
     });
     app.router.head('/*', (ctx) => {
-      ctx.response.header('x-from', 'catch-all').send('');
+      return ctx.response.header('x-from', 'catch-all').text('');
     });
     await app.start();
     expect((await app.inject({ method: 'HEAD', url: '/same' })).headers.get('x-from')).toBe('head');
@@ -122,7 +122,7 @@ describe('cleanup when the client leaves (V13-200)', () => {
       ctx.defer?.(() => {
         cleaned++;
       });
-      return new Promise<void>(() => {});
+      return new Promise<never>(() => {});
     });
     await app.start();
     const client = new AbortController();
@@ -150,7 +150,7 @@ describe('cleanup when the client leaves (V13-200)', () => {
         sourceCancelled = true;
       });
       body.push('first');
-      ctx.response.stream(body.stream);
+      return ctx.response.stream(body.stream);
     });
     await app.start();
     const client = new AbortController();
@@ -173,7 +173,7 @@ describe('cleanup when the client leaves (V13-200)', () => {
       ctx.defer?.(() => {
         cleaned++;
       });
-      ctx.response.send('ok');
+      return ctx.response.text('ok');
     });
     await app.start();
     const client = new AbortController();
@@ -189,7 +189,7 @@ describe('cleanup when the client leaves (V13-200)', () => {
   it('logs nothing for an abort of a request that deferred nothing', async () => {
     const calls: LogCall[] = [];
     const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
-    app.router.get('/hang', () => new Promise<void>(() => {}));
+    app.router.get('/hang', () => new Promise<never>(() => {}));
     await app.start();
     const client = new AbortController();
     void app.dispatch!(new Request('http://localhost/hang', { signal: client.signal }));
@@ -206,7 +206,7 @@ describe('a failed response stream (V13-256)', () => {
     const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
     app.router.get('/broken', (ctx) => {
       let sent = false;
-      ctx.response.stream(
+      return ctx.response.stream(
         new ReadableStream<Uint8Array>({
           pull(controller) {
             if (!sent) {
@@ -303,7 +303,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     const app = createApplication({ plugins: [fakeRuntime(fake)] });
     const body = manualStream();
     app.router.get('/events', (ctx) => {
-      ctx.response.stream(body.stream);
+      return ctx.response.stream(body.stream);
     });
     await app.start();
     await app.dispatch!(new Request('http://localhost/events'));

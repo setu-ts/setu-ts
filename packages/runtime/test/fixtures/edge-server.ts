@@ -46,11 +46,11 @@ const loggerPlugin: IPlugin = {
 
 const app = createApplication({ plugins: [RuntimePlugin(), loggerPlugin] });
 app.router.get('/doc', (ctx) => {
-  ctx.response.json({ hello: 'world' });
+  return ctx.response.json({ hello: 'world' });
 });
 app.router.get('/broken', (ctx) => {
   let sent = false;
-  ctx.response.stream(
+  return ctx.response.stream(
     new ReadableStream<Uint8Array>({
       pull(controller) {
         if (!sent) {
@@ -65,7 +65,7 @@ app.router.get('/broken', (ctx) => {
 });
 app.router.get('/quiet', (ctx) => {
   let step = 0;
-  ctx.response.stream(
+  return ctx.response.stream(
     new ReadableStream<Uint8Array>({
       async pull(controller) {
         step++;
@@ -84,7 +84,7 @@ app.router.get('/quiet', (ctx) => {
 app.router.get('/full', (ctx) => {
   ctx.defer?.(() => emit({ marker: 'cleanup' }));
   let n = 0;
-  ctx.response.stream(
+  return ctx.response.stream(
     new ReadableStream<Uint8Array>({
       pull(controller) {
         n++;

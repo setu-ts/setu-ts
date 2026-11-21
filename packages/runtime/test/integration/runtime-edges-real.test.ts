@@ -93,7 +93,7 @@ describe('a refused upgrade on Node (V13-53)', () => {
     const port = await unusedPort();
     const adapter = new NodeHttpAdapter();
     // An installed router is what attaches Node's raw `upgrade` listener.
-    adapter.setUpgradeRouter({ route: () => null });
+    adapter.setUpgradeRouter(() => Promise.resolve(null));
     adapter.setHandler((_request: IRequest): IResponse => {
       const headers = new Headers({ 'content-type': 'application/problem+json' });
       const body = '{"title":"Unauthorized","status":401}';
@@ -121,7 +121,7 @@ describe('HEAD on a real server (V13-113)', () => {
   it('answers a GET route with its content-length and no body', async () => {
     const port = await serve((app) => {
       app.router.get('/doc', (ctx) => {
-        ctx.response.json({ hello: 'world' });
+        return ctx.response.json({ hello: 'world' });
       });
     });
     const get = await fetch(`http://127.0.0.1:${port}/doc`);
@@ -143,7 +143,7 @@ describe('a failed response stream on Node (V13-256)', () => {
       (app) => {
         app.router.get('/broken', (ctx) => {
           let sent = false;
-          ctx.response.stream(
+          return ctx.response.stream(
             new ReadableStream<Uint8Array>({
               pull(controller) {
                 if (!sent) {
@@ -179,7 +179,7 @@ describe('cleanup when a Node client leaves or reads to the end (V13-200)', () =
           events.push('cleanup');
         });
         let n = 0;
-        ctx.response.stream(
+        return ctx.response.stream(
           new ReadableStream<Uint8Array>({
             pull(controller) {
               n++;
@@ -204,7 +204,7 @@ describe('cleanup when a Node client leaves or reads to the end (V13-200)', () =
         ctx.defer?.(() => {
           cleaned++;
         });
-        ctx.response.stream(
+        return ctx.response.stream(
           new ReadableStream<Uint8Array>({
             async pull(controller) {
               await new Promise((resolve) => setTimeout(resolve, 20));
@@ -230,7 +230,7 @@ describe('the drain sends HTTP/2 GOAWAY (V13-23)', () => {
     const app = createApplication({ plugins: [RuntimePlugin({ http2: true })] });
     app.router.get('/slow', async (ctx) => {
       await held;
-      ctx.response.send('finished');
+      return ctx.response.text('finished');
     });
     await app.start({ port, hostname: '127.0.0.1', drainTimeoutMs: 5_000 });
     const session = http2Connect(`http://127.0.0.1:${port}`);

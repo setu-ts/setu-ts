@@ -344,7 +344,7 @@ describe('createRequestLoggerMiddleware', () => {
     });
     await middleware(ctx, async () => {
       client.abort();
-      ctx.response.status(500).send('render failed');
+      ctx.response.status(500).send(new TextEncoder().encode('render failed'));
     });
     const completed = logger.entries.find((e) => e.message === 'request completed');
     expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
@@ -357,7 +357,7 @@ describe('createRequestLoggerMiddleware', () => {
       request: { ...createFakeRequest('GET', '/page'), signal: client.signal },
     });
     await middleware(ctx, async () => {
-      ctx.response.status(500).send('render failed');
+      ctx.response.status(500).send(new TextEncoder().encode('render failed'));
     });
     const completed = logger.entries.find((e) => e.message === 'request completed');
     expect(completed!.metadata.status).toBe(500);
