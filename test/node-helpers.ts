@@ -1,13 +1,5 @@
 import { spawn } from 'node:child_process';
-import {
-  accessSync,
-  constants,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { accessSync, constants, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -26,9 +18,6 @@ export const TEST_PORT_RANGE: { readonly first: number; readonly last: number } 
   last: 32_767,
 };
 
-/** A claim this old belongs to no running test, whatever its process id says. */
-const STALE_CLAIM_MS = 6 * 60 * 60 * 1000;
-
 /** What a port allocator reads from its host; tests replace each part. */
 export interface PortAllocatorOptions {
   /** The directory holding one claim file per port, shared by every test process. */
@@ -41,8 +30,6 @@ export interface PortAllocatorOptions {
   readonly pid?: number;
   /** Whether a process id belongs to a running process. */
   readonly alive?: (pid: number) => boolean;
-  /** The wall clock, in milliseconds, compared with a claim file's modification time. */
-  readonly now?: () => number;
   /** Why a listener cannot bind the port right now, or `undefined` when it can. */
   readonly bindError?: (port: number) => Promise<Error | undefined>;
   /** A number in `[0, 1)` choosing where a search starts. */
@@ -96,19 +83,22 @@ function bindFailure(port: number): Promise<Error | undefined> {
  * comes from a range the system never assigns from, and is claimed with an
  * exclusively created file, so two test processes cannot be given the same one.
  *
- * A claim lasts until {@linkcode PortAllocator.release}. Two things end it early,
- * and each lets another caller take the claim over:
- *
- * - its process no longer exists (a worker that was killed never releases);
- * - it is more than six hours old, whatever its process id says. This covers a hung
- *   process and a process id that was reused, at the cost that a process still
- *   using a port after six hours can lose its claim.
+ * A claim lasts until {@linkcode PortAllocator.release}, or until its process no
+ * longer exists (a worker that was killed never releases); only then can another
+ * caller take it over. A claim is never taken from a running process, whatever its
+ * age, so a holder's release can only ever remove its own claim. The cost is that a
+ * process id reused by an unrelated program keeps one dead claim's port out of use
+ * until that program ends.
  *
  * A takeover holds a per-port marker file while it checks the claim again and
  * replaces it. Only a marker holder removes another process's claim, and only after
- * finding it stale while holding the marker, so a live claim is never removed,
- * hidden or overwritten. A marker left by a crashed process only keeps that one port
- * from being taken over.
+ * finding its process gone while holding the marker: a process that is gone cannot
+ * release or re-create its claim, and nobody else can create a file that exists, so
+ * the claim removed is the one that was checked. A marker left by a crashed process
+ * only keeps that one port from being taken over.
+ *
+ * Liveness is asked of this machine's process table, so one claims directory must not
+ * be shared between process-id namespaces (two containers with a common `/tmp`).
  *
  * @param options - The claims directory, the range, and replaceable host parts
  * @returns The allocator
@@ -117,7 +107,6 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
   const { directory, first, last } = options;
   const pid = options.pid ?? process.pid;
   const alive = options.alive ?? processAlive;
-  const now = options.now ?? Date.now;
   const bindError = options.bindError ?? bindFailure;
   const random = options.random ?? Math.random;
   const span = last - first + 1;
@@ -136,19 +125,17 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
     return true;
   }
 
-  /** Whether the port's claim belongs to a process that is gone, or outlived any test run. */
+  /** Whether the port's claim belongs to a process that no longer exists. */
   function stale(port: number): boolean {
     let owner: number;
-    let modified: number;
     try {
       owner = Number(readFileSync(file(port), 'utf8'));
-      modified = statSync(file(port)).mtimeMs;
     } catch (error) {
       // Released between the failed create and this read: its owner is alive.
       if (errorCode(error) === 'ENOENT') return false;
       throw error;
     }
-    if (now() - modified > STALE_CLAIM_MS) return true;
+    // An empty or unreadable id is a claim still being written: its owner is alive.
     return Number.isInteger(owner) && owner > 0 && !alive(owner);
   }
 
@@ -175,8 +162,6 @@ export function createPortAllocator(options: PortAllocatorOptions): PortAllocato
   }
 
   function claim(port: number): boolean {
-    // Never the port this allocator already gave out, however old its claim is.
-    if (held.has(port)) return false;
     if (create(port)) return true;
     return stale(port) && takeOver(port);
   }

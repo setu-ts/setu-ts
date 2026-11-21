@@ -82,7 +82,6 @@ describe('the test port allocator', () => {
       last: 104,
       pid: 4242,
       alive: () => true,
-      now: () => Date.now(),
       bindError: () => Promise.resolve(undefined),
       random: () => 0,
       ...overrides,
@@ -122,13 +121,6 @@ describe('the test port allocator', () => {
     // Once before the takeover and once more while it holds the marker.
     expect(asked).toEqual([7, 7]);
     expect(readFileSync(join(directory, '100'), 'utf8')).toBe('4242');
-  });
-  it('takes over a claim older than any test run, even from a running process', async () => {
-    const { directory, ports } = await allocator();
-    writeSync(join(directory, '100'), '7');
-    const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
-    utimesSync(join(directory, '100'), old, old);
-    expect(await ports.port()).toBe(100);
   });
   it('never removes a claim that became live before the takeover checked it again', async () => {
     const directory = await tempDir({ prefix: 'ports-' });
@@ -201,13 +193,20 @@ describe('the test port allocator', () => {
       }
     },
   );
-  it('does not give out a port it still holds, however old its own claim is', async () => {
-    const { directory, ports } = await allocator({ first: 100, last: 100 });
-    expect(await ports.port()).toBe(100);
-    const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
+  it('never takes a claim from a running process, however old the claim is', async () => {
+    const { directory, ports } = await allocator();
+    writeSync(join(directory, '100'), '7');
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     utimesSync(join(directory, '100'), old, old);
-    await expect(ports.port()).rejects.toThrow('no free test port');
-    expect(readFileSync(join(directory, '100'), 'utf8')).toBe('4242');
+    expect(await ports.port()).toBe(101);
+    expect(readFileSync(join(directory, '100'), 'utf8')).toBe('7');
+  });
+  it('removes only its own claims on release', async () => {
+    const { directory, ports } = await allocator();
+    writeSync(join(directory, '101'), '7');
+    expect(await ports.port()).toBe(100);
+    ports.release();
+    expect(claimed(directory)).toEqual(['101']);
   });
   it('asks the operating system whether the claiming process still exists', async () => {
     const ended = spawnProcess(process.execPath, { args: ['-e', ''] });
