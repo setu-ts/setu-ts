@@ -15,7 +15,9 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function start(options: { cacheControl?: string; expose?: boolean } = {}) {
+async function start(
+  options: { cacheControl?: string; expose?: boolean; keyPrefixes?: readonly string[] } = {},
+) {
   app = await createTestApp({
     autoStart: false,
     plugins: [
@@ -34,6 +36,7 @@ async function start(options: { cacheControl?: string; expose?: boolean } = {}) 
                 ...(options.cacheControl === undefined
                   ? {}
                   : { cacheControl: options.cacheControl }),
+                ...(options.keyPrefixes === undefined ? {} : { keyPrefixes: options.keyPrefixes }),
               },
             }),
       }),
@@ -56,6 +59,27 @@ describe('the catalogue route', () => {
       locale: 'de-AT',
       messages: { ...EN, title: 'Warenkorb' },
     });
+  });
+
+  it('serves only the keys under keyPrefixes, after the default-locale overlay (V12-132)', async () => {
+    await start({ keyPrefixes: ['ti', 'item'] });
+    const response = await get('/i18n/de-AT');
+    expect(await response.json()).toEqual({
+      locale: 'de-AT',
+      messages: { title: 'Warenkorb', items: EN.items },
+    });
+  });
+
+  it('refuses a malformed keyPrefixes when the plugin is created (V12-132)', () => {
+    for (const keyPrefixes of [[], [''], 'page.', [1]]) {
+      expect(() =>
+        LocalizationPlugin({
+          supportedLocales: ['en'],
+          catalogues: { en: EN },
+          exposeCatalogues: { basePath: '/i18n', keyPrefixes: keyPrefixes as readonly string[] },
+        }),
+      ).toThrow(/keyPrefixes must be a non-empty array of non-empty strings/);
+    }
   });
 
   it('honours a configured Cache-Control', async () => {

@@ -6,6 +6,7 @@
  */
 
 import type { FlagContext, ILogger } from '@setu-ts/common';
+import { withDeadline } from '@setu-ts/common';
 import type {
   FlagProvider,
   FlagProviderStatus,
@@ -23,6 +24,9 @@ const ANONYMOUS_KEY = '__anonymous__';
 
 /** Default wait budget, in seconds, for the client's initial connection. */
 const DEFAULT_INIT_TIMEOUT_SECONDS = 5;
+
+/** The largest `initTimeoutSeconds` whose milliseconds fit the runtime timer range. */
+const MAX_INIT_TIMEOUT_SECONDS = 2_147_483;
 
 /**
  * Builds the LaunchDarkly evaluation context for a framework
@@ -107,6 +111,8 @@ export class LaunchDarklyProvider implements FlagProvider {
 
   #client: ILaunchDarklyClient | undefined;
   #started = false;
+  /** The boot wait, in seconds, checked at construction. */
+  readonly #initTimeoutSeconds: number;
   /** Set when `start()` could not reach LaunchDarkly; surfaced by `status()`. */
   #startError: string | undefined;
 
@@ -115,12 +121,26 @@ export class LaunchDarklyProvider implements FlagProvider {
    * @param logger - Optional logger for background-refill failures
    * @param maxCachedContexts - Positive integer snapshot limit, default 10,000;
    * least recently used contexts are evicted
-   * @throws {RangeError} When maxCachedContexts is not a positive integer
+   * @throws {RangeError} When maxCachedContexts is not a positive integer, or
+   * `initTimeoutSeconds` is not a finite number in `(0, 2147483]`
    */
   constructor(config: LaunchDarklyProviderConfig, logger?: ILogger, maxCachedContexts = 10_000) {
     if (!Number.isInteger(maxCachedContexts) || maxCachedContexts <= 0) {
       throw new RangeError('feature-flags: maxCachedContexts must be a positive integer');
     }
+    const initTimeoutSeconds = config.initTimeoutSeconds ?? DEFAULT_INIT_TIMEOUT_SECONDS;
+    // No zero: LaunchDarkly reads `timeout: 0` as "do not wait" and the
+    // deadline below reads 0 as "unbounded", which mean opposite things.
+    if (
+      !Number.isFinite(initTimeoutSeconds) ||
+      initTimeoutSeconds <= 0 ||
+      initTimeoutSeconds > MAX_INIT_TIMEOUT_SECONDS
+    ) {
+      throw new RangeError(
+        `feature-flags: initTimeoutSeconds must be a finite number above 0 and at most ${MAX_INIT_TIMEOUT_SECONDS}`,
+      );
+    }
+    this.#initTimeoutSeconds = initTimeoutSeconds;
     this.#config = config;
     this.#logger = logger;
     this.#fallbackValue = config.fallbackValue ?? false;
@@ -203,10 +223,13 @@ export class LaunchDarklyProvider implements FlagProvider {
     this.#client = this.#config.client ?? (await this.#buildClient());
     this.#started = true;
 
+    const client = this.#client;
     try {
-      await this.#client.waitForInitialization({
-        timeoutSeconds: this.#config.initTimeoutSeconds ?? DEFAULT_INIT_TIMEOUT_SECONDS,
-      });
+      // `timeout` is the SDK's option (seconds). The deadline races it too, so
+      // an injected client that ignores the option still cannot hold startup.
+      await this.#bounded(() =>
+        client.waitForInitialization({ timeout: this.#initTimeoutSeconds }),
+      );
     } catch (error) {
       this.#startError = error instanceof Error ? error.message : String(error);
       this.#logger?.warn(
@@ -223,6 +246,15 @@ export class LaunchDarklyProvider implements FlagProvider {
     });
 
     await this.#refill(this.#client, ANONYMOUS_KEY, undefined);
+  }
+
+  /** Runs one call under the boot bound (`initTimeoutSeconds`). */
+  #bounded<T>(run: () => Promise<T>): Promise<T> {
+    const seconds = this.#initTimeoutSeconds;
+    return withDeadline(run, {
+      timeoutMs: seconds * 1000,
+      onTimeout: () => new Error(`launchdarkly: no answer within ${seconds} s`),
+    });
   }
 
   /** Closes the client and drops every cached snapshot. */
@@ -303,7 +335,9 @@ export class LaunchDarklyProvider implements FlagProvider {
   ): Promise<void> {
     this.#refilling.add(key);
     try {
-      const state = await client.allFlagsState(toLaunchDarklyContext(context));
+      // Bounded like the boot wait: a client that has not initialized must not
+      // hold `start()` or pile up refills.
+      const state = await this.#bounded(() => client.allFlagsState(toLaunchDarklyContext(context)));
       // An invalid snapshot means the SDK could not evaluate (offline, bad
       // context); caching it would pin every flag to the fallback until the
       // next update event.

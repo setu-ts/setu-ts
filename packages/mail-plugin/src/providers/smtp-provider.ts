@@ -6,6 +6,7 @@
  *
  * @module
  */
+import type { IDnsResolver } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISmtpTransport, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
@@ -38,6 +39,45 @@ export interface SmtpProviderOptions {
   auth?: { user: string; pass: string } | undefined;
   /** Injected transport facade; bypasses the lazy `nodemailer` import. */
   transport?: ISmtpTransport | undefined;
+  /**
+   * How long to wait for the TCP connection, in milliseconds (nodemailer
+   * `connectionTimeout`). nodemailer's default applies when absent.
+   *
+   * @since 0.14.0
+   */
+  connectionTimeoutMs?: number | undefined;
+  /**
+   * How long to wait for the server's greeting, in milliseconds (nodemailer
+   * `greetingTimeout`).
+   *
+   * @since 0.14.0
+   */
+  greetingTimeoutMs?: number | undefined;
+  /**
+   * How long an idle connection may stay silent, in milliseconds (nodemailer
+   * `socketTimeout`).
+   *
+   * @since 0.14.0
+   */
+  socketTimeoutMs?: number | undefined;
+  /**
+   * Re-resolve `host` through the runtime's DNS at most this often, in
+   * milliseconds, and connect to the address found, presenting and verifying
+   * `host` as the TLS server name. Absent: nodemailer resolves `host` itself
+   * and caches the answer for 5 minutes. Refused with an injected `transport`,
+   * and on a runtime without DNS.
+   *
+   * @since 0.14.0
+   */
+  dnsTtlMs?: number | undefined;
+}
+
+/** What `SmtpProvider` needs from the runtime for `dnsTtlMs`. */
+export interface SmtpRuntime {
+  /** The runtime's resolver (`IRuntimeServices.dns`). */
+  readonly dns?: IDnsResolver | undefined;
+  /** Monotonic clock in milliseconds (`IRuntimeServices.hrtime`). */
+  readonly hrtime: () => number;
 }
 
 /**
@@ -62,8 +102,9 @@ export function validateSmtpTransport(transport: unknown): transport is ISmtpTra
 export function adaptNodemailerModule(
   mod: NodemailerModule,
   options: SmtpProviderOptions,
+  address?: string,
 ): ISmtpTransport {
-  return mod.createTransport(buildTransportConfig(options));
+  return mod.createTransport(buildTransportConfig(options, address));
 }
 
 /**
@@ -83,19 +124,43 @@ export async function loadNodemailerModule(): Promise<NodemailerModule> {
   }
 }
 
-/** Builds a transport config without assigning `undefined` to optional fields. */
-function buildTransportConfig(options: SmtpProviderOptions): Record<string, unknown> {
+/**
+ * Builds a transport config without assigning `undefined` to optional fields.
+ * With `address`, the transport connects to that address and presents `host`
+ * as the TLS server name, so the certificate is still checked against `host`.
+ */
+export function buildTransportConfig(
+  options: SmtpProviderOptions,
+  address?: string,
+): Record<string, unknown> {
   const config: Record<string, unknown> = {
     port: options.port ?? DEFAULT_PORT,
     secure: options.secure ?? false,
   };
-  if (options.host !== undefined) {
+  if (address !== undefined) {
+    config.host = address;
+    config.tls = { servername: options.host };
+  } else if (options.host !== undefined) {
     config.host = options.host;
   }
   if (options.auth !== undefined) {
     config.auth = options.auth;
   }
+  if (options.connectionTimeoutMs !== undefined) {
+    config.connectionTimeout = options.connectionTimeoutMs;
+  }
+  if (options.greetingTimeoutMs !== undefined) {
+    config.greetingTimeout = options.greetingTimeoutMs;
+  }
+  if (options.socketTimeoutMs !== undefined) {
+    config.socketTimeout = options.socketTimeoutMs;
+  }
   return config;
+}
+
+/** Reports whether a host is an IP literal (no DNS to re-resolve). */
+function isIpLiteral(host: string): boolean {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
 }
 
 /** Maps an {@linkcode OutgoingMail} to nodemailer's message fields. */
@@ -125,7 +190,11 @@ export function toNodemailerMessage(
       content: toBase64(attachment.content),
       encoding: 'base64',
       ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
-      ...(attachment.contentId === undefined ? {} : { cid: attachment.contentId }),
+      // A `contentId` attachment is referenced from the body (`cid:`), so it
+      // goes out inline; nodemailer would only infer that for an image.
+      ...(attachment.contentId === undefined
+        ? {}
+        : { cid: attachment.contentId, contentDisposition: 'inline' as const }),
     }));
   }
   return mail;
@@ -144,6 +213,13 @@ function joinAddresses(to: string | readonly string[]): string {
 export class SmtpProvider implements MailProvider {
   #transport: ISmtpTransport | null = null;
   readonly #options: SmtpProviderOptions;
+  readonly #runtime: SmtpRuntime | undefined;
+  /** The module, kept so `dnsTtlMs` can build a transport for a new address. */
+  #module: NodemailerModule | null = null;
+  /** The address the current transport connects to, under `dnsTtlMs`. */
+  #address: string | undefined;
+  /** When `#address` was resolved (monotonic ms), under `dnsTtlMs`. */
+  #resolvedAt = Number.NEGATIVE_INFINITY;
   /**
    * M70c: present only when the transport exposes `verify()`; its absence is
    * *unknown* reachability, not `false` (a minimal injected fake has not told
@@ -155,9 +231,31 @@ export class SmtpProvider implements MailProvider {
 
   /**
    * @param options - SMTP connection/injection options
+   * @param runtime - The runtime's resolver and clock, read only for
+   *   `dnsTtlMs`; `MailPlugin` supplies them
+   * @throws {Error} When `dnsTtlMs` is set with an injected transport, or
+   *   without a runtime resolver
+   * @throws {RangeError} When `dnsTtlMs` is not a finite number `>= 0`
    */
-  constructor(options?: SmtpProviderOptions) {
+  constructor(options?: SmtpProviderOptions, runtime?: SmtpRuntime) {
     this.#options = options ?? {};
+    this.#runtime = runtime;
+    const ttl = this.#options.dnsTtlMs;
+    if (ttl !== undefined) {
+      if (!Number.isFinite(ttl) || ttl < 0) {
+        throw new RangeError('SmtpProvider options.dnsTtlMs must be a finite number >= 0');
+      }
+      if (this.#options.transport !== undefined) {
+        throw new Error(
+          'SmtpProvider options.dnsTtlMs cannot apply to an injected transport, which resolves its own host',
+        );
+      }
+      if (runtime?.dns === undefined) {
+        throw new Error(
+          'SmtpProvider options.dnsTtlMs needs a runtime with DNS (IRuntimeServices.dns), and this runtime has none',
+        );
+      }
+    }
   }
 
   async connect(): Promise<void> {
@@ -168,9 +266,53 @@ export class SmtpProvider implements MailProvider {
       }
       this.#transport = injected;
     } else {
-      this.#transport = adaptNodemailerModule(await loadNodemailerModule(), this.#options);
+      this.#module = await loadNodemailerModule();
+      this.#transport = this.#usesDnsTtl()
+        ? await this.#refreshTransport()
+        : adaptNodemailerModule(this.#module, this.#options);
     }
     this.#installProbe();
+  }
+
+  /** `true` when the provider resolves the host itself (`dnsTtlMs` on a name). */
+  #usesDnsTtl(): boolean {
+    const host = this.#options.host;
+    return this.#options.dnsTtlMs !== undefined && host !== undefined && !isIpLiteral(host);
+  }
+
+  /**
+   * Under `dnsTtlMs`: re-resolves the host once its answer is older than the
+   * TTL, and replaces the transport when the address changed. Returns the
+   * transport to use.
+   */
+  async #refreshTransport(): Promise<ISmtpTransport> {
+    const runtime = this.#runtime!;
+    const now = runtime.hrtime();
+    if (this.#transport !== null && now - this.#resolvedAt < this.#options.dnsTtlMs!) {
+      return this.#transport;
+    }
+    const host = this.#options.host!;
+    const addresses = await runtime.dns!.resolveHost(host);
+    const address = addresses[0];
+    if (address === undefined) {
+      throw new Error(`SmtpProvider: '${host}' resolved to no address`);
+    }
+    this.#resolvedAt = now;
+    if (this.#transport !== null && address === this.#address) {
+      return this.#transport;
+    }
+    this.#transport?.close?.();
+    this.#address = address;
+    this.#transport = adaptNodemailerModule(this.#module!, this.#options, address);
+    return this.#transport;
+  }
+
+  /** The transport for the next call, refreshed first under `dnsTtlMs`. */
+  async #currentTransport(): Promise<ISmtpTransport> {
+    if (this.#transport === null) {
+      throw new Error('SmtpProvider is not connected');
+    }
+    return this.#usesDnsTtl() ? this.#refreshTransport() : this.#transport;
   }
 
   /**
@@ -180,10 +322,10 @@ export class SmtpProvider implements MailProvider {
   #installProbe(): void {
     const transport = this.#transport;
     if (transport !== null && typeof transport.verify === 'function') {
-      const verify = transport.verify;
       this.isHealthy = async (): Promise<boolean> => {
         try {
-          await verify();
+          const current = await this.#currentTransport();
+          await current.verify!();
           return true;
         } catch {
           return false;
@@ -196,6 +338,8 @@ export class SmtpProvider implements MailProvider {
 
   disconnect(): Promise<void> {
     this.#transport = null;
+    this.#address = undefined;
+    this.#resolvedAt = Number.NEGATIVE_INFINITY;
     delete this.isHealthy;
     return Promise.resolve();
   }
@@ -211,9 +355,7 @@ export class SmtpProvider implements MailProvider {
    * @throws {Error} If the provider is not connected or the transport rejects
    */
   async send(message: OutgoingMail): Promise<void> {
-    if (this.#transport === null) {
-      throw new Error('SmtpProvider is not connected');
-    }
-    await this.#transport.sendMail(toNodemailerMessage(message));
+    const transport = await this.#currentTransport();
+    await transport.sendMail(toNodemailerMessage(message));
   }
 }

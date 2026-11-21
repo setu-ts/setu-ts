@@ -96,6 +96,30 @@ export function validateCacheControl(cacheControl: unknown): string {
 }
 
 /**
+ * Validates `exposeCatalogues.keyPrefixes` at construction: absent, or a
+ * non-empty array of non-empty strings.
+ *
+ * @param keyPrefixes - The configured value
+ * @returns The prefixes, or `undefined` to serve every key
+ * @throws {TypeError} If the value is present and not a non-empty array of non-empty strings
+ */
+export function validateKeyPrefixes(keyPrefixes: unknown): readonly string[] | undefined {
+  if (keyPrefixes === undefined) {
+    return undefined;
+  }
+  if (
+    !Array.isArray(keyPrefixes) ||
+    keyPrefixes.length === 0 ||
+    !keyPrefixes.every((prefix: unknown) => typeof prefix === 'string' && prefix !== '')
+  ) {
+    throw new TypeError(
+      'localization-plugin: exposeCatalogues.keyPrefixes must be a non-empty array of non-empty strings.',
+    );
+  }
+  return Object.freeze([...(keyPrefixes as readonly string[])]);
+}
+
+/**
  * Registers `GET <basePath>/:locale`.
  *
  * A supported tag (exact canonical spelling) answers `{ locale, messages }`
@@ -111,12 +135,14 @@ export function validateCacheControl(cacheControl: unknown): string {
  * @param basePath - The validated prefix
  * @param store - The validated catalogues
  * @param cacheControl - The validated `Cache-Control` value
+ * @param keyPrefixes - The validated key prefixes; absent serves every key
  */
 export function registerCatalogueRoute(
   router: IRouterApi,
   basePath: string,
   store: CatalogueStore,
   cacheControl: string,
+  keyPrefixes?: readonly string[],
 ): void {
   // Built once: the catalogues are fixed after `register()`.
   const bodies = new Map<string, CatalogueBody>();
@@ -130,7 +156,11 @@ export function registerCatalogueRoute(
     LocalizationMessage
   >;
   for (const [tag, messages] of store.messages) {
-    const merged = Object.fromEntries([...defaults, ...messages]);
+    // With `keyPrefixes`, only the keys a browser page needs are served.
+    const entries = [...defaults, ...messages].filter(
+      ([key]) => keyPrefixes === undefined || keyPrefixes.some((prefix) => key.startsWith(prefix)),
+    );
+    const merged = Object.fromEntries(entries);
     bodies.set(tag, Object.freeze({ locale: tag, messages: merged }));
   }
   const route: RouteDefinition = {

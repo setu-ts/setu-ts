@@ -51,25 +51,37 @@ export function createProvider(
     case 'log':
       return new LogProvider(buildLogOptions(options, ctx));
     case 'smtp':
-      return new SmtpProvider({
-        host: options.host,
-        port: options.port,
-        secure: options.secure,
-        auth: options.auth,
-        transport: options.transport,
-      });
+      return new SmtpProvider(
+        {
+          host: options.host,
+          port: options.port,
+          secure: options.secure,
+          auth: options.auth,
+          transport: options.transport,
+          connectionTimeoutMs: options.connectionTimeoutMs,
+          greetingTimeoutMs: options.greetingTimeoutMs,
+          socketTimeoutMs: options.socketTimeoutMs,
+          dnsTtlMs: options.dnsTtlMs,
+        },
+        { dns: ctx.runtime.dns, hrtime: () => ctx.runtime.hrtime() },
+      );
     case 'ses':
       return new SesProvider({
         region: options.region,
         accessKeyId: options.accessKeyId,
         secretAccessKey: options.secretAccessKey,
+        endpoint: options.endpoint,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: options.client,
+        timing: resolveProbeTiming(ctx.runtime),
       });
     case 'sendgrid':
       return new SendGridProvider({
         apiKey: options.apiKey,
         endpoint: options.endpoint,
         http: options.http,
+        requestTimeoutMs: options.requestTimeoutMs,
+        timing: resolveProbeTiming(ctx.runtime),
       });
     default:
       throw new Error(`Unsupported mail provider: ${type as string}`);
