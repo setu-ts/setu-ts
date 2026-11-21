@@ -17275,8 +17275,8 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
 
 ## Milestone 143: The `v0.13.0` Smoke Closeout
 
-**Source:** the full `0.13.0` smoke programme of 2026-11-19/20 on published `0.13.0`, recorded in
-`smoke/DEFECTS.md` as V13-1 … V13-194:
+**Source:** the full `0.13.0` smoke programme of 2026-11-19 to 21 on published `0.13.0`, recorded in
+`smoke/DEFECTS.md` as V13-1 … V13-270:
 
 - an outside claims-intake validation report and its soak evidence
   (`smoke/V0130-CLAIMS-VALIDATION.md`);
@@ -17287,12 +17287,17 @@ keeps its status through a real React Router build; `check:apps` and `check:brow
   (`smoke/X106-X111-FINDINGS.md`, 1,652 matrix rows);
 - rows found building an application on `0.13.0` (`smoke/V0130-MOHOR-RERUN.md`);
 - four agent builds, X112 to X115 (`smoke/X112-FINDINGS.md`): small models in isolated sessions
-  building on the REST and full-stack scaffolds, scored by hidden tests and a browser probe.
+  building on the REST and full-stack scaffolds, scored by hidden tests and a browser probe;
+- Part 26 (`smoke/X116-X123-FINDINGS.md`): eight exercises on Workers and on the queue, broker,
+  database, storage, secrets and discovery arms that no earlier run had driven. Everything in it ran
+  on local `workerd`, emulators and stand-ins: there is no Cloudflare account and no cloud account,
+  so nothing ran on the real services.
 
-A prior-decision audit then withdrew two rows and reworded 27. That leaves 172 open or partial rows
-(11 High, 57 Medium, 104 Low), including the remainders of M139 (X3-3, V12-8, V12-14, V12-15) and
-M140 (V12-65, V12-70, V12-75, V12-82, V12-85, V12-111, V12-120, V12-125, V12-130). They are grouped
-by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its reasons.
+A prior-decision audit then withdrew two rows and reworded 27, and Part 26 added 76 (V13-195 …
+V13-270). That leaves 248 open or partial rows (23 High, 96 Medium, 129 Low), including the
+remainders of M139 (X3-3, V12-8, V12-14, V12-15) and M140 (V12-65, V12-70, V12-75, V12-82, V12-85,
+V12-111, V12-120, V12-125, V12-130). They are grouped by shape into eighteen letters;
+`smoke/FIX-ORDER.md` holds the grouping and its reasons.
 
 **Decisions (maintainer, 2026-11-20).**
 
@@ -17300,43 +17305,63 @@ by shape into fourteen letters; `smoke/FIX-ORDER.md` holds the grouping and its 
   `setu workspace deploy` with its generated manifests and Secrets, and `setu workspace broker`,
   `workspace rpc` and `workspace ports --reallocate`. All stay, and their rows are fixed in M143d.
 - **No experimental tier.** Every published package is held to the same bar.
-- **One release.** All fourteen letters ship together in `0.14.0`. No row closes until that release
+- **One release.** All eighteen letters ship together in `0.14.0`. No row closes until that release
   is published and re-run.
+- **Part 26 joins this milestone** (2026-11-21). Its 76 rows are added here and not opened as a
+  milestone of their own. Twenty fall into existing letters by shape: a CLI row goes to the letter
+  that owns its command, a row whose fix is text goes to M143n, and six rows about error answers,
+  log lines and a missing option go to M143h, M143i and M143m. The other 56 form four new letters,
+  M143o to M143r, one per backend family, because each family is tested against its own set of
+  emulators.
 
-| Letter    | Kind   | Shape                                           | Rows                                                                                                                                                                                                | Packages                                                                                                                                                                                          |
-| --------- | ------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **M143a** | design | sessions and shared caches                      | V13-111, V13-112, V13-135, V13-136, V13-20, V13-34, V13-60, V13-137                                                                                                                                 | `session-plugin`, `react-router-plugin`, `http-security-plugin`, `kernel`, `cli` (full-stack template)                                                                                            |
-| **M143b** | fix    | a first command that fails                      | V13-36, V13-140, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161, V13-166, V13-168                                                                                                    | `cli`, `telemetry-plugin`, `database-plugin` (packaging)                                                                                                                                          |
-| **M143c** | design | calls between services that hang or pile up     | V13-101, X3-3, V13-23, V13-24, V13-25, V13-43, V13-102, V13-103, V13-104, V13-52, V13-54                                                                                                            | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`, `realtime-backplane-plugin`, `common`                                                                                   |
-| **M143d** | fix    | `adopt` and workspace output                    | V13-121, V13-144, V13-16, V13-22, V12-111, V13-153, V13-45, V13-46, V13-125, V13-163, V13-164, V13-179, V13-180, V13-181                                                                            | `cli` (workspace, `adopt`)                                                                                                                                                                        |
-| **M143e** | fix    | `add` wiring that is incomplete                 | V13-15, V13-37, V12-75, V13-149, V13-150, V13-151, V13-152, V13-155, V13-6, V13-21, V13-30, V13-44, V12-82, V13-167, V13-170, V13-171, V13-172, V13-176, V13-182                                    | `cli` (`add`)                                                                                                                                                                                     |
-| **M143f** | fix    | `generate` output that is wrong or unwired      | V13-14, V12-65, V12-70, V13-147, V13-186, V13-17, V13-18, V13-156, V13-159, V13-165, V13-185, V13-187, V13-188, V12-85                                                                              | `cli` (`generate`)                                                                                                                                                                                |
-| **M143g** | fix    | `setu check` and CLI-owned files                | V12-130, V13-146, V13-7, V13-47, V13-48, V13-49, V13-157, V13-158, V13-162, V13-194                                                                                                                 | `cli` (`check`, `sync`)                                                                                                                                                                           |
-| **M143h** | fix    | errors a client can act on                      | V13-9, V13-40, V13-107, V13-115, V13-117, V13-118, V13-50, V13-53, V13-132, V13-133, V13-139                                                                                                        | `database-plugin`, `messaging-plugin`, `queue-plugin`, `exceptions`, `audit-plugin`, `runtime`                                                                                                    |
-| **M143i** | fix    | what the process says while it runs and stops   | V13-8, V13-11, V13-27, V13-38, V13-39, V13-10, V13-12, V13-13, V13-26, V13-120                                                                                                                      | `kernel`, `runtime`, `common`, `queue-plugin`, `messaging-plugin`, `agent-runs-plugin`, `vector-store-plugin`                                                                                     |
-| **M143j** | fix    | the full-stack template and runtime differences | V13-41, V13-42, V13-108, V13-109, V13-113, V12-120, V13-55, V13-110, V13-114                                                                                                                        | `cli` (full-stack template), `runtime`, `kernel`, `react-router-plugin`                                                                                                                           |
-| **M143k** | fix    | prompts, devtool, briefs, client and build      | V13-122, V12-125, V13-32, V13-33, V13-57, V13-127, V13-169, V13-173, V13-174, V13-175, V13-177, V13-189, V13-190                                                                                    | `cli`, `sdk`                                                                                                                                                                                      |
-| **M143l** | design | OpenAPI document gaps                           | V13-58, V13-59, V13-61, V13-62, V13-63, V13-65, V13-56                                                                                                                                              | `openapi-plugin`, `common`, `validation-plugin`, `storage-plugin`, `mcp-plugin`                                                                                                                   |
-| **M143m** | design | options and small gaps in integrations          | V13-192, V13-2, V13-4, V13-5, V13-64, V13-119, V13-131, V12-131, V12-132, V13-193, V12-8, V12-15                                                                                                    | `react-router-plugin`, `auth-plugin`, `storage-plugin`, `mail-plugin`, `worker-pool-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`, `localization-plugin`, `full-stack-starter`, `common` |
-| **M143n** | docs   | documentation                                   | V13-28, V13-29, V13-106, V13-123, V13-124, V13-183, V13-1, V13-3, V13-19, V13-31, V13-35, V13-105, V13-126, V13-128, V13-134, V13-138, V13-160, V13-178, V13-184, V13-191, V12-14, V13-129, V13-130 | `docs/upgrading.md`, package READMEs and agent cards, `PUBLIC_API.md`, the website                                                                                                                |
+| Letter    | Kind   | Shape                                            | Rows                                                                                                                                                                                                                                                               | Packages                                                                                                                                                                                                              |
+| --------- | ------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M143a** | design | sessions and shared caches                       | V13-111, V13-112, V13-135, V13-136, V13-20, V13-34, V13-60, V13-137                                                                                                                                                                                                | `session-plugin`, `react-router-plugin`, `http-security-plugin`, `kernel`, `cli` (full-stack template)                                                                                                                |
+| **M143b** | fix    | a first command that fails                       | V13-36, V13-140, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161, V13-166, V13-168                                                                                                                                                                   | `cli`, `telemetry-plugin`, `database-plugin` (packaging)                                                                                                                                                              |
+| **M143c** | design | calls between services that hang or pile up      | V13-101, X3-3, V13-23, V13-24, V13-25, V13-43, V13-102, V13-103, V13-104, V13-52, V13-54                                                                                                                                                                           | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`, `kernel`, `realtime-backplane-plugin`, `common`                                                                                                       |
+| **M143d** | fix    | `adopt` and workspace output                     | V13-121, V13-144, V13-16, V13-22, V12-111, V13-153, V13-208, V13-264, V13-45, V13-46, V13-125, V13-163, V13-164, V13-179, V13-180, V13-181                                                                                                                         | `cli` (workspace, `adopt`)                                                                                                                                                                                            |
+| **M143e** | fix    | `add` wiring that is incomplete                  | V13-15, V13-37, V12-75, V13-149, V13-150, V13-151, V13-152, V13-155, V13-207, V13-6, V13-21, V13-30, V13-44, V12-82, V13-167, V13-170, V13-171, V13-172, V13-176, V13-182, V13-222, V13-254, V13-270                                                               | `cli` (`add`)                                                                                                                                                                                                         |
+| **M143f** | fix    | `generate` output that is wrong or unwired       | V13-14, V12-65, V12-70, V13-147, V13-186, V13-17, V13-18, V13-156, V13-159, V13-165, V13-185, V13-187, V13-188, V13-225, V12-85                                                                                                                                    | `cli` (`generate`)                                                                                                                                                                                                    |
+| **M143g** | fix    | `setu check` and CLI-owned files                 | V12-130, V13-146, V13-7, V13-47, V13-48, V13-49, V13-157, V13-158, V13-162, V13-194                                                                                                                                                                                | `cli` (`check`, `sync`)                                                                                                                                                                                               |
+| **M143h** | fix    | errors a client can act on                       | V13-9, V13-40, V13-107, V13-115, V13-117, V13-118, V13-237, V13-50, V13-53, V13-132, V13-133, V13-139, V13-218, V13-252                                                                                                                                            | `database-plugin`, `messaging-plugin`, `queue-plugin`, `exceptions`, `audit-plugin`, `runtime`                                                                                                                        |
+| **M143i** | fix    | what the process says while it runs and stops    | V13-8, V13-11, V13-27, V13-38, V13-39, V13-10, V13-12, V13-13, V13-26, V13-120, V13-223, V13-256                                                                                                                                                                   | `kernel`, `runtime`, `common`, `logger-plugin`, `queue-plugin`, `messaging-plugin`, `agent-runs-plugin`, `vector-store-plugin`                                                                                        |
+| **M143j** | fix    | the full-stack template and runtime differences  | V13-41, V13-42, V13-108, V13-109, V13-113, V12-120, V13-55, V13-110, V13-114                                                                                                                                                                                       | `cli` (full-stack template), `runtime`, `kernel`, `react-router-plugin`                                                                                                                                               |
+| **M143k** | fix    | prompts, devtool, briefs, client and build       | V13-122, V12-125, V13-32, V13-33, V13-57, V13-127, V13-169, V13-173, V13-174, V13-175, V13-177, V13-189, V13-190                                                                                                                                                   | `cli`, `sdk`                                                                                                                                                                                                          |
+| **M143l** | design | OpenAPI document gaps                            | V13-58, V13-59, V13-61, V13-62, V13-63, V13-65, V13-56                                                                                                                                                                                                             | `openapi-plugin`, `common`, `validation-plugin`, `storage-plugin`, `mcp-plugin`                                                                                                                                       |
+| **M143m** | design | options and small gaps in integrations           | V13-192, V13-265, V13-2, V13-4, V13-5, V13-64, V13-119, V13-131, V12-131, V12-132, V13-193, V12-8, V12-15                                                                                                                                                          | `react-router-plugin`, `auth-plugin`, `storage-plugin`, `mail-plugin`, `messaging-plugin`, `worker-pool-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`, `localization-plugin`, `full-stack-starter`, `common` |
+| **M143n** | docs   | documentation                                    | V13-28, V13-29, V13-106, V13-123, V13-124, V13-183, V13-1, V13-3, V13-19, V13-31, V13-35, V13-105, V13-126, V13-128, V13-134, V13-138, V13-160, V13-178, V13-184, V13-191, V13-221, V13-226, V13-227, V13-229, V13-250, V13-253, V13-269, V12-14, V13-129, V13-130 | `docs/upgrading.md`, package READMEs and agent cards, `PUBLIC_API.md`, the website                                                                                                                                    |
+| **M143o** | design | Workers: realtime, Durable Objects and messaging | V13-195, V13-196, V13-200, V13-201, V13-202, V13-203, V13-204, V13-205, V13-206, V13-209, V13-210, V13-211, V13-219, V13-224                                                                                                                                       | `websocket-plugin`, `cloudflare-plugin`, `runtime`, `kernel`, `common`, `cli` (Workers templates)                                                                                                                     |
+| **M143p** | design | queues and brokers off the common path           | V13-197, V13-198, V13-199, V13-258, V13-212, V13-213, V13-214, V13-215, V13-259, V13-260, V13-261, V13-262, V13-263, V13-266, V13-220, V13-267, V13-268                                                                                                            | `queue-plugin` (`sqs`, `SnsPublisher`), `cloudflare-plugin` (`WorkersQueue`), `messaging-plugin` (`pubsub`, `service-bus`), `realtime-backplane-plugin`, `mail-plugin` (`ses`)                                        |
+| **M143q** | design | databases off PostgreSQL                         | V13-230, V13-231, V13-236, V13-238, V13-239, V13-240, V13-241, V13-242, V13-243, V13-244, V13-249, V13-251                                                                                                                                                         | `database-plugin` (Prisma and Drizzle on MySQL, Bigtable, Cosmos, DynamoDB), `agent-runs-plugin`, `auth-plugin`, `cli`                                                                                                |
+| **M143r** | fix    | provider arms that cannot work as documented     | V13-232, V13-233, V13-234, V13-235, V13-216, V13-217, V13-245, V13-246, V13-247, V13-248, V13-228, V13-255, V13-257                                                                                                                                                | `storage-plugin`, `feature-flags-plugin`, `secrets-plugin`, `service-discovery-plugin` (`dns`), `mail-plugin` (`ses`), `notification-plugin` (`slack`), `queue-plugin`                                                |
 
-**Sequence.** The letters run in order, a to n, with one exception: **M143g runs before M143e and
-M143f** (maintainer, 2026-11-21). The order decides what is safe first. M143a leads: it is the only
-letter whose rows harm an application's users, it crosses a trust boundary, and it is
-**security-audited** before it merges. M143b follows with the commands that fail outright. M143a to
-M143d hold all eleven High rows, so if the release must be cut short, the cut falls on the late
-letters, which hold none. M143c and M143h to M143m can start beside the CLI letters, since they
-touch other packages. The CLI letters run one at a time, because they share files, in the order b,
-d, g, e, f, k. M143g goes ahead of the `add` and `generate` letters because their rows are wiring
-that is missing or wrong, which is what `setu check` exists to catch, and three of its own rows
-(V13-47, V13-48, V13-49) are misses of exactly that: with the gate fixed first, each later wiring
-fix has a failing `setu check` as its test. M143n batches the documentation last.
+**Sequence.** M143a to M143n run in order, with one exception: **M143g runs before M143e and M143f**
+(maintainer, 2026-11-21). The order decides what is safe first. M143a leads: it is the only letter
+whose rows harm an application's users, it crosses a trust boundary, and it is **security-audited**
+before it merges. M143b follows with the commands that fail outright. M143a to M143d hold eleven of
+the 23 High rows. The other twelve are in M143o to M143r, which are lettered last only because they
+were added last. They touch plugin packages, so they start beside the CLI letters once M143a has
+merged, in the order p, q, r, o: work that is lost or repeated, then writes that report a wrong
+result, then provider arms that cannot start, then Workers realtime. If the release must be cut
+short, the cut falls on M143e to M143n, which hold no High row. M143c and M143h to M143m can also
+start beside the CLI letters, since they touch other packages. Two letters that share a package do
+not run at the same time, and the one holding a High row in that package goes first, for example
+M143p before M143c in `realtime-backplane-plugin`, M143p before M143h and M143i in `queue-plugin`
+and `messaging-plugin`, M143q before M143h in `database-plugin`. The CLI letters run one at a time,
+because they share files, in the order b, d, g, e, f, k; M143o's rows in the Workers templates wait
+for them. M143g goes ahead of the `add` and `generate` letters because their rows are wiring that is
+missing or wrong, which is what `setu check` exists to catch, and three of its own rows (V13-47,
+V13-48, V13-49) are misses of exactly that: with the gate fixed first, each later wiring fix has a
+failing `setu check` as its test. M143n batches the documentation last.
 
 **Gates for the whole milestone.** Beside each letter's own gates:
 
 - every fix ships with a test that fails without it; for a CLI row that is a row in the
   scaffold-and-boot gate, not only a unit test;
 - the CLI matrix of the smoke programme's Part 24 is re-run on the release candidate;
+- a fix in M143o to M143r is proved against the emulator or stand-in its row was found on, and the
+  rows that could only be read from source (the backplane's `messaging` transport on Pub/Sub and
+  Service Bus, the conditional-write stores on MySQL) are driven before they are closed;
 - after `0.14.0` is published, every row is re-run on it with `0.13.0` as the control, and a
   first-hour exercise follows the getting-started guide with no other context, per template and
   runtime.
@@ -17409,6 +17434,8 @@ failure-rate option on the breaker.
 - **V13-22** — Workspace gRPC members at /grpc exclude native gRPC clients.
 - **V12-111** — depends-on member gets gRPC client it cannot connect with.
 - **V13-153** — Adopted member config never calls transport module.
+- **V13-208** — `setu adopt` builds the Workers workspace that `new --workspace` refuses.
+- **V13-264** — The Service Bus emulator documentation and the generated stack are out of date.
 - **V13-45** — Compose project names and image tags collide across projects.
 - **V13-46** — Standalone .dockerignore says context is workspace root.
 - **V13-125** — generate app notice misreports README transport section markers.
@@ -17431,6 +17458,8 @@ wired to memory, or without its companion files.
 - **V13-151** — Multi-package add wires only first package/broker.
 - **V13-152** — add database prisma after drizzle leaves mixed toolchain.
 - **V13-155** — Generated Deno output fails deno fmt in four places.
+- **V13-207** — `setu add messaging` on the Workers microservice scaffold answers 503 on every
+  route.
 - **V13-6** — add database prints GitHub links, not setu-ts.dev.
 - **V13-21** — add database writes default URL for PostgreSQL nothing starts.
 - **V13-30** — add idempotency writes bare plugin agent-runs refuses.
@@ -17443,6 +17472,10 @@ wired to memory, or without its companion files.
 - **V13-176** — Default memory backend for database/vector-store left unwired.
 - **V13-182** — `add database` and `add auth` print their registration while events, queue and cache
   wire themselves.
+- **V13-222** — On Workers `add database` never names D1, and `g migration` writes a Node-style
+  runner.
+- **V13-254** — The CLI's refusal for Prisma with MySQL talks about Drizzle.
+- **V13-270** — CLI gaps for the less common messaging shapes.
 
 ### Milestone 143f: `generate` Output That Is Wrong or Unwired
 
@@ -17464,6 +17497,7 @@ row re-run found (V13-14, V13-17, V13-18); they go first within the letter.
   builder rewrote.
 - **V13-187** — Generated files cite internal tracker ids.
 - **V13-188** — The generated `signedSession()` test helper signs nobody in.
+- **V13-225** — A refusal recommends a command that is itself refused.
 - **V12-85** — Following g job hint leaves job unwired.
 
 ### Milestone 143g: `setu check` and CLI-Owned Files
@@ -17495,15 +17529,19 @@ conflicts a client cannot tell apart.
 - **V13-115** — Serializable conflict via native Drizzle handle masked 500.
 - **V13-117** — RPC with no reply answers 500, not 504.
 - **V13-118** — RabbitMQ queue.add during outage answers opaque 500.
+- **V13-237** — A write that timed out is answered "not applied" when it was applied.
 - **V13-50** — Pool acquire timeout: 503 outage vs saturation, error log flood.
 - **V13-53** — Node refused WebSocket upgrade gets bare response, no problem body.
 - **V13-132** — Prisma P1017 unclassified; masked 500.
 - **V13-133** — Mongo error subclasses missed by exact-name classifier.
 - **V13-139** — Distinct 409 conflicts share about:blank type.
+- **V13-218** — Foreign-key and NOT NULL violations answer a masked 500.
+- **V13-252** — A value too long for its column, and a lock wait timeout, answer a masked 500 on
+  every SQL cell.
 
 ### Milestone 143i: What the Process Says While It Runs and Stops
 
-**Package(s):** `kernel`, `runtime`, `common`, `queue-plugin`, `messaging-plugin`,
+**Package(s):** `kernel`, `runtime`, `common`, `logger-plugin`, `queue-plugin`, `messaging-plugin`,
 `agent-runs-plugin`, `vector-store-plugin`. Ships in `0.14.0`. Silent crashes and shutdowns,
 failures logged without their cause, and ceilings nothing documents.
 
@@ -17517,6 +17555,9 @@ failures logged without their cause, and ceilings nothing documents.
 - **V13-13** — app.stop logs no stopping or stopped line.
 - **V13-26** — Shutdown drain hard-coded 10 s vs generated 30 s.
 - **V13-120** — Queue readiness cache TTL hard-coded 5 s.
+- **V13-223** — The request log records 200 for a WebSocket upgrade answered with 101.
+- **V13-256** — A failed response stream is printed raw, outside the logger, while the request log
+  says 200.
 
 ### Milestone 143j: The Full-Stack Template and Runtime Differences
 
@@ -17571,14 +17612,16 @@ encoding, component hoisting, API-key parameters.
 ### Milestone 143m: Options and Small Gaps in Integrations
 
 **Package(s):** `react-router-plugin`, `auth-plugin`, `storage-plugin`, `mail-plugin`,
-`worker-pool-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`, `localization-plugin`,
-`full-stack-starter`, `common`. Ships in `0.14.0`. Missing options and small requests. V13-192 is
-the largest: a page policy cannot be attached to one operation of a page action, so the agent
-builders wrote their rate limits and upload checks by hand. Each plan names the public surface it
-adds.
+`messaging-plugin`, `worker-pool-plugin`, `multi-tenancy-plugin`, `vector-store-plugin`,
+`localization-plugin`, `full-stack-starter`, `common`. Ships in `0.14.0`. Missing options and small
+requests. V13-192 is the largest: a page policy cannot be attached to one operation of a page
+action, so the agent builders wrote their rate limits and upload checks by hand. Each plan names the
+public surface it adds.
 
 - **V13-192** — A page policy attaches to a route, not to one operation, and no agent builder used
   the framework's limiter or upload check.
+- **V13-265** — The `custom` broker arm is one clause of documentation, and a trace cannot cross a
+  broker written from it.
 - **V13-2** — resourceServer.resource fixed; per-tenant hosts get broken challenge.
 - **V13-4** — SMTP sends contentId attachment as attachment, not inline.
 - **V13-5** — pgvector wrong-opclass index reported as missing.
@@ -17619,17 +17662,147 @@ fixed.
 - **V13-184** — The testing card omits that `inject()` returns a `Headers` object and takes `body`.
 - **V13-191** — `csrf.exclude` for an API with no browser session is in neither the generated README
   nor the session card.
+- **V13-221** — The D1 README does not say an ordinary table stores a wrong-typed value.
+- **V13-226** — What crosses a call between services is written nowhere.
+- **V13-227** — The SDK card's first example fails at run time.
+- **V13-229** — The SQS adapter's options are in no document.
+- **V13-250** — The database README says four adapters ship and has no DynamoDB section.
+- **V13-253** — The README's isolation advice does not hold on MySQL.
+- **V13-269** — The backplane README on readiness and lateness does not describe the `messaging`
+  transport.
 - **V12-14** — createFullStackAppFromConfig JSDoc example fails as written.
 - **V13-129** — PUBLIC_API documents nonexistent shutdown options and signal handling.
 - **V13-130** — Upgrade guide omits Zod peer ERESOLVE and remedy.
 
+### Milestone 143o: Workers: Realtime, Durable Objects and Messaging
+
+**Package(s):** `websocket-plugin`, `cloudflare-plugin`, `runtime`, `kernel`, `common`, `cli`
+(Workers templates). Ships in `0.14.0`. Found by running two Workers side by side. A WebSocket room
+and the Durable Object backplane work only while each Worker has had a single member, a client that
+leaves mid-response skips its `ctx.defer` cleanup, and two scaffolded Workers microservices cannot
+message each other. The plan settles where a room's sockets live, given that workerd ties each
+socket to the request that accepted it. Measured on local `workerd` only; nothing ran on Cloudflare
+itself.
+
+- **V13-195** (High) — A WebSocket room works for one member per Worker only.
+- **V13-196** (High) — The Durable Object backplane goes deaf once a Worker's first room member
+  leaves.
+- **V13-200** — On workerd a client that leaves mid-response skips every `ctx.defer` cleanup.
+- **V13-201** — A binding of the wrong kind is not caught.
+- **V13-202** — The edge cache cannot be invalidated.
+- **V13-203** — On Workers a client's clean WebSocket close hangs for 30 seconds.
+- **V13-204** — The Durable Object lock grants every caller for a TTL of `Infinity`, `NaN`, zero or
+  a negative value.
+- **V13-205** — The documented `max_batch_size = 1` makes Workers request/reply strictly serial.
+- **V13-206** — The Durable Object lock's documented use cannot be built.
+- **V13-209** — Service bindings are in no document and no scaffold.
+- **V13-210** — A trace cannot cross Workers messaging.
+- **V13-211** — Two scaffolded Workers microservices cannot message each other.
+- **V13-219** — A throwing cron handler is logged without its message.
+- **V13-224** — Static discovery between Workers needs a flag or a binding the scaffold does not
+  set.
+
+### Milestone 143p: Queues and Brokers off the Common Path
+
+**Package(s):** `queue-plugin` (`sqs`, `SnsPublisher`), `cloudflare-plugin` (`WorkersQueue`),
+`messaging-plugin` (`pubsub`, `service-bus`), `realtime-backplane-plugin`, `mail-plugin` (`ses`).
+Ships in `0.14.0`. RabbitMQ and Redis have retry budgets, dead-letter stores and soak evidence;
+these arms do not. A job that exhausts its attempts is deleted on Workers and on SQS, an SQS job
+longer than the visibility timeout runs again, a failing handler is redelivered without limit on
+Pub/Sub, and the backplane's `messaging` transport reaches every replica only on RabbitMQ. The plan
+settles what an exhausted job does on every adapter, a fan-out subscription for the backplane, and
+whether `consumerRetry` extends to Pub/Sub and Service Bus. Measured on emulators; V13-258 was
+measured on Kafka, NATS and Redis Streams and read from source for Pub/Sub and Service Bus.
+
+- **V13-197** (High) — On Workers a job that exhausts `maxAttempts` is deleted, and `onFailed` is
+  never called.
+- **V13-198** (High) — An SQS job longer than the visibility timeout runs again and again, then is
+  reported failed.
+- **V13-199** (High) — With the README's SQS example an exhausted job is deleted and counted as
+  dead-lettered.
+- **V13-258** (High) — The backplane's `messaging` transport loses cross-replica frames on every
+  broker but RabbitMQ.
+- **V13-212** — `SnsPublisher` publishes nothing the SQS adapter can read.
+- **V13-213** — A message the SQS adapter cannot read is redelivered forever.
+- **V13-214** — The framework's attempts and the queue's own redrive policy disagree silently.
+- **V13-215** — The SQS adapter and the SES provider have no reachability check, though the docs say
+  they do.
+- **V13-259** — A Service Bus publish has no bound and no error class.
+- **V13-260** — After a fatal Pub/Sub stream error the consumer is dead until restart while health
+  says `up`.
+- **V13-261** — A failing handler is redelivered with no delay, no limit and no setting on Pub/Sub
+  and Service Bus.
+- **V13-262** — Service Bus consumer concurrency is fixed at 1 with no option.
+- **V13-263** — A crashed Service Bus requester leaves its reply-inbox subscription for ever.
+- **V13-266** — The README's Pub/Sub ordering claim did not hold.
+- **V13-220** — Retry spacing and polling are fixed on the Workers and SQS queues.
+- **V13-267** — A consume-only service never reports a dead Service Bus.
+- **V13-268** — On Pub/Sub a missing topic stops the boot without naming the topic.
+
+### Milestone 143q: Databases off PostgreSQL
+
+**Package(s):** `database-plugin` (Prisma and Drizzle on MySQL, Bigtable, Cosmos, DynamoDB),
+`agent-runs-plugin`, `auth-plugin`, `cli`. Ships in `0.14.0`. On Prisma with MySQL a conditional
+write that lost its race reports success, a Bigtable project exits a minute after its first database
+call on a host without Google credentials, and the three NoSQL stores have no working call bound and
+no readiness probe. The plan settles how the Prisma adapter learns the affected-row count on MySQL,
+how driver options reach the Bigtable client, and whether a unit of work on the NoSQL stores can
+carry a conditional write. The outbox, inbox and idempotency stores build on conditional writes and
+were not driven on MySQL; this letter drives them. Measured on a MySQL server and on the three
+stores' emulators.
+
+- **V13-230** (High) — On Prisma with MySQL a conditional write that lost its race reports success.
+- **V13-231** (High) — A Bigtable project built as documented dies 60 s after its first database
+  call.
+- **V13-236** — Readiness stays green for a stopped or frozen NoSQL store.
+- **V13-238** — Nothing bounds a call to the three NoSQL stores by default, and the documented
+  bounds do not work.
+- **V13-239** — Bigtable reads slow down with every update.
+- **V13-240** — On Bigtable the first authorization check after boot denies a valid grant.
+- **V13-241** — A unit of work on the NoSQL stores cannot carry a conditional write, so concurrent
+  updates are lost.
+- **V13-242** — On Drizzle with MySQL every `contains` filter and offset-only paging is a SQL syntax
+  error.
+- **V13-243** — Drizzle with MySQL cannot write through the repository, and says so only as a
+  masked 500.
+- **V13-244** — A MySQL deadlock or duplicate key through `query()` answers 500.
+- **V13-249** — The agent-run store refusal on DynamoDB and Bigtable names no reason.
+- **V13-251** — A connection lost while a unit of work is idle answers 500 on Drizzle with MySQL.
+
+### Milestone 143r: Provider Arms That Cannot Work as Documented
+
+**Package(s):** `storage-plugin`, `feature-flags-plugin`, `secrets-plugin`,
+`service-discovery-plugin` (`dns`), `mail-plugin` (`ses`), `notification-plugin` (`slack`),
+`queue-plugin`. Ships in `0.14.0`. Arms that had never met a server. The Azure storage provider
+cannot start from a connection string, GCS signed URLs always fail, a 502 on a GCS download ends the
+process, and an unreachable LaunchDarkly stops the application from starting. The rest are missing
+endpoint options, calls with no time bound, and outages reported as "not there". Each fix ships with
+a test against a local stand-in. Measured on stand-ins; no live account was used.
+
+- **V13-232** (High) — With LaunchDarkly unreachable at boot the application never starts.
+- **V13-233** (High) — The Azure storage provider cannot start from a connection string.
+- **V13-234** (High) — GCS signed URLs always fail.
+- **V13-235** (High) — On GCS a 502 or 503 answer to a download ends the process.
+- **V13-216** — No AWS call has a time bound and no option adds one.
+- **V13-217** — An unreachable Secrets Manager or S3 is a masked 500.
+- **V13-245** — `exists()` and `delete()` report an outage as "not there".
+- **V13-246** — The DNS discovery provider cannot be pointed at a name server and is never `down`.
+- **V13-247** — When every record of a service is removed, the old instances are served
+  indefinitely.
+- **V13-248** — GCS has no endpoint option, and the B2 preset defaults to a host that does not
+  exist.
+- **V13-228** — The SES provider has no `endpoint` option.
+- **V13-255** — The Azure secrets provider needs a peer the README does not name.
+- **V13-257** — The Slack channel drops `subject`.
+
 **Deliverables (M143 as a whole):**
 
-- [ ] M143a–M143n, each closing its rows on the published `0.14.0` re-run
+- [ ] M143a–M143r, each closing its rows on the published `0.14.0` re-run
 - [ ] `smoke/DEFECTS.md` rows updated as each letter ships
-- [ ] A plan per design letter (M143a, M143c, M143l, M143m) before implementation
+- [ ] A plan per design letter (M143a, M143c, M143l, M143m, M143o, M143p, M143q) before
+      implementation
 - [ ] The committed-tree security audit of M143a
-- [x] **ROADMAP.md** — this section and the Progress Tracking rows `143`–`143n`
+- [x] **ROADMAP.md** — this section and the Progress Tracking rows `143`–`143r`
 
 ---
 
@@ -17996,7 +18169,7 @@ not a pass threshold.
 | 140e      | ✅     | docs — documentation the code letters change                                                                                                                                                                                                                                              |
 | 141       | ✅     | common + kernel + react-router + auth + cli — page route policies: route middleware for React Router actions                                                                                                                                                                              |
 | 142       | ✅     | cli + react-router-plugin + auth-plugin + apps/full-stack — pages that never need the app's own `/api`: generator actions, refusals keep their status, template and example practise it, `setu.W007`                                                                                      |
-| 143       | ⬜     | the `v0.13.0` smoke closeout — 172 rows in fourteen letters, all shipping in `0.14.0`                                                                                                                                                                                                     |
+| 143       | ⬜     | the `v0.13.0` smoke closeout — 248 rows in eighteen letters, all shipping in `0.14.0`                                                                                                                                                                                                     |
 | 143a      | ⬜     | session + react-router + http-security + kernel + cli — sessions and shared caches (security-audited)                                                                                                                                                                                     |
 | 143b      | ⬜     | cli + telemetry + database — a first command that fails                                                                                                                                                                                                                                   |
 | 143c      | ⬜     | service-discovery + resilience + grpc + kernel + realtime-backplane — calls between services that hang or pile up                                                                                                                                                                         |
@@ -18005,10 +18178,14 @@ not a pass threshold.
 | 143f      | ⬜     | cli — `generate` output that is wrong or unwired                                                                                                                                                                                                                                          |
 | 143g      | ⬜     | cli — `setu check` and CLI-owned files                                                                                                                                                                                                                                                    |
 | 143h      | ⬜     | database + messaging + queue + exceptions + audit — errors a client can act on                                                                                                                                                                                                            |
-| 143i      | ⬜     | kernel + runtime + queue + messaging + agent-runs + vector-store — what the process says while it runs and stops                                                                                                                                                                          |
+| 143i      | ⬜     | kernel + runtime + logger + queue + messaging + agent-runs + vector-store — what the process says while it runs and stops                                                                                                                                                                 |
 | 143j      | ⬜     | cli + runtime + kernel + react-router — the full-stack template and runtime differences                                                                                                                                                                                                   |
 | 143k      | ⬜     | cli + sdk — prompts, devtool, briefs, client and build                                                                                                                                                                                                                                    |
 | 143l      | ⬜     | openapi + common + validation + storage + mcp — OpenAPI document gaps                                                                                                                                                                                                                     |
-| 143m      | ⬜     | react-router + auth + storage + mail + worker-pool + multi-tenancy + vector-store + localization — options and small gaps in integrations                                                                                                                                                 |
+| 143m      | ⬜     | react-router + auth + storage + mail + messaging + worker-pool + multi-tenancy + vector-store + localization — options and small gaps in integrations                                                                                                                                     |
 | 143n      | ⬜     | docs — documentation                                                                                                                                                                                                                                                                      |
+| 143o      | ⬜     | websocket + cloudflare + runtime + kernel + cli — Workers: realtime, Durable Objects and messaging                                                                                                                                                                                        |
+| 143p      | ⬜     | queue + cloudflare + messaging + realtime-backplane — queues and brokers off the common path                                                                                                                                                                                              |
+| 143q      | ⬜     | database + agent-runs + auth — databases off PostgreSQL                                                                                                                                                                                                                                   |
+| 143r      | ⬜     | storage + feature-flags + secrets + service-discovery + mail + notification — provider arms that cannot work as documented                                                                                                                                                                |
 | 144       | ⬜     | cli + website + docs — agent guidance: a repair section per `setu check` finding, `--json`, corrections in the brief, `llms.txt`                                                                                                                                                          |
