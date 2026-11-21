@@ -1,7 +1,9 @@
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { startHost, stopHost } from '../apps/smoke-helpers.ts';
+import { createServer } from 'node:net';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { freePort, startHost, stopHost } from '../apps/smoke-helpers.ts';
+import { unusedPort } from './node-helpers.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const appsDir = join(root, 'apps');
@@ -32,5 +34,46 @@ describe('startHost cwd option', () => {
     const host = startHost(process.execPath, ['-e', cwdProbe(appsDir)], undefined, { cwd: root });
     await host.status;
     expect(await stopHost(host)).toBe(1);
+  });
+});
+
+describe('freePort', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  /** The `Math.random()` value that makes `freePort` draw exactly `port`. */
+  const drawing = (port: number): number => (port - 20_000 + 0.5) / 12_768;
+
+  it('draws a bindable port below the range the operating system assigns from', async () => {
+    const port = await freePort();
+    expect(port).toBeGreaterThanOrEqual(20_000);
+    expect(port).toBeLessThanOrEqual(32_767);
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', resolve);
+    });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it('draws again when the port is already bound, and gives up after twenty draws', async () => {
+    const taken = await unusedPort();
+    const free = await unusedPort();
+    const occupant = createServer();
+    await new Promise<void>((resolve) => occupant.listen(taken, '127.0.0.1', resolve));
+    try {
+      const random = vi
+        .spyOn(Math, 'random')
+        .mockReturnValueOnce(drawing(taken))
+        .mockReturnValueOnce(drawing(free));
+      expect(await freePort()).toBe(free);
+      expect(random).toHaveBeenCalledTimes(2);
+
+      random.mockReset().mockReturnValue(drawing(taken));
+      await expect(freePort()).rejects.toThrow('No free loopback port between 20000 and 32767.');
+      expect(random).toHaveBeenCalledTimes(20);
+    } finally {
+      await new Promise<void>((resolve) => occupant.close(() => resolve()));
+    }
   });
 });

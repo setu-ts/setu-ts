@@ -99,6 +99,7 @@ describe('Per-member Node test runner', () => {
       'run',
       '--coverage',
       '--shard=2/3',
+      '--reporter=default',
       '--reporter=blob',
       '--coverage.reporter=json-summary',
       '--coverage.reporter=json',

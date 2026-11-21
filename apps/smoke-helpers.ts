@@ -1,7 +1,6 @@
 /* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
 /** Node host utilities shared by the example smoke checks. */
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 import { createServer } from 'node:net';
 
 /** Exit code `check:apps` reads as "skipped, external prerequisite unavailable". */
@@ -37,17 +36,34 @@ export function skipAfterTests(reason: string): void {
   });
 }
 
-/** Binds an ephemeral loopback port, then releases it for the example server. */
+/**
+ * A loopback port for the example server this smoke check is about to start.
+ *
+ * The port is drawn at random from 20000–32767 and checked by binding it. That
+ * range is below the one an operating system assigns from on its own (Linux
+ * 32768–60999, macOS and Windows 49152–65535), so no outgoing connection and no
+ * listener on port `0` takes it between this call and the server's start. This
+ * file is copied into standalone examples, so it shares no state with other
+ * processes: two smoke checks started at the same moment could draw the same port.
+ *
+ * @returns A free TCP port
+ * @throws {Error} If twenty draws in a row are already bound
+ */
 export async function freePort(): Promise<number> {
-  const server = createServer();
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  return address.port;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 12_768);
+    const server = createServer();
+    const bound = await new Promise<boolean>((resolve) => {
+      server.once('error', () => resolve(false));
+      server.listen(port, '127.0.0.1', () => resolve(true));
+    });
+    if (!bound) continue;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    return port;
+  }
+  throw new Error('No free loopback port between 20000 and 32767.');
 }
 
 /** Options for {@link startHost}. */
