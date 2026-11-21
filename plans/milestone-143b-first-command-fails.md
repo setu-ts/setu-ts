@@ -12,8 +12,13 @@ documented first command works as written (`--env-file` renamed to a flag Node d
 `npm install`, `setu add messaging --broker pubsub` against the emulator, `setu add telemetry` on
 Workers), and a flag with no value, a target that is a file or a non-empty directory, and an
 unsupported Node version are refused or warned about by name. First letter of the CLI lane; it edits
-only `packages/cli`, `packages/telemetry-plugin` (README only) and the shared files every letter
-touches.
+only `packages/cli`, `packages/telemetry-plugin` (README only), the comments `apps/*/.dockerignore`
+carry from CLI output (`apps/` is in the CLI lane), and the shared files every letter touches
+(`CHANGELOG.md`, `PUBLIC_API.md`, `docs/upgrading.md`, ROADMAP row, `CLAUDE.md` status line).
+**Deliberate exception:** `docs/cli.md` and `docs/deployment.md` belong to no code lane (M143n, the
+Docs letter, runs after every code letter); this letter edits only the sentences in them that name
+the CLI's own `--env-file` flag, because leaving them would ship a documented command that cannot
+run. No other `docs/` file is touched.
 
 - **In scope:** V13-36, V13-140, V13-141, V13-142 (CLI half), V13-143, V13-145, V13-148, V13-154,
   V13-161, V13-166, V13-168.
@@ -26,31 +31,35 @@ touches.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                                | Source (file:line)                                                               | Verified surface / fact                                                                                                                                                                                                                      |
-| ---------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Node consumes `--env-file` after script  | measured, Node 24.22.1: `node a.mjs --env-file nope` → exit 9                    | Node scans the whole argv, script arguments included; `--env-file=x` too. Bun 1.4.5 and Deno 2.9.6 pass it through. `--dotenv` and `--env-path` reach the script on all three. A `--` before it is not consumed, but users do not type `--`. |
-| `parseArgs` valued flag with no value    | `packages/cli/src/args.ts:96-109`                                                | `--key=` (empty) and `--key` followed by a flag or end of argv are recorded as boolean `true`.                                                                                                                                               |
-| `stringFlag`                             | `packages/cli/src/args.ts:125-131`                                               | returns `undefined` for `true`, so `new.ts` reads `--template`/`--runtime`/`--dir` as absent.                                                                                                                                                |
-| `VALUE_FLAGS`                            | `packages/cli/src/constants.ts:70-114`                                           | the set of flags that consume the next token; includes `env-file` (`:100`).                                                                                                                                                                  |
-| Dispatcher gates                         | `packages/cli/src/cli.ts:175-236`                                                | control-character gate, `builtInFlagRefusal`, `builtInPositionalRefusal` run before any command body; all return `EXIT_USAGE` (2) through `deps.error`. Plugin commands' flags are checked in their own dispatcher.                          |
-| `--env-file` registration                | `flags.ts:146`, `flags.ts:200`, `templates/env-file.ts:53-80`                    | `new` and `generate app` accept it; `readEnvFilePath(flags)` reads `flags['env-file']`; `new.ts:216` refuses it with `--workspace`; help text `new.ts:638,657`, `app.ts:195`.                                                                |
-| `add view` script prefixing              | `packages/cli/src/commands/add-view.ts:154-166`                                  | prefixes the CSS step to `build` and `start:dev` only; `build/` is gitignored and `StaticPlugin({ root: './build/assets' })` reports down while it is missing, so `/health` is 503.                                                          |
-| `add telemetry` peers                    | `packages/cli/src/commands/add.ts:289-303`                                       | peers `@opentelemetry/api`, `sdk-trace-base`, `resources`, `context-async-hooks` restricted to `runtimes: ['node', 'bun', 'deno']`.                                                                                                          |
-| OTel peer ranges                         | `packages/cli/src/templates/client-dependencies.ts:30-34`                        | `api ~1.9.0`, `sdk-trace-base ^2.9.0`, `resources ^2.9.0`, `context-async-hooks ^2.0.0` — the one table of versions.                                                                                                                         |
-| Telemetry loads peers only with exporter | `packages/telemetry-plugin/src/plugin/telemetry-plugin.ts:240-270`               | a bare `TelemetryPlugin()` loads nothing; `exporter` set → `loadOtelTracerProvider` imports the peers, throwing `OptionalDependencyUnavailableError` (boot failure → Workers answers 503 per request).                                       |
-| Microservice registers telemetry         | `packages/cli/src/templates/microservice.ts:39`                                  | `TelemetryPlugin` in `MICROSERVICE_ADDITIONS` on every runtime; the template declares no `npmDependencies`.                                                                                                                                  |
-| Template npm dependencies                | `packages/cli/src/templates/registry.ts:262-266`, `project-files.ts:1226`        | `TemplateManifest.npmDependencies` is merged into `dependencies` on npm targets and the Deno import map.                                                                                                                                     |
-| Bigtable ERESOLVE                        | measured, npm 11.19.1, scratch projects                                          | telemetry-plugin@0.13.0 + database-plugin@0.13.0 + bigtable ^6 → ERESOLVE (`resources@1` hoisted vs optional peer ^2.9). Adding only `@opentelemetry/resources ^2.9.0` to the project → install exit 0. Bigtable 7.5.1 still pulls ^1.       |
-| Pub/Sub connection                       | `packages/cli/src/workspace/transport.ts:408-451`                                | `connection.variable = PUBSUB_PROJECT_ID`; the emulator host appears only in `connection.note` and Compose `memberEnv` (workspaces). `PubSubOptions` has no endpoint; the SDK reads `PUBSUB_EMULATOR_HOST` from the environment.             |
-| Broker env rows                          | `packages/cli/src/templates/broker.ts:225-240`, `add.ts:3208-3260`               | `brokerEnvVariables(spec)` returns one row (the connection variable); `add` appends it to the dotenv and `.example` and never prints `connection.note`.                                                                                      |
-| Generated test scripts                   | `project-files.ts:1662-1684` (npm), `:1300-1317` (Deno), `:1712-1732`            | `start*` scripts load the dotenv (`--env-file-if-exists` on Node, implicit/`--env-file=` on Bun, `--env-file=` on Deno when declared); `test`/`test:e2e` load nothing.                                                                       |
-| Deno missing env file                    | measured, Deno 2.9.6                                                             | `--env-file=nope` prints a warning and continues (exit 0).                                                                                                                                                                                   |
-| Workspace root test                      | `packages/cli/src/workspace/runtime-profile.ts:237,253`, `root-files.ts:180,210` | npm `npm run test --workspaces --if-present` exits 1 "No workspaces found!" with no member; Bun `bun run --filter '*' test` exits 1. Measured: npm 11.19.1, Bun 1.4.5.                                                                       |
-| `findExisting` rethrow                   | `packages/cli/src/utils/file-writer.ts:356-375`                                  | rethrows any non-ENOENT stat error; `new.ts:836` does not catch → ENOTDIR stack trace.                                                                                                                                                       |
-| `new` target                             | `packages/cli/src/commands/new.ts:813-844`                                       | refuses only exact file collisions; a non-empty directory is written into.                                                                                                                                                                   |
-| `writeFiles` is not a lock               | `packages/cli/src/utils/file-writer.ts:651-666`                                  | its own JSDoc: "not crash-atomic storage or a lock against concurrent editors".                                                                                                                                                              |
-| `IFileSystem.mkdir`                      | `packages/common/src/runtime.ts:111`                                             | `mkdir(path, { recursive? })`; non-recursive on an existing path rejects (EEXIST) — an atomic create.                                                                                                                                        |
-| Engines                                  | `packages/cli/package.json:22-24`, `packages/create/package.json:22-24`          | both `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`; `bin.ts` has no version check; `create` runs the same `runMain`.                                                                                                                               |
+| Reference                                | Source (file:line)                                                                 | Verified surface / fact                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node consumes `--env-file` after script  | measured, Node 24.22.1: `node a.mjs --env-file nope` → exit 9                      | Node scans the whole argv, script arguments included; `--env-file=x` too. Bun 1.4.5 and Deno 2.9.6 pass it through. `--dotenv` and `--env-path` reach the script on all three. A `--` before it is not consumed, but users do not type `--`.                                                                                                                                                                                                                                                                |
+| `parseArgs` valued flag with no value    | `packages/cli/src/args.ts:96-109`                                                  | `--key=` (empty) and `--key` followed by a flag or end of argv are recorded as boolean `true`.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `stringFlag`                             | `packages/cli/src/args.ts:125-131`                                                 | returns `undefined` for `true`, so `new.ts` reads `--template`/`--runtime`/`--dir` as absent.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `VALUE_FLAGS`                            | `packages/cli/src/constants.ts:70-114`                                             | the set of flags that consume the next token; includes `env-file` (`:100`).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Dispatcher gates                         | `packages/cli/src/cli.ts:175-236`                                                  | control-character gate, `builtInFlagRefusal`, `builtInPositionalRefusal` run before any command body; all return `EXIT_USAGE` (2) through `deps.error`. Plugin commands' flags are checked in their own dispatcher.                                                                                                                                                                                                                                                                                         |
+| `--env-file` registration                | `flags.ts:146`, `flags.ts:200`, `templates/env-file.ts:53-80`                      | `new` and `generate app` accept it; `readEnvFilePath(flags)` reads `flags['env-file']`, and two internal callers build a fake flag record (`env-file.ts:138`, `workspace/manifest.ts:430` — a string-keyed record, so a missed key type-checks); `new.ts:216` refuses it with `--workspace`; other mentions: `new.ts:542-543,638,657`, `app.ts:195,357`, `examples/new.ts:84`, `workspace/compose.ts:394` (generated `.dockerignore` comment, committed in `apps/*/.dockerignore`), `templates/rest.ts:37`. |
+| `add view` script prefixing              | `packages/cli/src/commands/add-view.ts:154-166`                                    | prefixes the CSS step to `build` and `start:dev` only; `build/` is gitignored and `StaticPlugin({ root: './build/assets' })` reports down while it is missing, so `/health` is 503.                                                                                                                                                                                                                                                                                                                         |
+| `add telemetry` peers                    | `packages/cli/src/commands/add.ts:289-303`                                         | peers `@opentelemetry/api`, `sdk-trace-base`, `resources`, `context-async-hooks` restricted to `runtimes: ['node', 'bun', 'deno']`.                                                                                                                                                                                                                                                                                                                                                                         |
+| OTel peer ranges                         | `packages/cli/src/templates/client-dependencies.ts:30-34`                          | `api ~1.9.0`, `sdk-trace-base ^2.9.0`, `resources ^2.9.0`, `context-async-hooks ^2.0.0` — the one table of versions.                                                                                                                                                                                                                                                                                                                                                                                        |
+| Telemetry loads peers only with exporter | `packages/telemetry-plugin/src/plugin/telemetry-plugin.ts:240-270`                 | a bare `TelemetryPlugin()` loads nothing; `exporter` set → `loadOtelTracerProvider` imports the peers, throwing `OptionalDependencyUnavailableError` (boot failure → Workers answers 503 per request).                                                                                                                                                                                                                                                                                                      |
+| Microservice registers telemetry         | `packages/cli/src/templates/microservice.ts:39`, `:239-247`                        | `TelemetryPlugin` in `MICROSERVICE_ADDITIONS` on every runtime; the template declares no `npmDependencies`. The class-based host takes `CLASS_BASED_MODULE_MANIFEST` (`templates/style.ts`), and `withReadmeSection` copies only `readmeSection` from `MICROSERVICE_MANIFEST`, so a peer added to `MICROSERVICE_MANIFEST` alone would miss `--style class-based`.                                                                                                                                           |
+| Template npm dependencies                | `packages/cli/src/templates/registry.ts:262-266`, `project-files.ts:1226`          | `TemplateManifest.npmDependencies` is merged into `dependencies` on npm targets and the Deno import map.                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Bigtable ERESOLVE                        | measured, npm 11.19.1, scratch projects                                            | telemetry-plugin@0.13.0 + database-plugin@0.13.0 + bigtable ^6 → ERESOLVE (`resources@1` hoisted vs optional peer ^2.9). Adding only `@opentelemetry/resources ^2.9.0` to the project → install exit 0. Bigtable 7.5.1 still pulls ^1.                                                                                                                                                                                                                                                                      |
+| Pub/Sub connection                       | `packages/cli/src/workspace/transport.ts:408-451`                                  | `connection.variable = PUBSUB_PROJECT_ID`; the emulator host appears only in `connection.note` and Compose `memberEnv` (workspaces). `PubSubOptions` has no endpoint; the SDK reads `PUBSUB_EMULATOR_HOST` from the environment.                                                                                                                                                                                                                                                                            |
+| Broker env rows                          | `packages/cli/src/templates/broker.ts:225-240`, `add.ts:3208-3260`                 | `brokerEnvVariables(spec)` returns one row (the connection variable); `add` appends it to the dotenv and `.example` and never prints `connection.note`.                                                                                                                                                                                                                                                                                                                                                     |
+| Generated test scripts                   | `project-files.ts:1662-1684` (npm), `:1300-1317` (Deno), `:1712-1736`              | `start*` scripts load the dotenv (`--env-file-if-exists` on Node, implicit/`--env-file=` on Bun, `--env-file=` on Deno when declared); `test`/`test:e2e` load nothing. `generatedTestScripts` also produces Workers' scripts, and Workers manifests have `envFilePath` stripped (`:338`) and read `.dev.vars`. Node's shared `nodeFlags` (`:1734-1736`) also carries the telemetry preload. The comment at `:1296` says a missing Deno env file is a hard error, which the measurement below contradicts.   |
+| Deno missing env file                    | measured, Deno 2.9.6                                                               | `--env-file=nope` prints a warning and continues (exit 0).                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Workspace root test                      | `packages/cli/src/workspace/runtime-profile.ts:237,253`, `root-files.ts:180,210`   | npm `npm run test --workspaces --if-present` exits 1 "No workspaces found!" with no member; Bun `bun run --filter '*' test` exits 1. Measured: npm 11.19.1, Bun 1.4.5.                                                                                                                                                                                                                                                                                                                                      |
+| `findExisting` rethrow                   | `packages/cli/src/utils/file-writer.ts:361-380`                                    | rethrows any non-ENOENT stat error; `new.ts:840` does not catch → ENOTDIR stack trace; `examples/new.ts:146` calls it with no catch either.                                                                                                                                                                                                                                                                                                                                                                 |
+| `new` target                             | `packages/cli/src/commands/new.ts:813-844`                                         | refuses only exact file collisions; a non-empty directory is written into.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `writeFiles` is not a lock               | `packages/cli/src/utils/file-writer.ts:651-666`                                    | its own JSDoc: "not crash-atomic storage or a lock against concurrent editors".                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `IFileSystem.mkdir`                      | `packages/common/src/runtime.ts:105-111`, `cli/src/utils/node-regular-file.ts:216` | `mkdir(path, { recursive? })`; the JSDoc does not promise EEXIST, but the Node implementation the CLI runs on rejects a non-recursive `mkdir` of an existing path (EEXIST) — an atomic create. `StatResult.mtime` is optional (`runtime.ts:47-55`). `IFileSystem` has no `rename`.                                                                                                                                                                                                                          |
+| Engines                                  | `packages/cli/package.json:22-24`, `packages/create/package.json:22-24`            | both `^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1`; `bin.ts` has no version check; `create` runs the same `runMain`.                                                                                                                                                                                                                                                                                                                                                                                              |
+| `MainProcess` is published               | `packages/cli/package.json:37-40` (`./main` subpath), `PUBLIC_API.md:11281-11301`  | adding a field to `MainProcess` changes a documented published interface.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| In-process command composition           | `commands/generate.ts:189,204`                                                     | `generate` calls `runAppCommand` and `runLibraryCommand` in the same process.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Workspace root files                     | `workspace/root-files.ts:317-327`, `commands/adopt.ts:69`                          | the root `.gitignore` is written here; `adopt` reuses `workspaceRootFiles`.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Root peer recording                      | `commands/add.ts:2849-2915`                                                        | only `add` records optional peers in an npm/Bun workspace root (M119f); `generate app` does not.                                                                                                                                                                                                                                                                                                                                                                                                            |     |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -66,65 +75,89 @@ touches.
 
 - **Decision:** rename the CLI flag to `--dotenv <path>` for `new` and `generate app` (VALUE_FLAGS,
   both `flags.ts` tables, `readEnvFilePath`, help text, every message that names the flag, the
-  `--workspace` refusal). The internal names (`envFilePath`, `readEnvFilePath`) stay. A literal
+  `--workspace` refusal). The internal name `envFilePath` stays. `readEnvFilePath` changes to take
+  the raw flag value (`string | boolean | readonly string[] | undefined`) instead of a flag record,
+  so every caller names the key itself and the compiler sees it: `new.ts`, `app.ts` pass
+  `args.flags['dotenv']`; `env-file.ts:138` and `workspace/manifest.ts:430` pass the stored path
+  string. Every site in the §1 row is updated, including the generated `.dockerignore` comment in
+  `workspace/compose.ts:394` and the six `apps/*/.dockerignore` files that carry it. A literal
   `--env-file` that reaches the CLI (it does under Bun and Deno launchers) is refused by the
-  dispatcher with exit 2:
+  dispatcher with exit 2 (it runs before the positional refusal too, since with `env-file` gone from
+  VALUE_FLAGS its path would otherwise be read as a stray positional):
   `--env-file is Node's own option and never reaches setu under Node; use --dotenv <path>.`
   `--env-file` is removed from VALUE_FLAGS and from both flag tables, and the refusal runs before
   `builtInFlagRefusal` so it is the message the user sees instead of "unknown flag".
 - **Why:** Node exits 9 before any JavaScript runs; no code in `bin.ts` can intercept it. A shebang
   `env -S node --` would work on Linux but not through npm's Windows command shims. No existing
   users (maintainer rule), so no alias.
-- **Test home:** `test/unit/args-and-flags.test.ts` (rename + refusal), the scaffold-and-boot gate
-  row "`--dotenv` scaffold boots and reads the chosen file" spawning the built `bin.js` through
-  `node` (so the Node argv behaviour is exercised for real), and a negative row asserting
-  `node bin.js new x --env-file a` still exits 9 — documenting why the rename exists.
+- **Test home:** `test/unit/args.test.ts` / `test/unit/flags.test.ts` (rename + refusal); a unit
+  test that a workspace manifest whose member has `envFilePaths` still reads after the rename (the
+  `manifest.ts:430` caller); the scaffold-and-boot gate row "`--dotenv` scaffold boots and reads the
+  chosen file" spawning the built `bin.js` through `node`, so the Node argv path is exercised for
+  real. No test asserts Node's own exit 9 (that is Node's behaviour, not Setu's).
 
 ### 3.2 V13-145 — a valued flag with no value is refused
 
 - **Decision:** a new dispatcher gate in `cli.ts`, run for built-in commands after the control-
-  character gate: every flag in `VALUE_FLAGS` whose parsed value is `true` (or an array containing
-  `true`, for repeatable flags) is refused with exit 2 and
+  character gate: every flag in `VALUE_FLAGS` whose parsed value is `true` is refused (a repeatable
+  flag with any value-less occurrence already collapses to `true` in `setFlag`, `args.ts:63-70`, so
+  no array case exists) with exit 2 and
   `Option --<flag> needs a value (write --<flag>=<value> when the value begins with "-").` Plugin
   commands are not gated (their flags are their handler's). `parseArgs` is unchanged; its JSDoc
   sentence "callers type-check the value" is replaced by a pointer to the gate.
 - **Why:** one central check covers every current and future valued flag; per-command checks (the
-  existing `--broker needs a value`) stay but become unreachable for this case, which is fine.
+  existing `--broker needs a value`) stay for direct callers but are unreachable through `runCli`.
+  The existing tests that assert those per-command messages through `runCli`
+  (`new-command.test.ts:1425,1557,1563`, `app-command.test.ts:429,460`,
+  `library-command.test.ts:178`, `logger-choice.test.ts:114`) are updated to the gate's message.
+  `--example` with no value now exits 2 with the gate message instead of exit 1 with the offered
+  list; accepted (`setu new --help` lists the examples).
 - **Test home:** `test/unit/cli-dispatch.test.ts` table over `--template`, `--runtime`, `--dir`,
   `--template=`, `g service foo --dir`, `--depends-on` repeated with a missing value; each exit 2,
   nothing written. Scaffold gate: not needed (no generated output changes).
 
 ### 3.3 V13-36 — telemetry peers on Workers and in the microservice template
 
-- **Decision:** one exported internal helper `telemetryPeers(runtime)` (in
-  `templates/client-dependencies.ts`) returns the four OTel peers with their pinned ranges for EVERY
-  runtime, Workers included. `add telemetry` reads it (the `runtimes` restriction is dropped: the
-  entry lists all four runtimes) and the microservice template's manifest sets `npmDependencies` to
-  it, so a microservice project on Node, Bun, Deno and Workers lists the peers from the first
-  commit. No other peer (otlp exporter, instrumentations) is added by this letter.
+- **Decision:** one internal constant `TELEMETRY_PEERS` (in `templates/client-dependencies.ts`): the
+  four OTel peer names with their pinned ranges, the same on every runtime (Deno's `npm:` prefix is
+  added downstream, `project-files.ts:1212`). The `add` table's `telemetry.peers.packages` is
+  derived from its keys and its `runtimes` lists all four runtimes, Workers included. The
+  microservice template sets `npmDependencies` to it on BOTH hosts: `MICROSERVICE_MANIFEST`
+  (functional) and the class-based manifest built in `withReadmeSection`. So a microservice project
+  on Node, Bun, Deno and Workers, functional or class-based, lists the peers from the first commit.
+  In an npm or Bun workspace, `generate app` also records the template's peers in the workspace root
+  through the same root-recording function `add` uses (`add.ts:2849-2915`, extracted if needed so
+  both call one implementation), because a root-hoisted plugin cannot load a peer nested only under
+  a member (checklist item 10). No other peer (otlp exporter, instrumentations) is added by this
+  letter.
 - **Why:** a bare `TelemetryPlugin()` needs no peer, but the Workers README and the printed
   registration set `exporter`, and then every route answers 503. Measured by the runner: 200 with
   exactly these four installed.
-- **Test home:** unit — `add telemetry` on a Workers fixture records the four peers; `microservice`
-  template manifest on each runtime lists them. Scaffold gate — a Workers rest project,
-  `add telemetry`, paste the printed registration (`exporter: 'console'`), install, run the
-  generated workerd test: 200 (guarded the same way as the existing Workers rows).
+- **Test home:** unit — `add telemetry` on a Workers fixture records the four peers; the
+  `microservice` manifest lists them for every style × runtime; one test asserts the `add` table and
+  the template read the same constant; `generate app --template microservice` in an npm workspace
+  records them in the root. Scaffold gate — a Workers rest project, `add telemetry`, paste the
+  printed registration (`exporter: 'console'`), install, run the generated workerd test: 200
+  (guarded the same way as the existing Workers rows).
 
 ### 3.4 V13-142 — Bigtable and telemetry install together (CLI half)
 
 - **Decision:** the microservice template lists the OTel peers (§3.3), which alone resolves the
   ERESOLVE (measured: `resources ^2.9.0` at the project level is enough). In addition, when
-  `add database --type bigtable` runs in a project whose manifest has `@setu-ts/telemetry-plugin`
-  and lacks any of the four peers, it records the missing ones through the same peer-recording path
-  `add` already uses (member and workspace root per M119f), and prints one line naming why.
+  `add database --type bigtable` runs on an npm or Bun manifest (`package.json`; ERESOLVE is an npm
+  failure, Deno import maps are not affected) that has `@setu-ts/telemetry-plugin` and lacks any of
+  the four peers, it records the missing ones through the same peer-recording path `add` already
+  uses (member and workspace root per M119f), and prints
+  `Added the OpenTelemetry peers telemetry-plugin needs: Bigtable pulls @opentelemetry/resources 1, which npm would otherwise hoist in their place.`
 - **M143q half (Data lane, not edited here):** no `database-plugin` code or range change is needed —
   Bigtable 6 and 7 both pull `resources ^1`, so no range fixes it. M143q adds a note to
   `packages/database-plugin/README.md`'s Bigtable section: an application that also uses
   `@setu-ts/telemetry-plugin` lists `@opentelemetry/resources@^2.9.0` (and the other OTel peers) in
   its own `package.json`, which `setu new --template microservice` and `setu add` now write.
-- **Test home:** unit — bigtable add on a manifest with telemetry-plugin records the missing peers,
-  and records nothing when they are present; scaffold gate (network) — microservice Node,
-  `add database --type bigtable`, `npm install` exit 0.
+- **Test home:** unit — bigtable add on a manifest with telemetry-plugin records the missing peers
+  and prints the line, records and prints nothing when they are present, and nothing on a Deno
+  import map; scaffold gate (network) — microservice Node, `add database --type bigtable`,
+  `npm install` exit 0; and the same in an npm workspace member created by `generate app`.
 
 ### 3.5 V13-141 — the CSS build runs before `test`
 
@@ -148,11 +181,18 @@ touches.
   the `.example` (empty value). `new` already writes every row with its own `develop` value
   (`new.ts:422`); `add` calls `withEnvVariable`, which handles only `variables[0]` with one value
   (`add.ts:3799-3805`), so `add` loops over the rows and passes each row's own value. `add` also
-  prints `connection.note` after the `Connection:` line for every transport that has one. And the
-  generated `test` and `test:e2e` scripts load the project's dotenv the way its `start` scripts do
-  (Node `--env-file-if-exists=<dotenv>`, Bun `--env-file=<dotenv>` only for a non-default name, Deno
-  `--env-file=<dotenv>` when the manifest declares one) — one helper shared with the start scripts,
-  so the two cannot drift.
+  prints `connection.note` after the `Connection:` line for every transport that has one. The
+  Pub/Sub note is reworded: the dotenv now carries `PUBSUB_EMULATOR_HOST`, so it says the local
+  dotenv points the SDK at the emulator and that a deployment leaves the variable unset to reach
+  Google Cloud (no "export" instruction); the topics caveat stays. The Compose `memberEnv` key is
+  derived from `emulator.variable`, so the name has one source. And the generated `test` and
+  `test:e2e` scripts load the project's dotenv the way its `start` scripts do (Node
+  `--env-file-if-exists=<dotenv>`, Bun `--env-file=<dotenv>` only for a non-default name — the
+  `bun test --env-file=` form is measured before it is used, Deno `--env-file=<dotenv>` when the
+  manifest declares one). One helper returns ONLY the env-file fragment and both the start and test
+  scripts call it; the Node telemetry preload is not added to test scripts. Workers test scripts get
+  no flag (Workers reads `.dev.vars` through wrangler and has no `envFilePath`). The comment at
+  `project-files.ts:1296` is corrected to the measured Deno behaviour.
 - **Why:** the SDK takes the emulator only from the environment; `setu.config.ts` is evaluated
   before ConfigPlugin runs, so only the process environment reaches it, and the test scripts had
   none. Deno 2.9 warns on a missing env file and continues; Node's flag is `-if-exists`.
@@ -162,7 +202,8 @@ touches.
   `add messaging --broker pubsub`: `.env` holds `PUBSUB_EMULATOR_HOST=127.0.0.1:8085`, and a probe
   test file run by the project's own test script sees it in `process.env`. The real emulator is not
   started (the gcloud image is not local; pulling it is outside this letter) — the M143 gate "proved
-  against the emulator" is recorded as open for the release re-run.
+  against the emulator" is recorded as open for the release re-run. A unit test asserts the reworded
+  note in the generated README.
 
 ### 3.7 V13-148 — one `setu` writer per project at a time
 
@@ -171,23 +212,37 @@ touches.
   non-recursive `mkdir` (parent created recursively first) and writes `owner.json`
   `{ pid, command }` inside it; on EEXIST it reads the owner: a live pid → refuse with exit 1
   `Another setu command (<command>, pid <pid>) is changing this project; run this again when it finishes.`;
-  a dead or unreadable owner → remove the stale lock once and retry. Released in a `finally` (SIGINT
-  reaches the finally through the existing interruption path). Each command acquires it itself,
-  after it has resolved its target directory and before its first read of a file it will rewrite;
-  the dispatcher does not, because only the command knows its target. `lockRoot` is the workspace
-  root when the target is a workspace member (so two members' `add` runs cannot race on the root
-  manifest), otherwise the project directory. Applied to `add`, `generate` (schematics and
-  `generate app`/`library`) and `sync` — every command that rewrites `setu.config.ts`,
-  `package.json` or a barrel — and skipped for `--dry-run`. `isAlive` comes from `MainProcess`
-  (`process.kill(pid, 0)` on Node; EPERM counts as alive). The scaffolded `.gitignore` gains
-  `.setu-ts/write.lock/`.
+  a dead owner, or a missing or unreadable `owner.json` on a lock directory whose `mtime` is more
+  than 10 seconds old → remove the stale lock once and retry. A missing or unreadable owner on a
+  younger directory (or one with no `mtime`) is treated as live: that is the window between another
+  process's `mkdir` and its `owner.json` write, and stealing it would reopen the race. The refusal
+  names the lock path:
+  `Another setu command (<command>, pid <pid>) is changing this project; run this again when it finishes. If none is running, delete <lockRoot>/.setu-ts/write.lock.`
+  Released in a `finally` (SIGINT reaches the finally through the existing interruption path). Each
+  command acquires it itself, after project detection has succeeded (so a refused `add` outside a
+  project leaves no `.setu-ts/` behind) and before its first read of a file it will rewrite. There
+  is exactly one acquisition per process run: `runGenerateCommand` acquires it before it dispatches
+  to schematics, `runAppCommand` or `runLibraryCommand`, and those two never acquire it themselves.
+  The lock is not re-entrant: a second acquisition by the same pid refuses like any live owner,
+  which is what the concurrency test relies on. `lockRoot` is the workspace root when the target is
+  a workspace member (so two members' `add` runs cannot race on the root manifest), otherwise the
+  project directory. Applied to `add`, `generate` (schematics, `generate app`, `generate library`)
+  and `sync`, and skipped for `--dry-run`. Other commands that rewrite the same files —
+  `devtool enable`, `workspace broker`, `workspace rpc`, `adopt` — are not locked by this letter;
+  the helper is ready for M143d (`adopt`, workspace) and M143k (devtool), and the report names them.
+  `isAlive` comes from `MainProcess` (`process.kill(pid, 0)` on Node; EPERM counts as alive). The
+  scaffolded project `.gitignore` and the workspace root `.gitignore` (`root-files.ts:317-327`) both
+  gain `.setu-ts/write.lock/`.
 - **Why:** last-writer-wins lost a package 10/10 with `setu check` clean. A compare-before-write in
   `writeFiles` would need every call site to pass the bytes it planned from, and still leaves a
   window; a lock around read-plan-write closes it.
-- **Test home:** `test/unit/project-lock.test.ts` (acquire, live-owner refusal, stale takeover,
-  release on throw); `test/integration/concurrent-add.test.ts` — two `runCli(['add', …])` started
-  together against one temp project: each package lands or the second exits 1 with the named
-  message, and the final `package.json`/`setu.config.ts` hold every package whose run exited 0.
+- **Test home:** `test/unit/project-lock.test.ts` (acquire, live-owner refusal naming the path,
+  stale takeover, owner-not-yet-written window treated as live, old ownerless lock taken over, EPERM
+  counts as alive, release on throw); `generate app` and `generate library` succeed with the lock
+  wired; a refused `add` outside a project leaves no `.setu-ts/`;
+  `test/integration/concurrent-add.test.ts` — two `runCli(['add', …])` started together against one
+  temp project: each package lands or the second exits 1 with the named message, and the final
+  `package.json`/`setu.config.ts` hold every package whose run exited 0.
 
 ### 3.8 V13-154 — an empty workspace's root test passes
 
@@ -196,14 +251,17 @@ touches.
   generated-by header) and the root `test` script becomes `node scripts/test.mjs` /
   `bun scripts/test.mjs`. It expands the root `workspaces` globs, and when no matched directory
   holds a `package.json` it prints `No members or libraries yet; nothing to test.` and exits 0;
-  otherwise it runs the profile's current `testAll` command and exits with its code. Deno is
-  unchanged (its root task passes today). `testAll` stays the one owner of the per-member command.
+  otherwise it runs the profile's current `testAll` command and exits with its code. The script runs
+  the package manager with `shell: true` on Windows (`process.platform === 'win32'`), where `npm` is
+  `npm.cmd`. Deno is unchanged (its root task passes today). `adopt` writes root files through
+  `workspaceRootFiles` (`adopt.ts:69`), so an adopted workspace gets the script too. `testAll` stays
+  the one owner of the per-member command.
 - **Why:** both package managers fail on an empty match. npm has no flag for it; Bun's
   `--if-present` beside `--filter` does exit 0 on an empty match (measured, Bun 1.4.5), but one
   script for both keeps one mechanism and one message.
 - **Test home:** unit for the root manifest and script content; scaffold gate — `new --workspace`
   (Node, Bun): root test exit 0 with no member; after `generate app`, a failing member test makes
-  the root test fail (exit propagation).
+  the root test fail (exit propagation); a unit test that `adopt`'s root files include the script.
 
 ### 3.9 V13-161 and V13-168 — the `new` target must be absent or an empty directory
 
@@ -213,13 +271,15 @@ touches.
   holding anything other than `.git` → exit 1
   `<path> already exists and is not empty (<n> entries); choose another name or empty it.` When the
   entries look like an interrupted `new` (the existing `interruptedRunRetryHint` condition), its
-  hint is printed after the refusal. `findExisting` keeps rethrowing (other callers rely on it); the
-  remaining `new.ts` call is wrapped so an unexpected filesystem error is reported by name, never as
-  a stack trace.
+  hint is printed after the refusal. The same target check runs on the `new --example` path
+  (`examples/new.ts`, dispatched at `new.ts:697` before the template path) through one shared
+  function. `findExisting` keeps rethrowing (other callers rely on it); the remaining `new.ts` call
+  is wrapped so an unexpected filesystem error is reported by name, never as a stack trace.
 - **Why:** writing beside a user's files is surprising and hard to undo; a directory with only
   `.git` is a common deliberate target.
 - **Test home:** unit in `test/unit/new-command.test.ts` (file target, file ancestor, non-empty dir,
-  `.git`-only dir accepted, dry-run refusal, interrupted-run hint kept).
+  `.git`-only dir accepted, dry-run refusal, interrupted-run hint kept) and the same file-target and
+  non-empty cases through `new --example`.
 
 ### 3.10 V13-166 — a warning outside the declared Node range
 
@@ -234,18 +294,19 @@ touches.
 - **Why:** a warning, not a refusal: the row asks for the user to be told; the CLI works on some
   older lines and a hard refusal would block them for no measured fault.
 - **Test home:** `test/unit/node-version.test.ts` (range table incl. 20.20.2, 22.12.0, 22.23.4,
-  23.1.0, 24.22.0, 24.22.1, 26.12.1, 27.0.0); `test/unit/main.test.ts` warning printed / not printed
-  / skipped under Bun.
+  23.1.0, 24.22.0, 24.22.1, 26.12.1, 27.0.0); `test/unit/main-node-runtime.test.ts` warning printed
+  / not printed / skipped under Bun.
 
 ## 4. Exported surface — every symbol names its consumer
 
-**Breaking for implementors:** none in TypeScript. The CLI flag `--env-file` is renamed `--dotenv`
-(a command-line break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ships in
-minor `0.14.0`.
+**Breaking for implementors:** none in TypeScript (two optional fields are added to the published
+`MainProcess`, which is additive). The CLI flag `--env-file` is renamed `--dotenv` (a command-line
+break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ships in minor `0.14.0`.
 
-| Exported symbol                      | Kind | Consumer / real code path that READS it                                                                                                                                                                 |
-| ------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| None from any package `src/index.ts` | —    | All new symbols are internal to `packages/cli` (`telemetryPeers`, `withProjectLock`, the node-version comparator, `TransportConnection.emulator`). `packages/telemetry-plugin` changes only its README. |
+| Exported symbol                                           | Kind                                 | Consumer / real code path that READS it                                                                                                                                                                  |
+| --------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MainProcess.nodeVersion?`, `MainProcess.isProcessAlive?` | optional fields, `@setu-ts/cli/main` | `runMain` (version warning) and `withProjectLock` (stale-owner test); `PUBLIC_API.md` `MainProcess` entry updated in the same PR.                                                                        |
+| Nothing new from any package `src/index.ts`               | —                                    | All new symbols are internal to `packages/cli` (`TELEMETRY_PEERS`, `withProjectLock`, the node-version comparator, `TransportConnection.emulator`). `packages/telemetry-plugin` changes only its README. |
 
 ### 4.1 Options — every option names its consumer
 
@@ -258,46 +319,53 @@ minor `0.14.0`.
 
 ## 5. Implementation files
 
-| File                                                                       | Purpose                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `packages/cli/src/index.ts`                                                | unchanged (no new export).                                                      |
-| `packages/cli/src/cli.ts`                                                  | §3.1 `--env-file` refusal, §3.2 empty-value gate.                               |
-| `packages/cli/src/args.ts`                                                 | JSDoc only (§3.2).                                                              |
-| `packages/cli/src/constants.ts`, `src/flags.ts`                            | `env-file` → `dotenv`.                                                          |
-| `packages/cli/src/templates/env-file.ts`                                   | reads `dotenv`; messages name `--dotenv`.                                       |
-| `packages/cli/src/commands/new.ts`, `commands/app.ts`                      | help/refusal text; §3.9 target checks.                                          |
-| `packages/cli/src/commands/add.ts`                                         | §3.3 peers on Workers, §3.4 bigtable peers, §3.6 note printing, §3.7 lock.      |
-| `packages/cli/src/commands/add-view.ts`                                    | §3.5 test scripts.                                                              |
-| `packages/cli/src/commands/generate.ts`, `commands/sync.ts`                | §3.7 lock.                                                                      |
-| `packages/cli/src/templates/client-dependencies.ts`                        | `telemetryPeers(runtime)`.                                                      |
-| `packages/cli/src/templates/microservice.ts`                               | `npmDependencies` from `telemetryPeers`.                                        |
-| `packages/cli/src/templates/project-files.ts`                              | §3.6 test scripts load the dotenv; §3.7 `.gitignore` line.                      |
-| `packages/cli/src/workspace/transport.ts`, `templates/broker.ts`           | §3.6 `emulator` field and second env row.                                       |
-| `packages/cli/src/workspace/runtime-profile.ts`, `workspace/root-files.ts` | §3.8 root test script and `scripts/test.mjs`.                                   |
-| `packages/cli/src/utils/project-lock.ts` (new)                             | §3.7.                                                                           |
-| `packages/cli/src/utils/node-version.ts` (new)                             | §3.10 comparator and `SUPPORTED_NODE`.                                          |
-| `packages/cli/src/main.ts`                                                 | §3.10 check; `nodeVersion`/`isProcessAlive` on the Node host.                   |
-| `packages/cli/README.md`, `docs/cli.md`, `docs/deployment.md`              | §2 C1, and every behaviour above that the docs describe.                        |
-| `packages/telemetry-plugin/README.md`                                      | §2 C2: peers on every runtime, microservice template lists them, Bigtable note. |
-| `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `CLAUDE.md`             | letter entries.                                                                 |
+| File                                                                                                     | Purpose                                                                                               |
+| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `packages/cli/src/index.ts`                                                                              | unchanged (no new export).                                                                            |
+| `packages/cli/src/cli.ts`                                                                                | §3.1 `--env-file` refusal, §3.2 empty-value gate.                                                     |
+| `packages/cli/src/args.ts`                                                                               | JSDoc only (§3.2).                                                                                    |
+| `packages/cli/src/constants.ts`, `src/flags.ts`                                                          | `env-file` → `dotenv`.                                                                                |
+| `packages/cli/src/templates/env-file.ts`                                                                 | reads `dotenv`; messages name `--dotenv`.                                                             |
+| `packages/cli/src/workspace/manifest.ts`, `examples/new.ts`, `workspace/compose.ts`, `templates/rest.ts` | `readEnvFilePath` caller and the remaining `--env-file` mentions (§3.1); `examples/new.ts` also §3.9. |
+| `apps/*/.dockerignore` (six files)                                                                       | the regenerated CLI comment naming `--dotenv`.                                                        |
+| `packages/cli/src/templates/style.ts` (if the class-based manifest is built there)                       | §3.3 peers on the class-based microservice host.                                                      |
+| `PUBLIC_API.md`                                                                                          | `MainProcess` optional fields (§4).                                                                   |
+| `packages/cli/src/commands/new.ts`, `commands/app.ts`                                                    | help/refusal text; §3.9 target checks.                                                                |
+| `packages/cli/src/commands/add.ts`                                                                       | §3.3 peers on Workers, §3.4 bigtable peers, §3.6 note printing, §3.7 lock.                            |
+| `packages/cli/src/commands/add-view.ts`                                                                  | §3.5 test scripts.                                                                                    |
+| `packages/cli/src/commands/generate.ts`, `commands/sync.ts`                                              | §3.7 lock.                                                                                            |
+| `packages/cli/src/templates/client-dependencies.ts`                                                      | `TELEMETRY_PEERS`.                                                                                    |
+| `packages/cli/src/templates/microservice.ts`                                                             | `npmDependencies` from `TELEMETRY_PEERS` on both hosts.                                               |
+| `packages/cli/src/templates/project-files.ts`                                                            | §3.6 test scripts load the dotenv; §3.7 `.gitignore` line.                                            |
+| `packages/cli/src/workspace/transport.ts`, `templates/broker.ts`                                         | §3.6 `emulator` field and second env row.                                                             |
+| `packages/cli/src/workspace/runtime-profile.ts`, `workspace/root-files.ts`                               | §3.8 root test script and `scripts/test.mjs`.                                                         |
+| `packages/cli/src/utils/project-lock.ts` (new)                                                           | §3.7.                                                                                                 |
+| `packages/cli/src/utils/node-version.ts` (new)                                                           | §3.10 comparator and `SUPPORTED_NODE`.                                                                |
+| `packages/cli/src/main.ts`                                                                               | §3.10 check; `nodeVersion`/`isProcessAlive` on the Node host.                                         |
+| `packages/cli/README.md`, `docs/cli.md`, `docs/deployment.md`                                            | §2 C1, and every behaviour above that the docs describe.                                              |
+| `packages/telemetry-plugin/README.md`                                                                    | §2 C2: peers on every runtime, microservice template lists them, Bigtable note.                       |
+| `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `CLAUDE.md`                                           | letter entries.                                                                                       |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                       | src covered                                                                                  | Key assertions                                                                                                |
-| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `packages/cli/test/unit/cli-dispatch.test.ts` (existing or new) | `cli.ts`, `args.ts`                                                                          | §3.1 refusal text/exit 2; §3.2 table, nothing written; plugin commands not gated.                             |
-| existing flag/env-file unit tests                               | `flags.ts`, `constants.ts`, `templates/env-file.ts`                                          | `--dotenv` accepted with the old grammar; `env-file` absent from both tables.                                 |
-| `packages/cli/test/unit/new-command.test.ts`                    | `commands/new.ts`                                                                            | §3.9 cases; `--dotenv` with `--workspace` refused.                                                            |
-| existing `app` unit tests                                       | `commands/app.ts`                                                                            | `generate app --dotenv`.                                                                                      |
-| `packages/cli/test/unit/add-view.test.ts`                       | `commands/add-view.ts`                                                                       | §3.5 per runtime; existing `css` in `test` noted, absent `test` left absent.                                  |
-| existing `add` unit tests                                       | `commands/add.ts`                                                                            | §3.3 Workers peers; §3.4 bigtable records missing peers / nothing when present; §3.6 note printed.            |
-| existing template unit tests                                    | `microservice.ts`, `client-dependencies.ts`, `project-files.ts`, `broker.ts`, `transport.ts` | peers in every runtime's manifest; test scripts' env flag per runtime equals the start scripts'; pubsub rows. |
-| existing workspace unit tests                                   | `runtime-profile.ts`, `root-files.ts`                                                        | root `test` script, `scripts/test.mjs` content.                                                               |
-| `packages/cli/test/unit/project-lock.test.ts` (new)             | `utils/project-lock.ts`                                                                      | §3.7 acquire, refuse live, take over stale, release on throw, EPERM alive.                                    |
-| `packages/cli/test/integration/concurrent-add.test.ts` (new)    | lock wiring in `add.ts`/`generate.ts`/`sync.ts`                                              | two concurrent runs: no silent loss (fails without the lock: verified by reverting the wiring).               |
-| `packages/cli/test/unit/node-version.test.ts` (new)             | `utils/node-version.ts`                                                                      | range table; constant equals both `engines.node`.                                                             |
-| existing `main` unit tests                                      | `main.ts`                                                                                    | warning printed / not printed / skipped.                                                                      |
-| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts`               | generated output                                                                             | rows named in §3.1, §3.3, §3.4, §3.5, §3.6, §3.8 — each fails on `develop` source.                            |
+| Test file                                                    | src covered                                                                                  | Key assertions                                                                                                                      |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli/test/unit/cli-dispatch.test.ts`                | `cli.ts`, `args.ts`                                                                          | §3.1 refusal text/exit 2; §3.2 table, nothing written; plugin commands not gated.                                                   |
+| existing flag/env-file unit tests                            | `flags.ts`, `constants.ts`, `templates/env-file.ts`                                          | `--dotenv` accepted with the old grammar; `env-file` absent from both tables.                                                       |
+| `packages/cli/test/unit/new-command.test.ts`                 | `commands/new.ts`                                                                            | §3.9 cases; `--dotenv` with `--workspace` refused.                                                                                  |
+| existing `app` unit tests                                    | `commands/app.ts`                                                                            | `generate app --dotenv`.                                                                                                            |
+| `packages/cli/test/unit/add-view.test.ts`                    | `commands/add-view.ts`                                                                       | §3.5 per runtime; existing `css` in `test` noted, absent `test` left absent.                                                        |
+| existing `add` unit tests                                    | `commands/add.ts`                                                                            | §3.3 Workers peers; §3.4 bigtable records missing peers / nothing when present; §3.6 note printed.                                  |
+| existing template unit tests                                 | `microservice.ts`, `client-dependencies.ts`, `project-files.ts`, `broker.ts`, `transport.ts` | peers in every runtime's manifest; test scripts' env flag per runtime equals the start scripts'; pubsub rows.                       |
+| existing workspace unit tests                                | `runtime-profile.ts`, `root-files.ts`                                                        | root `test` script, `scripts/test.mjs` content.                                                                                     |
+| `packages/cli/test/unit/project-lock.test.ts` (new)          | `utils/project-lock.ts`                                                                      | §3.7 acquire, refuse live, take over stale, release on throw, EPERM alive.                                                          |
+| `packages/cli/test/integration/concurrent-add.test.ts` (new) | lock wiring in `add.ts`/`generate.ts`/`sync.ts`                                              | two concurrent runs: no silent loss (fails without the lock: verified by reverting the wiring).                                     |
+| `packages/cli/test/unit/node-version.test.ts` (new)          | `utils/node-version.ts`                                                                      | range table; constant equals both `engines.node`.                                                                                   |
+| existing `main` unit tests                                   | `main.ts`                                                                                    | warning printed / not printed / skipped.                                                                                            |
+| existing workspace manifest unit tests                       | `workspace/manifest.ts`                                                                      | a member with `envFilePaths` still reads after the rename.                                                                          |
+| existing examples unit tests                                 | `examples/new.ts`                                                                            | §3.9 file target and non-empty directory through `new --example`.                                                                   |
+| existing `generate` unit tests                               | `commands/generate.ts`                                                                       | `generate app`/`library` succeed with the lock; `generate app --template microservice` records OTel peers in an npm workspace root. |
+| `packages/cli/test/e2e/scaffold-runs-e2e.test.ts`            | generated output                                                                             | rows named in §3.1, §3.3, §3.4, §3.5, §3.6, §3.8 — each fails on `develop` source.                                                  |
 
 Every row's fix is shown failing first: the brief requires Codex to run each new test against the
 unfixed source and record the failure.
