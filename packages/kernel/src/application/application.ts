@@ -341,6 +341,8 @@ class Application implements IKernelApplication {
   /** Settles (rejecting) when `stop()` cancels the running start. */
   #startCancelled: Promise<never> | null = null;
   #cancelled = false;
+  /** Set while a start that already failed runs its close hooks. */
+  #startFailing = false;
   /** Created on first read of `ctx.signal`, so an unread signal costs nothing. */
   #startAbort: AbortController | undefined;
   /** Removes the kernel's fatal-error observer; set while subscribed. */
@@ -609,6 +611,7 @@ class Application implements IKernelApplication {
       // Startup fully completed (including listen): the application serves.
       this.#collector?.markRunning();
     } catch (error) {
+      if (!this.#cancelled) this.#startFailing = true;
       // Plugins may have connected resources and registered their `onClose`
       // hook before a later registration, environment validation, or `onInit`
       // step fails. `stop()` deliberately no-ops after a failed start, so this
@@ -630,6 +633,7 @@ class Application implements IKernelApplication {
     } finally {
       this.#startPromise = null;
       this.#cancelStart = null;
+      this.#startFailing = false;
     }
   }
 
@@ -1015,6 +1019,14 @@ class Application implements IKernelApplication {
     // runs the close hooks). A start that finished before the cancellation
     // reached it is stopped normally.
     if (this.#startPromise !== null) {
+      // A start that has already failed is unwinding on its own: wait for it,
+      // and do not report it as cancelled.
+      if (this.#startFailing) {
+        return this.#startPromise.then(
+          () => undefined,
+          () => undefined,
+        );
+      }
       if (this.#stopPromise === null) {
         const starting = this.#startPromise;
         this.#cancelRunningStart();
@@ -2064,6 +2076,9 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
+    // The response is being handed back: an abort from here on is not a
+    // client that left before it (a streamed body watches the signal itself).
+    handle.disarmAbort();
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
       // Keep the request in the shutdown drain, and leave defer open for work

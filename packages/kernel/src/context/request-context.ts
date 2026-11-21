@@ -40,6 +40,12 @@ export interface RequestContextHandle {
    * @since 0.11.0
    */
   takeDeferred(): DeferredCleanup[] | undefined;
+  /**
+   * Stops running cleanups on the request signal's abort, once the response
+   * has been handed back.
+   * @since 0.14.0
+   */
+  disarmAbort(): void;
 }
 
 /** Shared empty params — replaced by `setParams` once a route matches. */
@@ -81,6 +87,8 @@ class RequestContext implements IRequestContext {
   #slotValue: unknown;
   #slotOverflow: { readonly key: object; readonly value: unknown }[] | undefined;
   readonly #onAbort: ((ctx: IRequestContext) => void) | undefined;
+  /** The signal listener `#watchAbort` attached, until it is removed. */
+  #abortWatch: { readonly signal: AbortSignal; readonly aborted: () => void } | undefined;
 
   constructor(
     request: IRequest,
@@ -221,11 +229,12 @@ class RequestContext implements IRequestContext {
     const signal = this.request.signal;
     if (signal === undefined) return;
     const aborted = (): void => {
-      if (this.#completed) return;
+      if (this.#completed || this.#abortWatch === undefined) return;
       const cleanups = this.takeDeferred();
       this.#onAbort?.(this);
       if (cleanups !== undefined) void runDeferred(cleanups, this.#registry);
     };
+    this.#abortWatch = { signal, aborted };
     if (signal.aborted) {
       queueMicrotask(aborted);
       return;
@@ -233,8 +242,23 @@ class RequestContext implements IRequestContext {
     signal.addEventListener('abort', aborted, { once: true });
   }
 
+  /**
+   * Stops watching the request's signal: the response has been handed back,
+   * so a later abort is not a client that left before it. Deno's legacy
+   * `request.signal` aborts after every successful response, which would
+   * otherwise run cleanups under a handler that is still running behind an
+   * early middleware response.
+   */
+  disarmAbort(): void {
+    const watch = this.#abortWatch;
+    if (watch === undefined) return;
+    this.#abortWatch = undefined;
+    watch.signal.removeEventListener('abort', watch.aborted);
+  }
+
   /** Internal completion handoff; no list is allocated for an unused request. */
   takeDeferred(): DeferredCleanup[] | undefined {
+    this.disarmAbort();
     this.#completed = true;
     const cleanups = this.#deferred;
     this.#deferred = undefined;
@@ -273,5 +297,6 @@ export function createRequestContext(
       ctx.setParams(next);
     },
     takeDeferred: () => ctx.takeDeferred(),
+    disarmAbort: () => ctx.disarmAbort(),
   };
 }

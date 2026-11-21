@@ -126,6 +126,7 @@ describe('HEAD on a real server (V13-113)', () => {
     });
     const get = await fetch(`http://127.0.0.1:${port}/doc`);
     const getLength = get.headers.get('content-length');
+    expect(getLength).not.toBeNull();
     await get.text();
     const head = await fetch(`http://127.0.0.1:${port}/doc`, { method: 'HEAD' });
     expect(head.status).toBe(200);
@@ -247,6 +248,17 @@ describe('the drain sends HTTP/2 GOAWAY (V13-23)', () => {
 
       const stopping = app.stop();
       await goaway;
+      // A stream opened after GOAWAY is refused without reaching a handler.
+      const refused = await new Promise<string>((resolve) => {
+        try {
+          const late = session.request({ ':path': '/slow' });
+          late.on('error', (error: NodeJS.ErrnoException) => resolve(String(error.code)));
+          late.on('response', () => resolve('answered'));
+        } catch (error) {
+          resolve(String((error as NodeJS.ErrnoException).code));
+        }
+      });
+      expect(refused).not.toBe('answered');
       release();
       await ended;
       expect(body).toBe('finished');

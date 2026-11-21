@@ -62,6 +62,14 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
     }
   }, 30_000);
 
+  /** Polls the child's output until `ready` holds, for up to 10 s. */
+  async function until(ready: () => boolean): Promise<void> {
+    const deadline = Date.now() + 10_000;
+    while (!ready() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
   afterAll(() => {
     child.kill();
   });
@@ -69,6 +77,7 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
   it('answers HEAD from a GET route', async () => {
     const get = await fetch(`http://127.0.0.1:${port}/doc`);
     const length = get.headers.get('content-length');
+    expect(length).not.toBeNull();
     await get.text();
     const head = await fetch(`http://127.0.0.1:${port}/doc`, { method: 'HEAD' });
     expect(head.status).toBe(200);
@@ -80,7 +89,7 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
     await fetch(`http://127.0.0.1:${port}/broken`)
       .then((response) => response.text())
       .catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await until(() => records().some((record) => record['msg'] === 'Response stream failed'));
     expect(records().some((record) => record['msg'] === 'Response stream failed')).toBe(true);
     expect(stderr).not.toContain('source failed');
   });
@@ -89,7 +98,7 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
     expect(await (await fetch(`http://127.0.0.1:${port}/full`)).text()).toBe(
       'chunk 1\nchunk 2\nchunk 3\n',
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await until(() => records().some((record) => record['marker'] === 'cleanup'));
     const markers = records()
       .map((record) => record['marker'])
       .filter((marker) => marker !== undefined);

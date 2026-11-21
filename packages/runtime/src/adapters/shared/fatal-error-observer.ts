@@ -23,6 +23,40 @@ export interface GlobalEventHost {
   removeEventListener(type: string, listener: (event: Event) => void): void;
 }
 
+/** The `onFatalError` implementation a factory returns. */
+type Subscribe = (handler: FatalErrorHandler) => () => void;
+
+/**
+ * One observer per process object and mechanism. Every runtime services
+ * object built over the same process shares it, so two of them in one process
+ * add one listener, not two — which is what lets the Bun observer tell its
+ * own `unhandledRejection` listener from the application's.
+ */
+const observers = new WeakMap<object, Map<string, Subscribe>>();
+
+/**
+ * Returns the observer already built for this process object and mechanism,
+ * or builds it.
+ *
+ * @param target - The process object or global scope
+ * @param kind - Which mechanism
+ * @param build - Builds the observer once
+ * @returns The shared observer
+ */
+function shared(target: object, kind: string, build: () => Subscribe): Subscribe {
+  let byKind = observers.get(target);
+  if (byKind === undefined) {
+    byKind = new Map();
+    observers.set(target, byKind);
+  }
+  let subscribe = byKind.get(kind);
+  if (subscribe === undefined) {
+    subscribe = build();
+    byKind.set(kind, subscribe);
+  }
+  return subscribe;
+}
+
 /**
  * A set of handlers whose shared process listeners exist only while the set
  * is non-empty, so starting many applications in one process never piles
@@ -66,7 +100,9 @@ function handlerSet(install: (notify: FatalErrorHandler) => () => void): {
 /**
  * Node's observer: `uncaughtExceptionMonitor` sees both a thrown error and,
  * under Node's default `--unhandled-rejections=throw`, an unhandled rejection
- * (origin `'unhandledRejection'`), without changing the crash.
+ * (origin `'unhandledRejection'`), without changing the crash. An error the
+ * application's own `uncaughtException` listener handles is not reported: the
+ * process survives it.
  *
  * @param proc - The process
  * @returns The `onFatalError` implementation
@@ -74,8 +110,16 @@ function handlerSet(install: (notify: FatalErrorHandler) => () => void): {
 export function createNodeFatalErrorObserver(
   proc: ProcessEventHost,
 ): (handler: FatalErrorHandler) => () => void {
+  return shared(proc, 'node', () => nodeObserver(proc));
+}
+
+/** Builds the Node observer for {@linkcode createNodeFatalErrorObserver}. */
+function nodeObserver(proc: ProcessEventHost): Subscribe {
   return handlerSet((notify) => {
     const monitor = (error: unknown, origin: unknown): void => {
+      // The monitor also fires when the application's own `uncaughtException`
+      // listener is about to handle the error, and the process survives that.
+      if (proc.listenerCount('uncaughtException') > 0) return;
       notify(error, origin === 'unhandledRejection' ? 'unhandledRejection' : 'uncaughtException');
     };
     proc.on('uncaughtExceptionMonitor', monitor as (...args: unknown[]) => void);
@@ -90,7 +134,8 @@ export function createNodeFatalErrorObserver(
  * rejection listener reports and then, when it is the only
  * `unhandledRejection` listener, rethrows the reason, which crashes the
  * process as Bun would have. When the application registered its own
- * listener it chose not to crash, and nothing is rethrown. The rethrown
+ * listener it chose not to crash, and nothing is reported or rethrown; nor is
+ * a thrown error the application's own `uncaughtException` listener handles. The rethrown
  * reason is remembered so the monitor does not report the crash twice.
  *
  * @param proc - The process
@@ -99,15 +144,24 @@ export function createNodeFatalErrorObserver(
 export function createBunFatalErrorObserver(
   proc: ProcessEventHost,
 ): (handler: FatalErrorHandler) => () => void {
+  return shared(proc, 'bun', () => bunObserver(proc));
+}
+
+/** Builds the Bun observer for {@linkcode createBunFatalErrorObserver}. */
+function bunObserver(proc: ProcessEventHost): Subscribe {
   return handlerSet((notify) => {
     const rethrown = new WeakSet<object>();
     const monitor = (error: unknown): void => {
       if (typeof error === 'object' && error !== null && rethrown.has(error)) return;
+      // The application's own `uncaughtException` listener keeps it alive.
+      if (proc.listenerCount('uncaughtException') > 0) return;
       notify(error, 'uncaughtException');
     };
     const rejection = (reason: unknown): void => {
-      notify(reason, 'unhandledRejection');
+      // Another listener is the application's own: it chose not to crash, so
+      // nothing is ending and nothing is reported or rethrown.
       if (proc.listenerCount('unhandledRejection') !== 1) return;
+      notify(reason, 'unhandledRejection');
       const thrown =
         typeof reason === 'object' && reason !== null
           ? reason
@@ -127,7 +181,9 @@ export function createBunFatalErrorObserver(
 /**
  * Deno's observer: the global `error` and `unhandledrejection` events,
  * without `preventDefault()`, so the process still exits 1 (measured on Deno
- * 2.9.6).
+ * 2.9.6). It cannot see whether a listener registered after it will call
+ * `preventDefault()`, so on Deno an error the application then suppresses is
+ * still reported.
  *
  * @param target - The global scope
  * @returns The `onFatalError` implementation
@@ -135,6 +191,11 @@ export function createBunFatalErrorObserver(
 export function createDenoFatalErrorObserver(
   target: GlobalEventHost,
 ): (handler: FatalErrorHandler) => () => void {
+  return shared(target, 'deno', () => denoObserver(target));
+}
+
+/** Builds the Deno observer for {@linkcode createDenoFatalErrorObserver}. */
+function denoObserver(target: GlobalEventHost): Subscribe {
   return handlerSet((notify) => {
     const onError = (event: Event): void => {
       notify((event as ErrorEvent).error, 'uncaughtException');

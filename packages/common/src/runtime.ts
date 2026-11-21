@@ -463,7 +463,11 @@ export interface IRuntimeServices {
   /**
    * Observes an error that is about to end the process: an uncaught exception
    * or an unhandled rejection. The handler runs before the process dies, so a
-   * structured logger can record why it died.
+   * structured logger can record why it died. On Node and Bun an error the
+   * application handles itself (its own `uncaughtException` or
+   * `unhandledRejection` listener) is not reported, since the process survives
+   * it; Deno cannot tell whether a later listener calls `preventDefault()`, so
+   * it reports such an error too.
    *
    * It OBSERVES only. The process still ends with the runtime's own exit code
    * and the runtime still prints its own report on stderr; registering a

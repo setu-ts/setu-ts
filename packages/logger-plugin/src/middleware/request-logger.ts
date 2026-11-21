@@ -104,14 +104,13 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
       // returns; a client that left received nothing, so its line must not
       // read as a 5xx (499 is the access-log code for "client closed request").
       // `ctx.request.signal`, not `ctx.signal`: the getter allocates a
-      // controller for a request whose adapter supplied none.
+      // controller for a request whose adapter supplied none. Read only for a
+      // 5xx — the status a client that left gets from a render that failed —
+      // because on Deno the first read prints the runtime's legacy-abort notice.
       const upgraded = upgradeIntentOf(ctx.request) !== undefined;
-      const aborted = !upgraded && ctx.request.signal?.aborted === true;
-      const status = upgraded
-        ? SWITCHING_PROTOCOLS
-        : aborted
-          ? CLIENT_CLOSED_REQUEST
-          : (errorStatus ?? readStatus(ctx));
+      const served = errorStatus ?? readStatus(ctx);
+      const aborted = !upgraded && served >= 500 && ctx.request.signal?.aborted === true;
+      const status = upgraded ? SWITCHING_PROTOCOLS : aborted ? CLIENT_CLOSED_REQUEST : served;
       requestLogger.info('request completed', {
         method: ctx.request.method,
         path,

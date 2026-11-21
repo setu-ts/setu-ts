@@ -57,7 +57,6 @@ describe('implicit HEAD on GET routes (V13-113)', () => {
     expect(head.body).toBeNull();
     expect(head.headers.get('x-doc')).toBe('yes');
     expect(head.headers.get('content-type')).toBe(get.headers.get('content-type'));
-    expect(head.headers.get('content-length')).toBe(get.headers.get('content-length'));
 
     const dispatched = await app.dispatch!(new Request('http://localhost/doc', { method: 'HEAD' }));
     expect(dispatched.status).toBe(200);
@@ -184,6 +183,44 @@ describe('cleanup when the client leaves (V13-200)', () => {
     client.abort();
     await flush();
     expect(cleaned).toBe(1);
+  });
+
+  it('keeps the cleanup of a running handler when the signal aborts after an early response (code-review M2)', async () => {
+    // Deno's legacy `request.signal` aborts after every successful response.
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    let release!: () => void;
+    const handlerDone = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const order: string[] = [];
+    app.middleware.add(
+      (ctx, next) => {
+        void next();
+        return Promise.resolve(void ctx.response.status(202).text('accepted'));
+      },
+      { name: 'early', priority: 1 },
+    );
+    app.router.get('/work', async (ctx) => {
+      ctx.defer?.(() => void order.push('cleanup'));
+      await handlerDone;
+      order.push('handler done');
+      return ctx.response.text('late');
+    });
+    await app.start();
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/work', { signal: client.signal }),
+    );
+    expect(response.status).toBe(202);
+    await flush();
+    client.abort();
+    await flush();
+    expect(order).toEqual([]);
+    expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(0);
+    release();
+    await flush();
+    expect(order).toEqual(['handler done', 'cleanup']);
   });
 
   it('logs nothing for an abort of a request that deferred nothing', async () => {

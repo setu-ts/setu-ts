@@ -405,6 +405,32 @@ describe('a stop during start cancels the start (V13-43)', () => {
     }
   });
 
+  it('waits for a start that is already failing without calling it cancelled (code-review L2)', async () => {
+    const fake = createFakeRuntime();
+    const calls: LogCall[] = [];
+    const closing = deferred();
+    const app = createApplication({
+      plugins: [
+        runtimeWith(fake, (ctx) => {
+          ctx.lifecycle.onClose(() => closing.promise);
+          ctx.lifecycle.onInit(() => {
+            throw new Error('init failed');
+          });
+        }),
+        recordingLogger(calls),
+      ],
+    });
+    const starting = app.start({ port: 4209 });
+    starting.catch(() => undefined);
+    await flush();
+    // The failed start is now running its close hooks.
+    const stopping = app.stop();
+    closing.resolve();
+    await expect(starting).rejects.toThrow('init failed');
+    await stopping;
+    expect(withMessage(calls, 'Startup cancelled')).toHaveLength(0);
+  });
+
   it('cancels a start that stop() reaches in the same turn', async () => {
     const fake = createFakeRuntime();
     const app = createApplication({ plugins: [runtimeWith(fake)] });

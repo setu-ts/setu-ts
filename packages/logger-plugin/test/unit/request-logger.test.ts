@@ -350,6 +350,24 @@ describe('createRequestLoggerMiddleware', () => {
     expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
   });
 
+  it('does not read the signal for a response below 500 (code-review M2)', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    let reads = 0;
+    const client = new AbortController();
+    client.abort();
+    const request = Object.defineProperty(createFakeRequest('GET', '/page'), 'signal', {
+      get() {
+        reads++;
+        return client.signal;
+      },
+    });
+    const { ctx } = createFakeContext(logger, { request });
+    await middleware(ctx, async () => {});
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata.status).toBe(200);
+    expect(reads).toBe(0);
+  });
+
   it('keeps the served status while the request signal is live', async () => {
     const middleware = createRequestLoggerMiddleware();
     const client = new AbortController();

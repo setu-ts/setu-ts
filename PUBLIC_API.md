@@ -323,8 +323,8 @@ never listens. `stop()` resolves; the kernel logs `Startup cancelled` at `warn`.
 answers `HEAD`; at equal rank an explicit `HEAD` route wins. Over a server the adapter sends no
 body; `inject()` and `dispatch()` drop the body themselves and keep the headers, cancelling a
 streamed body. A request's `ctx.defer` cleanups also run, once, when the request's own signal aborts
-before the response settles, logged as `Request aborted before completion`. A streamed body whose
-source fails is logged once as `Response stream failed`
+before the response is handed back, logged as `Request aborted before completion`. A streamed body
+whose source fails is logged once as `Response stream failed`
 (`{ requestId, method, path, status, error }`), and the error still aborts the response.
 
 ### Route Introspection
@@ -946,8 +946,10 @@ removes the handler. It never keeps the process alive: the exit code and the run
 stderr are unchanged. Node uses `uncaughtExceptionMonitor`; Deno the global `error` and
 `unhandledrejection` events; Bun `uncaughtExceptionMonitor` for throws and, because a Bun
 `unhandledRejection` listener would suppress the crash, a listener that rethrows the reason unless
-the application has its own. Each handler is called once per crash. One process listener per
-mechanism exists while any handler is subscribed.
+the application has its own. Each handler is called once per crash. On Node and Bun an error the
+application handles itself (its own `uncaughtException` or `unhandledRejection` listener) is not
+reported; Deno cannot tell and reports it. One process listener per mechanism exists while any
+handler is subscribed.
 
 ```typescript
 interface IDnsResolver {

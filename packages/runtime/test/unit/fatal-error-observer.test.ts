@@ -124,7 +124,7 @@ describe('Bun observer', () => {
     const seen = recorder();
     subscribe(seen.handler);
     expect(() => proc.emit('unhandledRejection', new Error('handled'))).not.toThrow();
-    expect(seen.seen).toHaveLength(1);
+    expect(seen.seen).toHaveLength(0);
   });
 
   it('reports a thrown error from the monitor and removes both listeners', () => {
@@ -137,6 +137,46 @@ describe('Bun observer', () => {
     off();
     expect(proc.listenerCount('uncaughtExceptionMonitor')).toBe(0);
     expect(proc.listenerCount('unhandledRejection')).toBe(0);
+  });
+});
+
+describe('an error the application handles itself (code-review L1)', () => {
+  it('Node and Bun skip a thrown error an application uncaughtException listener handles', () => {
+    for (const create of [createNodeFatalErrorObserver, createBunFatalErrorObserver]) {
+      const proc = new FakeProcess();
+      proc.on('uncaughtException', () => {});
+      const seen = recorder();
+      create(proc)(seen.handler);
+      proc.emit('uncaughtExceptionMonitor', new Error('handled'), 'uncaughtException');
+      expect(seen.seen).toEqual([]);
+    }
+  });
+});
+
+describe('one observer per process (code-review M1)', () => {
+  it('lets two Bun runtimes over one process still crash on a rejection', () => {
+    const proc = new FakeProcess();
+    const first = recorder();
+    const second = recorder();
+    createBunFatalErrorObserver(proc)(first.handler);
+    createBunFatalErrorObserver(proc)(second.handler);
+    expect(proc.listenerCount('unhandledRejection')).toBe(1);
+    expect(proc.listenerCount('uncaughtExceptionMonitor')).toBe(1);
+    const reason = new Error('boom');
+    expect(() => proc.emit('unhandledRejection', reason)).toThrow(reason);
+    expect(first.seen).toEqual([[reason, 'unhandledRejection']]);
+    expect(second.seen).toEqual([[reason, 'unhandledRejection']]);
+  });
+
+  it('adds one Node listener however many runtimes subscribe', () => {
+    const proc = new FakeProcess();
+    for (let i = 0; i < 12; i++) createNodeFatalErrorObserver(proc)(() => {});
+    expect(proc.listenerCount('uncaughtExceptionMonitor')).toBe(1);
+  });
+
+  it('shares one Deno observer per global scope', () => {
+    const target = new EventTarget();
+    expect(createDenoFatalErrorObserver(target)).toBe(createDenoFatalErrorObserver(target));
   });
 });
 
