@@ -1,10 +1,9 @@
 # Milestone 143a — Sessions and Shared Caches (`@setu-ts/session-plugin`, `http-security-plugin`, `openapi-plugin`, `cache-plugin`)
 
-> **Status:** Planning — design approved by the maintainer on 2026-11-22 (§10 "Maintainer
-> decisions"); nothing is implemented, and how the letter is built is still to be decided. Branch:
-> `feat/m143a-sessions-shared-caches`. `develop` and `main` are protected; all work and fixes stay
-> on this one branch until it merges through a single PR. Lane: Web (first letter). Security-audited
-> before it merges. Revised after three independent plan reviews (§11).
+> **Status:** Complete — implemented on `feat/m143a-sessions-shared-caches` (built inline at the
+> maintainer's direction), independently reviewed and security-audited before it merges; the PR
+> description carries the verification and audit records. Lane: Web (first letter). Revised after
+> three independent plan reviews (§11).
 
 **Dependencies on other lanes, stated first.**
 
