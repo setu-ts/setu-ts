@@ -245,7 +245,9 @@ export class LaunchDarklyProvider implements FlagProvider {
       this.#snapshots.clear();
     });
 
-    await this.#refill(this.#client, ANONYMOUS_KEY, undefined);
+    // The anonymous prewarm is awaited by `start()`, so it runs under the boot
+    // bound; background refills hold nothing and stay unbounded.
+    await this.#refill(this.#client, ANONYMOUS_KEY, undefined, true);
   }
 
   /** Runs one call under the boot bound (`initTimeoutSeconds`). */
@@ -327,17 +329,19 @@ export class LaunchDarklyProvider implements FlagProvider {
    * @param client - The live client to fetch through
    * @param key - The cache key
    * @param context - The originating framework context
+   * @param bounded - Run under the boot bound (the prewarm `start()` awaits)
    */
   async #refill(
     client: ILaunchDarklyClient,
     key: string,
     context: FlagContext | undefined,
+    bounded = false,
   ): Promise<void> {
     this.#refilling.add(key);
     try {
-      // Bounded like the boot wait: a client that has not initialized must not
-      // hold `start()` or pile up refills.
-      const state = await this.#bounded(() => client.allFlagsState(toLaunchDarklyContext(context)));
+      const fetchState = (): Promise<ILaunchDarklyFlagsState> =>
+        client.allFlagsState(toLaunchDarklyContext(context));
+      const state = await (bounded ? this.#bounded(fetchState) : fetchState());
       // An invalid snapshot means the SDK could not evaluate (offline, bad
       // context); caching it would pin every flag to the fallback until the
       // next update event.
