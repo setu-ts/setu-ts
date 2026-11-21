@@ -210,39 +210,45 @@ run. No other `docs/` file is touched.
 - **Decision:** a new internal `utils/project-lock.ts` exports
   `withProjectLock(fs, lockRoot, isAlive, fn)`. It creates `<lockRoot>/.setu-ts/write.lock` with a
   non-recursive `mkdir` (parent created recursively first) and writes `owner.json`
-  `{ pid, command }` inside it; on EEXIST it reads the owner: a live pid → refuse with exit 1
+  `{ pid, command }` inside it; on EEXIST it never removes, takes over or rewrites the existing lock
+  — every automatic stale-takeover protocol over path-based `mkdir`/`rm` lets two writers in (Codex
+  showed two deterministic interleavings: the gap between `mkdir` and the owner write, and two
+  contenders acting on the same dead-owner snapshot, one deleting the other's fresh lock). It reads
+  the owner only to choose the message, and always refuses with exit 1. A live pid (or an owner that
+  is missing or unreadable, which includes the `mkdir`-to-owner window):
   `Another setu command (<command>, pid <pid>) is changing this project; run this again when it finishes.`;
-  a dead owner, or a missing or unreadable `owner.json` on a lock directory whose `mtime` is more
-  than 10 seconds old → remove the stale lock once and retry. A missing or unreadable owner on a
-  younger directory (or one with no `mtime`) is treated as live: that is the window between another
-  process's `mkdir` and its `owner.json` write, and stealing it would reopen the race. The refusal
-  names the lock path:
-  `Another setu command (<command>, pid <pid>) is changing this project; run this again when it finishes. If none is running, delete <lockRoot>/.setu-ts/write.lock.`
-  Released in a `finally` (SIGINT reaches the finally through the existing interruption path). Each
-  command acquires it itself, after project detection has succeeded (so a refused `add` outside a
-  project leaves no `.setu-ts/` behind) and before its first read of a file it will rewrite. There
-  is exactly one acquisition per process run: `runGenerateCommand` acquires it before it dispatches
-  to schematics, `runAppCommand` or `runLibraryCommand`, and those two never acquire it themselves.
-  The lock is not re-entrant: a second acquisition by the same pid refuses like any live owner,
-  which is what the concurrency test relies on. `lockRoot` is the workspace root when the target is
-  a workspace member (so two members' `add` runs cannot race on the root manifest), otherwise the
-  project directory. Applied to `add`, `generate` (schematics, `generate app`, `generate library`)
-  and `sync`, and skipped for `--dry-run`. Other commands that rewrite the same files —
-  `devtool enable`, `workspace broker`, `workspace rpc`, `adopt` — are not locked by this letter;
-  the helper is ready for M143d (`adopt`, workspace) and M143k (devtool), and the report names them.
-  `isAlive` comes from `MainProcess` (`process.kill(pid, 0)` on Node; EPERM counts as alive). The
+  with the owner details omitted when unknown, followed by
+  `If no setu command is running, delete <lockRoot>/.setu-ts/write.lock and run this again.`; an
+  owner whose pid is not running:
+  `A setu command (<command>, pid <pid>) that is no longer running left <lockRoot>/.setu-ts/write.lock; delete it and run this again.`
+  A lock is left behind only when the process is killed without running its `finally` (SIGKILL,
+  power loss); SIGINT and thrown errors release it. Released in a `finally` (SIGINT reaches the
+  finally through the existing interruption path). Each command acquires it itself, after project
+  detection has succeeded (so a refused `add` outside a project leaves no `.setu-ts/` behind) and
+  before its first read of a file it will rewrite. There is exactly one acquisition per process run:
+  `runGenerateCommand` acquires it before it dispatches to schematics, `runAppCommand` or
+  `runLibraryCommand`, and those two never acquire it themselves. The lock is not re-entrant: a
+  second acquisition by the same pid refuses like any live owner, which is what the concurrency test
+  relies on. `lockRoot` is the workspace root when the target is a workspace member (so two members'
+  `add` runs cannot race on the root manifest), otherwise the project directory. Applied to `add`,
+  `generate` (schematics, `generate app`, `generate library`) and `sync`, and skipped for
+  `--dry-run`. Other commands that rewrite the same files — `devtool enable`, `workspace broker`,
+  `workspace rpc`, `adopt` — are not locked by this letter; the helper is ready for M143d (`adopt`,
+  workspace) and M143k (devtool), and the report names them. `isAlive` comes from `MainProcess`
+  (`process.kill(pid, 0)` on Node; EPERM counts as alive) and only selects the message. The
   scaffolded project `.gitignore` and the workspace root `.gitignore` (`root-files.ts:317-327`) both
   gain `.setu-ts/write.lock/`.
 - **Why:** last-writer-wins lost a package 10/10 with `setu check` clean. A compare-before-write in
   `writeFiles` would need every call site to pass the bytes it planned from, and still leaves a
   window; a lock around read-plan-write closes it.
 - **Test home:** `test/unit/project-lock.test.ts` (acquire, live-owner refusal naming the path,
-  stale takeover, owner-not-yet-written window treated as live, old ownerless lock taken over, EPERM
-  counts as alive, release on throw); `generate app` and `generate library` succeed with the lock
-  wired; a refused `add` outside a project leaves no `.setu-ts/`;
-  `test/integration/concurrent-add.test.ts` — two `runCli(['add', …])` started together against one
-  temp project: each package lands or the second exits 1 with the named message, and the final
-  `package.json`/`setu.config.ts` hold every package whose run exited 0.
+  dead-owner refusal naming the path and leaving the lock in place, owner-not-yet-written window
+  refused, EPERM counts as alive, release on throw and on interruption, a lock never removed by a
+  contender); `generate app` and `generate library` succeed with the lock wired; a refused `add`
+  outside a project leaves no `.setu-ts/`; `test/integration/concurrent-add.test.ts` — two
+  `runCli(['add', …])` started together against one temp project: each package lands or the second
+  exits 1 with the named message, and the final `package.json`/`setu.config.ts` hold every package
+  whose run exited 0.
 
 ### 3.8 V13-154 — an empty workspace's root test passes
 
@@ -305,17 +311,17 @@ break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ship
 
 | Exported symbol                                           | Kind                                 | Consumer / real code path that READS it                                                                                                                                                                  |
 | --------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MainProcess.nodeVersion?`, `MainProcess.isProcessAlive?` | optional fields, `@setu-ts/cli/main` | `runMain` (version warning) and `withProjectLock` (stale-owner test); `PUBLIC_API.md` `MainProcess` entry updated in the same PR.                                                                        |
+| `MainProcess.nodeVersion?`, `MainProcess.isProcessAlive?` | optional fields, `@setu-ts/cli/main` | `runMain` (version warning) and `withProjectLock` (refusal message); `PUBLIC_API.md` `MainProcess` entry updated in the same PR.                                                                         |
 | Nothing new from any package `src/index.ts`               | —                                    | All new symbols are internal to `packages/cli` (`TELEMETRY_PEERS`, `withProjectLock`, the node-version comparator, `TransportConnection.emulator`). `packages/telemetry-plugin` changes only its README. |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                         | Consumer                                            | Behavior (per implementation)                                    |
-| ------------------------------ | --------------------------------------------------- | ---------------------------------------------------------------- |
-| `--dotenv <path>`              | `readEnvFilePath` → `new`, `generate app`           | same grammar and effect as the old `--env-file`.                 |
-| `TransportConnection.emulator` | `brokerEnvVariables` → `new`, `generate app`, `add` | pubsub only; other transports leave it undefined.                |
-| `MainProcess.nodeVersion`      | `runMain` version check                             | undefined → no check (Bun, Deno, tests that do not set it).      |
-| `MainProcess.isProcessAlive`   | `withProjectLock` stale-owner test                  | undefined → owner treated as alive (refuse, never steal a lock). |
+| Option                         | Consumer                                            | Behavior (per implementation)                                   |
+| ------------------------------ | --------------------------------------------------- | --------------------------------------------------------------- |
+| `--dotenv <path>`              | `readEnvFilePath` → `new`, `generate app`           | same grammar and effect as the old `--env-file`.                |
+| `TransportConnection.emulator` | `brokerEnvVariables` → `new`, `generate app`, `add` | pubsub only; other transports leave it undefined.               |
+| `MainProcess.nodeVersion`      | `runMain` version check                             | undefined → no check (Bun, Deno, tests that do not set it).     |
+| `MainProcess.isProcessAlive`   | `withProjectLock` refusal message                   | undefined → owner treated as alive (the "is changing" message). |
 
 ## 5. Implementation files
 
@@ -358,7 +364,7 @@ break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ship
 | existing `add` unit tests                                    | `commands/add.ts`                                                                            | §3.3 Workers peers; §3.4 bigtable records missing peers / nothing when present; §3.6 note printed.                                  |
 | existing template unit tests                                 | `microservice.ts`, `client-dependencies.ts`, `project-files.ts`, `broker.ts`, `transport.ts` | peers in every runtime's manifest; test scripts' env flag per runtime equals the start scripts'; pubsub rows.                       |
 | existing workspace unit tests                                | `runtime-profile.ts`, `root-files.ts`                                                        | root `test` script, `scripts/test.mjs` content.                                                                                     |
-| `packages/cli/test/unit/project-lock.test.ts` (new)          | `utils/project-lock.ts`                                                                      | §3.7 acquire, refuse live, take over stale, release on throw, EPERM alive.                                                          |
+| `packages/cli/test/unit/project-lock.test.ts` (new)          | `utils/project-lock.ts`                                                                      | §3.7 acquire, refuse live and dead owners by name, never remove a held lock, release on throw, EPERM alive.                         |
 | `packages/cli/test/integration/concurrent-add.test.ts` (new) | lock wiring in `add.ts`/`generate.ts`/`sync.ts`                                              | two concurrent runs: no silent loss (fails without the lock: verified by reverting the wiring).                                     |
 | `packages/cli/test/unit/node-version.test.ts` (new)          | `utils/node-version.ts`                                                                      | range table; constant equals both `engines.node`.                                                                                   |
 | existing `main` unit tests                                   | `main.ts`                                                                                    | warning printed / not printed / skipped.                                                                                            |
@@ -391,8 +397,9 @@ pnpm run release:verify 0.14.0
   start scripts already load it and ConfigPlugin already reads the same file, so tests only gain
   parity; the scaffold gate's existing "boots with no dotenv file at all" row keeps the fresh-clone
   case covered.
-- A stale `.setu-ts/write.lock` after SIGKILL blocks the next command → dead-pid takeover; the
-  refusal names the lock path so a user can delete it.
+- A `.setu-ts/write.lock` left by a SIGKILLed run blocks the next command → the refusal says the
+  owner is no longer running and names the exact path to delete; no automatic takeover, because
+  every takeover over path-based operations admits two writers.
 - The scaffold-gate rows that install from npm (Bigtable) are network-bound → they follow the
   existing guarded-install pattern of that file and are run once locally with the result reported.
 - `--dotenv` misses a doc site → `rg -- '--env-file'` over docs and CLI sources after the change;
