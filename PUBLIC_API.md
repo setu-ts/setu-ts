@@ -9336,13 +9336,13 @@ the network, expires, or gets a `500`/`502`/`503`/`504` rejects with `BackendUna
 (`503`); a `put` or `delete` rejects with `BackendUnavailableError` when refused before it was sent
 and with `BackendOutcomeUnknownError` (`504`) when it may have been applied. Any other failure is an
 `Error` whose message starts `storage-plugin (<provider>): <call> failed:`. `exists` is `false` and
-`delete` is `false` only on a not-found answer (S3/B2 resolve `delete` `true` for an absent key,
-which `DeleteObject` cannot tell apart); every other failure rejects. A missing object read by
-`get`/`getStream` throws `StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly
-constructed `GcsProvider` or `AzureBlobProvider` takes `now` as its second argument; without one
-`getSignedUrl` rejects. The GCS and Azure readiness probes (`bucket.exists()`, the container's
-`exists()`) read reachable when the backend answers below `500`; the storage indicator caches its
-probe for 5 s and bounds it at 2 s.
+`delete` is `false` only when the object was absent — on every provider; S3/B2 check with a `HEAD`
+first, since `DeleteObject` cannot tell (an object removed between the two still resolves `true`);
+every other failure rejects. A missing object read by `get`/`getStream` throws
+`StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly constructed `GcsProvider` or
+`AzureBlobProvider` takes `now` as its second argument; without one `getSignedUrl` rejects. The GCS
+and Azure readiness probes (`bucket.exists()`, the container's `exists()`) read reachable when the
+backend answers below `500`; the storage indicator caches its probe for 5 s and bounds it at 2 s.
 
 All cloud providers support an injectable `client` option that bypasses the lazy import, but the
 three types are NOT alike and the difference decides what you can pass:
@@ -9524,9 +9524,12 @@ app.router.post('/users', async (ctx) => {
 - `TemplateEngine`, `escapeHtml` — the template renderer (both arms; `render` is asynchronous since
   M102) and its HTML escaper.
 - `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes. Since 0.14.0
-  an SMTP attachment with a `contentId` goes out `Content-Disposition: inline`; the lazily adapted
-  SES client probes readiness with `GetAccount` (reachable when SES answers below `500`); a SendGrid
-  refusal's message carries SendGrid's first error text after the status.
+  an SMTP attachment with a `contentId` goes out `Content-Disposition: inline`; `SmtpProvider` takes
+  an optional second argument, `SmtpRuntime` (`{ dns?, hrtime }`, exported as a type), which
+  `MailPlugin` fills from `ctx.runtime` for `dnsTtlMs`; the three SMTP timeouts must be whole
+  milliseconds in `1`–`2147483647`; the lazily adapted SES client probes readiness with `GetAccount`
+  (reachable when SES answers below `500`); a SendGrid refusal's message carries SendGrid's first
+  error text after the status.
 - `adaptNodemailerModule` / `loadNodemailerModule` / `toNodemailerMessage` /
   `validateSmtpTransport`, `adaptSesModule` / `loadSesModule` / `toSesInput` / `validateSesClient`,
   `toSendGridBody` — provider adapter/mapper/validator helpers.

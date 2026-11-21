@@ -200,8 +200,9 @@ managed identity) is refused. GCS signs with the credentials the SDK finds
 An outage is an error, never "not there". On every cloud arm:
 
 - `exists` resolves `false` only when the backend answers that the object is absent; `delete`
-  resolves `false` only when the backend answers that it was absent (S3 and B2 cannot tell, so they
-  resolve `true` for an absent key). Any other failure rejects.
+  resolves `false` only when the object was absent. S3 and B2 cannot tell from their delete answer,
+  so they check with a `HEAD` first; an object removed between that check and the delete still
+  resolves `true`. Any other failure rejects. Every provider gives the same `delete()` answer.
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/
   `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
   `delete` with `BackendUnavailableError` when the request was refused before it was sent and
@@ -214,7 +215,7 @@ An outage is an error, never "not there". On every cloud arm:
 
 | Provider | `exists` of an absent object | `delete` of an absent object |
 | -------- | ---------------------------- | ---------------------------- |
-| S3 / B2  | `false`                      | `true`                       |
+| S3 / B2  | `false`                      | `false` (checked first)      |
 | GCS      | `false`                      | `false`                      |
 | Azure    | `false`                      | `false`                      |
 | Memory   | `false`                      | `false`                      |

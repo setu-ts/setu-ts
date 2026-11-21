@@ -54,8 +54,11 @@ All notable changes to this project are documented here. The format follows
   on 7.x and 8.x), and `getStream` waits for the first chunk, so an absent object is `null`. An
   outage on a storage or secrets arm rejects with a `503`/`504` (`BackendUnavailableError`,
   `BackendOutcomeUnknownError`, `SecretProviderUnavailableError`); other failures name the provider.
+  An SES or SendGrid send that does not settle in time is a `504`, a refused connection a `503`;
+  `SesSdkModule.GetAccountCommand` is optional (a module without it gets no readiness probe).
   `exists`/`delete` reject on an outage instead of answering "not there", on every provider, `local`
-  included. A missing object is `StorageObjectNotFoundError` (`404`). `b2` with neither `region` nor
+  included. `delete()` of an absent key is `false` on every provider; S3 and B2 check with a `HEAD`
+  first. A missing object is `StorageObjectNotFoundError` (`404`). `b2` with neither `region` nor
   `endpoint` refuses to start. `createUploadMiddleware` answers a disallowed type `415`. An SMTP
   `contentId` attachment is sent inline. Slack posts the subject in bold before the body.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML

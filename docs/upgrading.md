@@ -16,12 +16,16 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 - **Outages are errors.** `exists()` and `delete()` reject on an outage or a refused credential on
   every storage provider; code that treated `false` as "not there" during an outage now sees the
-  error. S3 and B2 still resolve `delete()` `true` for an absent key.
+  error. `delete()` of an absent key now resolves `false` on S3 and B2 too (a `HEAD` runs first),
+  the answer every other provider gives.
 - **Status codes.** A storage or cloud-secrets outage answers `503` (a write that may have been
   applied, `504`) instead of a masked `500`; a missing object read with `get`/`getStream` answers
   `404` (`StorageObjectNotFoundError`). Catch those classes rather than matching error messages: an
   unclassified failure's message now starts `storage-plugin (<provider>): <call> failed:` or
   `<ProviderClass> <get|set> failed:`.
+- **Mail sends.** An SES or SendGrid send that does not settle within `requestTimeoutMs` rejects
+  with `BackendOutcomeUnknownError` (`504`): the message may have gone out. A refused connection is
+  `BackendUnavailableError` (`503`).
 - **Time bounds.** Cloud calls are bounded by `requestTimeoutMs` (storage 30 s, secrets 5 s, SES and
   SendGrid 15 s). Raise it for large storage transfers, or set `0` to keep the old unbounded call.
 - **GCS.** The SDK's own retry is off, so a `5xx` answers at once; retry in the caller. A provider
