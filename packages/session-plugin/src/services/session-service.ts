@@ -9,19 +9,19 @@
  * @module
  */
 import type {
+  ILogger,
   IRequestContext,
   ISession,
   ISessionService,
   ISessionStore,
-  SessionData,
   SessionView,
 } from '@setu-ts/common';
 import {
+  CAPABILITIES,
   parseCookie,
   requestOriginOf,
   serializeCookie,
   SESSION_STATE_KEY,
-  SESSION_TENANT_BINDING_KEY,
 } from '@setu-ts/common';
 
 import type { KeyRing } from '../codec/crypto.ts';
@@ -29,26 +29,58 @@ import { open, seal } from '../codec/crypto.ts';
 import { SessionMiddlewareMissingError, SessionTooLargeError } from '../errors.ts';
 import type { ResolvedSessionConfig } from '../options.ts';
 import type { Session } from './session.ts';
-import { createSession, parseSnapshot, restoreSession } from './session.ts';
-import { CSRF_SESSION_KEY } from '../csrf/token.ts';
+import { createSession, holdsOnlyReservedKeys, parseSnapshot, restoreSession } from './session.ts';
 
 /**
- * The reserved keys a session may hold and still be sealed into the cookie on
- * the store strategy (M113e, V9-46): the form-CSRF token and the tenant
- * binding. Both exist to serve requests before anyone signs in, and a store
- * row behind them buys nothing — there is nothing to revoke in a session
- * holding only those. The first write of any other key moves the session into
- * the store. Pending sign-in secrets (`auth-plugin`'s state, nonce and PKCE
- * verifier) are deliberately NOT here: they stay server-side.
+ * Whether a session payload may be sealed into the cookie on the store
+ * strategy (M113e, V9-46): it holds only the reserved keys, the form-CSRF token
+ * and the tenant binding. Both exist to serve requests before anyone signs in,
+ * and a store row behind them buys nothing — there is nothing to revoke in a
+ * session holding only those. The first write of any other key moves the
+ * session into the store. Pending sign-in secrets (`auth-plugin`'s state, nonce
+ * and PKCE verifier) are deliberately NOT reserved: they stay server-side.
  */
-const COOKIE_HELD_KEYS: ReadonlySet<string> = new Set([
-  CSRF_SESSION_KEY,
-  SESSION_TENANT_BINDING_KEY,
-]);
+const isCookieHeld = holdsOnlyReservedKeys;
 
-/** Whether every key of `data` is one {@linkcode COOKIE_HELD_KEYS} allows. */
-function isCookieHeld(data: SessionData): boolean {
-  return Object.keys(data).every((key) => COOKIE_HELD_KEYS.has(key));
+/**
+ * The two revocation marker kinds. `revoked` is written for a sign-out (`destroy()`, or a commit
+ * that moves a stored session back into the cookie); `superseded` for the old id of a
+ * `regenerate()`. A marker lives under its own id, `<kind>:<session id>`, so a racing commit to the
+ * session id cannot overwrite it. Session ids are UUIDs and never contain `:`.
+ */
+type MarkerKind = 'revoked' | 'superseded';
+
+/** The payload field a marker carries, so an empty or foreign row never counts as a marker. */
+const MARKER_FIELD = '__setu_marker';
+
+const MARKER_KINDS: readonly MarkerKind[] = ['revoked', 'superseded'];
+
+/** Whether an id is a marker id rather than a session id. */
+function isMarkerId(id: string): boolean {
+  return MARKER_KINDS.some((kind) => id.startsWith(`${kind}:`));
+}
+
+/**
+ * What a {@linkcode SessionService.commit} did: `'written'` (the session was persisted and its
+ * cookie sent, or a destroy cleared it), `'refused'` (the session was revoked or superseded while
+ * this request ran, or its row was gone; nothing was written and no cookie sent), or `'skipped'`
+ * (nothing needed writing, or the policy declined the commit).
+ * @since 0.14.0
+ */
+export type SessionCommitOutcome = 'written' | 'refused' | 'skipped';
+
+/**
+ * Which commits a response allows, computed by the session middleware from the response. Both
+ * default to `true`. A response a shared cache may store sets both to `false`, so it carries no
+ * session cookie for a commit that only refreshes the expiry or only stores a new session's
+ * reserved keys (a CSRF mint, a tenant binding).
+ * @since 0.14.0
+ */
+export interface SessionCommitPolicy {
+  /** Allow a commit that only refreshes the session (`rolling` or `idleTimeoutMs`). */
+  readonly refresh?: boolean;
+  /** Allow committing a NEW session that holds only reserved keys. */
+  readonly reservedOnlyNew?: boolean;
 }
 
 /**
@@ -182,7 +214,7 @@ export class SessionService implements ISessionService {
       return null;
     }
 
-    return { id: restored.id, data: restored.toJSON() };
+    return { id: restored.id, data: restored.snapshot().data };
   }
 
   /**
@@ -198,7 +230,9 @@ export class SessionService implements ISessionService {
    * @since 0.12.0
    */
   async revokeSuperseded(session: Session): Promise<void> {
-    if (session.wasRegenerated) await this.#destroyStored(session.previousId);
+    if (session.wasRegenerated && this.#hadRow(session)) {
+      await this.#revoke(session.loadedId, 'superseded');
+    }
   }
 
   /**
@@ -207,22 +241,35 @@ export class SessionService implements ISessionService {
    * A clean session emits no header at all: committing on every request would
    * rewrite the cookie on pure reads and defeat downstream caching.
    *
+   * On the store strategy a commit to a restored session checks the revocation
+   * markers after its write and deletes its own write when the session was
+   * signed out or superseded while this request ran, so an in-flight request
+   * cannot undo a `destroy()` or `regenerate()`. A refused commit sends no
+   * cookie.
+   *
    * @param ctx - The request context
    * @param session - The session returned by {@linkcode SessionService.load}
+   * @param policy - Which commits this response allows; both allowed when omitted
+   * @returns What the commit did
    * @throws {SessionTooLargeError} If the serialized cookie exceeds the budget
    * @since 0.2.0
    */
-  async commit(ctx: IRequestContext, session: Session): Promise<void> {
+  async commit(
+    ctx: IRequestContext,
+    session: Session,
+    policy: SessionCommitPolicy = {},
+  ): Promise<SessionCommitOutcome> {
+    const store = this.#store;
+    const source = this.#hadRow(session) ? session.loadedId : null;
+
     if (session.isDestroyed) {
-      // Both ids, not just the current one. After a `regenerate()` in this same
-      // request `session.id` is the NEW id, which was never written to the
-      // store — while the cookie the client presented still carries the old one.
-      // Deleting only the current id would leave that row readable until its
-      // TTL, so a stolen copy of the original cookie would keep authenticating
-      // after an explicit destroy.
-      await this.#destroyStored(session.id, session.previousId);
+      // Only the id the request restored from the store has a row. After a
+      // `regenerate()` in this same request `session.id` is a new id that was
+      // never written, and a new or cookie-held session has no row at all, so
+      // neither gets a marker: anonymous `POST /logout` traffic writes nothing.
+      if (source !== null) await this.#revoke(source, 'revoked');
       ctx.response.appendHeader('set-cookie', this.#cookie(ctx, '', 0));
-      return;
+      return 'written';
     }
 
     const rolling = this.#config.rolling;
@@ -233,32 +280,62 @@ export class SessionService implements ISessionService {
     // every request exactly as `rolling` does. It does NOT extend absolute
     // expiry; only `rolling` does that (see below).
     const refreshesIdleWindow = rolling || this.#config.idleTimeoutMs !== undefined;
-    const shouldCommit =
-      session.isDirty || session.wasRegenerated || (refreshesIdleWindow && !session.isNew);
-    if (!shouldCommit) {
-      return;
+    const changed = session.isDirty || session.wasRegenerated;
+    if (!changed && !(refreshesIdleWindow && !session.isNew)) {
+      return 'skipped';
+    }
+    if (!changed && policy.refresh === false) {
+      return 'skipped';
+    }
+    if (
+      session.isNew &&
+      !session.wasRegenerated &&
+      policy.reservedOnlyNew === false &&
+      holdsOnlyReservedKeys(session.snapshot().data)
+    ) {
+      return 'skipped';
+    }
+
+    // A regeneration whose source was signed out while this request ran must
+    // not carry that session's data to a fresh id.
+    if (store !== undefined && session.wasRegenerated && source !== null) {
+      if (await this.#hasMarker(source, ['revoked'])) {
+        return this.#refused(ctx);
+      }
     }
 
     const now = this.#deps.now();
-
-    // A regenerated session leaves its old server-side row behind, which would
-    // otherwise stay readable until its TTL — that is what makes regeneration a
-    // real revocation rather than a rename.
-    await this.#destroyStored(session.previousId);
-
     session.touch(now);
     if (rolling) {
       session.extend(now + this.#config.maxAgeMs);
     }
 
-    const cookieHeld = this.#store !== undefined && isCookieHeld(session.toJSON());
-    if (this.#store !== undefined && !cookieHeld && !session.wasStoreHeld && !session.isNew) {
+    // The payload to persist. In `'changes'` mode a commit to the row this
+    // request restored applies only this request's changes to the row as it is
+    // now, so a concurrent request's keys survive; a missing row means the
+    // session was revoked or expired, and the commit is refused.
+    let data = session.snapshot().data;
+    const mergesOntoRow =
+      store !== undefined &&
+      source !== null &&
+      !session.wasRegenerated &&
+      this.#config.storeCommit === 'changes';
+    if (mergesOntoRow) {
+      const current = await store.read(source);
+      if (current === null) {
+        return this.#refused(ctx);
+      }
+      data = session.applyChangesTo(current);
+    }
+
+    const cookieHeld = store !== undefined && isCookieHeld(data);
+    if (store !== undefined && !cookieHeld && !session.wasStoreHeld && !session.isNew) {
       // A copied anonymous cookie must not know the promoted row's id. Avoid
       // regenerate(): this id has no row to revoke or regeneration to record.
       session.rotateId(this.#deps.uuid());
     }
 
-    const snapshot = session.snapshot();
+    const snapshot = { ...session.snapshot(), data };
     const ttlMs = Math.max(snapshot.exp - now, 0);
 
     // On the store strategy the payload goes server-side and the cookie carries
@@ -267,7 +344,7 @@ export class SessionService implements ISessionService {
     // carries them and no row is written (M113e, V9-46), so anonymous traffic
     // rendering forms does not grow the store.
     const payload =
-      this.#store === undefined
+      store === undefined
         ? snapshot
         : cookieHeld
           ? { ...snapshot, held: 'cookie' as const }
@@ -288,18 +365,29 @@ export class SessionService implements ISessionService {
       throw new SessionTooLargeError(header.length, this.#config.maxCookieBytes);
     }
 
-    if (this.#store !== undefined) {
-      if (cookieHeld) {
+    if (store !== undefined) {
+      if (session.wasRegenerated && source !== null) {
+        // The old id is superseded — or, when this commit moves the session into
+        // the cookie (a logout by `clear()` and `regenerate()`), revoked, so an
+        // in-flight regeneration on the old cookie is refused too.
+        await this.#revoke(source, cookieHeld ? 'revoked' : 'superseded');
+      } else if (cookieHeld && source !== null) {
         // Moving a stored session into the cookie (a logout clearing every
-        // other key) deletes its row: otherwise a copy of the old id-only
+        // other key) revokes its row: otherwise a copy of the old id-only
         // cookie would keep restoring the signed-in data until its TTL.
-        await this.#destroyStored(session.wasStoreHeld ? snapshot.id : null);
-      } else {
-        await this.#store.write(snapshot.id, snapshot.data, ttlMs);
+        await this.#revoke(source, 'revoked');
+      }
+
+      if (!cookieHeld) {
+        await store.write(snapshot.id, snapshot.data, ttlMs);
+        if (await this.#fenced(session, source, snapshot.id)) {
+          return this.#refused(ctx);
+        }
       }
     }
 
     ctx.response.appendHeader('set-cookie', header);
+    return 'written';
   }
 
   /**
@@ -344,7 +432,7 @@ export class SessionService implements ISessionService {
     }
 
     const snapshot = parseSnapshot(plaintext);
-    if (snapshot === null) {
+    if (snapshot === null || isMarkerId(snapshot.id)) {
       return null;
     }
 
@@ -362,8 +450,14 @@ export class SessionService implements ISessionService {
       return restoreSession(snapshot, now, this.#deps.uuid, this.#config.idleTimeoutMs);
     }
 
-    const stored = await this.#store.read(snapshot.id);
-    if (stored === null) {
+    const store = this.#store;
+    const [stored, marked] = await Promise.all([
+      store.read(snapshot.id),
+      this.#config.restoreRevocationCheck
+        ? this.#hasMarker(snapshot.id, MARKER_KINDS)
+        : Promise.resolve(false),
+    ]);
+    if (stored === null || marked) {
       // Revoked or expired server-side. The cookie is authentic but the
       // session behind it is gone, so this must not restore.
       return null;
@@ -377,21 +471,73 @@ export class SessionService implements ISessionService {
     );
   }
 
+  /** Whether the session was restored from a store row, which is the only kind a marker fences. */
+  #hadRow(session: Session): boolean {
+    return this.#store !== undefined && session.wasStoreHeld;
+  }
+
   /**
-   * Deletes the given ids from the store, skipping `null` and de-duplicating.
-   *
-   * A no-op on the cookie strategy, where there is no store to clean up.
+   * Revokes a stored id: writes its marker FIRST, then deletes the row. A
+   * marker that is written fences every later commit to the id even when the
+   * delete then fails. A marker write that fails still attempts the delete and
+   * then rethrows, so a sign-out never reports success with its marker missing.
    */
-  async #destroyStored(...ids: readonly (string | null)[]): Promise<void> {
-    const store = this.#store;
-    if (store === undefined) {
-      return;
+  async #revoke(id: string, kind: MarkerKind): Promise<void> {
+    const store = this.#store!;
+    let fault: { readonly error: unknown } | undefined;
+    try {
+      await store.write(`${kind}:${id}`, { [MARKER_FIELD]: kind }, this.#config.maxAgeMs);
+    } catch (error) {
+      fault = { error };
     }
-    for (const id of new Set(ids)) {
-      if (id !== null) {
-        await store.destroy(id);
-      }
+    try {
+      await store.destroy(id);
+    } catch (error) {
+      if (fault === undefined) throw error;
     }
+    if (fault !== undefined) throw fault.error;
+  }
+
+  /** Whether any of the given markers is present for `id`; a read fault propagates. */
+  async #hasMarker(id: string, kinds: readonly MarkerKind[]): Promise<boolean> {
+    const store = this.#store!;
+    const rows = await Promise.all(kinds.map((kind) => store.read(`${kind}:${id}`)));
+    return rows.some((row, index) => row !== null && row[MARKER_FIELD] === kinds[index]);
+  }
+
+  /**
+   * The write-then-verify fence, run after a commit's row write: a write to
+   * the restored id checks both markers of that id, and a regenerating write
+   * checks that its source was not signed out meanwhile. When the check fails,
+   * or the check itself throws, the commit deletes its own write.
+   */
+  async #fenced(session: Session, source: string | null, written: string): Promise<boolean> {
+    if (source === null) {
+      // A fresh id with no stored source: no other request can hold it.
+      return false;
+    }
+    const kinds: readonly MarkerKind[] = session.wasRegenerated ? ['revoked'] : MARKER_KINDS;
+    let marked: boolean;
+    try {
+      marked = await this.#hasMarker(source, kinds);
+    } catch (error) {
+      await this.#store!.destroy(written).catch(() => false);
+      throw error;
+    }
+    if (marked) {
+      await this.#store!.destroy(written);
+    }
+    return marked;
+  }
+
+  /** A refused commit: no cookie, one `debug` line carrying no id. */
+  #refused(ctx: IRequestContext): SessionCommitOutcome {
+    if (ctx.services.has(CAPABILITIES.LOGGER)) {
+      ctx.services
+        .get<ILogger>(CAPABILITIES.LOGGER)
+        .debug('session commit refused: the session was revoked or superseded during this request');
+    }
+    return 'refused';
   }
 
   /** Builds the `Set-Cookie` header value for a value and remaining lifetime. */

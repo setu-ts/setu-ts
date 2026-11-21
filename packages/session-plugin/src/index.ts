@@ -37,7 +37,11 @@ export { SessionPlugin } from './plugin/session-plugin.ts';
 
 // Service and access
 export { SessionService } from './services/session-service.ts';
-export type { SessionServiceDeps } from './services/session-service.ts';
+export type {
+  SessionCommitOutcome,
+  SessionCommitPolicy,
+  SessionServiceDeps,
+} from './services/session-service.ts';
 export { getSession } from './services/get-session.ts';
 
 // CSRF

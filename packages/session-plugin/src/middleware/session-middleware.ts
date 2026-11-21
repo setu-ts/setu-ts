@@ -15,6 +15,11 @@ import {
 } from '@setu-ts/common';
 
 import { NO_COMMIT_STATE_KEY } from '../csrf/exclude.ts';
+import {
+  markPerVisitor,
+  PublicDirectiveWarnings,
+  RequestCacheMarking,
+} from '../services/cache-marking.ts';
 import type { SessionService } from '../services/session-service.ts';
 import { readTenantBinding, sealTenantBinding } from '../services/session-tenant-binding.ts';
 
@@ -61,6 +66,9 @@ export function sessionMiddleware(
   service: SessionService,
   tenantBinding: boolean = true,
 ): MiddlewareFunction {
+  // One bounded warning set per middleware instance (the public-directive warning).
+  const warnings = new PublicDirectiveWarnings();
+
   return async (ctx: IRequestContext, next: NextFunction): Promise<void> => {
     const session = await service.load(ctx);
 
@@ -77,8 +85,15 @@ export function sessionMiddleware(
         title: 'Tenant Mismatch',
         detail: 'This session was created for a different tenant',
       });
+      markPerVisitor(ctx.response);
       return;
     }
+
+    // Mark the response before the handler runs, and at the first application
+    // write, so a cache registered inside this middleware sees the marking when
+    // it captures the response.
+    const marking = new RequestCacheMarking(ctx, session, warnings);
+    marking.begin();
 
     ctx.state.set(SESSION_STATE_KEY, session);
     // Tell the tenant-side compare whether binding is on, so `tenantBinding:
@@ -120,6 +135,7 @@ export function sessionMiddleware(
       ctx.state.get(NO_COMMIT_STATE_KEY) === true ||
       ctx.state.get(CSRF_EXEMPT_STATE_KEY) === true
     ) {
+      marking.finish(undefined);
       return;
     }
 
@@ -137,6 +153,6 @@ export function sessionMiddleware(
       }
     }
 
-    await service.commit(ctx, session);
+    marking.finish(await service.commit(ctx, session, marking.policy()));
   };
 }

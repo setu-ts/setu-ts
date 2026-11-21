@@ -767,6 +767,8 @@ export type {
 
 // Session contracts
 export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';
+export { CSRF_TOKEN_ACCESS_STATE_KEY } from './services/csrf-token-access.ts';
+export type { ICsrfTokenAccess } from './services/csrf-token-access.ts';
 export type {
   ISession,
   ISessionService,

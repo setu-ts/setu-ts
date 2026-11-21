@@ -27,6 +27,7 @@
  * | uploads             | `storage-plugin`       | `storage-plugin:uploads`              |
  * | tenant cache prefix | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`   |
  * | credential source   | `auth-plugin`          | `auth-plugin:credential-source`       |
+ * | CSRF token access   | `session-plugin`       | `session-plugin:csrf-token-access`    |
  *
  * @module
  */

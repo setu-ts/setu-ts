@@ -9,8 +9,8 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IRequestContext } from '@setu-ts/common';
+import { CAPABILITIES, CSRF_TOKEN_ACCESS_STATE_KEY } from '@setu-ts/common';
+import type { ICsrfTokenAccess, IRequestContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -29,6 +29,7 @@ import { CsrfTokenMismatchError, SessionMiddlewareMissingError } from '../../../
 import { resolveCsrfConfig, resolveSessionConfig } from '../../../src/options.ts';
 import { SessionPlugin } from '../../../src/plugin/session-plugin.ts';
 import { SESSION_STATE_KEY, SessionService } from '../../../src/services/session-service.ts';
+import { Session } from '../../../src/services/session.ts';
 import type { MakeContextOptions } from '../../fixtures/context.ts';
 import { fakeRandomBytes, makeClock, makeContext } from '../../fixtures/context.ts';
 import { createFakeRuntime } from '../../fixtures/runtime.ts';
@@ -494,5 +495,54 @@ describe('csrfTokenField — the published plugin config (M95c §3.1/§3.3)', ()
     const token = getCsrfToken(ctx);
 
     expect(csrfTokenField(ctx)).toBe(`<input type="hidden" name="_csrf" value="${token}">`);
+  });
+});
+
+describe('the published token accessor', () => {
+  async function accessorFor(
+    isNew: boolean,
+    options: Parameters<typeof csrfFormMiddleware>[0] = {},
+  ) {
+    const harness = await withSession();
+    let session = harness.ctx.state.get(SESSION_STATE_KEY) as Session;
+    if (!isNew) {
+      session = new Session(
+        { id: 'sid', data: { userId: 'u1' }, exp: 4_102_444_800_000, seen: 0 },
+        false,
+        () => 'x',
+      );
+      harness.ctx.state.set(SESSION_STATE_KEY, session);
+    }
+    await csrfFormMiddleware(options)(harness.ctx, () => Promise.resolve());
+    const access = harness.ctx.state.get(CSRF_TOKEN_ACCESS_STATE_KEY) as ICsrfTokenAccess;
+    return { access, session, harness };
+  }
+
+  it('is published, frozen, and carries the configured header name', async () => {
+    const { access } = await accessorFor(false, { headerName: 'x-form-token' });
+    expect(Object.isFrozen(access)).toBe(true);
+    expect(access.headerName).toBe('x-form-token');
+  });
+
+  it('mints and returns the token of a restored session', async () => {
+    const { access, session } = await accessorFor(false);
+    const token = access.tokenForExistingSession();
+    expect(token).toBe(readCsrfToken(session));
+    expect(access.tokenForExistingSession()).toBe(token);
+  });
+
+  it('returns undefined and mints nothing for a new session', async () => {
+    const { access, session } = await accessorFor(true);
+    expect(access.tokenForExistingSession()).toBeUndefined();
+    expect(readCsrfToken(session)).toBeUndefined();
+    expect(session.isDirty).toBe(false);
+  });
+
+  it('getCsrfToken marks the response private and records the read', async () => {
+    const { session, harness } = await accessorFor(false);
+    getCsrfToken(harness.ctx);
+    expect(harness.response.headers.get('cache-control')).toBe('private, no-store');
+    expect(harness.response.headers.get('vary')).toBe('Cookie');
+    expect(session.csrfTokenRead).toBe(true);
   });
 });

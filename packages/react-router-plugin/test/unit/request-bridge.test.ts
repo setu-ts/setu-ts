@@ -210,6 +210,27 @@ describe('request-bridge', () => {
     expect(respState.setCookies).toContain('token=xyz; Secure');
   });
 
+  it("a route's Cache-Control replaces the value already set; other headers still append", async () => {
+    const handler: SsrRequestHandler = () => {
+      const resp = new Response('<html>ok</html>');
+      resp.headers.set('Cache-Control', 'public, s-maxage=60');
+      resp.headers.set('Vary', 'Accept-Language');
+      resp.headers.append('Set-Cookie', 'a=1');
+      resp.headers.append('Set-Cookie', 'b=2');
+      return Promise.resolve(resp);
+    };
+
+    const { ctx, respState } = buildCtx({ method: 'GET' });
+    // The session plugin marked the page before the route ran.
+    respState.headers.set('cache-control', 'private, no-store');
+    respState.headers.set('vary', 'Cookie');
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
+
+    expect(respState.headers.get('cache-control')).toBe('public, s-maxage=60');
+    expect(respState.headers.get('vary')).toBe('Cookie, Accept-Language');
+    expect(respState.setCookies).toEqual(['a=1', 'b=2']);
+  });
+
   it('built Request carries ctx.request.method/url/headers', async () => {
     let receivedMethod = '';
     let receivedUrl = '';

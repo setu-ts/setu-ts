@@ -280,6 +280,15 @@ lexical `..` checking.
 Registers a `react-router` health indicator. There is no `onClose` — the request handler is
 stateless.
 
+## Caching pages
+
+`@setu-ts/session-plugin` marks a page tied to one visitor `Cache-Control: private, no-store` with
+`Vary: Cookie` (a signed-in visitor's page, a page carrying a CSRF token); see its
+[Caching](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#caching)
+section. A route's `headers` export that sets `Cache-Control` replaces that value rather than adding
+a second one, and the session plugin keeps an explicit shared-cacheable directive except on a
+response that sets the session cookie. Every other header from the route is appended.
+
 ## HTML forms and Referrer-Policy
 
 React Router refuses an unsafe document or single-fetch action request carrying `Origin: null`. A

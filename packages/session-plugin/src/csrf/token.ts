@@ -18,6 +18,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import { toBase64Url } from '../codec/envelope.ts';
 import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
+import { noteCsrfTokenRead } from '../services/cache-marking.ts';
 import { getSession } from '../services/get-session.ts';
 
 /**
@@ -39,7 +40,8 @@ const TOKEN_BYTES = 32;
  * Call it from whatever renders the form, and put the result in a hidden field
  * named to match the configured `fieldName` (default `_csrf`). Minting marks the
  * session dirty, so the token is committed with the response that carries the
- * form.
+ * form. Every call marks the response `Cache-Control: private, no-store` with
+ * `Vary: Cookie`, so no shared cache stores a page carrying a visitor's token.
  *
  * @param ctx - The request context
  * @returns The token to embed in the form
@@ -58,6 +60,9 @@ const TOKEN_BYTES = 32;
  */
 export function getCsrfToken(ctx: IRequestContext): string {
   const session = getSession(ctx);
+  // A page carrying a visitor's token is per-visitor: marked at the read, so a
+  // cache inside the session middleware never stores it.
+  noteCsrfTokenRead(ctx, session);
 
   const existing = readCsrfToken(session);
   if (existing !== undefined) {
