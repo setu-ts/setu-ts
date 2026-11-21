@@ -151,6 +151,8 @@ async function start(): Promise<Harness> {
             flows: { password: { tokenUrl: `${idp.origin}/token`, scopes: {} } },
           },
         },
+        // Authorized schemes are sent only on operations that list them.
+        security: [{ bearer: [] }],
       }),
     ],
   });
@@ -216,7 +218,10 @@ async function openDocs(
   if (withoutInterceptor) {
     await page.route(`${h.origin}/docs`, async (route) => {
       const response = await route.fetch();
-      const html = (await response.text()).replace(/\n\s*requestInterceptor: .*\n/, '\n');
+      const page = await response.text();
+      // The interceptor's source spans several lines, up to its `(<token url>, window),` call.
+      const html = page.replace(/\n\s*requestInterceptor: [\s\S]*?, window\),/, '');
+      if (html === page) throw new Error('the interceptor was not found in the page');
       await route.fulfill({ response, body: html });
     });
   }
