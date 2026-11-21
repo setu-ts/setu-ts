@@ -102,13 +102,19 @@ app.router.post('/api/data', {
 
 ## Middleware Priorities
 
-| Concern          | Priority | Description                                      |
-| ---------------- | -------- | ------------------------------------------------ |
-| IP Security      | 120      | Resolves client IP early for downstream stages   |
-| Request Size     | 180      | Rejects oversized bodies before other processing |
-| CORS             | 200      | Standard CORS handling + preflight short-circuit |
-| Security Headers | 250      | Sets response headers before handler execution   |
-| CSRF             | 270      | Validates CSRF after headers, before auth (300)  |
+| Concern          | Priority | Description                                         |
+| ---------------- | -------- | --------------------------------------------------- |
+| Security Headers | 10       | Sets response headers before every later middleware |
+| IP Security      | 120      | Resolves client IP early for downstream stages      |
+| CORS             | 125      | Standard CORS handling + preflight short-circuit    |
+| Request Size     | 180      | Rejects oversized bodies before other processing    |
+| CSRF             | 270      | Validates CSRF after headers, before auth (300)     |
+
+Security headers and CORS set their headers before calling `next()`, so every response produced
+after them carries those headers, including the request-size 400 and 413. CORS runs after IP
+security because an origin matcher may read the resolved client address or public origin. Security
+headers at 10 also cover the tenant (40) and locale (45) refusals and every error response the error
+handler (0) builds from a throw after priority 10.
 
 ## Defaults
 

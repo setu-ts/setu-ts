@@ -21,9 +21,9 @@ import { readTenantBinding, sealTenantBinding } from '../services/session-tenant
 /**
  * Builds the session middleware.
  *
- * Registered by the plugin at priority 260: after security headers (250) so a
- * rejected request never loads a session, and before authentication (300) so an
- * auth strategy can read one.
+ * Registered by the plugin at priority 260: after CORS (125) and request size
+ * (180) so a request those refuse never loads a session, and before
+ * authentication (300) so an auth strategy can read one.
  *
  * The commit runs after `next()` returns. That works even though the handler has
  * already called a terminal response method, because the kernel's response

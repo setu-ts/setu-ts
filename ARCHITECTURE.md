@@ -1923,6 +1923,7 @@ last outbound).
 | Priority | Middleware                | Purpose                  |
 | -------- | ------------------------- | ------------------------ |
 | 0        | ErrorHandler              | Outermost error handler  |
+| 10       | SecurityHeadersMiddleware | Add security headers     |
 | 20       | MetricsMiddleware         | Record metrics           |
 | 30       | TelemetryMiddleware       | Propagate trace context  |
 | 40       | TenantMiddleware          | Resolve request tenant   |
@@ -1930,8 +1931,7 @@ last outbound).
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
 | 150      | CorrelationIdMiddleware   | Propagate correlation ID |
-| 200      | CorsMiddleware            | Handle CORS              |
-| 250      | SecurityHeadersMiddleware | Add security headers     |
+| 125      | CorsMiddleware            | Handle CORS              |
 | 260      | SessionMiddleware         | Load/commit the session  |
 | 270      | CsrfMiddleware            | Origin/Referer check     |
 | 300      | AuthMiddleware            | Authenticate request     |
@@ -1940,11 +1940,11 @@ last outbound).
 | 400      | ValidationMiddleware      | Validate request         |
 
 These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40),
-locale resolution (45), HTTP security (120–270), session (260), authentication (300), and form CSRF
-(325) are self-registered by their own plugins. The application (or a starter) adds the error
-handler and any application middleware. `AuthPluginOptions.middleware` can move authentication,
-exclude selected paths, or disable its global registration when the application attaches
-`authMiddleware()` per route.
+locale resolution (45), HTTP security (10 and 120–270), session (260), authentication (300), and
+form CSRF (325) are self-registered by their own plugins. The application (or a starter) adds the
+error handler and any application middleware. `AuthPluginOptions.middleware` can move
+authentication, exclude selected paths, or disable its global registration when the application
+attaches `authMiddleware()` per route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through

@@ -403,7 +403,7 @@ object.
 
 | Priority | Middleware           | Why there                                                                                                                                                                    |
 | -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)                                                                                                                              |
+| 260      | `sessionMiddleware`  | After CORS (125) and request size (180), before auth (300)                                                                                                                   |
 | 325      | `csrfFormMiddleware` | After the session loads (260) and after authentication (300), before authorization (350): the bearer exemption reads the credential source recorded and the session it parks |
 
 Session sits below authentication so an auth strategy can read it. Anything that reads the session

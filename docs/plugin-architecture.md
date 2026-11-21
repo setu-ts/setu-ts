@@ -148,15 +148,15 @@ The default middleware priority order:
 | Priority | Middleware                          | Registered by                                       |
 | -------- | ----------------------------------- | --------------------------------------------------- |
 | 0        | `errorHandler()`                    | The application (the starters and `setu new` do it) |
+| 10       | Security headers                    | `HttpSecurityPlugin`                                |
 | 20       | Metrics collection                  | `MetricsPlugin`                                     |
 | 30       | Request tracing                     | `TelemetryPlugin`                                   |
 | 40       | Tenant resolution                   | `MultiTenancyPlugin`                                |
 | 45       | Locale resolution                   | `LocalizationPlugin`                                |
 | 100      | Request logging                     | `LoggerPlugin`                                      |
 | 120      | IP allow/deny lists                 | `HttpSecurityPlugin`                                |
+| 125      | CORS                                | `HttpSecurityPlugin`                                |
 | 180      | Request size limit                  | `HttpSecurityPlugin`                                |
-| 200      | CORS                                | `HttpSecurityPlugin`                                |
-| 250      | Security headers                    | `HttpSecurityPlugin`                                |
 | 260      | Session load and commit             | `SessionPlugin`                                     |
 | 270      | Origin-based CSRF check             | `HttpSecurityPlugin`                                |
 | 300      | Authentication                      | `AuthPlugin`                                        |

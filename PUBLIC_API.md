@@ -4366,13 +4366,13 @@ app.register(
 
 ### Options
 
-| Option         | Type                     | Default            | Description                                        |
-| -------------- | ------------------------ | ------------------ | -------------------------------------------------- |
-| `cors?`        | `CorsOptions`            | —                  | Presence enables CORS (priority 200).              |
-| `headers?`     | `SecurityHeadersOptions` | default secure set | Omitted → defaults ON. `{ enabled: false }` → off. |
-| `csrf?`        | `CsrfOptions`            | —                  | Presence enables CSRF (priority 270).              |
-| `requestSize?` | `RequestSizeOptions`     | —                  | Presence enables size limiting (priority 180).     |
-| `ipSecurity?`  | `IpSecurityOptions`      | —                  | Presence enables IP resolution (priority 120).     |
+| Option         | Type                     | Default            | Description                                                      |
+| -------------- | ------------------------ | ------------------ | ---------------------------------------------------------------- |
+| `cors?`        | `CorsOptions`            | —                  | Presence enables CORS (priority 125).                            |
+| `headers?`     | `SecurityHeadersOptions` | default secure set | Omitted → defaults ON (priority 10). `{ enabled: false }` → off. |
+| `csrf?`        | `CsrfOptions`            | —                  | Presence enables CSRF (priority 270).                            |
+| `requestSize?` | `RequestSizeOptions`     | —                  | Presence enables size limiting (priority 180).                   |
+| `ipSecurity?`  | `IpSecurityOptions`      | —                  | Presence enables IP resolution (priority 120).                   |
 
 ### Per-concern Behavior
 
