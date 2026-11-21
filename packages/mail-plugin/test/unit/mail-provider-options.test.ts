@@ -371,3 +371,58 @@ describe('SendGrid bound and reason (V13-216, V13-217)', () => {
     );
   });
 });
+
+describe('MailPlugin wiring for the new options', () => {
+  it('createProvider hands SMTP the runtime resolver and clock for dnsTtlMs', async () => {
+    const { createProvider } = await import('../../src/plugin/mail-plugin.ts');
+    const server = await smtpServer('127.0.0.1', 0);
+    let ticks = 0;
+    const ctx = {
+      runtime: {
+        dns: {
+          resolveHost: () => Promise.resolve(['127.0.0.1']),
+          resolveSrv: () => Promise.resolve([]),
+        },
+        hrtime: () => {
+          ticks++;
+          return 0;
+        },
+        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+        clearTimeout: (handle: unknown) => {
+          clearTimeout(handle as ReturnType<typeof setTimeout>);
+        },
+      },
+    } as unknown as Parameters<typeof createProvider>[2];
+    const provider = createProvider(
+      'smtp',
+      { host: 'smtp.x.test', port: server.port, dnsTtlMs: 1000 },
+      ctx,
+    );
+    try {
+      await provider.connect();
+      await provider.send(mail);
+      expect(server.received).toEqual(['127.0.0.1']);
+      expect(ticks).toBeGreaterThan(0);
+    } finally {
+      server.server.close();
+    }
+  }, 20_000);
+});
+
+describe('SendGrid tolerates a body that cannot be cancelled', () => {
+  it('a send and a probe still answer when cancel() rejects', async () => {
+    const unCancellable = (status: number): Response =>
+      ({
+        status,
+        ok: status < 300,
+        body: { cancel: () => Promise.reject(new Error('already closed')) },
+      }) as unknown as Response;
+    const provider = new SendGridProvider({
+      apiKey: 'k',
+      http: (url) => Promise.resolve(unCancellable(url.endsWith('/scopes') ? 200 : 202)),
+    });
+    await provider.connect();
+    await expect(provider.send(mail)).resolves.toBeUndefined();
+    expect(await provider.isHealthy()).toBe(true);
+  });
+});
