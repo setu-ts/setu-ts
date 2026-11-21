@@ -68,18 +68,25 @@ export function createProvider(
         accessKeyId: options.accessKeyId,
         secretAccessKey: options.secretAccessKey,
         endpoint: options.endpoint,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isAwsClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'gcp':
       return new GcpSecretManagerProvider({
         projectId: options.projectId,
         endpoint: options.endpoint,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isGcpClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'azure':
       return new AzureKeyVaultProvider({
         vaultUrl: options.vaultUrl,
+        disableChallengeResourceVerification: options.disableChallengeResourceVerification,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isAzureClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'vault':
       return new HashiCorpVaultProvider({

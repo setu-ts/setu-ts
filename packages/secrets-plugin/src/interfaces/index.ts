@@ -161,6 +161,15 @@ export interface SecretsProviderOptions {
   projectId?: string;
   /** (`azure`) Key Vault URL for the lazily-loaded client. */
   vaultUrl?: string;
+  /**
+   * (`azure`) Passed to the SDK's `SecretClient`: turns off its check that the
+   * authentication challenge names the vault's own domain. For an emulator or
+   * a test vault at `localhost` only — the check keeps a bearer token from
+   * being sent to a host that is not the vault. Default `false`.
+   *
+   * @since 0.14.0
+   */
+  disableChallengeResourceVerification?: boolean;
   /** (`vault`) Vault server address, e.g. `https://vault.example.com`. */
   address?: string;
   /** (`vault`) Vault auth token sent as `X-Vault-Token`. */
@@ -176,10 +185,12 @@ export interface SecretsProviderOptions {
   /** (`vault`) Injected `fetch`-shaped function; defaults to global `fetch`. */
   http?: IVaultHttp;
   /**
-   * (`vault`) Bound on one Vault request, in milliseconds. A request that
-   * fails on the network or does not answer in time rejects with
-   * `SecretProviderUnavailableError` (`503`). `0` disables the bound.
-   * Default `5000`.
+   * (`vault` | `aws-kms` | `gcp` | `azure`) Bound on one backend call, in
+   * milliseconds, including an SDK's own retries. A call that fails on the
+   * network, gets a `5xx` (or a gRPC `UNAVAILABLE`/`DEADLINE_EXCEEDED`), or does
+   * not answer in time rejects with `SecretProviderUnavailableError` (`503`).
+   * `0` disables the bound. Default `5000`. Read by `vault` since 0.9.0 and by
+   * the other three since 0.14.0.
    *
    * @since 0.9.0
    */
