@@ -62,7 +62,7 @@ setu new my-app                                  # Node, minimal (runtime plugin
 setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
-setu new my-app --template rest --env-file config/.env.local
+setu new my-app --template rest --dotenv config/.env.local
 ```
 
 `--runtime` chooses the manifest and the start command, not the code. On `deno`, `node` and `bun`
@@ -84,10 +84,10 @@ its `test` task permits an empty suite. For an existing project, `setu add testi
 package in Deno's import map or npm's `devDependencies`.
 
 On Deno, Node, and Bun, config-backed templates emit a gitignored `.env` and tracked `.env.example`,
-and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--env-file <path>` to
-select another relative path. Cloudflare Workers use request bindings and therefore emit no dotenv
-file or filesystem configuration; `--env-file` is refused there. Values needed while constructing a
-plugin must come from this pre-construction environment source; `ConfigPlugin` cannot retroactively
+and load the selected path through `ConfigPlugin({ envFilePath })`. Use `--dotenv <path>` to select
+another relative path. Cloudflare Workers use request bindings and therefore emit no dotenv file or
+filesystem configuration; `--dotenv` is refused there. Values needed while constructing a plugin
+must come from this pre-construction environment source; `ConfigPlugin` cannot retroactively
 configure a plugin already built.
 
 | Template       | Plugin set                                                                                                                                              |
@@ -442,7 +442,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--runtime <target>`    | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `--example <app>`       | `new` only: download an offered example as a standalone Node project at the CLI release tag. Dry-run fetches nothing. Refuses template, workspace and composition overrides.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `--template <name>`     | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `--env-file <path>`     | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `--dotenv <path>`       | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--broker <name>`       | `new` and `add messaging`: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers and templates registering no messaging. Full-stack receives starter options through config reads; `add` preserves existing options, creates only missing Compose files, and appends the connection variable to an existing dotenv pair only where it is not assigned. |
 | `--queue <name>`        | `new` and `add queue`: the job queue backend (`memory`, `redis`, `rabbitmq`). Same overlay as `--broker`, for the queue wiring.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `--redis-client <name>` | `new` and `add` with a Redis arm: `ioredis` (default) or `node-redis`. node-redis projects depend on `redis` and wire each plugin through a generated `src/node-redis.ts` (`nodeRedisClient(url)` over `fromNodeRedis`). A workspace records it as `redisClient`; members and `generate app` follow the workspace and refuse the flag. Refused without a Redis arm and on Workers.                                                                                                                                                                                                                                                          |
@@ -465,6 +465,22 @@ is within a small edit distance (`--templat` suggests `--template`; `--base-port
 and the removed `--transport` flags on `new`, the broker flags and `--runtime` on `generate app`)
 still reaches that specific message. Plugin-registered commands accept only `--dir` and `--config`:
 a handler receives positionals only, so no plugin command can read any other flag.
+
+A valued built-in option without a value exits `2` before writing. Use `--option=<value>` when the
+value begins with `-`. Node owns the former dotenv flag; launchers that pass it through receive a
+refusal pointing to `--dotenv <path>`.
+
+`new` accepts an absent target or an empty directory, including a directory containing only `.git`.
+It refuses a file anywhere in the target path and reports the entry count for a non-empty target.
+Dry runs print `WOULD REFUSE` for these cases and write nothing.
+
+On a Node host outside `^22.23.4 || ^24.22.1 || >=26.12.1`, the CLI prints one warning to stderr and
+continues. Bun and Deno hosts skip this warning.
+
+`add`, `generate` and `sync` hold `.setu-ts/write.lock/` while changing a project, using the
+workspace root for members. Dry runs skip the lock. A second writer exits `1` and names the lock
+path; it never removes or replaces an existing lock. If a killed command leaves a lock behind,
+confirm no Setu command is running before deleting the named directory.
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command

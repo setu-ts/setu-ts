@@ -1717,7 +1717,7 @@ function npmScripts(
   // M131a X88-2: a local start script loads the project's dotenv file into the
   // environment before the process starts (the plugin options are evaluated in
   // createApp(), before any plugin runs, so only the process environment is
-  // available there). The file is the one the project declares (`--env-file
+  // available there). The file is the one the project declares (`--dotenv
   // local.env` included; CodeRabbit #543), `.env` by default. Node uses
   // `--env-file-if-exists` (safe when the file is absent); Bun loads `.env`
   // itself and takes `--env-file=` for any other name (measured, Bun 1.4: a
@@ -2242,7 +2242,7 @@ docker run --rm -p 3000:3000 ${generatedVariables.map((variable) => `-e ${variab
   }`;
 
   // Deno's nodeModulesDir: 'auto' creates node_modules for standalone projects too.
-  const gitignore = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
+  const gitignore = `node_modules/\ncoverage/\n.setu-ts/write.lock/\n.env\n.env.*\n!.env.example\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output and its typegen directory are generated, so
     // they are ignored like any other build artifact — the generated file used
     // to list only `coverage/` and the env file, which left a minified bundle

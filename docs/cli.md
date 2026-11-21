@@ -82,7 +82,12 @@ setu new my-app --template rest                # a REST composition
 setu new my-app --runtime deno                 # node | deno | bun | cloudflare-workers (see below)
 setu new my-app --template class-based         # decorators and a DI container
 setu new my-app --dry-run                      # print the plan, write nothing
+setu new my-app --template rest --dotenv config/local.env
 ```
+
+`--dotenv <path>` selects the generated configuration file for `new` and `generate app`. Node owns
+the former flag; if it reaches the CLI under another launcher, the CLI refuses it and points to
+`--dotenv`.
 
 ### Start from an example
 
@@ -110,7 +115,7 @@ repository dependency and an alternative. `full-stack` uses `--template full-sta
 repository scripts or source.
 
 Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
-`--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,
+`--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--dotenv`, `--transport`,
 `--transport-url`, `--broker-url`, `--rpc`, `--port`, `--depends-on` and `--di` are refused with
 `--example`. `--runtime node` is accepted; other runtimes are refused. `--dir`, `--agents` and
 `--dry-run` remain available. See [Examples](./examples.md) for the learning path and prerequisites.

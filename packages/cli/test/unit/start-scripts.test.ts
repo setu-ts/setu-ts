@@ -145,7 +145,7 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
     ['node', '--env-file-if-exists=local.env'],
     ['bun', '--env-file=local.env'],
   ] as const)(
-    '%s scripts load a configured --env-file path (CodeRabbit #543)',
+    '%s scripts load a configured --dotenv path (CodeRabbit #543)',
     async (runtime, flag) => {
       const h = harness();
       expect(
@@ -156,7 +156,7 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
           'rest',
           '--runtime',
           runtime,
-          '--env-file',
+          '--dotenv',
           'local.env',
         ]),
       ).toBe(0);

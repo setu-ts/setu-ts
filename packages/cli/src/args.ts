@@ -32,8 +32,8 @@ const REPEATABLE_FLAGS: ReadonlySet<string> = new Set(['depends-on', 'build-arg'
  * - `--key value` for the flags named in {@linkcode VALUE_FLAGS}
  *
  * A valued flag at the end of argv with no following token, or followed by
- * another flag, is recorded as the boolean `true` — callers type-check the
- * value before using it.
+ * another flag, is recorded as the boolean `true`. The built-in dispatcher
+ * gate in `cli.ts` refuses those missing values before invoking a command.
  *
  * @param argv - The argument array (e.g. `process.argv.slice(2)`)
  * @param valueFlags - Flags whose value is the next token; defaults to {@linkcode VALUE_FLAGS}

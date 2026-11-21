@@ -76,12 +76,12 @@ describe('X91-1 same-named adoption', () => {
     it(`${style}: refuses a same-named service without its controller`, async () => {
       const h = scaffold(host(style));
       expect(await h.run(['service', 'orders'])).toBe(0);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
       expect(h.err.text()).toContain(
         'adopt it with its controller, or name the module something else',
       );
-      expect(h.fs.writes).toHaveLength(writes);
+      expect(h.fs.projectWrites).toHaveLength(writes);
     });
   }
   it('refuses a same-named file the scan did not admit (CodeRabbit #560)', async () => {
@@ -140,7 +140,7 @@ describe('X91-1 same-named adoption', () => {
       if (file.path.startsWith('src/modules/')) await h.fs.rm(`/app/${file.path}`);
     expect(await h.run(['module', 'orders', '--adopt-controllers'])).toBe(1);
     expect(h.err.text()).toContain('token and index import OrdersService and ordersService');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 });
 
@@ -163,9 +163,9 @@ describe('the first setu g module', () => {
       for (const module of ['shipment', 'billing']) {
         const h = scaffold(host(style));
         expect(await h.run(['controller', 'orders'])).toBe(0);
-        const writes = h.fs.writes.length;
+        const writes = h.fs.projectWrites.length;
         expect(await h.run(['module', module])).toBe(1);
-        expect(h.fs.writes.length).toBe(writes);
+        expect(h.fs.projectWrites.length).toBe(writes);
         expect(h.err.text()).toContain(
           [
             'Cannot create the first module while controllers or services live outside modules; a project keeps them in one place:',
@@ -329,9 +329,9 @@ describe('the first setu g module', () => {
 
   it('prints the plan on --dry-run and writes nothing', async () => {
     const h = scaffold(host('functional'));
-    const before = h.fs.writes.length;
+    const before = h.fs.projectWrites.length;
     expect(await h.run(['module', 'shipment', '--adopt-controllers', '--dry-run'])).toBe(0);
-    expect(h.fs.writes.length).toBe(before);
+    expect(h.fs.projectWrites.length).toBe(before);
     expect(h.out.text()).toContain(
       'would move src/controllers/greeting.controller.ts -> src/modules/shipment/greeting.controller.ts',
     );
@@ -411,10 +411,10 @@ describe('the first setu g module', () => {
         '/app/src/services/greeting.service.ts',
       ];
       const before = snapshot(h.fs, paths);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run(argv), label).toBe(1);
       expect(h.err.text(), label).toContain(message);
-      expect(h.fs.writes.length, label).toBe(writes);
+      expect(h.fs.projectWrites.length, label).toBe(writes);
       expect(snapshot(h.fs, paths), label).toEqual(before);
       expect(h.fs.has('/app/src/modules/index.ts'), label).toBe(false);
     }
@@ -445,12 +445,12 @@ describe('the first setu g module', () => {
     const readdir = h.fs.readdir.bind(h.fs);
     h.fs.readdir = (path) =>
       path === '/app/src/shared' ? Promise.reject(new Error('permission denied')) : readdir(path);
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     expect(await h.run(['module', 'shipment', '--adopt-controllers'])).toBe(1);
     expect(h.err.text()).toContain(
       'Cannot plan the switch to modules: permission denied. Nothing was changed.',
     );
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
   });
 
   it('switches whatever config it finds: absent, already switched, or flat without barrels', async () => {
@@ -549,12 +549,12 @@ describe('the first setu g module', () => {
     const broken = scaffold(host('functional'), {
       'src/shared/stale.ts': "export * from '../controllers/gone.controller.ts';\n",
     });
-    const writes = broken.fs.writes.length;
+    const writes = broken.fs.projectWrites.length;
     expect(await broken.run(['module', 'shipment', '--adopt-controllers'])).toBe(1);
     expect(broken.err.text()).toContain(
       'src/shared/stale.ts imports ../controllers/gone.controller.ts, which does not name a file the first module moves. Nothing was changed.',
     );
-    expect(broken.fs.writes.length).toBe(writes);
+    expect(broken.fs.projectWrites.length).toBe(writes);
   });
 
   it('refuses to adopt a class whose name the new module already binds', async () => {

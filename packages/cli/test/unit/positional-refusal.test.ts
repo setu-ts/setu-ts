@@ -75,22 +75,22 @@ describe('extra-positional refusal', () => {
     expect(h.err.text()).toContain('setu new takes one project name; got 3.');
     expect(h.out.text()).not.toContain('would create');
     expect(h.out.text()).not.toContain('created');
-    expect(h.fs.writes).toEqual([]);
-    expect(h.fs.mkdirs).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
+    expect(h.fs.projectMkdirs).toEqual([]);
   });
 
   it('refuses the n alias the same way', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['n', 'app', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu new takes one project name; got 2.');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses an extra name on a bare generate schematic', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['generate', 'service', 'billing', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu generate takes one name; got 2.');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses an extra name on generate custom', async () => {
@@ -102,28 +102,28 @@ describe('extra-positional refusal', () => {
     expect(h.err.text()).toContain(
       'setu generate custom takes two names: the custom schematic and the artifact name; got 3.',
     );
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses an extra name on generate app', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['generate', 'app', 'billing', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu generate app takes one member name; got 2.');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses an extra name on generate library', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
     expect(await h.run(['generate', 'library', 'shared', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu generate library takes one library name; got 2.');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses positionals on build before bundling or writing', async () => {
     const h = harness();
     expect(await h.run(['build', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu build takes no arguments; got 1.');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses any positional on adopt, which takes none', async () => {
@@ -137,7 +137,7 @@ describe('extra-positional refusal', () => {
     expect(await h.run(['adopt', 'extra'])).toBe(2);
     expect(h.err.text()).toContain('setu adopt takes no arguments; got 1.');
     expect(h.fs.has('/work/setu.workspace.json')).toBe(false);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses a positional on workspace ports', async () => {
@@ -148,7 +148,7 @@ describe('extra-positional refusal', () => {
     expect(await h.run(['workspace', 'ports', 'extra', '--reallocate'])).toBe(2);
     expect(h.err.text()).toContain('setu workspace ports takes no arguments beyond ports; got 1.');
     expect(h.out.text()).not.toContain('Reallocated');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses a positional on commands, which takes none', async () => {
@@ -180,7 +180,7 @@ describe('extra-positional refusal', () => {
     expect(await h.run(['new', 'app', 'extra', 'junk', '--dry-run'])).toBe(2);
     expect(h.err.text()).toContain('setu new takes one project name; got 3.');
     expect(h.out.text()).not.toContain('would create');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('tokens hidden behind the -- terminator are positionals and refuse too', async () => {
@@ -188,7 +188,7 @@ describe('extra-positional refusal', () => {
     expect(await h.run(['new', 'app', '--dry-run', '--', 'extra', 'junk'])).toBe(2);
     expect(h.err.text()).toContain('setu new takes one project name; got 3.');
     expect(h.err.text()).not.toContain('Unknown option');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 });
 
@@ -197,7 +197,7 @@ describe('unchanged neighbors of the refusal', () => {
     const h = harness({ seed: { '/work/deno.json': '{}' } });
     expect(await h.run(['add', 'auth', 'extra', 'junk'])).toBe(2);
     expect(h.err.text()).toContain('"extra" is not a Setu-TS package');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('a missing generate name still usage-errors in the command body', async () => {
@@ -344,6 +344,6 @@ for (const command of ['check', 'sync']) {
     const h = harness();
     expect(await h.run([command, 'extra'])).toBe(2);
     expect(h.err.text()).toContain(`setu ${command} takes no arguments; got 1.`);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 }

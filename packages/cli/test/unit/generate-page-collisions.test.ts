@@ -50,13 +50,13 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     expect(h.fs.read(path)).toContain('export async function signIn(');
     const edited = new Uint8Array([239, 187, 191, 47, 47, 32, 109, 105, 110, 101, 13, 10]);
     await h.fs.writeFile(path, edited);
-    const writesBefore = h.fs.writes.filter((target) => target === path).length;
+    const writesBefore = h.fs.projectWrites.filter((target) => target === path).length;
     expect(await h.run(['g', 'module', 'other', '--page', '--dry-run']), h.err.text()).toBe(0);
     expect(h.out.text()).toContain(`unchanged ${path}`);
     expect(await h.fs.readFile(path)).toEqual(edited);
     expect(await h.run(['g', 'module', 'other', '--page']), h.err.text()).toBe(0);
     expect(await h.fs.readFile(path)).toEqual(edited);
-    expect(h.fs.writes.filter((target) => target === path)).toHaveLength(writesBefore);
+    expect(h.fs.projectWrites.filter((target) => target === path)).toHaveLength(writesBefore);
     expect(h.fs.has('/app/app/routes/_app/other._index.tsx')).toBe(true);
     expect(h.err.text()).not.toContain('already exists');
   });
@@ -112,7 +112,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     const h = harness();
     expect(await h.run(['g', 'module', 'products', '--page', ...(api ? ['--api'] : [])])).toBe(1);
     expect(h.err.text()).toContain('the page /products already exists');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it.each([false, true])('keeps the same-named adoption refusal with --api=%s', async (api) => {
@@ -176,7 +176,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
       }),
     ).toBe(1);
     expect(err.text()).toContain('would take precedence');
-    expect(fs.writes).toEqual([]);
+    expect(fs.projectWrites).toEqual([]);
     expect(runner.mock.calls[0]?.[0]).toBe('/work/node_modules/.bin/react-router');
   });
   it('lets a full-stack module share its page name: its routes mount at /api (M130 §3.6)', async () => {
@@ -191,7 +191,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
   it('refuses --page over an existing page, naming its file (review finding 3)', async () => {
     const h = harness();
     expect(await h.run(['g', 'module', 'products', '--page'])).toBe(1);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     expect(h.err.text()).toContain('the page /products already exists');
     expect(h.err.text()).toContain('routes/_app/products._index.tsx');
   });
@@ -208,7 +208,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
       Promise.resolve({ code: 0, stdout: JSON.stringify(api), stderr: '' }),
     );
     expect(await h.run(['g', 'module', 'orders'])).toBe(1);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     expect(h.err.text()).toContain('/api/orders and /api/orders/:id would take precedence');
     expect(h.err.text()).toContain('routes/_app/api.orders.tsx');
   });
@@ -218,7 +218,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
       it(`refuses ${schematic} products before writing or printing a dry-run plan (${dryRun})`, async () => {
         const h = harness();
         expect(await h.run(['g', schematic, 'products', ...(dryRun ? ['--dry-run'] : [])])).toBe(1);
-        expect(h.fs.writes).toEqual([]);
+        expect(h.fs.projectWrites).toEqual([]);
         expect(h.out.lines).toEqual([]);
         expect(h.err.text()).toContain('app/routes/_app/products._index.tsx');
         expect(h.err.text()).toContain('/products and /products/:id would take precedence');
@@ -255,7 +255,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     expect(h.err.text()).toContain('React Router exited 127: missing CLI)');
     expect(h.err.text()).not.toContain('trace line');
     expect(h.err.text()).toContain('/products and /products/:id');
-    expect(h.fs.writes.length).toBeGreaterThan(0);
+    expect(h.fs.projectWrites.length).toBeGreaterThan(0);
   });
   it('prints no route notice for a page-only module, which writes no kernel route', async () => {
     const failing = () => Promise.resolve({ code: 127, stdout: '', stderr: '\nmissing CLI\n' });

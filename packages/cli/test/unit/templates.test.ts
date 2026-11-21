@@ -398,7 +398,7 @@ describe('class-based template', () => {
     //
     // `config-plugin` is deliberately NOT in this set: its dotenv argument is
     // template MANIFEST data rendered by `configModule`, so a literal on the
-    // wiring as well would be a second source of truth that `--env-file`
+    // wiring as well would be a second source of truth that `--dotenv`
     // silently overrides.
     const withArgs = new Set([
       'runtime',

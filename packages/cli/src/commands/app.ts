@@ -192,7 +192,7 @@ function printUsage(log: (message: string) => void): void {
     '  --devtool           Enable the local diagnostics connector for this member (Deno or Node)',
   );
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
-  log('  --env-file <path>   Store local configuration in this ignored relative path');
+  log('  --dotenv <path>     Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
   log(
     `  --rpc <style>       ${RPC_STYLES.join(' | ')} (default http): grpc co-serves Connect/gRPC`,
@@ -310,7 +310,7 @@ function planMember(
       readonly ok: false;
       readonly message: string;
     } {
-  const envFile = readEnvFilePath(args.flags);
+  const envFile = readEnvFilePath(args.flags['dotenv']);
   if (!envFile.ok) return { ok: false, message: envFile.message };
 
   const extra: GeneratedFile[] = [];
@@ -354,7 +354,7 @@ function planMember(
       // `readWorkspaceManifest` refuses a manifest naming it, so a Workers
       // member cannot exist and a branch for one would be unreachable.
       message:
-        '--env-file requires a template that registers ConfigPlugin ' +
+        '--dotenv requires a template that registers ConfigPlugin ' +
         '(rest, microservice, class-based, or full-stack).',
     };
   }
@@ -787,7 +787,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     .map((variable) => variable.name);
   // A custom dotenv name the generated `.env`/`.env.*` rules miss is recorded,
   // so the managed root .dockerignore lists it on every regeneration.
-  const envFlag = readEnvFilePath(args.flags);
+  const envFlag = readEnvFilePath(args.flags['dotenv']);
   const envFilePath =
     envFlag.ok &&
     envFlag.path !== undefined &&

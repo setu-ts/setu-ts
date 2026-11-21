@@ -16,6 +16,7 @@ import { ZERO_CONFIG_WIRINGS } from '../utils/plugin-wirings.ts';
  * @module
  */
 
+import { runWithProjectLock, type IProjectLockDependencies } from '../utils/project-lock.ts';
 import { devtoolRuntimeRefusal } from '../devtool/planner.ts';
 import { withDatabaseScripts, databaseConfig } from './add-database.ts';
 import type { Prompter } from '../prompt.ts';
@@ -163,7 +164,7 @@ import {
 } from '../devtool/sources.ts';
 
 /** What `runAddCommand` reaches the outside world through. */
-export interface AddCommandDependencies {
+export interface AddCommandDependencies extends IProjectLockDependencies {
   /** Creates a fresh local secret when adding session support. */
   readonly secret?: () => string;
   readonly ask?: Prompter;
@@ -2389,12 +2390,25 @@ export async function runAddCommand(
       return EXIT_USAGE;
     }
   }
-  const selectedFlags = await askOpenChoices(args, deps, packages);
-  if (selectedFlags === undefined) return EXIT_INTERRUPTED;
-  const requests = packages.map((bare) => ({
-    positionals: [bare],
-    flags: flagsFor(selectedFlags, bare),
-  }));
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  return await runWithProjectLock(deps, dir, args.flags['dry-run'] !== true, 'add', async () => {
+    const selectedFlags = await askOpenChoices(args, deps, packages);
+    if (selectedFlags === undefined) return EXIT_INTERRUPTED;
+    const requests = packages.map((bare) => ({
+      positionals: [bare],
+      flags: flagsFor(selectedFlags, bare),
+    }));
+    return addRequests(args, deps, packages, requests);
+  });
+}
+
+/** Executes validated package requests beneath one project lock. */
+async function addRequests(
+  args: ParsedArgs,
+  deps: AddCommandDependencies,
+  packages: readonly string[],
+  requests: readonly ParsedArgs[],
+): Promise<number> {
   if (requests.length === 1) {
     deps.log(`@setu-ts/${packages[0]}:`);
     return addOne(requests[0]!, deps);

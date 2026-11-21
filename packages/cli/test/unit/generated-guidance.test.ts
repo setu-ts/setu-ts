@@ -499,7 +499,7 @@ describe('generated code and guidance', () => {
     ).toBe(false);
     for (const quote of ["'", '"']) {
       const h = harness();
-      expect(await h.run(['new', 'api', '--template', 'rest', '--env-file', 'local.env'])).toBe(0);
+      expect(await h.run(['new', 'api', '--template', 'rest', '--dotenv', 'local.env'])).toBe(0);
       const config = h.fs
         .read('/work/api/setu.config.ts')
         .replace("envFilePath: 'local.env'", `envFilePath: ${quote}local.env${quote}`);
@@ -512,7 +512,7 @@ describe('generated code and guidance', () => {
     }
     const h = harness();
     expect(
-      await h.run(['new', 'api', '--template', 'rest', '--env-file', 'local.env', '--devtool']),
+      await h.run(['new', 'api', '--template', 'rest', '--dotenv', 'local.env', '--devtool']),
     ).toBe(0);
     expect(JSON.parse(h.fs.read('/work/api/package.json')).scripts.dev).toBe(
       'tsx --import ./instrumentation.mjs --env-file-if-exists=local.env main.dev.ts',
