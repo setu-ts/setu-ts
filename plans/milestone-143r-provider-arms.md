@@ -156,9 +156,11 @@ of the live service.
   rejects through §3.2. `delete` resolves `true` when the store accepted the delete, `false` only
   when the store answered not-found (GCS 404, Azure 404); every other failure rejects. S3/B2
   `DeleteObject` answers 204 for an absent key, so `s3`/`b2` resolve `true` for one — stated in the
-  README per provider. Memory and local keep their behaviour. The provider × case outcomes are one
-  table in `exists-delete-conformance.test.ts` that the test iterates (fakes per provider), and the
-  same table's rows are re-run against the real SDKs on the stand-ins.
+  README per provider. Memory keeps its behaviour; local follows the same rule (`ENOENT` or Deno's
+  `NotFound` is "not there"; a permission or I/O failure rejects), found during implementation. The
+  provider × case outcomes are one table in `exists-delete-conformance.test.ts` that the test
+  iterates (fakes per provider), and the same table's rows are re-run against the real SDKs on the
+  stand-ins.
 - **Why:** an application that writes when `exists` is `false` overwrites during an outage.
 - **Test home:** `exists-delete-conformance.test.ts`; guarded `*-standin.test.ts`.
 
@@ -175,8 +177,9 @@ of the live service.
   (service throws not-found), other `error` → §3.2, otherwise a web stream that yields the first
   chunk then the rest (cancel destroys the source).
 - **Why:** the crash is in the SDK's retry path, and the newer majors are not free of a fault.
-- **Test home:** `gcs-outage-real.test.ts` (real SDK, in-test 502/503 server, child process alive
-  and rejection observed); `gcs-provider.test.ts` (peek branches with fakes).
+- **Test home:** `storage-deadline-real.test.ts` (real SDK, in-test 502/503 server, in-process:
+  Vitest fails the run on the unhandled rejection the old path raised);
+  `cloud-provider-options.test.ts` (peek branches with fakes).
 
 ### 3.5 GCS signed URLs (V13-234)
 
@@ -255,11 +258,13 @@ of the live service.
 
 - **Decision:** `start()` passes `{ timeout: initTimeoutSeconds }` and also wraps the wait in
   `withDeadline(initTimeoutSeconds * 1000)`, so an injected client that ignores the option is
-  bounded too; the post-init `allFlagsState` refill runs under the same bound. The facade type
-  becomes `waitForInitialization(options?: { readonly timeout?: number })`. Expiry keeps today's
-  documented degraded start (warn, fallback values, `status()` unhealthy). `initTimeoutSeconds` must
-  be a finite number `> 0` and `<= 2147483` (so `* 1000` stays in the timer range); anything else,
-  `0` included, throws `RangeError` naming the option at construction — a zero wait is not offered,
+  bounded too; the anonymous snapshot that `start()` awaits runs under the same bound. Background
+  refills are not bounded: they hold nothing, and a timer per refill measurably slowed the growth
+  tests (one per distinct context). The facade type becomes
+  `waitForInitialization(options?: { readonly timeout?: number })`. Expiry keeps today's documented
+  degraded start (warn, fallback values, `status()` unhealthy). `initTimeoutSeconds` must be a
+  finite number `> 0` and `<= 2147483` (so `* 1000` stays in the timer range); anything else, `0`
+  included, throws `RangeError` naming the option at construction — a zero wait is not offered,
   because the LaunchDarkly `0` ("do not wait") and `withDeadline`'s `0` ("unbounded") mean opposite
   things.
 - **Test home:** `launchdarkly-real.test.ts` (real SDK, `baseUri`/`streamUri` to a black-hole TCP
@@ -432,7 +437,7 @@ refused). Ships in minor `0.14.0`.
 | `storage-plugin/test/unit/exists-delete-conformance.test.ts`                                                                                  | the three providers                  | §3.3 table iterated                                                                                                                                                                    |
 | `storage-plugin/test/unit/{s3,gcs,azure}-provider.test.ts` (extended)                                                                         | providers                            | §3.4–3.8 branches with fake modules; configs recorded                                                                                                                                  |
 | `storage-plugin/test/unit/storage-deadline.test.ts`                                                                                           | providers + plugin                   | real SDKs vs black-hole server settle within bound; `RangeError` table                                                                                                                 |
-| `storage-plugin/test/integration/gcs-outage-real.test.ts`                                                                                     | gcs provider                         | real SDK, 502/503 server, process alive, 503 class                                                                                                                                     |
+| `storage-plugin/test/integration/storage-deadline-real.test.ts`                                                                               | gcs provider                         | real SDK, 502/503 server, process alive, 503 class                                                                                                                                     |
 | `storage-plugin/test/unit/providers/{gcs,azure}-health.test.ts` (extended)                                                                    | probes                               | §3.9 rule table                                                                                                                                                                        |
 | `storage-plugin/test/unit/storage-plugin.test.ts`, `storage-service.test.ts`                                                                  | plugin, service                      | b2 refusal; options passed; not-found class                                                                                                                                            |
 | `storage-plugin/test/unit/upload-refusal-status.test.ts`, `upload-middleware.test.ts`                                                         | middleware                           | 415; brand read back                                                                                                                                                                   |
