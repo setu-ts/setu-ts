@@ -16,8 +16,9 @@ All notable changes to this project are documented here. The format follows
   `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000). `RuntimeSignal` adds
   `'SIGHUP'`. `IHttpAdapter.beginDrain` lets the Node adapter send HTTP/2 `GOAWAY` when the drain
   begins. `IPluginContext.signal` aborts when `stop()` is called during `start()`, which now rejects
-  with `StartCancelledError` (new, `@setu-ts/kernel`). `WorkerRunOptions.signal` is the cancel
-  signal the worker pool honours (V13-131). V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
+  with `StartCancelledError` (new, `@setu-ts/kernel`). `WorkerRunOptions.signal` adds the cancel
+  signal to the worker pool's `run`; the pool honours it with V13-131's worker-pool half (M143r).
+  V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns

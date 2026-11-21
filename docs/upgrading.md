@@ -1162,7 +1162,8 @@ application without `DiPlugin` is unaffected.
 - **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
   means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
-  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
+  in-flight until its body finishes, so `stop()` waits for it, up to the drain bound (10 s unless
+  `drainTimeoutMs` sets it).
 
 <!-- version:history -->
 

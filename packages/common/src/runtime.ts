@@ -473,7 +473,7 @@ export interface IRuntimeServices {
    * `uncaughtExceptionMonitor` for thrown errors and, because a Bun
    * `unhandledRejection` listener would otherwise suppress the crash, an
    * `unhandledRejection` listener that rethrows the reason unless the
-   * application registered its own. A crash is reported once per process.
+   * application registered its own. Each handler is called once per crash.
    *
    * Absent on Cloudflare Workers, where an exception ends a request, not the
    * isolate. A handler that throws is ignored.

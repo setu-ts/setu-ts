@@ -369,6 +369,15 @@ describe('createDenoRuntimeServices | onSignal', () => {
   });
 });
 
+/** Records fatal-error reports. */
+function recorder(): {
+  handler: (error: unknown, origin: string) => void;
+  seen: [unknown, string][];
+} {
+  const seen: [unknown, string][] = [];
+  return { seen, handler: (error, origin) => seen.push([error, origin]) };
+}
+
 describe('Deno onFatalError (V13-11)', () => {
   it('wires Deno to the global events it is given, and omits it without them', () => {
     const fakeDeno = {
@@ -385,7 +394,7 @@ describe('Deno onFatalError (V13-11)', () => {
     target.dispatchEvent(Object.assign(new Event('error'), { error: 'boom' }));
     expect(seen.seen).toEqual([['boom', 'uncaughtException']]);
     expect(
-      createDenoRuntimeServices(fakeDeno, undefined, undefined, undefined).onFatalError,
+      createDenoRuntimeServices(fakeDeno, undefined, undefined, null).onFatalError,
     ).toBeUndefined();
   });
 });

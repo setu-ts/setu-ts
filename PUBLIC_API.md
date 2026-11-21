@@ -946,8 +946,8 @@ removes the handler. It never keeps the process alive: the exit code and the run
 stderr are unchanged. Node uses `uncaughtExceptionMonitor`; Deno the global `error` and
 `unhandledrejection` events; Bun `uncaughtExceptionMonitor` for throws and, because a Bun
 `unhandledRejection` listener would suppress the crash, a listener that rethrows the reason unless
-the application has its own. A crash is reported once. One process listener per mechanism exists
-while any handler is subscribed.
+the application has its own. Each handler is called once per crash. One process listener per
+mechanism exists while any handler is subscribed.
 
 ```typescript
 interface IDnsResolver {
@@ -14145,8 +14145,9 @@ Contract notes:
   the Node adapter sends HTTP/2 `GOAWAY` to every session (and to any that opens later) and closes
   idle HTTP/1.1 connections. Deno omits it (`Deno.serve` has no session control) and says so once at
   `listen` when HTTP/2 is configured; Bun serves HTTP/2 through the Node adapter.
-- `WorkerRunOptions.signal?: AbortSignal` (0.14.0) cancels a worker-pool call: an aborted signal
-  rejects with `signal.reason`, a queued call is withdrawn, a running call's worker is terminated.
+- `WorkerRunOptions.signal?: AbortSignal` (0.14.0, honoured by `@setu-ts/worker-pool-plugin` with
+  M143r) cancels a worker-pool call: an aborted signal rejects with `signal.reason`, a queued call
+  is withdrawn, a running call's worker is terminated.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop

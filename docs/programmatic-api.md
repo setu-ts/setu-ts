@@ -495,7 +495,7 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 ### IRuntimeServices
 
 ```typescript
-type RuntimeSignal = 'SIGTERM' | 'SIGINT';
+type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP';
 
 interface IRuntimeServices {
   reportError?(record: Readonly<Record<string, unknown>>): void;

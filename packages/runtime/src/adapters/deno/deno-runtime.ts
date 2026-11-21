@@ -95,7 +95,7 @@ export interface DenoDirEntry {
  * @param host - Injected Deno host (defaults to real Deno global)
  * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @param dns - Injected DNS resolver (defaults to one over the host's `resolveDns`)
- * @param globalEvents - Where uncaught errors are announced (defaults to the global scope)
+ * @param globalEvents - Where uncaught errors are announced (defaults to the global scope; `null` for none)
  * @returns Complete runtime services for Deno
  */
 export function createDenoRuntimeServices(
@@ -110,7 +110,8 @@ export function createDenoRuntimeServices(
   dns: IDnsResolver = createDenoDnsResolver(host),
   // Deno reports an uncaught error or rejection through the global `error`
   // and `unhandledrejection` events, not through the `Deno` namespace.
-  globalEvents: GlobalEventHost | undefined = globalThis as unknown as GlobalEventHost,
+  // `null` (not `undefined`, which would take this default) means none.
+  globalEvents: GlobalEventHost | null = globalThis as unknown as GlobalEventHost,
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
@@ -233,7 +234,7 @@ export function createDenoRuntimeServices(
         };
 
   const fatal =
-    typeof globalEvents?.addEventListener === 'function'
+    globalEvents !== null && typeof globalEvents.addEventListener === 'function'
       ? { onFatalError: createDenoFatalErrorObserver(globalEvents) }
       : {};
 
