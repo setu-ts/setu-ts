@@ -27,15 +27,15 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/common` (M143r).** `StorageObjectNotFoundError` (a `404` status hint, the key in
   `message` and on `.key`, never in the served body) and the upload brand `UPLOAD_METADATA` /
-  `withUploadMetadata` / `uploadMetadataOf`, which `createUploadMiddleware` now carries so a
-  documentation generator can see a multipart route.
+  `withUploadMetadata` / `uploadMetadataOf` (typed `UploadMetadata`), which `createUploadMiddleware`
+  now carries so a documentation generator can see a multipart route.
 - **Provider options (M143r; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
   `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
   `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault) and the `ses` and `sendgrid`
   mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the key form) and
   `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm; `connectionTimeoutMs`,
-  `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP; `exposeCatalogues.keyPrefixes` on
-  the localization catalogue route.
+  `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime it reads is the
+  exported `SmtpRuntime` type); `exposeCatalogues.keyPrefixes` on the localization catalogue route.
 - **Readiness probes (M143r; V13-215, the lane half).** The `gcs` and `azure` storage arms, the
   `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each reads
   reachable when the backend answers below `500`.

@@ -478,7 +478,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the re-measured baseline of 235 on pinned TypeDoc 0.28.20', () => {
+    it('is the re-measured baseline of 233 on pinned TypeDoc 0.28.20', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -536,7 +536,8 @@ error[private-type-ref]: public type references private type
       // required (inRatchetScope) — 237 in scope.
       // M119a documented the messaging publish paths it touched: 236.
       // M139b's plain RpcCall/RpcReply contract measured one fewer: 235.
-      expect(DOC_LINT_BASELINE).toBe(235);
+      // M143r's provider-arm JSDoc (storage, secrets, mail) measured two fewer: 233.
+      expect(DOC_LINT_BASELINE).toBe(233);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.
