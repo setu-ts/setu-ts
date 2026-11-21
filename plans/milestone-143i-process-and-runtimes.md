@@ -350,6 +350,19 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   `Error: source failed`; Bun and Deno arms (guarded) run the same server in a child process and
   assert empty stderr and a truncated response.
 
+### 3.15 A cancel signal for a worker-pool call (V13-131's `common` half, for M143r)
+
+- **Decision:** `WorkerRunOptions` (`packages/common/src/services/worker-pool.ts`) gains
+  `readonly signal?: AbortSignal` with `@since 0.14.0`. The JSDoc says what the pool does with it:
+  an already-aborted signal rejects with `signal.reason`, a queued call is withdrawn, a running
+  call's worker is terminated as on timeout. This letter adds only the field; the worker-pool plugin
+  that honours it is M143r's follow-up (its plan §3.16). If that follow-up does not ship in
+  `0.14.0`, the release removes the field rather than ship a member nothing reads.
+- **Why:** an application reaches the pool as `IWorkerPool` (`capability-services.ts:140`), so
+  `{ signal }` cannot reach `run` without this contract change, which only the Core lane may make.
+- **Test home:** a type-level test in `common/test/unit/worker-pool-options.test.ts` that
+  `run(…, { signal })` type-checks; the behaviour tests are M143r's.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none — every member added to a published interface is optional, and
@@ -367,6 +380,7 @@ phrases; the request log's 101 and 499. Ships in minor `0.14.0`.
 | `StartOptions.drainTimeoutMs?` (common)   | option           | Kernel `#drainRequests`.                                                                                               |
 | `IHttpAdapter.beginDrain?` (common)       | interface member | Kernel `#runShutdownSequence`.                                                                                         |
 | `IPluginContext.signal?` (common)         | interface member | Plugins that await at startup (realtime-backplane-plugin, M143m); kernel aborts it.                                    |
+| `WorkerRunOptions.signal?` (common)       | option           | The worker-pool plugin's `run` (M143r follow-up, plan §3.16 there).                                                    |
 | `StartCancelledError` (kernel)            | class            | Thrown by `start()`; an entry tells a cancelled start from a failure with `instanceof` (the generated entries, M143j). |
 | `rejectRawUpgrade` (runtime, changed)     | function         | Node adapter fixed-status refusals; reason phrases now from `STATUS_CODES`.                                            |
 
