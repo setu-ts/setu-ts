@@ -17340,17 +17340,17 @@ A **lane** is a set of packages that no other lane edits. Each letter belongs to
 in different lanes are built at the same time, each in its own session, worktree and branch; letters
 in the same lane are built one after the other, in the order shown.
 
-| Lane             | Letters, in order                               | Rows | High | The lane alone edits                                                                                                                            |
-| ---------------- | ----------------------------------------------- | ---- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CLI**          | M143b, M143d, M143g, M143e, M143f, M143k, M143j | 95   | 7    | `cli`, `create`, `sdk`, `telemetry-plugin`, `apps/`                                                                                             |
-| **Web**          | M143a, M143l                                    | 20   | 3    | `session-plugin`, `http-security-plugin`, `react-router-plugin`, `auth-plugin`, `openapi-plugin`, `validation-plugin`, `mcp-plugin`, `starters` |
-| **Core**         | M143i                                           | 13   | 0    | `kernel`, `runtime` (all but `src/adapters/workers`), `common`, `logger-plugin`, `health-plugin`                                                |
-| **Services**     | M143c                                           | 9    | 1    | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`                                                                                  |
-| **Data**         | M143q, M143h                                    | 27   | 2    | `database-plugin`, `exceptions`, `audit-plugin`, `agent-runs-plugin`, `vector-store-plugin`, `multi-tenancy-plugin`                             |
-| **Messaging**    | M143p, M143m                                    | 26   | 3    | `messaging-plugin`, `queue-plugin`, `realtime-backplane-plugin`                                                                                 |
-| **Workers**      | M143o                                           | 12   | 3    | `cloudflare-plugin`, `websocket-plugin`, `runtime` (`src/adapters/workers` only)                                                                |
-| **Integrations** | M143r                                           | 16   | 4    | `storage-plugin`, `secrets-plugin`, `mail-plugin`, `notification-plugin`, `feature-flags-plugin`, `worker-pool-plugin`, `localization-plugin`   |
-| **Docs**         | M143n                                           | 30   | 0    | documentation of every package, after the code lanes                                                                                            |
+| Lane             | Letters, in order                               | Rows | High | The lane alone edits                                                                                                                                            |
+| ---------------- | ----------------------------------------------- | ---- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CLI**          | M143b, M143d, M143g, M143e, M143f, M143k, M143j | 95   | 7    | `cli`, `create`, `sdk`, `telemetry-plugin`, `apps/`                                                                                                             |
+| **Web**          | M143a, M143l                                    | 20   | 3    | `session-plugin`, `http-security-plugin`, `react-router-plugin`, `auth-plugin`, `openapi-plugin`, `validation-plugin`, `mcp-plugin`, `starters`, `cache-plugin` |
+| **Core**         | M143i                                           | 13   | 0    | `kernel`, `runtime` (all but `src/adapters/workers`), `common`, `logger-plugin`, `health-plugin`                                                                |
+| **Services**     | M143c                                           | 9    | 1    | `service-discovery-plugin`, `resilience-plugin`, `grpc-plugin`                                                                                                  |
+| **Data**         | M143q, M143h                                    | 27   | 2    | `database-plugin`, `exceptions`, `audit-plugin`, `agent-runs-plugin`, `vector-store-plugin`, `multi-tenancy-plugin`                                             |
+| **Messaging**    | M143p, M143m                                    | 26   | 3    | `messaging-plugin`, `queue-plugin`, `realtime-backplane-plugin`                                                                                                 |
+| **Workers**      | M143o                                           | 12   | 3    | `cloudflare-plugin`, `websocket-plugin`, `runtime` (`src/adapters/workers` only)                                                                                |
+| **Integrations** | M143r                                           | 16   | 4    | `storage-plugin`, `secrets-plugin`, `mail-plugin`, `notification-plugin`, `feature-flags-plugin`, `worker-pool-plugin`, `localization-plugin`                   |
+| **Docs**         | M143n                                           | 30   | 0    | documentation of every package, after the code lanes                                                                                                            |
 
 Eight sessions can start at once: M143a, M143b, M143c, M143i, M143o, M143p, M143q and M143r. Those
 eight letters and M143d, the second CLI letter, hold all 23 High rows.
@@ -17360,7 +17360,7 @@ eight letters and M143d, the second CLI letter, hold all 23 High rows.
 - **A letter changes code only in its own lane's packages**, their tests and their READMEs.
 - **A row that needs a change in two lanes is listed in both letters.** The letter that owns the row
   lists it with its other rows; the other letter lists it under "Half of a row owned elsewhere". The
-  row closes when both halves have shipped. There are 24 such halves, and 11 of them are template
+  row closes when both halves have shipped. There are 27 such halves, and 12 of them are template
   changes in M143j. Only a template half waits for the other half; every other half is a separate
   change inside its own lane and is built without waiting.
 - **Only the CLI lane edits `packages/cli`.** `add.ts` and the template files are shared by every
@@ -17700,8 +17700,9 @@ without a hand edit.
 - **V13-224** — Static discovery between Workers needs a flag or a binding the scaffold does not
   set.
 
-Half of a row owned elsewhere: V13-111, V13-20 (owned by M143a); V13-11, V13-12, V13-200 (owned by
-M143i); V13-195, V13-203, V13-205, V13-209, V13-219 (owned by M143o); V13-231 (owned by M143q).
+Half of a row owned elsewhere: V13-111, V13-20, V13-34 (owned by M143a); V13-11, V13-12, V13-200
+(owned by M143i); V13-195, V13-203, V13-205, V13-209, V13-219 (owned by M143o); V13-231 (owned by
+M143q).
 
 ### Milestone 143k: Prompts, Devtool, Briefs, Client and Build
 
@@ -17868,7 +17869,8 @@ lock's real use are documented, and a trace crosses Workers messaging. The proof
 - **V13-210** — A trace cannot cross Workers messaging.
 - **V13-219** — A throwing cron handler is logged without its message.
 
-Half of a row owned elsewhere: V13-218 (owned by M143h); V13-220 (owned by M143m).
+Half of a row owned elsewhere: V13-218 (owned by M143h); V13-220 (owned by M143m); V13-111, V13-135
+(owned by M143a).
 
 ### Milestone 143p: Queued Work and Frames That Are Lost or Repeated
 
