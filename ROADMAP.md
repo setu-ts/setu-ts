@@ -17388,6 +17388,7 @@ eight letters and M143d, the second CLI letter, hold all 23 High rows.
   is missing or wrong, which is what `setu check` exists to catch, and three of its own rows
   (V13-47, V13-48, V13-49) are misses of exactly that: with the gate fixed first, each later wiring
   fix has a failing `setu check` as its test.
+- Milestone 144 edits `packages/cli` too, so it takes a turn in the CLI lane, after M143k.
 - If the release must be cut short, the cut falls on the later letters of each lane (M143l, M143h,
   M143m, and M143g onwards in the CLI lane), which hold no High row.
 
