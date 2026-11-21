@@ -506,7 +506,7 @@ own read sees the marker. It uses only `read`/`write`/`destroy`, with one implem
   2. **Credentialed check.** A request is credentialed when it carries `Authorization`, or a
      `Cookie` header holding a cookie that counts: by default any cookie; with the new option
      `credentialCookies: readonly string[]`, only the named ones (`[]` means only `Authorization`
-     counts). Q8 asks the maintainer to confirm this default (§10).
+     counts). Q8 settled this default after a comparison (§10).
   3. **Credentialed request:** never leads and never joins the coalescer. It is replayed a HIT only
      from an entry whose stored `Cache-Control` contains `public`; otherwise it runs the origin
      itself, and its response is stored only when that response's `Cache-Control` contains `public`
@@ -848,12 +848,32 @@ anonymous traffic. The warning set holds at most 1,000 method-and-path pairs.
   and treats a request with a cookie or `Authorization` as not shared-cacheable unless the response
   says `public` (§3.12); the Cache API and KV halves go to M143o (§0.2 X6, X7).
 
-**Open question for the maintainer (raised by the third review).**
+**Resolved after the third review.**
 
 - **Q8** — `cacheMiddleware` cannot know the session plugin's cookie name, so §3.12 counts **any**
   cookie as a credential by default and adds `credentialCookies` to narrow it. Q7 said "a session
-  cookie". Recommended: keep "any cookie" as the safe default with the option; the alternative is to
-  default to the session plugin's default name `setu_session`, which misses a renamed cookie.
+  cookie". Decided (maintainer, 2026-11-22): keep "any cookie" as the default with the option, after
+  the comparison below; defaulting to `setu_session` would miss a renamed cookie.
+
+**Q8 compared with established caches (2026-11-22; each row re-read at its source).** Decision: any
+cookie counts as a credential by default, `credentialCookies` narrows it; no code change.
+
+| Cache                                   | What a request cookie does by default                                                                                                                                                                     | Source read                                                                                                       |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Symfony `HttpCache`                     | A request with any parsed cookie or `Authorization` makes the response private unless it says `public`; option `private_headers`, default `['Authorization', 'Cookie']`                                   | `symfony/symfony` 7.3 `HttpKernel/HttpCache/HttpCache.php:97` (default), `:518` (rule), `:671-686` (cookie test)  |
+| `Rack::Cache`                           | The same rule: `private_request?` when any of `['Authorization', 'Cookie']` is present; private unless `public`                                                                                           | `rack/rack-cache` `lib/rack/cache/options.rb:152`, `context.rb:112-113`, `:272`                                   |
+| Varnish builtin VCL                     | Any `Cookie` (or `Authorization`) request header passes in `vcl_recv`, before the response, so no `public` override; the guide documents the analytics-cookie cost and stripping or allow-listing cookies | `varnish-cache` `bin/varnishd/builtin.vcl:99-111`; `users-guide/increasing-your-hitrate.rst:124-180`              |
+| Django cache middleware                 | Never reads the request cookie; the session framework adds `Vary: Cookie` when the session was accessed (as Design 2 does)                                                                                | `django/middleware/cache.py:101,107,130-135`; `contrib/sessions/middleware.py:49`                                 |
+| ASP.NET Core Output Caching             | Never reads request cookies; refuses a request with `Authorization` or an authenticated `HttpContext.User`, and a response with `Set-Cookie`                                                              | `dotnet/aspnetcore` `OutputCaching/src/Policies/DefaultPolicy.cs:50-60,80-89`                                     |
+| Nginx `proxy_cache`, Cloudflare, Fastly | Ignore request cookies by default (no cookie in the default key); cookie key fields are opt-in (Cloudflare Enterprise); a `Set-Cookie` response is not cached                                             | nginx `ngx_http_proxy_module`; Cloudflare cache-keys and default-cache-behavior docs; Fastly cache-freshness docs |
+
+No cache found defaults to one named session cookie. The application frameworks that skip the cookie
+test (Django, ASP.NET Core) can do so because their own session or identity layer marks the
+response; `cacheMiddleware` cannot see the session plugin, so it takes the reverse-proxy rule
+(Symfony, Rack::Cache, Varnish) and keeps the `public` override the first two have. The cost Varnish
+documents applies: an application whose visitors all carry an analytics or consent cookie gets
+nothing shared-cached until it marks responses `public` or sets `credentialCookies`; the
+`cache-plugin` README says so, in one place.
 
 ## 11. Plan review (2026-11-22)
 
