@@ -33,7 +33,10 @@ import { deriveNames } from '../../src/utils/names.ts';
  * @param plugins - The plugins under test, beside the runtime
  * @returns The priorities, ascending
  */
-async function registeredPriorities(plugins: readonly IPlugin[]): Promise<number[]> {
+async function registeredPriorities(
+  plugins: readonly IPlugin[],
+  skip: ReadonlySet<number> = new Set(),
+): Promise<number[]> {
   const app = createApplication({ plugins: [RuntimePlugin(), ...plugins], diagnostics: {} });
   await app.start();
   try {
@@ -41,6 +44,7 @@ async function registeredPriorities(plugins: readonly IPlugin[]): Promise<number
       .diagnostics!.snapshot()
       .nodes.filter((node) => node.kind === 'middleware')
       .map((node) => node.priority!)
+      .filter((priority) => !skip.has(priority))
       .sort((left, right) => left - right);
   } finally {
     await app.stop();
@@ -64,6 +68,8 @@ function band(owner: string): { readonly from: number; readonly to: number } {
  * added to the table without a composition here fails the completeness case below.
  */
 const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
+  // Security headers are on by default, and nothing else in the plugin is.
+  'security headers': () => [HttpSecurityPlugin()],
   metrics: () => [MetricsPlugin()],
   telemetry: () => [TelemetryPlugin()],
   'tenant resolution': () => [MultiTenancyPlugin({ resolver: 'header' })],
@@ -81,6 +87,14 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
   ],
 };
 
+/**
+ * Priorities a composition registers that belong to another band: the HTTP security plugin always
+ * registers its security headers, which have their own band at 10.
+ */
+const SKIPPED: Readonly<Record<string, ReadonlySet<number>>> = {
+  'HTTP security, session, authentication and form CSRF': new Set([band('security headers').from]),
+};
+
 describe('the generated middleware priority comment', () => {
   it('names a composition for every plugin-owned band', () => {
     const owners = FRAMEWORK_MIDDLEWARE_BANDS.map((entry) => entry.owner).filter(
@@ -91,7 +105,7 @@ describe('the generated middleware priority comment', () => {
 
   for (const [owner, plugins] of Object.entries(COMPOSITIONS)) {
     it(`matches what the ${owner} plugins register`, async () => {
-      const priorities = await registeredPriorities(plugins());
+      const priorities = await registeredPriorities(plugins(), SKIPPED[owner]);
       const { from, to } = band(owner);
       expect(priorities.length).toBeGreaterThan(0);
       // Both ends observed, so the band is neither too wide nor stale…
@@ -138,7 +152,12 @@ describe('the generated middleware priority comment', () => {
     expect(emitted).toBeGreaterThan(highest);
 
     // And the kernel runs it after all of them.
-    const plugins = Object.values(COMPOSITIONS).flatMap((compose) => compose());
+    // One instance of each plugin: two bands are owned by the HTTP security plugin.
+    const byName = new Map<string, IPlugin>();
+    for (const plugin of Object.values(COMPOSITIONS).flatMap((compose) => compose())) {
+      byName.set(plugin.name, plugin);
+    }
+    const plugins = [...byName.values()];
     const app = createApplication({ plugins: [RuntimePlugin(), ...plugins], diagnostics: {} });
     app.middleware.add((_ctx, next) => next(), { priority: emitted, name: 'generated' });
     await app.start();
