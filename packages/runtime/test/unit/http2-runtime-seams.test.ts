@@ -226,6 +226,29 @@ describe('Node adapter http2 seams', () => {
     expect(queued).toEqual([{ 'grpc-status': '0' }]);
   });
 
+  it('reports a rejecting trailers promise through reportError as "Response trailers failed"', async () => {
+    const reports: Readonly<Record<string, unknown>>[] = [];
+    const handle = new NodeHttpServerHandle(undefined, {
+      http2: { key: 'k', cert: 'c' },
+      reportError: (record) => void reports.push(record),
+    });
+    handle.setHandler(() => {
+      const { response } = createTestContext();
+      response.stream(new Response('body').body!, {
+        trailers: Promise.reject(new Error('call failed')),
+      });
+      return response;
+    });
+    const env = {
+      incoming: { httpVersion: '2.0', stream: {}, socket: { remoteAddress: '10.0.0.9' } },
+      outgoing: { writeHead: () => undefined, addTrailers: () => undefined },
+    };
+    const response = await handle.createFetchHandler()(new Request('http://h/a'), env);
+    await expect(response.text()).rejects.toThrow('call failed');
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ level: 'error', msg: 'Response trailers failed' });
+  });
+
   it('an HTTP/1.1 request writes no trailers, even where the response could', async () => {
     const queued: unknown[] = [];
     const env = {

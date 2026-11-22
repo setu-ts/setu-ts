@@ -448,6 +448,27 @@ describe('a stop during start cancels the start (V13-43)', () => {
     expect(fake.adapter.listening).toBe(false);
   });
 
+  it.each([1, 2, 3, 4, 5, 6])(
+    'cancels, and never listens, when stop() lands %i microtask(s) after a bootstrap hook settles (code review)',
+    async (depth) => {
+      const fake = createFakeRuntime();
+      const app = createApplication({
+        plugins: [
+          runtimeWith(fake, (ctx) => {
+            ctx.lifecycle.onBootstrap(() => {
+              let chain = Promise.resolve();
+              for (let i = 0; i < depth; i++) chain = chain.then(() => undefined);
+              void chain.then(() => app.stop());
+            });
+          }),
+        ],
+      });
+      await expect(app.start({ port: 4213 })).rejects.toBeInstanceOf(StartCancelledError);
+      await flush();
+      expect(fake.adapter.listening).toBe(false);
+    },
+  );
+
   it('runs no further startup hook once the start is cancelled (CodeRabbit)', async () => {
     const fake = createFakeRuntime();
     const first = deferred();

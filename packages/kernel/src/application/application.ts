@@ -660,7 +660,21 @@ class Application implements IKernelApplication {
     // Checked first: a step that has already resolved would otherwise win
     // the race against a cancellation that came before it was awaited.
     if (this.#cancelled) return cancelled;
-    return Promise.race([step, cancelled]);
+    // Re-checked after the race: a step can settle first while a `stop()`
+    // reached through a promise chain lands before this continuation runs.
+    return Promise.race([step, cancelled]).then((value) => (this.#cancelled ? cancelled : value));
+  }
+
+  /**
+   * Throws the start's cancellation when `stop()` has already been called.
+   * Synchronous, and called at each point where startup resumes after an
+   * await and would otherwise run further steps (environment checks,
+   * compile, seal, `setHandler`, `listen`), so no yield opens a gap.
+   *
+   * @throws {StartCancelledError} When the start was cancelled
+   */
+  #continueStart(): void {
+    if (this.#cancelled) throw new StartCancelledError();
   }
 
   /**
@@ -937,6 +951,7 @@ class Application implements IKernelApplication {
       this.#registeringPlugin = undefined;
     }
 
+    this.#continueStart();
     // 4. Validate collected env specs against runtime.env
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
     // Fallback initialization for a runtime registered as a LAZY factory,
@@ -950,6 +965,7 @@ class Application implements IKernelApplication {
 
     // 5. Run init hooks
     await this.#raceStart(this.#lifecycle.runInit());
+    this.#continueStart();
 
     // 5b. Warn about consumed capabilities that no plugin provides. Checked
     //     here — after all plugins have registered and run their init hooks —
@@ -977,6 +993,7 @@ class Application implements IKernelApplication {
 
     // 7. Run bootstrap hooks
     await this.#raceStart(this.#lifecycle.runBootstrap());
+    this.#continueStart();
     registry.seal();
 
     // 8. Set the handler (always, so app.fetch works even without listen — CF Workers path)
@@ -995,6 +1012,7 @@ class Application implements IKernelApplication {
       }
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const listenOperation = collector?.beginOperation();
+      this.#continueStart();
       const listening = adapter.listen(options.port, options.hostname);
       try {
         this.#serverHandle = await this.#raceStart(listening);
