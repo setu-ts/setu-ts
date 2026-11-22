@@ -8,7 +8,7 @@
  * It never stores a per-visitor response. A response whose `Cache-Control`
  * says `private` or `no-store` is not stored, nor one captured after a
  * component set {@linkcode PER_VISITOR_RESPONSE_STATE_KEY} (the session plugin
- * does, at a request's first session write). A request carrying
+ * does, at a request's first application write). A request carrying
  * `Authorization` or a credential cookie (any cookie by default, see
  * {@linkcode CacheMiddlewareOptions.credentialCookies}) is credentialed: it is
  * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`

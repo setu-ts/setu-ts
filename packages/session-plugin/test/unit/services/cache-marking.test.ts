@@ -138,8 +138,6 @@ describe('signals and the after-handler decision', () => {
     expect(lines[0]![1]).toEqual({ method: 'GET', route: '/', signal: 'csrf-token' });
   });
 
-  // An outer default must not let a cache inside the session middleware store a signed-in page that
-  // never reads the session API (it may render `ctx.request.user`).
   it('the first application write flags the response per-visitor for a cache inside', () => {
     const t = makeContext();
     const session = fresh();
@@ -150,6 +148,8 @@ describe('signals and the after-handler decision', () => {
     expect(t.ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY)).toBe(true);
   });
 
+  // An outer default must not let a cache inside the session middleware store a signed-in page that
+  // never reads the session API (it may render `ctx.request.user`).
   it('S1 replaces a shared-cacheable directive an outer middleware set before it', () => {
     const t = makeContext();
     t.response.header('cache-control', 'public, max-age=3600');

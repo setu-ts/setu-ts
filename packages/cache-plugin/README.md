@@ -132,10 +132,10 @@ export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['
 carries a CSRF token or belongs to a signed-in visitor is marked `private`, so it is never stored
 whichever side of the session middleware the cache runs on; an anonymous page that only read the
 session is marked `Vary: Cookie`, so it is stored for visitors without cookies only. A response for
-a request that wrote the session is never stored, even when the handler marks it `public`: the
-session plugin sets `PER_VISITOR_RESPONSE_STATE_KEY` at the first write, before the commit adds
-`Set-Cookie`. Register `cacheMiddleware` outside the session middleware (a priority below 260) where
-you can, so a cached anonymous page is replayed before any session work.
+a request that wrote application data to the session is never stored, even when the handler marks it
+`public`: the session plugin sets `PER_VISITOR_RESPONSE_STATE_KEY` at the first application write,
+before the commit adds `Set-Cookie`. Register `cacheMiddleware` outside the session middleware (a
+priority below 260) where you can, so a cached anonymous page is replayed before any session work.
 
 ## Exports
 

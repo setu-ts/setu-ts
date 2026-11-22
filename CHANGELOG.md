@@ -70,8 +70,8 @@ All notable changes to this project are documented here. The format follows
   response. A response varying on either is stored and served only for requests carrying no cookie
   and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
   `Authorization` never joins or leads a coalesced flight, and a response captured after the session
-  plugin's first write (`PER_VISITOR_RESPONSE_STATE_KEY`, new in `@setu-ts/common`) is never stored.
-  New option `credentialCookies`.
+  plugin's first application write (`PER_VISITOR_RESPONSE_STATE_KEY`, new in `@setu-ts/common`) is
+  never stored. New option `credentialCookies`.
 - **`@setu-ts/http-security-plugin` (M143a; V13-34).** Security headers run at priority 10 and CORS
   at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a; V13-60).** Swagger UI's Try-it-out sends

@@ -16,19 +16,19 @@
  * `common` is the only module both sides can read; a key one package both
  * writes and reads stays in that package.
  *
- * | Key                 | Owner                  | Value                                 |
- * | ------------------- | ---------------------- | ------------------------------------- |
- * | client IP           | `http-security-plugin` | `http-security-plugin:client-ip`      |
- * | error responder     | `exceptions`           | `exceptions:error-responder`          |
- * | validated value     | `validation-plugin`    | `validation-plugin:validated-<target>` |
- * | telemetry span      | `telemetry-plugin`     | `telemetry-plugin:span`               |
- * | session             | `session-plugin`       | `session-plugin:session`              |
- * | tenant binding on   | `session-plugin`       | `session-plugin:tenant-binding`       |
- * | uploads             | `storage-plugin`       | `storage-plugin:uploads`              |
- * | tenant cache prefix | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`   |
- * | credential source   | `auth-plugin`          | `auth-plugin:credential-source`       |
- * | CSRF token access   | `session-plugin`       | `session-plugin:csrf-token-access`    |
- * | per-visitor response | `session-plugin`      | `session-plugin:per-visitor-response` |
+ * | Key                  | Owner                  | Value                                  |
+ * | -------------------- | ---------------------- | -------------------------------------- |
+ * | client IP            | `http-security-plugin` | `http-security-plugin:client-ip`       |
+ * | error responder      | `exceptions`           | `exceptions:error-responder`           |
+ * | validated value      | `validation-plugin`    | `validation-plugin:validated-<target>` |
+ * | telemetry span       | `telemetry-plugin`     | `telemetry-plugin:span`                |
+ * | session              | `session-plugin`       | `session-plugin:session`               |
+ * | tenant binding on    | `session-plugin`       | `session-plugin:tenant-binding`        |
+ * | uploads              | `storage-plugin`       | `storage-plugin:uploads`               |
+ * | tenant cache prefix  | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`    |
+ * | credential source    | `auth-plugin`          | `auth-plugin:credential-source`        |
+ * | CSRF token access    | `session-plugin`       | `session-plugin:csrf-token-access`     |
+ * | per-visitor response | `session-plugin`       | `session-plugin:per-visitor-response`  |
  *
  * @module
  */

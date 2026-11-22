@@ -4693,12 +4693,13 @@ app.router.get('/users/:id', {
 | `credentialCookies` | `readonly string[]`          | any cookie           | The cookie names that make a request credentialed (0.14.0); `Authorization` always does. A credentialed request is served a HIT only from an entry stored with `Cache-Control: public` whose `Vary` names neither `Cookie` nor `Authorization`, never joins or leads a coalesced flight, and its response is stored only when it says `public` and varies on neither. A response varying on `Cookie` or `Authorization` is stored and served only for requests carrying no cookie and no `Authorization`, whatever `credentialCookies` names, and a request carrying any cookie never joins or leads a coalesced flight; a `Vary: *` response is never stored. Omitted, any cookie counts; `[]` leaves only `Authorization` |
 
 Since 0.14.0 a response is never stored when its `Cache-Control` holds `private` or `no-store` or
-its `Vary` is `*` (besides streaming, a non-cacheable status and `Set-Cookie`, as before). A
-response whose `Vary` names `Cookie` or `Authorization` is stored and served only for a request
-carrying no cookie and no `Authorization`. A request carrying `Authorization` or a credential cookie
-follows the credentialed rule of `credentialCookies`; one carrying only cookies `credentialCookies`
-does not name skips entries varying on `Cookie` or `Authorization` and never joins or leads a
-coalesced flight.
+its `Vary` is `*`, or when it was captured after a component set `PER_VISITOR_RESPONSE_STATE_KEY`
+(the session plugin does at a request's first application write; besides streaming, a non-cacheable
+status and `Set-Cookie`, as before). A response whose `Vary` names `Cookie` or `Authorization` is
+stored and served only for a request carrying no cookie and no `Authorization`. A request carrying
+`Authorization` or a credential cookie follows the credentialed rule of `credentialCookies`; one
+carrying only cookies `credentialCookies` does not name skips entries varying on `Cookie` or
+`Authorization` and never joins or leads a coalesced flight.
 
 #### Key composition
 
