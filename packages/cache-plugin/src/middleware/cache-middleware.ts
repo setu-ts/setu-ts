@@ -13,9 +13,10 @@
  * nor `Authorization`, never shares an origin run with another request, and
  * its own response is stored only when it says `public` and its `Vary` names
  * neither. A response whose `Vary` names `Cookie` or `Authorization` is stored
- * only from a request carrying no cookie and no `Authorization` at all (with
- * `credentialCookies` set too), so it is only ever the cookie-less variant,
- * and it is served only to such a request. A `Vary: *` response is never
+ * only from a request carrying no cookie and no `Authorization` at all, even
+ * one `credentialCookies` does not name, so it is only ever the cookie-less
+ * variant, and it is served only to such a request. A request carrying any
+ * cookie or `Authorization` never shares an origin run with another request. A `Vary: *` response is never
  * stored.
  *
  * @module
@@ -239,9 +240,12 @@ function isPrivate(cacheControl: string | null): boolean {
   return hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store');
 }
 
-/** Whether a request carries any cookie, whether or not it counts as a credential. */
+/**
+ * Whether a request carries any cookie, whether or not it counts as a credential. Any non-blank
+ * `Cookie` header counts, a nameless pair included, since an application may read it raw.
+ */
 function carriesCookie(headers: Headers): boolean {
-  return Object.keys(parseCookie(headers.get('cookie'))).length > 0;
+  return (headers.get('cookie') ?? '').trim() !== '';
 }
 
 /** The lowercased field names of a `Vary` value. */

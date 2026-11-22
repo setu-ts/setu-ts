@@ -58,10 +58,12 @@ All notable changes to this project are documented here. The format follows
   signed-in visitor's response, a response setting the session cookie and one carrying a CSRF token
   answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as each is known;
   an anonymous response that read the session varies on `Cookie`. An explicit shared-cacheable
-  directive is kept, with one bounded warning per route, unless the response sets the session
-  cookie; on a `public` response a refresh-only commit and a new visitor's CSRF-token-only session
-  are not committed, so a form on a page marked `public` fails CSRF. A missing asset starts no
-  session. The React Router bridge sets a route's `Cache-Control` instead of appending it.
+  directive set by the handler is kept, with one bounded warning per route, unless the response sets
+  the session cookie; one set by a middleware outside the session middleware is replaced by
+  `private, no-store` for a signed-in visitor; on a `public` response a refresh-only commit and a
+  new visitor's CSRF-token-only session are not committed, so a form on a page marked `public` fails
+  CSRF. A missing asset starts no session. The React Router bridge sets a route's `Cache-Control`
+  instead of appending it.
 - **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
   `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
   from a `public` entry that does not vary on `Cookie`/`Authorization`, outside the coalescer. A

@@ -90,12 +90,13 @@ aggregate every tenant using the instance.
 `ReadableStream` cannot be replayed from a cache, so those requests are marked `X-Cache: MISS` and
 pass straight through.
 
-Concurrent misses for the same key are coalesced within one process: one request reaches a
-cacheable, buffered origin response and waiters replay it with `X-Cache: COALESCED`. A failed,
-streaming, or otherwise uncacheable leader is not replayed; every waiter runs the origin itself.
-Separate processes do not coordinate, so one overlapping successful batch can produce at most one
-origin call per process. `CacheService.getOrSet()` applies the same per-store coalescing to
-programmatic read-through calls; the capability is typed as `ICacheStore`, so narrow it with
+Concurrent misses for the same key are coalesced within one process, for requests carrying no cookie
+and no `Authorization` (one carrying either runs its own origin): one request reaches a cacheable,
+buffered origin response and waiters replay it with `X-Cache: COALESCED`. A failed, streaming, or
+otherwise uncacheable leader is not replayed; every waiter runs the origin itself. Separate
+processes do not coordinate, so one overlapping successful batch can produce at most one origin call
+per process. `CacheService.getOrSet()` applies the same per-store coalescing to programmatic
+read-through calls; the capability is typed as `ICacheStore`, so narrow it with
 `instanceof CacheService` first.
 
 ### Per-visitor responses are never shared
@@ -111,9 +112,10 @@ programmatic read-through calls; the capability is typed as `ICacheStore`, so na
   bearer API that marks its responses `public` without `Vary: Authorization` is still cached.
 - A response whose `Vary` names `Cookie` or `Authorization` is stored only from a request carrying
   no cookie and no `Authorization` at all, so the entry is the cookie-less variant, and it is served
-  only to such requests — also when `credentialCookies` names fewer cookies. A `Vary: *` response is
-  never stored. A localized application, whose responses vary on `Cookie` by default, is still
-  cached for visitors without cookies.
+  only to such requests — also when `credentialCookies` names fewer cookies: a request carrying only
+  cookies it does not name skips such entries and, like a credentialed one, never shares an origin
+  run. A `Vary: *` response is never stored. A localized application, whose responses vary on
+  `Cookie` by default, is still cached for visitors without cookies.
 
 The middleware cannot know which cookie identifies a visitor, so by default **any cookie** makes a
 request credentialed, an analytics or consent cookie included: such a request is taken out of the

@@ -318,8 +318,9 @@ own read sees the marker. It uses only `read`/`write`/`destroy`, with one implem
 
 - **Decision:** marking happens as early as each signal is known, so a cache inside the session
   middleware (`cacheMiddleware` registered on a route) sees it when it captures the response:
-  - **Before `next()`:** when S1 holds, set `Cache-Control: private, no-store` and append
-    `Vary: Cookie`, and remember the value written.
+  - **Before `next()`:** when S1 holds, set `Cache-Control: private, no-store`, whatever directive
+    an outer middleware set, and remember the value written; `Vary: Cookie` follows at the first
+    application read or after the handler.
   - **At the moment of the read:** `getCsrfToken` sets `Cache-Control: private, no-store` and
     appends `Vary: Cookie` on `ctx.response` when it returns a token (S3).
   - **At the first write:** the middleware gives the request's `Session` a first-write hook; the
@@ -535,9 +536,11 @@ own read sees the marker. It uses only `read`/`write`/`destroy`, with one implem
   an unnamed cookie with it, only by `Authorization` with `[]`; credentialed HIT replayed only from
   a `public` entry; a credentialed request never leads or joins a coalesced flight; a credentialed
   `public` response without `Vary: Cookie` (a bearer API, no session plugin) is stored; one with
-  `Vary: Cookie` is not; a `public` response varying on `Cookie`, `Authorization` or `*` stored from
-  a cookie-less request is replayed to cookie-less requests and never to a credentialed one, with
-  the Vary check as its negative control; anonymous behaviour unchanged;
+  `Vary: Cookie` is not; a `public` response varying on `Cookie` or `Authorization` stored from a
+  cookie-less request is replayed to cookie-less requests and never to a credentialed one, with the
+  Vary check as its negative control; with `credentialCookies` narrowed, a `Vary: Cookie` entry is
+  never stored from or served to a request carrying an unnamed cookie, with the cookie check as its
+  negative control; a `Vary: *` response is never stored; anonymous behaviour unchanged;
   `packages/localization-plugin/test/integration/cache-vary.test.ts` passes unchanged);
   `test/integration/cache-per-visitor.test.ts` (kernel app with `SessionPlugin` as a dev dependency,
   cache inside and outside the session middleware: a signed-in read is never replayed to another
@@ -891,7 +894,8 @@ nothing shared-cached until it marks responses `public` or sets `credentialCooki
 refusal of every `Vary: Cookie` response leaves `cacheMiddleware` caching nothing in a localized
 application (`localization-plugin/test/integration/cache-vary.test.ts`). Decided: store a
 `Vary: Cookie` response only for a request that carries no cookie (as Q8 defines one: any cookie,
-narrowed by `credentialCookies`), and never serve it to a request that carries one; a request with a
+narrowed by `credentialCookies`; the final review below tightened this to no cookie at all, whatever
+`credentialCookies` names), and never serve it to a request that carries one; a request with a
 cookie or `Authorization` is served only a `public` entry that varies on neither. Option B (keep the
 refusal, so a localized application caches only with `cookieName: false`) was declined. Reason,
 looked up by the maintainer on 2026-11-22 (the first three agree with the Q8 table's source reads

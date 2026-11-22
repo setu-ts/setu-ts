@@ -830,6 +830,10 @@ describe('cacheMiddleware — per-visitor responses', () => {
       const light = await app.inject(get({ cookie: 'theme=light' }));
       expect([light.body, light.headers.get('x-cache')]).toEqual(['theme=light', 'MISS']);
       expect(calls()).toBe(3);
+      // A nameless pair is still a cookie an application may read raw.
+      const nameless = await app.inject(get({ cookie: 'abc' }));
+      expect([nameless.body, nameless.headers.get('x-cache')]).toEqual(['abc', 'MISS']);
+      expect(calls()).toBe(4);
     } finally {
       await app.stop();
     }
