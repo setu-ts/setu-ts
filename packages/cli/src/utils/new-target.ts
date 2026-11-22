@@ -65,7 +65,7 @@ export async function newTargetRefusal(
 
 /**
  * Whether everything under `root` is this run's own output: each file holds the
- * bytes the run would write at that path, and each directory is one a planned
+ * bytes the run would write at that path (or, cut short, their start; only whole files are evidence), and each directory is one a planned
  * path needs. A path match alone is not ownership (a user's `main.ts` sits at a
  * planned path too), so content decides. A secret file differs on every run and
  * counts by path only; at least one non-secret file must match, so a user's own
@@ -112,8 +112,11 @@ async function onlyPlannedFiles(
       const file = files.get(path);
       if (file === undefined) return false;
       if (file.secret === true) continue;
-      if ((await readExistingText(fs, full)) !== file.contents) return false;
-      matched++;
+      // The run's bytes, or (a fallback write cut short) their start. Only a whole
+      // match is evidence: a user's one-line `.gitignore` is a prefix too.
+      const text = (await readExistingText(fs, full)) ?? '';
+      if (!file.contents.startsWith(text)) return false;
+      if (text === file.contents) matched++;
     }
   } catch {
     // An entry that cannot be inspected is not shown to be this run's own output.

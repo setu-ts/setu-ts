@@ -265,6 +265,19 @@ describe('new target validation', () => {
     ]);
   });
 
+  it.each([
+    ['the whole planned file', 'export const main = 1;\n', true],
+    ['a truncated planned file alone', 'export const', false],
+    ['an empty planned file alone', '', false],
+    ['bytes that are not the planned start', 'export let', false],
+  ])('V13-168 judges %s by the planned bytes', async (_, text, hinted) => {
+    const fs = createFakeFs({ '/work/app/main.ts': text });
+    const refusal = await newTargetRefusal(fs, '/work/app', () =>
+      Promise.resolve([{ path: 'main.ts', contents: 'export const main = 1;\n' }]),
+    );
+    expect(refusal.length).toBe(hinted ? 2 : 1);
+  });
+
   it('V13-168 keeps the plain refusal when the planned bytes cannot be resolved', async () => {
     const fs = createFakeFs({ '/work/app/main.ts': 'partial run' });
     expect(

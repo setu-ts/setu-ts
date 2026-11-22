@@ -284,12 +284,15 @@ run. No other `docs/` file is touched.
   target path: a non-directory at the target or at any of its ancestors (the `--dir` path included)
   → exit 1 `Cannot create <path>: <ancestor> is a file, not a directory.`; an existing directory
   holding anything other than `.git` → exit 1
-  `<path> already exists and is not empty (<n> entries); choose another name or empty it.` When the
-  entries look like an interrupted `new` (the existing `interruptedRunRetryHint` condition), its
-  hint is printed after the refusal. The same target check runs on the `new --example` path
-  (`examples/new.ts`, dispatched at `new.ts:697` before the template path) through one shared
-  function. `findExisting` keeps rethrowing (other callers rely on it); the remaining `new.ts` call
-  is wrapped so an unexpected filesystem error is reported by name, never as a stack trace.
+  `<path> already exists and is not empty (<n> entries); choose another name or empty it.` When
+  every file under the target holds the formatted bytes this run would write there, or their start
+  (a write cut short), with secret files judged by path and at least one non-secret file matching in
+  full (a prefix such as a one-line `.gitignore` is no evidence), the `interruptedRunRetryHint` is
+  printed after the refusal; a path match alone is not ownership (PR #610 review). The same target
+  check runs on the `new --example` path (`examples/new.ts`, dispatched at `new.ts:697` before the
+  template path) through one shared function. `findExisting` keeps rethrowing (other callers rely on
+  it); the remaining `new.ts` call is wrapped so an unexpected filesystem error is reported by name,
+  never as a stack trace.
 - **Why:** writing beside a user's files is surprising and hard to undo; a directory with only
   `.git` is a common deliberate target.
 - **Test home:** unit in `test/unit/new-command.test.ts` (file target, file ancestor, non-empty dir,
