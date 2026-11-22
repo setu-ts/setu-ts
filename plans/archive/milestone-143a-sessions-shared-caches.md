@@ -1061,6 +1061,15 @@ from a stamp on the user instead (ASP.NET Core Identity's security stamp, re-val
 minutes by default; Django's session auth hash), which Setu has as `auth-plugin`'s
 `signIn.sessionStamp`. The design-review findings that concern gap 2 are moot.
 
+**Double regeneration accepted as a documented limit (coordinator, 2026-11-23, applying the
+maintainer's decision on the successor link; the maintainer may overrule).** Two regenerations of
+one id that both commit each write `successor:<old id>`; the later replaces the earlier, and a
+sign-out that loaded the old id ends only the session the surviving link names. Keeping every
+successor would need compare-and-set or key listing on `ISessionStore`, a Core-lane contract every
+custom store would have to implement. Compared with: Django, Rails and Spring Session keep no link
+at all; `auth-plugin`'s `signIn.sessionStamp` is the guaranteed path, and the session README points
+to it.
+
 ## 11. Plan review (2026-11-22)
 
 An independent agent that did not write the plan reviewed it against the row texts, the ROADMAP
