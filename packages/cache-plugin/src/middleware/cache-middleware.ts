@@ -228,10 +228,10 @@ function isCredentialed(
   if (headers.has('authorization')) {
     return true;
   }
-  const cookies = parseCookie(headers.get('cookie'));
   if (credentialCookies === undefined) {
-    return Object.keys(cookies).length > 0;
+    return carriesCookie(headers);
   }
+  const cookies = parseCookie(headers.get('cookie'));
   return credentialCookies.some((name) => Object.hasOwn(cookies, name));
 }
 

@@ -59,16 +59,17 @@ All notable changes to this project are documented here. The format follows
   answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as each is known;
   an anonymous response that read the session varies on `Cookie`. An explicit shared-cacheable
   directive set by the handler is kept, with one bounded warning per route, unless the response sets
-  the session cookie; one set by a middleware outside the session middleware is replaced by
-  `private, no-store` for a signed-in visitor; on a `public` response a refresh-only commit and a
-  new visitor's CSRF-token-only session are not committed, so a form on a page marked `public` fails
-  CSRF. A missing asset starts no session. The React Router bridge sets a route's `Cache-Control`
-  instead of appending it.
+  the session cookie; one set by a middleware outside the session middleware before it runs is
+  replaced by `private, no-store` for a signed-in visitor; on a `public` response a refresh-only
+  commit and a new visitor's CSRF-token-only session are not committed, so a form on a page marked
+  `public` fails CSRF. A missing asset starts no session. The React Router bridge sets a route's
+  `Cache-Control` instead of appending it.
 - **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
   `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
-  from a `public` entry that does not vary on `Cookie`/`Authorization`, outside the coalescer. A
-  response varying on either is stored and served only for requests carrying no cookie and no
-  `Authorization`, and a `Vary: *` response is never stored. New option `credentialCookies`.
+  from a `public` entry that does not vary on `Cookie`/`Authorization`, storing only such a
+  response. A response varying on either is stored and served only for requests carrying no cookie
+  and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
+  `Authorization` never joins or leads a coalesced flight. New option `credentialCookies`.
 - **`@setu-ts/http-security-plugin` (M143a; V13-34).** Security headers run at priority 10 and CORS
   at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a; V13-60).** Swagger UI's Try-it-out sends

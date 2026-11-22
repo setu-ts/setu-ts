@@ -481,9 +481,10 @@ directive can make a session cookie safe to share:
   `idleTimeoutMs`) or store a new session's reserved keys (a CSRF mint, a tenant binding) is
   skipped, so a public asset stays public;
 - a public asset fetched by a signed-in visitor keeps the directive its handler sets and gets no
-  `Vary: Cookie`. A directive set by an outer middleware (below priority 260) is a default for every
-  visitor and is replaced by `private, no-store` for a signed-in one before the handler runs; set
-  `public` in the handler, or in a middleware inside the session middleware, to keep it.
+  `Vary: Cookie`. A directive set by an outer middleware (below priority 260) before `next()` is a
+  default for every visitor and is replaced by `private, no-store` for a signed-in one before the
+  handler runs; set `public` in the handler, or in a middleware inside the session middleware, to
+  keep it.
 
 The plugin cannot see who a page was rendered for when it reads `ctx.request.user` rather than the
 session: `auth-plugin`'s session strategy restores the principal through `fromHeaders`, which counts

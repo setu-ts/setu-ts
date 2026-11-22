@@ -286,8 +286,10 @@ stateless.
 `Vary: Cookie` (a signed-in visitor's page, a page carrying a CSRF token); see its
 [Caching](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#caching)
 section. A route's `headers` export that sets `Cache-Control` replaces that value rather than adding
-a second one, and the session plugin keeps an explicit shared-cacheable directive except on a
-response that sets the session cookie. Every other header from the route is appended.
+a second one, and the session plugin keeps an explicit shared-cacheable directive set by the route,
+except on a response that sets the session cookie; one set by a middleware outside the session
+middleware before it runs is replaced by `private, no-store` for a signed-in visitor. Every other
+header from the route is appended.
 
 ## HTML forms and Referrer-Policy
 

@@ -867,6 +867,7 @@ describe('cacheMiddleware — per-visitor responses', () => {
   it.each([
     ['an Authorization header', { authorization: 'Bearer t' }],
     ['any cookie', { cookie: 'theme=dark' }],
+    ['a nameless cookie pair', { cookie: 'abc' }],
   ] as const)(
     'a request carrying %s is neither stored nor served a non-public entry',
     async (_n, headers) => {
@@ -1001,6 +1002,31 @@ describe('cacheMiddleware — per-visitor responses', () => {
       expect(c.body).toBe('setu_session=abc');
       expect(a.body).toBe('anonymous');
       expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+  it('a request with a cookie credentialCookies does not name never joins an anonymous flight', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(
+      async (ctx) => {
+        await gate;
+        return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+      },
+      { credentialCookies: ['setu_session'] },
+    );
+    try {
+      const leader = app.inject(get());
+      const themed = app.inject(get({ cookie: 'theme=dark' }));
+      // A coalesced joiner never reaches the origin, so this wait would fail if it joined.
+      await bothInOrigin(calls);
+      release();
+      const [a, t] = await Promise.all([leader, themed]);
+      expect([a.body, t.body]).toEqual(['anonymous', 'theme=dark']);
+      expect(t.headers.get('x-cache')).toBe('MISS');
     } finally {
       await app.stop();
     }

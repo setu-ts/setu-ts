@@ -77,14 +77,14 @@ CSRF token now carry `Cache-Control: private, no-store` and `Vary: Cookie`; an a
 that read the session carries `Vary: Cookie`. A page that a CDN cached by accident stops being
 cached, which is the intent. To cache a page on purpose, set `Cache-Control` in the handler; the
 plugin keeps it unless the response sets the session cookie (a directive set by a middleware outside
-the session middleware is replaced by `private, no-store` for a signed-in visitor), and logs one
-warning per route when it is per-visitor. On such a `public` response the plugin withholds the
-session cookie for a commit that would only refresh the expiry (`rolling`, `idleTimeoutMs`) or only
-store a new visitor's CSRF token or tenant binding: a form on a page you mark `public` now fails
-CSRF on submit, so remove `public` from pages carrying a form. See the session plugin's Caching
-section. A React Router route's `headers` export now replaces `Cache-Control` rather than appending
-a second value. A new session holding only the CSRF token or tenant binding is no longer committed
-on a `404` that is not a page navigation.
+the session middleware before it runs is replaced by `private, no-store` for a signed-in visitor),
+and logs one warning per route when it is per-visitor. On such a `public` response the plugin
+withholds the session cookie for a commit that would only refresh the expiry (`rolling`,
+`idleTimeoutMs`) or only store a new visitor's CSRF token or tenant binding: a form on a page you
+mark `public` now fails CSRF on submit, so remove `public` from pages carrying a form. See the
+session plugin's Caching section. A React Router route's `headers` export now replaces
+`Cache-Control` rather than appending a second value. A new session holding only the CSRF token or
+tenant binding is no longer committed on a `404` that is not a page navigation.
 
 ### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
 
@@ -94,7 +94,8 @@ not vary on `Cookie` or `Authorization`. A response varying on either is stored 
 requests carrying no cookie and no `Authorization`, and a `Vary: *` response is never stored. An
 application whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached
 until it marks responses `public` or names its session cookie:
-`cacheMiddleware({ credentialCookies: ['setu_session'] })`.
+`cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
+`Authorization` no longer shares a handler run with concurrent misses for the same key.
 
 ### Docs routes start no session (`@setu-ts/openapi-plugin`)
 
