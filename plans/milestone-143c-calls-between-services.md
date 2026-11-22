@@ -78,16 +78,18 @@ long to wait before a follow-up request, nothing about processing |
 Second survey, read from the linked documentation or source on 2026-11-22 (each cell names its
 source; "not verified" where it could not be confirmed):
 
-| Question                                       | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q1b Registry read bounds and who waits         | grpc-go DNS `ResolvingTimeout` 30 s, pushed to the ClientConn ([dns_resolver.go](https://raw.githubusercontent.com/grpc/grpc-go/master/internal/resolver/dns/dns_resolver.go)); Envoy `dns_refresh_rate` 5000 ms, requests use the host set a background refresh keeps ([cluster.proto](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/cluster/v3/cluster.proto)); Eureka callers read `localRegionApps`, refreshed every 30 s, read timeout 8 s ([DefaultEurekaClientConfig](https://github.com/Netflix/eureka/blob/master/eureka-client/src/main/java/com/netflix/discovery/DefaultEurekaClientConfig.java)); Spring Cloud Consul `getInstances` calls Consul synchronously, caching only through Spring Cloud LoadBalancer (TTL 35 s) ([ConsulDiscoveryClient](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/discovery/ConsulDiscoveryClient.java)); .NET ServiceDiscovery refresh 60 s, DNS resolver timeout 3 s × 2 attempts, the caller awaits once the cache expires ([ServiceEndpointWatcher](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery/ServiceEndpointWatcher.cs)) |
-| Q2b Retry spacing after a failed refresh       | grpc-go 1 s × 1.6, jitter 0.2, max 120 s, reset on success ([backoff.go](https://github.com/grpc/grpc-go/blob/master/backoff/backoff.go)); Envoy `dns_failure_refresh_rate` base required, max 10 × base; Eureka doubles to 10 × interval on timeouts only ([TimedSupervisorTask](https://github.com/Netflix/eureka/blob/master/eureka-client/src/main/java/com/netflix/discovery/TimedSupervisorTask.java)); .NET DNS 1 s × 2 to 30 s, no jitter ([DnsServiceEndpointProviderOptions](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery.Dns/DnsServiceEndpointProviderOptions.cs))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Q3b A successful empty answer                  | Envoy STRICT_DNS: 0 hosts means no hosts ([service discovery](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/service_discovery)); .NET: replaces the set and retries with backoff ([DnsServiceEndpointProviderBase](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery.Dns/DnsServiceEndpointProviderBase.cs)); Eureka: a successful response replaces the cache, a failed one keeps it (empty guard not verified); Consul checks start `critical` unless `status` is set ([checks](https://developer.hashicorp.com/consul/docs/services/usage/checks)), so `?passing` can be empty after a (re-)registration (the agent-restart case itself not documented, not verified)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Q4b Outlier failures                           | Envoy: local-origin errors and 5xx share one bucket unless `split_external_local_origin_errors`; `consecutive_gateway_failure` counts 502/503/504 and local failures ([outlier](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/outlier)); gRFC A50 implementations count any non-OK status (grpc-go `info.Err == nil`, grpc-js `statusCode === Status.OK`) but eject on success-rate or failure-percentage over a request volume (defaults 100 and 50) ([A50](https://github.com/grpc/proposal/blob/master/A50-xds-outlier-detection.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Q5 A cancelled stream whose handler is blocked | gRPC "does not have a mechanism to interrupt the application-provided server handler" ([cancellation guide](https://grpc.io/docs/guides/cancellation/)); grpc-go cancels the handler context, `Stop` does not wait unless `WaitForHandlers(true)`, unbounded ([server.go](https://github.com/grpc/grpc-go/blob/master/server.go)); grpc-js sets `cancelled` and emits `'cancelled'`, awaits nothing; connect-es `HandlerContext.signal` aborts on deadline, error and shutdown; WHATWG `ReadableStreamCancel` runs the source's cancel at once; ECMA-262 §27.9.1.3 queues `return()` on an executing async generator; no framework found that bounds the wait (not exhaustive)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| Q8b A 503 without `grpc-status`                | gRPC maps it to `UNAVAILABLE` ([status mapping](https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md)); A6 transparent retry covers refused streams and GOAWAY only, outside `maxAttempts`, and does not address an HTTP status ([A6](https://github.com/grpc/proposal/blob/master/A6-client-retries.md)); Envoy `5xx`/`gateway-error`/`retriable-status-codes` only when configured; Finagle marks a no-work 503 with `finagle-http-nack` (retryable) vs `finagle-http-nonretryable-nack` ([HttpNackFilter](https://github.com/twitter/finagle/blob/develop/finagle-base-http/src/main/scala/com/twitter/finagle/http/filter/HttpNackFilter.scala)), the closest precedent for a server-set "not processed" header; Linkerd documents none; Istio not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Q11 Runtime DNS APIs                           | Node `Resolver` `timeout` (default -1, c-ares default), `tries` (default 4), instance-scoped `setServers` taking IP literals, `resolveSrv` with no TTL, `ENOTFOUND`/`ENODATA` ([nodejs.org dns](https://nodejs.org/api/dns.html)); Deno `resolveDns` `nameServer {ipAddr, port}` and `signal`, `Deno.errors.NotFound` for NXDOMAIN and no records (`ares_code` distinguishes), a signal forces a 1 s one-attempt timeout ([ops.rs](https://github.com/denoland/deno/blob/main/ext/net/ops.rs)); Bun `node:dns` fully implemented except `resolveTlsa`, `Resolver` `maxTimeout` ignored ([compat](https://bun.com/docs/runtime/nodejs-compat))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Q12 Default registration id                    | Consul: defaults to the service name, unique per agent ([agent service API](https://developer.hashicorp.com/consul/api-docs/agent/service)); Spring Cloud Consul: application name plus instance id or port ([ConsulAutoRegistration](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/serviceregistry/ConsulAutoRegistration.java)); Micronaut: `appName:<instance id or port>`, with a documented collision warning across hosts ([guide](https://micronaut-projects.github.io/micronaut-discovery-client/latest/guide/)); Go-kit not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Question                                        | Finding                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1b Registry read bounds and who waits          | grpc-go DNS `ResolvingTimeout` 30 s, pushed to the ClientConn ([dns_resolver.go](https://raw.githubusercontent.com/grpc/grpc-go/master/internal/resolver/dns/dns_resolver.go)); Envoy `dns_refresh_rate` 5000 ms, requests use the host set a background refresh keeps ([cluster.proto](https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/cluster/v3/cluster.proto)); Eureka callers read `localRegionApps`, refreshed every 30 s, read timeout 8 s ([DefaultEurekaClientConfig](https://github.com/Netflix/eureka/blob/master/eureka-client/src/main/java/com/netflix/discovery/DefaultEurekaClientConfig.java)); Spring Cloud Consul `getInstances` calls Consul synchronously, caching only through Spring Cloud LoadBalancer (TTL 35 s) ([ConsulDiscoveryClient](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/discovery/ConsulDiscoveryClient.java)); .NET ServiceDiscovery refresh 60 s, DNS resolver timeout 3 s × 2 attempts, the caller awaits once the cache expires ([ServiceEndpointWatcher](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery/ServiceEndpointWatcher.cs)) |
+| Q2b Retry spacing after a failed refresh        | grpc-go 1 s × 1.6, jitter 0.2, max 120 s, reset on success ([backoff.go](https://github.com/grpc/grpc-go/blob/master/backoff/backoff.go)); Envoy `dns_failure_refresh_rate` base required, max 10 × base; Eureka doubles to 10 × interval on timeouts only ([TimedSupervisorTask](https://github.com/Netflix/eureka/blob/master/eureka-client/src/main/java/com/netflix/discovery/TimedSupervisorTask.java)); .NET DNS 1 s × 2 to 30 s, no jitter ([DnsServiceEndpointProviderOptions](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery.Dns/DnsServiceEndpointProviderOptions.cs))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Q3b A successful empty answer                   | Envoy STRICT_DNS: 0 hosts means no hosts ([service discovery](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/service_discovery)); .NET: replaces the set and retries with backoff ([DnsServiceEndpointProviderBase](https://github.com/dotnet/extensions/blob/main/src/Libraries/Microsoft.Extensions.ServiceDiscovery.Dns/DnsServiceEndpointProviderBase.cs)); Eureka: a successful response replaces the cache, a failed one keeps it (empty guard not verified); Consul checks start `critical` unless `status` is set ([checks](https://developer.hashicorp.com/consul/docs/services/usage/checks)), so `?passing` can be empty after a (re-)registration (the agent-restart case itself not documented, not verified)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Q3c Holding instances the registry dropped      | Envoy's "On eventually consistent service discovery" matrix: discovered + check OK route; discovered + check failed don't route; absent + check OK route ("so the design survives a discovery outage"); absent + check failed don't route and delete, "the only state in which Envoy will purge host data" ([service discovery](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/service_discovery)); Spring Cloud Consul `queryPassing` default `false` ([ConsulDiscoveryProperties](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/discovery/ConsulDiscoveryProperties.java)); that it then returns instances with failing checks is inferred from the property, not verified                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Q4c gRPC status in outlier detection            | Envoy: "For gRPC requests, the outlier detection will use the HTTP status mapped from the grpc-status response header" ([outlier](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/outlier)); the mapping, `grpcToHttpStatus` ([status.cc](https://raw.githubusercontent.com/envoyproxy/envoy/main/source/common/grpc/status.cc), read 2026-11-22): Canceled 499, Unknown 500, InvalidArgument 400, DeadlineExceeded 504, NotFound 404, AlreadyExists 409, PermissionDenied 403, ResourceExhausted 429, FailedPrecondition 400, Aborted 409, OutOfRange 400, Unimplemented 501, Internal 500, Unavailable 503, DataLoss 500, Unauthenticated 401                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Q4b Outlier failures                            | Envoy: local-origin errors and 5xx share one bucket unless `split_external_local_origin_errors`; `consecutive_gateway_failure` counts 502/503/504 and local failures ([outlier](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/outlier)); gRFC A50 implementations count any non-OK status (grpc-go `info.Err == nil`, grpc-js `statusCode === Status.OK`) but eject on success-rate or failure-percentage over a request volume (defaults 100 and 50) ([A50](https://github.com/grpc/proposal/blob/master/A50-xds-outlier-detection.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Q5b A cancelled stream whose handler is blocked | gRPC "does not have a mechanism to interrupt the application-provided server handler" ([cancellation guide](https://grpc.io/docs/guides/cancellation/)); grpc-go cancels the handler context, `Stop` does not wait unless `WaitForHandlers(true)`, unbounded ([server.go](https://github.com/grpc/grpc-go/blob/master/server.go)); grpc-js sets `cancelled` and emits `'cancelled'`, awaits nothing; connect-es `HandlerContext.signal` aborts on deadline, error and shutdown; WHATWG `ReadableStreamCancel` runs the source's cancel at once; ECMA-262 §27.9.1.3 queues `return()` on an executing async generator; no framework found that bounds the wait (not exhaustive)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Q8b A 503 without `grpc-status`                 | gRPC maps it to `UNAVAILABLE` ([status mapping](https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md)); A6 transparent retry covers refused streams and GOAWAY only, outside `maxAttempts`, and does not address an HTTP status ([A6](https://github.com/grpc/proposal/blob/master/A6-client-retries.md)); Envoy `5xx`/`gateway-error`/`retriable-status-codes` only when configured; Finagle marks a no-work 503 with `finagle-http-nack` (retryable) vs `finagle-http-nonretryable-nack` ([HttpNackFilter](https://github.com/twitter/finagle/blob/develop/finagle-base-http/src/main/scala/com/twitter/finagle/http/filter/HttpNackFilter.scala)), the closest precedent for a server-set "not processed" header; Linkerd documents none; Istio not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Q11 Runtime DNS APIs                            | Node `Resolver` `timeout` (default -1, c-ares default), `tries` (default 4), instance-scoped `setServers` taking IP literals, `resolveSrv` with no TTL, `ENOTFOUND`/`ENODATA` ([nodejs.org dns](https://nodejs.org/api/dns.html)); Deno `resolveDns` `nameServer {ipAddr, port}` and `signal`, `Deno.errors.NotFound` for NXDOMAIN and no records (`ares_code` distinguishes), a signal forces a 1 s one-attempt timeout ([ops.rs](https://github.com/denoland/deno/blob/main/ext/net/ops.rs)); Bun `node:dns` fully implemented except `resolveTlsa`, `Resolver` `maxTimeout` ignored ([compat](https://bun.com/docs/runtime/nodejs-compat))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Q12 Default registration id                     | Consul: defaults to the service name, unique per agent ([agent service API](https://developer.hashicorp.com/consul/api-docs/agent/service)); Spring Cloud Consul: application name plus instance id or port ([ConsulAutoRegistration](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/serviceregistry/ConsulAutoRegistration.java)); Micronaut: `appName:<instance id or port>`, with a documented collision warning across hosts ([guide](https://micronaut-projects.github.io/micronaut-discovery-client/latest/guide/)); Go-kit not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Where the frameworks split (Q2/Q3 between keep and replace, Q6 between "retry only when configured"
 and "transparent", Q9 between a percentage and a ratio), each choice is DECIDED by the maintainer
@@ -301,11 +303,15 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   an authoritative NXDOMAIN means the service is really gone; the grace window is the one rule that
   serves the first and still honours the second. Most compared clients replace the set on a
   successful empty answer (Envoy STRICT_DNS, grpc-go on NXDOMAIN, .NET, which also retries it with
-  backoff); none was found that holds it (Q3, Q3b). The grace is therefore a deliberate departure,
-  taken because Consul answers `?passing` with nothing while checks start `critical` after a
-  (re-)registration, so the default is OD2; `0` gives the majority behaviour. The ejection tracker
-  already refuses to empty a pool (`ejection-tracker.ts:114-118`), which is the sibling precedent
-  for not serving nothing on one signal.
+  backoff; Q3, Q3b). Two hold on in a related form: Envoy keeps routing to a host that is absent
+  from discovery but still passes its active health check, and purges a host only when it is both
+  absent and failing (Q3c); Spring Cloud Consul's `query-passing` defaults to `false`, so by default
+  it does not filter instances on passing checks (default verified, meaning of the property
+  inferred; Q3c). The grace is therefore a deliberate departure, taken because Consul answers
+  `?passing` with nothing while checks start `critical` after a (re-)registration, so the default is
+  OD2; `0` gives the majority behaviour. The ejection tracker already refuses to empty a pool
+  (`ejection-tracker.ts:114-118`), which is the sibling precedent for not serving nothing on one
+  signal.
 - **Test home:** `test/unit/empty-answer-rule.test.ts` (new; one table driven through BOTH `#read`
   and `watch` on the fake clock: warm then `[]` keeps the list and is degraded; `[]` after the grace
   replaces; a non-empty answer in between resets; cold `[]` stored at once; `0` replaces at once;
@@ -366,19 +372,19 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 
 ### 3.6 The DNS arm can be pointed at a name server, with a per-lookup bound (V13-246, server half)
 
-- **Decision (written against OD3 recommendation A):** the DNS arm gains
-  `servers?: readonly string[]`, each an IP literal with an optional port (`'127.0.0.1'`,
-  `'127.0.0.1:7853'`, `'::1'`, `'[::1]:53'`), because Node's `Resolver.setServers` takes IP literals
-  only (Q11); a host name or a malformed entry is refused at `ServiceDiscoveryPlugin()` with a
-  `RangeError` naming the entry. `createProvider` builds the resolver with
-  `runtime.createDnsResolver({ servers, timeoutMs: resolveTimeoutMs })` (the Core member, §11) when
-  `servers` is set, and refuses with `DiscoveryUnavailableError` naming the option when the runtime
-  has no such member. Without `servers` the arm uses `runtime.dns`, as today. The Core member owns
-  the mapping to each runtime (stated in the hand-over, §11): on Node and Bun a `Resolver` with
-  `tries: 1` (Node's default is 4, which would multiply the bound) and `timeout: timeoutMs`, with
-  `0` mapped to Node's `-1` (the c-ares default); on Deno `nameServer` plus a signal (Deno then
-  forces a 1 s, one-attempt resolver timeout, Q11). The record TTL is not read: `resolveSrv` returns
-  none on Node (Q11), so `cacheTtlMs` stays the freshness bound and the README says so.
+- **Decision (OD3 A, decided):** the DNS arm gains `servers?: readonly string[]`, each an IP literal
+  with an optional port (`'127.0.0.1'`, `'127.0.0.1:7853'`, `'::1'`, `'[::1]:53'`), because Node's
+  `Resolver.setServers` takes IP literals only (Q11); a host name or a malformed entry is refused at
+  `ServiceDiscoveryPlugin()` with a `RangeError` naming the entry. `createProvider` builds the
+  resolver with `runtime.createDnsResolver({ servers, timeoutMs: resolveTimeoutMs })` (the Core
+  member, §11) when `servers` is set, and refuses with `DiscoveryUnavailableError` naming the option
+  when the runtime has no such member. Without `servers` the arm uses `runtime.dns`, as today. The
+  Core member owns the mapping to each runtime (stated in the hand-over, §11): on Node and Bun a
+  `Resolver` with `tries: 1` (Node's default is 4, which would multiply the bound) and
+  `timeout: timeoutMs`, with `0` mapped to Node's `-1` (the c-ares default); on Deno `nameServer`
+  plus a signal (Deno then forces a 1 s, one-attempt resolver timeout, Q11). The record TTL is not
+  read: `resolveSrv` returns none on Node (Q11), so `cacheTtlMs` stays the freshness bound and the
+  README says so.
 - **Why:** a name-server option is the report's own remedy, and both runtimes support it natively
   (Node `Resolver` instances with `timeout`/`tries` and per-instance `setServers`; Deno
   `nameServer`). The plugin may not import `node:dns` (runtime-specific APIs live in
@@ -392,7 +398,7 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 
 ### 3.7 The breaker can open on a failure rate (V13-104)
 
-- **Decision (written against OD4 recommendation A; the `common` half is Core's, §11):**
+- **Decision (OD4 A, decided; the `common` half is Core's, §11):**
   - `CircuitBreakerPolicy` becomes a union: today's count policy, or a rate policy
     `{ failureRateThreshold: number /* percent, 1-100 */; minimumCalls: number; timeout; resetTimeout }`.
   - The count arm keeps its exact rule and its exact per-failure timestamps
@@ -408,6 +414,23 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     `failureRateThreshold` in 1 to 100, `minimumCalls` a positive integer, `timeout` and
     `resetTimeout` in the timer range, `threshold` a positive integer.
   - No default changes: `defaultCircuitBreaker` stays caller-supplied.
+  - **The trip rule lives once, in `common` (maintainer condition on OD4b).** Today the count rule
+    is written twice and the two copies already differ: `resilience-plugin` never clears its window
+    on a closed-state success (`circuit-breaker.ts:86-92`), while the SDK clears it on every success
+    (`sdk/src/circuit-breaker/circuit-breaker.ts:77-80`), so the SDK's "N failures in the window" is
+    really "N failures since the last success". The Core change that adds the union also adds a pure
+    primitive in `packages/common` (proposed `createBreakerWindow(policy, now)` in
+    `src/services/resilience-window.ts`, exported): `recordSuccess()`, `recordFailure(): boolean`
+    (true when the policy trips), `reset()` and `failures` (for the open-circuit message). It holds
+    the count arm with exact timestamps and the rate arm over ten buckets, takes a monotonic clock
+    as a function (no runtime API in `common`), and is pure TypeScript, so nothing stops it living
+    in `common` (it has `withDeadline` and `createCachedProbe` of the same kind). The half-open
+    state machine, cancellation and error classes stay in each package, since they differ (signals
+    and `CircuitOpenError` here, `ClientCircuitOpenError` and `isFailure` in the SDK).
+    `resilience-plugin` is planned against that primitive: `CircuitBreaker` keeps its state machine
+    and calls the window, and the plugin's own rolling window file is not written. The SDK, moved
+    onto the same window, stops clearing on a closed-state success: a behaviour change in the SDK
+    half, with its own CHANGELOG line. Until the Core change merges, V13-104 is not built here.
   - **`@setu-ts/sdk` reads the same type.**
     `packages/sdk/src/circuit-breaker/circuit-breaker.ts:48`, `:94`, `:96` reads `policy.threshold`
     and `policy.timeout`, `sdk/src/http/contracts.ts:205` takes
@@ -423,48 +446,82 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 - **Test home:** `test/unit/circuit-breaker.test.ts` (the count arm's existing cases unchanged,
   including a mid-flight abort recorded as a failure; the rate arm: below `minimumCalls` never
   trips, at the rate trips, old buckets expire on the fake clock, one failing instance in three at
-  high volume does not trip at 50 %); `test/unit/rolling-window.test.ts` (bucket rotation and sums);
-  `test/unit/resilience-service.test.ts` (each refusal row; a rate policy through `wrap` and through
-  `circuitBreaker: true` with a rate default, the two entry points under the same non-default policy
-  give the same trips).
+  high volume does not trip at 50 %); (bucket rotation and sums are tested in `common` with the
+  primitive, §11); `test/unit/resilience-service.test.ts` (each refusal row; a rate policy through
+  `wrap` and through `circuitBreaker: true` with a rate default, the two entry points under the same
+  non-default policy give the same trips).
 
-### 3.8 `grpcClient` reports every transport fault as an instance failure (V13-25)
+### 3.8 `grpcClient` reports every fault that is the instance's as an instance failure (V13-25)
 
-- **Decision:** `#attempt` classifies a failed call with one function, `callOutcome(error, signal)`
-  in a new internal file:
-  - the caller's own signal is aborted: no report;
-  - a refused stream (`isRefusedStream`): `failure` (unchanged);
-  - code `Unavailable` or `Unimplemented`, wire or not: `failure`. `Unavailable` keeps today's rule.
-    `Unimplemented` is the instance not serving this service (connect maps an HTTP 404 to it,
-    `protocol-connect/http-status.js:25-41`), which is a misrouted instance, not an application
-    answer;
-  - `DeadlineExceeded`: `success` (unchanged; OD5);
-  - any other code that is a server's answer (`isWireError`, through a new
-    `ConnectRuntime.isWireError` member): `success` (an application error is the instance working);
-  - anything else (no server answer: a reset, a close, a protocol error, a refused connection, or an
-    HTTP response that is not gRPC): `failure`. The README rule becomes: an instance is reported
-    failed when it did not answer as a gRPC server serving the service, or answered `Unavailable`.
+**DECIDED by the maintainer on 2026-11-22: OD5 (a `DeadlineExceeded` with no response is a
+`failure`) and OD10 (widened server-fault set).** Rejected in one line each: OD5 "no change"
+(`success` for a deadline), because a hung instance that accepts connections is then never ejected
+and each timeout erases its real failures; OD10 A (only `Unavailable`/`Unimplemented` fail), because
+a replica whose handler fails every call answers `Internal`, which A reported as success. The reason
+both matter: `EjectionTracker.record` treats `'success'` as "clear this instance's failure window
+and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.report` JSDoc in
+`common`), so a wrong `success` actively protects a broken instance.
+
+- **Where `callOutcome` sits, and what "no response" means (from source).** `#attempt` reports once,
+  when `run(transport)` settles (`grpc-client.ts:513-531`). For a unary call `run` settles only with
+  the whole response or an error, so an error there always means no response arrived. For a
+  streaming call, connect's `transport.stream` resolves as soon as the response headers are
+  validated (`protocol-grpc/transport.js:158-176`; the connect protocol likewise), before any
+  message is read, and the messages are read later by the caller from `res.message`. So an error
+  that rejects `run` is one before the response headers, when no message can have arrived, and an
+  error after messages (a deadline mid-stream included) surfaces from the caller's iteration and
+  never reaches `#attempt`: it reports nothing, which is the maintainer's rule. Unchanged and stated
+  in the README: a streaming call is reported `success` when its response headers arrive.
+- **Decision:** `#attempt` classifies an error that rejected `run` with one function,
+  `callOutcome(error, signal)`, in a new internal file `client/call-outcome.ts`. The rows, in order:
+  1. the caller's own signal is aborted: no report (a `Canceled` the caller caused);
+  2. a refused stream (`isRefusedStream`): `failure` (unchanged);
+  3. server-fault codes, wire or not: `Unavailable`, `Unimplemented`, `Internal`, `Unknown`,
+     `DataLoss`, `DeadlineExceeded`: `failure`;
+  4. `Canceled` that is not the caller's (a peer reset or killed mid-call, V13-25): `failure`;
+  5. caller-fault and application codes that are a server's answer (`isWireError`, through a new
+     `ConnectRuntime.isWireError` member): `InvalidArgument`, `NotFound`, `AlreadyExists`,
+     `PermissionDenied`, `Unauthenticated`, `FailedPrecondition`, `OutOfRange`, `Aborted`,
+     `ResourceExhausted`: `success`;
+  6. anything else, including those same codes without a server answer (connect-node maps
+     `ECONNRESET` to a non-wire `Aborted`, `node-error.js:20-57`): `failure`. The README rule
+     becomes: an instance is reported failed when it did not answer, or answered with a server-fault
+     code. The README also states the cost of row 3's `DeadlineExceeded`: a caller deadline tighter
+     than a healthy instance's latency can eject it, bounded by the defaults (5 failures in 30 s, at
+     most 50 % of instances, never the last one, 30 s ejection).
+- **What Setu's own server answers for an unhandled handler error:** connect writes `Internal`
+  ("internal error") for any non-`ConnectError` thrown by a handler, on the gRPC protocol
+  (`protocol-grpc/handler-factory.js:107-113`) and the Connect protocol
+  (`protocol-connect/handler-factory.js:138-146`); `grpc-plugin` adds no mapping of its own
+  (`src/errors/grpc-errors.ts` holds load and descriptor errors only). `Internal` is in row 3.
 - **Why the wire flag alone is not enough:** on the client's default protocol, `'connect'`
   (`grpc-client.ts:30-35`), connect parses ANY non-200 unary reply whose content type is JSON as a
   Connect error body (`protocol-connect/validate-response.js:32-37`,
   `protocol-connect/transport.js:112-113`), and `errorFromJson` sets `isWireError = true` for any
   JSON object, falling back to the HTTP-derived code when the body has no `code`
   (`protocol-connect/error-json.js:36-55`). So a JSON 404 from a Setu app without the service, or a
-  JSON 429/502/503 from a proxy, is a "wire" error with code `Unimplemented` or `Unavailable`. The
-  code rows above therefore come first. Envoy counts locally originated errors (reset, timeout,
-  connect failure) and gateway errors as failures (Q5, Q4b); gRFC A50 implementations count every
-  non-OK status, but they eject on a success-rate statistic over a request volume, not on one
-  failure, so counting application errors here (threshold 1 is allowed) would eject healthy
-  instances for `NotFound` answers.
-- **Test home:** `test/unit/grpc-client.test.ts` and `test/unit/call-outcome.test.ts` (new; one
-  table, iterated as data, of every error shape and its outcome, including a wire `Unimplemented`
-  and a wire `Unavailable` built the way `errorFromJson` builds them);
+  JSON 429/502/503 from a proxy, is a "wire" error with code `Unimplemented` or `Unavailable`; the
+  server-fault rows therefore ignore the flag. A proxy's JSON 429 becomes `Unavailable` (connect's
+  HTTP mapping), so it is a failure, as today.
+- **Why these codes:** Envoy's outlier detection uses "the HTTP status mapped from the grpc-status
+  response header" and counts 5xx; Envoy's own mapping (`source/common/grpc/status.cc`,
+  `grpcToHttpStatus`) sends `Unknown`, `Internal`, `DataLoss` to 500, `Unimplemented` to 501,
+  `Unavailable` to 503, `DeadlineExceeded` to 504, and every row-5 code to a 4xx (`Canceled` 499),
+  which is this table exactly (Q4c). The repo's own README example for HTTP callers counts a thrown
+  timeout and every non-2xx as `'failure'`. gRFC A50 implementations count every non-OK status but
+  eject on a statistic over a request volume, not on one failure.
+- **Test home:** `test/unit/call-outcome.test.ts` (new; ONE table iterated as data with every gRPC
+  code from connect's `Code` enum, each as a wire and a non-wire error, plus the caller-aborted,
+  refused-stream and peer-`Canceled` rows, each with its outcome; a test fails if a code of the enum
+  has no row); `test/unit/grpc-client.test.ts` (wiring: a unary `DeadlineExceeded` reports
+  `failure`; a streaming call whose iteration later fails reports only the header-time `success`);
   `test/e2e/grpc-client-scenarios-e2e.test.ts` (the report's four "dead port" cases as rows on real
   sockets: nothing listening, an HTTP/1.1 listener, an HTTP/2 server without the service, a listener
-  that accepts and closes; with `failureThreshold: 1` and two instances, every row is ejected after
-  one call and the next five succeed; each row run on the `connect`, `grpc` and `grpc-web`
-  protocols, and the "server without the service" row also against a Setu app answering its JSON
-  404).
+  that accepts and closes; plus a Setu server whose handler throws a plain `Error` (`Internal`) and
+  one that never answers within the deadline; with `failureThreshold: 1` and two instances, every
+  row is ejected after one call and the next five succeed; each row run on the `connect`, `grpc` and
+  `grpc-web` protocols, and the "server without the service" row also against a Setu app answering
+  its JSON 404).
 
 ### 3.9 A unary call a draining peer turned away goes to another replica (V13-23, `grpc-plugin` half)
 
@@ -525,12 +582,12 @@ because the drain answer is written through the application's error responder wh
 
 ### 3.10 Calls spread over a service's replicas (V13-24)
 
-- **Decision (written against OD7 recommendation A):** no new client option. The README's
-  "Connections" bullet states the consequence (one session per instance, so a Service address that
-  load-balances connections pins every call to one pod) and the remedy the plugin supports today:
-  discover the pods themselves (`dns` arm in mode `'a'` over a headless Service, or the `kubernetes`
-  arm), so each pod is its own instance and the balancer spreads calls. The generated Kubernetes
-  output half is a CLI-lane hand-over (§11).
+- **Decision (OD7 A, decided):** no new client option. The README's "Connections" bullet states the
+  consequence (one session per instance, so a Service address that load-balances connections pins
+  every call to one pod) and the remedy the plugin supports today: discover the pods themselves
+  (`dns` arm in mode `'a'` over a headless Service, or the `kubernetes` arm), so each pod is its own
+  instance and the balancer spreads calls. The generated Kubernetes output half is a CLI-lane
+  hand-over (§11).
 - **Why:** .NET's guidance and gRPC's both name client-side balancing over per-pod addresses as the
   remedy, and server-side connection age as the other (Q7), which is runtime code (Core). Per pod
   discovery already gives one session per pod here.
@@ -544,7 +601,7 @@ because the drain answer is written through the application's error responder wh
 - **Fact base.** connect's universal response body is an async generator (`untilFirst(pipe(...))`,
   `protocol-grpc/handler-factory.js:85-119`; `pipe` is a tslib `__asyncGenerator`,
   `protocol/async-iterable.js:22-32`, `:113-114`), and `return()` on an async generator that is
-  suspended at an `await` is queued behind the pending `next()` (ECMA-262 §27.9.1.3, Q5). The
+  suspended at an `await` is queued behind the pending `next()` (ECMA-262 §27.9.1.3, Q5b). The
   streams spec runs the source's `cancel()` at once, even while a `pull` is pending. So
   `iterableStream`'s `cancel()` (`transports/rpc-call.ts:133-135`) and `nativeGrpcReply`'s
   (`transports/native-grpc-reply.ts:57-60`) wait until the handler's next `yield`; connect's own
@@ -556,21 +613,21 @@ because the drain answer is written through the application's error responder wh
   `application.ts:1266`, `:1284`). Since M143i the kernel waits for `cancel()` with no time limit,
   so a handler waiting for its next event holds the request's drain slot and cleanups until it
   yields.
-- **Decision (written against OD9 recommendation A).** For a procedure that streams its response,
-  the dispatcher creates a local `AbortController` and passes
-  `AbortSignal.any([transport.signal, local.signal])` (or `local.signal` alone when there is no
-  transport signal) to `universalRequest`. Both reply builders' `cancel()` first aborts the local
-  controller with the cancel reason, then awaits `iterator.return()` with no bound, as today. A
-  handler that watches `ctx.signal` (connect's handler context) exits at once and `cancel()`
-  settles. A handler that ignores the signal still holds the stream until it yields, exactly as a
-  hung unary handler holds its request; the README says so. Unary procedures are unchanged (no
-  `AbortSignal.any`, whose cost the kernel measured on the unary path). `@setu-ts/common` has no
-  `AbortSignal.any` helper; it is a web standard on Node 20+, Deno and Bun, used directly.
+- **Decision (OD9 A, decided).** For a procedure that streams its response, the dispatcher creates a
+  local `AbortController` and passes `AbortSignal.any([transport.signal, local.signal])` (or
+  `local.signal` alone when there is no transport signal) to `universalRequest`. Both reply
+  builders' `cancel()` first aborts the local controller with the cancel reason, then awaits
+  `iterator.return()` with no bound, as today. A handler that watches `ctx.signal` (connect's
+  handler context) exits at once and `cancel()` settles. A handler that ignores the signal still
+  holds the stream until it yields, exactly as a hung unary handler holds its request; the README
+  says so. Unary procedures are unchanged (no `AbortSignal.any`, whose cost the kernel measured on
+  the unary path). `@setu-ts/common` has no `AbortSignal.any` helper; it is a web standard on Node
+  20+, Deno and Bun, used directly.
 - **Why not a bound.** Racing `return()` against a bound releases the request's cleanups and limit
   slot while the handler may still be running, which is the bypass M143i's security audit rejected
   (P15, `m143i-audit-record.md`). No compared framework interrupts a blocked handler or bounds the
   wait: gRPC "does not have a mechanism to interrupt the application-provided server handler",
-  grpc-go cancels the context, grpc-js sets `cancelled` (Q5).
+  grpc-go cancels the context, grpc-js sets `cancelled` (Q5b).
 - **Test home:** `test/unit/rpc-call.test.ts` and `test/unit/native-grpc-reply.test.ts` (new) (a
   source generator suspended at an `await` that listens to the signal: `cancel()` aborts it and
   settles; the abort happens before `return()` is called; a generator that ignores the signal keeps
@@ -630,7 +687,6 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `packages/service-discovery-plugin/src/providers/provider-factory.ts`         | `servers` through `runtime.createDnsResolver`.                                                                                                          |
 | `packages/service-discovery-plugin/src/providers/static-provider.ts`          | Accepts and ignores the signal parameter (signature only).                                                                                              |
 | `packages/resilience-plugin/src/patterns/circuit-breaker.ts`                  | Count arm unchanged, rate arm over the bucketed window, `validateCircuitBreakerPolicy`.                                                                 |
-| `packages/resilience-plugin/src/patterns/rolling-window.ts`                   | New: the ten-bucket call/failure counter on an injected monotonic clock.                                                                                |
 | `packages/resilience-plugin/src/services/resilience-service.ts`               | Validates a breaker policy from `wrap`.                                                                                                                 |
 | `packages/resilience-plugin/src/plugin/resilience-plugin.ts`                  | Validates `defaultCircuitBreaker` at registration.                                                                                                      |
 | `packages/grpc-plugin/src/client/call-outcome.ts`                             | New: `callOutcome`, and (after the Core gate, §3.9) the marked-503 resend rule.                                                                         |
@@ -662,7 +718,6 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `service-discovery-plugin/test/integration/readiness.test.ts` (extend)            | plugin + service               | Hung Consul fake in a kernel app via `inject()`: warm calls answer at once, `/ready` 200, `degraded` true, `staleForMs` above zero.                                                            |
 | `service-discovery-plugin/test/integration/self-registration.test.ts` (extend)    | `consul-provider.ts`, plugin   | Restart with the same registration leaves one agent entry.                                                                                                                                     |
 | `resilience-plugin/test/unit/circuit-breaker.test.ts` (extend)                    | `circuit-breaker.ts`           | Count arm unchanged; rate arm rows.                                                                                                                                                            |
-| `resilience-plugin/test/unit/rolling-window.test.ts` (new)                        | `rolling-window.ts`            | Rotation, sums, expiry on a fake clock.                                                                                                                                                        |
 | `resilience-plugin/test/unit/resilience-service.test.ts` (extend)                 | `resilience-service.ts`        | Refusal rows; both entry points under one non-default rate policy agree.                                                                                                                       |
 | `resilience-plugin/test/unit/resilience-plugin.test.ts` (extend)                  | `resilience-plugin.ts`         | `defaultCircuitBreaker` refused at registration.                                                                                                                                               |
 | `grpc-plugin/test/unit/grpc-client.test.ts` (extend)                              | `grpc-client.ts`               | Outcome wiring; marked-503 resend rows (after the Core gate); an unmarked 503 is never resent.                                                                                                 |
@@ -738,8 +793,7 @@ against the Consul container of X83, before the rows close on `0.14.0`.
 - Kernel GOAWAY at drain start and stream accounting: M143i.
 - Server-side HTTP/2 connection age (`MAX_CONNECTION_AGE`): runtime, Core lane; not requested by a
   row.
-- Reading DNS record TTLs: no runtime resolver exposes them for SRV (Q8).
-- A `DeadlineExceeded` counted as an instance failure: OD5.
+- Reading DNS record TTLs: no runtime resolver exposes them for SRV (Q11).
 - Guides under `docs/` (deployment, discovery, gRPC pages): M143n.
 
 ## 10. Documentation deliverables
@@ -773,8 +827,11 @@ against the Consul container of X83, before the rows close on `0.14.0`.
 - **Core lane (a small PR after M143i merges; OD4):** `packages/common/src/services/resilience.ts`
   `CircuitBreakerPolicy`: "add a rate arm
   `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` as a union with today's
-  `{ threshold, timeout, resetTimeout }`, with JSDoc for each field, and update `PUBLIC_API.md`
-  Resilience."
+  `{ threshold, timeout, resetTimeout }`, with JSDoc for each field; add the shared trip primitive
+  `createBreakerWindow(policy, now)` (count arm with exact timestamps, rate arm over ten buckets,
+  `recordSuccess`/`recordFailure(): boolean`/`reset`/`failures`, no clearing on a closed-state
+  success) with a conformance table test covering both arms; export it; update `PUBLIC_API.md`
+  Resilience." `resilience-plugin` (this letter) and the SDK (CLI lane) then both import it.
 - **Core lane (same PR; OD3):** `packages/common/src/runtime.ts` and
   `packages/runtime/src/adapters/{shared/node-dns-resolver.ts,deno/deno-dns-resolver.ts}`: "add an
   optional
@@ -800,10 +857,11 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   that, so Core need not change the body.
 - **CLI lane, `@setu-ts/sdk` (OD4b; must land with the Core union):**
   `packages/sdk/src/circuit-breaker/circuit-breaker.ts` and `sdk/src/http/contracts.ts`: "narrow the
-  `CircuitBreakerPolicy` union: implement the rate arm with the same rule as `resilience-plugin`
-  (OD4b A), or refuse it at construction with a `TypeError` naming the field (OD4b B); update the
-  SDK README and `PUBLIC_API.md` SDK section." Owning letter: the CLI-lane letter that holds `sdk`
-  (M143k per the lane table), to be confirmed by the maintainer.
+  `CircuitBreakerPolicy` union by moving the SDK breaker onto `common`'s `createBreakerWindow` (OD4b
+  A, decided), which gives it the rate arm and drops its clear-on-success behaviour; update the SDK
+  README, `PUBLIC_API.md` SDK section and a CHANGELOG line for that behaviour change." Owning
+  letter: the CLI-lane letter that holds `sdk` (M143k per the lane table), to be confirmed by the
+  maintainer.
 - **CLI lane (V13-24; M143d, whose ROADMAP section lists "Half of a row owned elsewhere: V13-24
   (owned by M143c)"):** `packages/cli/src/workspace/k8s.ts` and
   `packages/cli/src/workspace/discovery-module.ts`: "for a member whose transport is gRPC, emit a
@@ -817,13 +875,15 @@ against the Consul container of X83, before the rows close on `0.14.0`.
 
 ## 12. Open decisions for the maintainer
 
+All decided on 2026-11-22; kept with their options for the record.
+
 OD1 and OD6 were decided by the maintainer on 2026-11-22 (options B and C) and are recorded in §3.1
 and §3.9.
 
 - **OD2, the empty answer (Q3).** A: a grace window, default 30 s, `0` for immediate. B: replace at
   once (gRPC), and special-case Consul's restart. C: never replace a non-empty list with `[]`
-  (Eureka's self-preservation), which leaves V13-247 open. **Recommend A** with 30 s (Consul's
-  default check interval here is 10 s, `options.ts:182-186`).
+  (Eureka's self-preservation), which leaves V13-247 open. **DECIDED A by the maintainer
+  (2026-11-22)** with 30 s (Consul's default check interval here is 10 s, `options.ts:182-186`).
 - **OD3, the DNS name server (V13-246).** A: Core adds `createDnsResolver` (§11), the arm takes
   `servers`. B: the arm takes an injected `resolver?: IDnsResolver` and the application builds it,
   which puts runtime APIs in application code. **Recommend A.**
@@ -835,10 +895,10 @@ and §3.9.
   same rule (one rule in both breakers; the SDK cannot import the plugin). B: the SDK refuses a rate
   policy at construction (refusing is allowed: ignoring it would fail silently). C: keep the SDK on
   a separate count-only type (`SdkCircuitBreakerPolicy`), which splits one public type in two.
-  **Recommend A**, in the CLI lane, landing with the Core union.
-- **OD5, `DeadlineExceeded` as an instance failure (Q5).** Envoy counts timeouts; a caller's tight
-  deadline would then eject a healthy, slow instance. **Recommend no change** in this letter (no row
-  asks for it).
+  DECIDED A by the maintainer (2026-11-22), with the trip rule shared from `common` (§3.7).
+- **OD5 — DECIDED by the maintainer (2026-11-22):** a `DeadlineExceeded` with no response is a
+  `failure`; mid-stream reports nothing (§3.8). Rejected: no change (`success`), which never ejects
+  a hung instance.
 - **OD7, spreading calls (Q7).** A: docs plus the CLI hand-over for per-pod discovery, no new
   option. B: also a `GrpcPluginOptions.sessionMaxAgeMs` that recycles a session so kube-proxy
   re-balances over time (off by default; no compared client ships one). C: several sessions per
@@ -847,22 +907,21 @@ and §3.9.
   the handler's signal first, then await `return()` with no bound; a handler that ignores the signal
   still holds the stream (as a hung unary handler does). B: race `return()` against a bound (for
   example 5000 ms) and settle; cleanups and limit slots are released while the handler may still
-  run, which M143i's audit rejected (P15). C: document only. **Recommend A**: no compared framework
-  interrupts or bounds a blocked handler (Q5), and A releases everything a cooperating handler
-  holds.
-- **OD10 (new, from review), the outcome rule for JSON error replies (§3.8).** A: count
-  `Unavailable` and `Unimplemented` as failures whatever the wire flag, other wire codes as success.
-  B: count only non-wire errors (the draft), which on the default `connect` protocol makes a JSON
-  404 or a proxy's JSON 503 a success, a regression from today. C: count every non-OK status (gRFC
-  A50 implementations), which with `failureThreshold: 1` ejects instances for application errors
-  such as `NotFound`. **Recommend A.**
+  run, which M143i's audit rejected (P15). C: document only. **DECIDED A by the maintainer
+  (2026-11-22)**: no compared framework interrupts or bounds a blocked handler (Q5b), and A releases
+  everything a cooperating handler holds.
+- **OD10 — DECIDED by the maintainer (2026-11-22):** the widened server-fault set of §3.8, wire or
+  not; application codes count as success only as a server's answer. Rejected: A (only
+  `Unavailable`/`Unimplemented`), which reports a replica failing every call with `Internal` as
+  healthy; B (non-wire only), a regression on the `connect` protocol; C (every non-OK), which ejects
+  instances for application answers such as `NotFound`.
 - **OD8 (new, from OD1's decision), whether a stale list's age changes readiness.** With background
   refresh the last good list is served for as long as the registry is down. A: the indicator stays
   `up` at any age and reports `staleForMs` (§3.1), keeping the M113o rule that a warm cache keeps a
   replica ready. B: add an option `maxStaleMs` after which the indicator reports `degraded`, which
   makes `/ready` 503 (`health-plugin.ts:348-351`) and, because every replica's list ages together,
-  takes every replica out at once. **Recommend A**; Eureka's self-preservation (Q2) is the same
-  judgement that a registry outage should not empty the fleet.
+  takes every replica out at once. **DECIDED A by the maintainer (2026-11-22)**; Eureka's
+  self-preservation (Q2) is the same judgement that a registry outage should not empty the fleet.
 
 ## 13. Design security review
 
