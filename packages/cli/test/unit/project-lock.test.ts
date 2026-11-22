@@ -213,7 +213,10 @@ describe('project write lock', () => {
         withProjectLock({ ...fs, rm: () => Promise.reject(cause) }, '/work', undefined, 'add', () =>
           Promise.resolve(0),
         ),
-      ).rejects.toThrow(`Cannot release ${lock}: release denied`);
+      ).rejects.toHaveProperty(
+        'message',
+        `The command completed, but its lock ${lock} could not be removed: release denied\nDo not run the command again; delete ${lock} before the next setu command.`,
+      );
     },
   );
 

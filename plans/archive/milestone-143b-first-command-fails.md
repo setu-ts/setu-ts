@@ -341,6 +341,16 @@ run. No other `docs/` file is touched.
   Condition, already met by batch 1 and tested: the refusal names the lock path, says how to clear a
   stale one, and says when the owner process is gone.
 - **Unsupported Node: soft band and hard floor** (§3.10): changed from warn-only, as above.
+- **Security audit risks accepted (the maintainer, 2026-11-22):**
+  - A lock release failure after the command itself succeeded exits 1, because a lock left on disk
+    refuses the next command. Condition, met in the fix range: the message says the command
+    completed and only the lock cleanup failed, names the lock path, and says not to run the command
+    again.
+  - A dangling `write.lock` symlink is refused as a held lock: the link exists, the refusal names
+    it, and deleting it clears the refusal; it fails closed.
+  - Compared: git refuses on any existing `.git/index.lock`, even one left by a dead process, and
+    tells the user to delete it by hand; `proper-lockfile` reports a failed release as an error
+    rather than ignoring it; other tools' exit codes were not verified.
 
 ### 3.11 Compared with — sibling commands and established tools
 

@@ -137,18 +137,28 @@ export async function withProjectLock<T>(
     }
     throw failure;
   }
-  // A lock left behind blocks the next command, so failing to release fails this one.
-  await releaseProjectLock(fs, lock);
+  // A lock left behind blocks the next command, so failing to release fails this one;
+  // the message says the command's own work is done, so it is not run again.
+  await releaseProjectLock(fs, lock, true);
   return result;
 }
 
-/** Removes the command's own lock and names any filesystem failure. */
-async function releaseProjectLock(fs: IFileSystem, lock: string): Promise<void> {
+/**
+ * Removes the command's own lock and names any filesystem failure.
+ *
+ * @param fs - Filesystem holding the lock
+ * @param lock - The lock directory
+ * @param completed - True when the command itself finished, so only cleanup failed
+ */
+async function releaseProjectLock(fs: IFileSystem, lock: string, completed = false): Promise<void> {
   try {
     await fs.rm(lock, { recursive: true });
   } catch (cause) {
+    const reason = escapeName(cause instanceof Error ? cause.message : String(cause));
     throw new ProjectLockError(
-      `Cannot release ${escapeName(lock)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      completed
+        ? `The command completed, but its lock ${escapeName(lock)} could not be removed: ${reason}\nDo not run the command again; delete ${escapeName(lock)} before the next setu command.`
+        : `Cannot release ${escapeName(lock)}: ${reason}`,
     );
   }
 }
