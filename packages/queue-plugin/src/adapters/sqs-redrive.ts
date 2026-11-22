@@ -67,7 +67,10 @@ export class SqsRedrive {
       try {
         return await withDeadline(read, {
           timeoutMs: 10_000,
-          onTimeout: () => new Error(`SQS read timed out after 10000 ms`),
+          onTimeout: () =>
+            new Error(
+              this.#closed ? 'SqsQueue is disconnecting' : 'SQS read timed out after 10000 ms',
+            ),
           timing: {
             setTimer: (fn, ms) => {
               const handle = runtime.setTimeout(fn, ms);

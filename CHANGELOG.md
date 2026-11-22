@@ -53,7 +53,8 @@ All notable changes to this project are documented here. The format follows
   - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
     deleted, and its warning carries the message id, never the body (V13-213).
   - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
-    of logging and returning.
+    of logging and returning. A dead letter whose copy already reached its target still deletes the
+    source and warns when its claim lapsed during the forward.
   - Consuming needs `sqs:GetQueueAttributes`, and `sqs:GetQueueUrl` and `sqs:SendMessage` on a
     policy target.
 - **`@setu-ts/queue-plugin`, every adapter (M143p).** `queue_jobs_total` counts an outcome only

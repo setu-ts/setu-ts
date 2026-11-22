@@ -88,7 +88,7 @@ describe('SQS settlement and renewal ordering', () => {
   );
 
   it('still deletes the source after a forward that outlived its claim', async () => {
-    const { queue, transport, runtime } = await sqsHarness();
+    const { queue, transport, runtime, logger } = await sqsHarness();
     await transport.send('source', envelope(1));
     const [job] = await queue.reserve('build', 1, 0);
     const work = Promise.withResolvers<void>();
@@ -109,7 +109,12 @@ describe('SQS settlement and renewal ordering', () => {
       work.resolve();
       await terminal;
       expect(deleted).toHaveBeenCalledTimes(1);
+      expect(transport.depth('source')).toBe(0);
       expect(transport.depth('dead')).toBe(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('lapsed during the forward'),
+      );
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('payload-canary');
     } finally {
       work.resolve();
       await Promise.allSettled([terminal]);

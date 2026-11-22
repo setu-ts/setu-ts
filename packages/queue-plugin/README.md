@@ -473,7 +473,10 @@ change. SQS caps a message's visibility at 12 hours from the receive; the adapte
 than the time left and stops extending at the cap, after which the job is reported as stale
 (`queue job claim renewal failed`) and SQS delivers it again. A settle (`ack`, retry or dead-letter)
 for a claim the adapter no longer holds fails and is reported as `queue job settlement failed`; it
-is not counted.
+is not counted. One exception: once a dead letter's copy has reached its target, the source delete
+is always attempted and the settle counts; if the claim lapsed during the forward, a warning says
+the source may be delivered and dead-lettered again (SQS ignores a delete through a superseded
+receipt handle).
 
 #### SQS Retry and DLQ
 

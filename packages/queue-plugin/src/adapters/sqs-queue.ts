@@ -590,7 +590,7 @@ export class SqsQueue implements QueueAdapter {
       const headers = readStringMap(envelope.headers);
       if (envelope.headers !== undefined && headers === undefined) {
         this.#logger?.error(
-          `SQS reserve: malformed headers dropped on "${name}" job "${envelope.id}" — job runs untraced`,
+          `SQS reserve: malformed headers dropped on "${name}" job ${logId(envelope.id)} — job runs untraced`,
         );
       }
       let maxAttempts = envelope.maxAttempts ?? this.#defaultMaxAttempts;
@@ -697,7 +697,7 @@ export class SqsQueue implements QueueAdapter {
     token: string,
     call: (
       entry: ReceiptEntry,
-      fence: (recheck?: boolean) => Promise<void>,
+      fence: (recheck?: boolean) => Promise<boolean>,
       transport: ISqsTransport,
     ) => Promise<T>,
   ): Promise<T> {
@@ -711,10 +711,16 @@ export class SqsQueue implements QueueAdapter {
     // copy is already in the target, so the delete is always attempted. A stale
     // receipt handle makes SQS skip it harmlessly; refusing here would leave the
     // source to be delivered and forwarded again.
-    const fence = async (recheck = true): Promise<void> => {
+    // Resolves whether this delivery still owns the claim.
+    const fence = async (recheck = true): Promise<boolean> => {
       activity.settling = true;
       if (activity.renewal !== undefined) await activity.renewal;
-      if (recheck) this.#claim(name, id, token);
+      if (recheck) {
+        this.#claim(name, id, token);
+        return true;
+      }
+      const current = this.findReceiptEntry(id);
+      return current !== undefined && current.name === name && current.claimToken === token;
     };
     try {
       const result = await call(entry, fence, transport);
@@ -734,7 +740,7 @@ export class SqsQueue implements QueueAdapter {
     attempts: number,
     reason: 'attempts-exhausted' | 'abandoned' | 'unreadable',
     id = messageId,
-    fence?: (recheck?: boolean) => Promise<void>,
+    fence?: (recheck?: boolean) => Promise<boolean>,
   ): Promise<void | 'discarded'> {
     await this.prepareConsumer(name);
     const transport = this.#transport!;
@@ -744,7 +750,7 @@ export class SqsQueue implements QueueAdapter {
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
       if (reason !== 'unreadable') {
         this.#logger?.warn(
-          `SQS "${name}" job "${id}" discarded after ${attempts} attempts; deadLetterQueues[name] is false`,
+          `SQS "${name}" job ${logId(id)} discarded after ${attempts} attempts; deadLetterQueues[name] is false`,
         );
       }
       return 'discarded';
@@ -755,8 +761,13 @@ export class SqsQueue implements QueueAdapter {
       'setu-source-message-id': { DataType: 'String', StringValue: messageId },
     });
     try {
-      if (fence !== undefined) await fence(false);
+      const owned = fence === undefined ? true : await fence(false);
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
+      if (!owned) {
+        this.#logger?.warn(
+          `SQS deadLetter: the claim on "${name}" job ${logId(id)} lapsed during the forward; the source may be delivered and dead-lettered again`,
+        );
+      }
     } catch (error) {
       this.#logger?.error(
         `SQS deadLetter: source delete for "${name}" failed (possible duplicate on re-claim)`,
@@ -854,6 +865,18 @@ export class SqsQueue implements QueueAdapter {
     }
     return entry;
   }
+}
+
+/**
+ * Renders a sender-chosen job id for a log line: JSON-quoted, so a CR/LF or a
+ * quote cannot forge a second record in a plain-text logger, and cut to 128
+ * characters, so a large id cannot flood the log.
+ *
+ * @param id - The envelope id, as the sender wrote it
+ * @returns The quoted, bounded id
+ */
+function logId(id: string): string {
+  return JSON.stringify(id.length > 128 ? `${id.slice(0, 128)}…` : id);
 }
 
 /**
