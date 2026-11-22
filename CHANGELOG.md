@@ -65,10 +65,10 @@ All notable changes to this project are documented here. The format follows
   type `415`. It refuses, when built, options its upload brand cannot describe (a `RangeError`
   naming the rule). A key with a `.` or `..` path segment is refused with a `400` by every
   `StorageService` call and by the S3, B2, GCS and Azure providers used directly (on Azure such a
-  key could reach another container). A key that is not a string (a `String` object included) is
-  refused the same way. Local `get` rejects a permission or I/O failure instead of answering `404`.
-  Copied backend error text has its control characters replaced. An SMTP `contentId` attachment is
-  sent inline. Slack posts the subject in bold before the body.
+  key could reach another container). An empty key, or one that is not a string (a `String` object
+  included), is refused the same way. Local `get` rejects a permission or I/O failure instead of
+  answering `404`. Copied backend error text has its control characters replaced. An SMTP
+  `contentId` attachment is sent inline. Slack posts the subject in bold before the body.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

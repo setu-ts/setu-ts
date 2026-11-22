@@ -15,7 +15,9 @@ import { PROVIDERS } from '../fixtures/provider-fakes.ts';
 
 const BAD = ['../other/secret.txt', 'a/../../b', './a', 'a/.', '..'];
 // A boxed String is the case under test: an SDK reads it as its value.
-const NON_STRING: readonly unknown[] = [new String('../other/secret.txt'), undefined, 7];
+const NON_STRING: readonly unknown[] = [new String('../other/secret.txt'), undefined, 7, ['..']];
+// An empty key names the bucket itself (on S3, a listing).
+const EMPTY = '';
 const GOOD = ['a.txt', 'docs/a b/ñ#1?.txt', '.hidden', 'a..b', '/leading', 'a//b'];
 
 describe('assertStorageKey', () => {
@@ -34,6 +36,19 @@ describe('assertStorageKey', () => {
       });
     });
   }
+  it('refuses an empty key with its own 400', () => {
+    let thrown: unknown;
+    try {
+      assertStorageKey(EMPTY);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(httpStatusHintOf(thrown)).toEqual({
+      status: 400,
+      title: 'Bad Request',
+      detail: 'A storage key may not be empty.',
+    });
+  });
   for (const key of GOOD) {
     it(`accepts ${JSON.stringify(key)}`, () => {
       expect(() => {
@@ -78,7 +93,7 @@ describe('every provider, through StorageService, refuses a traversing key on ev
         const { provider, calls } = counted(factory());
         await provider.connect();
         const service = new StorageService(provider);
-        for (const key of [...BAD, ...NON_STRING]) {
+        for (const key of [...BAD, EMPTY, ...NON_STRING]) {
           const error = await run(service, key as string).catch((e: unknown) => e);
           expect(httpStatusHintOf(error)?.status).toBe(400);
         }
@@ -114,11 +129,11 @@ describe('the cloud providers used directly refuse one too', () => {
       }
     });
 
-    it(`${name}: a non-string key (a boxed String included) rejects with a 400`, async () => {
+    it(`${name}: an empty or non-string key (a boxed String included) rejects with a 400`, async () => {
       const provider = factory();
       await provider.connect();
       for (const [, run] of OPS) {
-        for (const key of NON_STRING) {
+        for (const key of [EMPTY, ...NON_STRING]) {
           let pending: Promise<unknown> | undefined;
           expect(() => {
             pending = run(provider, key as string);
