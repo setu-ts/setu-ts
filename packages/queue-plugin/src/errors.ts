@@ -16,24 +16,59 @@ export class StaleClaimError extends Error {
 }
 
 /**
+ * Why {@linkcode SqsDeadLetterTargetMissingError} was raised.
+ *
+ * - `no-target`: no `deadLetterQueues` entry and the queue has no `RedrivePolicy`.
+ * - `policy-unreadable`: the `RedrivePolicy` is not JSON, or its target ARN or
+ *   `maxReceiveCount` is malformed.
+ * - `attributes-unavailable`: the transport has no `getQueueAttributes`, or the
+ *   read was refused, failed or timed out (the error is the `cause`).
+ * - `target-unresolvable`: the policy names a target but the transport has no
+ *   `getQueueUrl`, or resolving it failed (the error is the `cause`).
+ *
+ * @since 0.14.0
+ */
+export type SqsDeadLetterTargetMissingReason =
+  'no-target' | 'policy-unreadable' | 'attributes-unavailable' | 'target-unresolvable';
+
+const TARGET_MISSING_TEXT: Readonly<Record<SqsDeadLetterTargetMissingReason, string>> = {
+  'no-target': 'no deadLetterQueues entry and the queue has no RedrivePolicy',
+  'policy-unreadable': "the queue's RedrivePolicy cannot be read",
+  'attributes-unavailable': "the queue's attributes (RedrivePolicy) could not be read",
+  'target-unresolvable': "the RedrivePolicy target's queue URL could not be resolved",
+};
+
+/**
  * A consumer has no proven dead-letter target. Raised before its first poll.
  * @since 0.14.0
  */
 export class SqsDeadLetterTargetMissingError extends Error {
+  /** Why no target could be proved. @since 0.14.0 */
+  readonly reason: SqsDeadLetterTargetMissingReason;
+
   /**
    * @param jobName - The consumed name
    * @param queueUrl - Source queue URL
+   * @param reason - Why no target could be proved (default `no-target`)
+   * @param cause - The underlying read error, when one occurred
    * @returns The refusal error
    * @throws Never
    * @since 0.14.0
    */
-  constructor(jobName: string, queueUrl: string) {
+  constructor(
+    jobName: string,
+    queueUrl: string,
+    reason: SqsDeadLetterTargetMissingReason = 'no-target',
+    cause?: unknown,
+  ) {
     super(
-      `SQS job "${jobName}" at "${queueUrl}": the queue's RedrivePolicy cannot be read or no dead-letter target is available. ` +
+      `SQS job "${jobName}" at "${queueUrl}" has no dead-letter target: ${TARGET_MISSING_TEXT[reason]}. ` +
         `Add a deadLetterQueues entry, configure a redrive policy on the queue, or set deadLetterQueues: { '${jobName}': false } to discard exhausted jobs. ` +
         'Required IAM rights: sqs:GetQueueAttributes on the source, sqs:GetQueueUrl for a policy target, sqs:SendMessage on the target, and kms:GenerateDataKey for a customer-managed encrypted target.',
+      cause === undefined ? undefined : { cause },
     );
     this.name = 'SqsDeadLetterTargetMissingError';
+    this.reason = reason;
   }
 }
 

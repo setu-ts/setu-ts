@@ -3,6 +3,15 @@ import { withDeadline } from '@setu-ts/common';
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { ISqsTransport } from './sqs-queue.ts';
 import { SqsDeadLetterTargetMissingError } from '../errors.ts';
+import type { SqsDeadLetterTargetMissingReason } from '../errors.ts';
+
+/** Warning text per refusal reason, for an explicit target that is kept. */
+const TARGET_TEXT: Readonly<Record<SqsDeadLetterTargetMissingReason, string>> = {
+  'no-target': 'the queue has no RedrivePolicy',
+  'policy-unreadable': "the queue's RedrivePolicy cannot be read",
+  'attributes-unavailable': "the queue's attributes (RedrivePolicy) could not be read",
+  'target-unresolvable': "the RedrivePolicy target's queue URL could not be resolved",
+};
 
 /** Resolved target and optional native receive budget. @since 0.14.0 */
 export interface ISqsRedriveTarget {
@@ -47,37 +56,52 @@ export class SqsRedrive {
     warn: (message: string) => void,
   ): Promise<ISqsRedriveTarget> {
     if (explicit === false) return { url: false };
-    const refusal = (): SqsDeadLetterTargetMissingError =>
-      new SqsDeadLetterTargetMissingError(name, queueUrl);
-    const bounded = <T>(read: () => Promise<T>): Promise<T> => {
-      if (this.#closed) return Promise.reject(refusal());
-      return withDeadline(read, {
-        timeoutMs: 10_000,
-        onTimeout: refusal,
-        timing: {
-          setTimer: (fn, ms) => {
-            const handle = runtime.setTimeout(fn, ms);
-            this.#timers.set(handle, fn);
-            return handle;
+    type Refusal = SqsDeadLetterTargetMissingReason;
+    let refusal: { reason: Refusal; cause?: unknown } = { reason: 'no-target' };
+    const refuse = (reason: Refusal, cause?: unknown): never => {
+      refusal = cause === undefined ? { reason } : { reason, cause };
+      throw new SqsDeadLetterTargetMissingError(name, queueUrl, reason, cause);
+    };
+    const bounded = async <T>(read: () => Promise<T>, reason: Refusal): Promise<T> => {
+      if (this.#closed) return refuse(reason, new Error('SqsQueue is disconnecting'));
+      try {
+        return await withDeadline(read, {
+          timeoutMs: 10_000,
+          onTimeout: () => new Error(`SQS read timed out after 10000 ms`),
+          timing: {
+            setTimer: (fn, ms) => {
+              const handle = runtime.setTimeout(fn, ms);
+              this.#timers.set(handle, fn);
+              return handle;
+            },
+            clearTimer: (handle) => {
+              runtime.clearTimeout(handle);
+              this.#timers.delete(handle);
+            },
           },
-          clearTimer: (handle) => {
-            runtime.clearTimeout(handle);
-            this.#timers.delete(handle);
-          },
-        },
-      });
+        });
+      } catch (error) {
+        return refuse(reason, error);
+      }
     };
     try {
-      if (!transport.getQueueAttributes) throw refusal();
-      const attributes = await bounded(() =>
-        transport.getQueueAttributes!(queueUrl, ['RedrivePolicy']),
+      if (!transport.getQueueAttributes) return refuse('attributes-unavailable');
+      const read = transport.getQueueAttributes.bind(transport);
+      const attributes = await bounded(
+        () => read(queueUrl, ['RedrivePolicy']),
+        'attributes-unavailable',
       );
       if (attributes.RedrivePolicy === undefined) {
         if (explicit) return { url: explicit };
-        throw refusal();
+        return refuse('no-target');
       }
-      const policy: unknown = JSON.parse(attributes.RedrivePolicy);
-      if (typeof policy !== 'object' || policy === null) throw refusal();
+      let policy: unknown;
+      try {
+        policy = JSON.parse(attributes.RedrivePolicy);
+      } catch {
+        return refuse('policy-unreadable');
+      }
+      if (typeof policy !== 'object' || policy === null) return refuse('policy-unreadable');
       const { deadLetterTargetArn, maxReceiveCount } = policy as Record<string, unknown>;
       const arn =
         typeof deadLetterTargetArn === 'string'
@@ -91,22 +115,23 @@ export class SqsRedrive {
           : typeof maxReceiveCount === 'string' && /^\d+$/.test(maxReceiveCount)
             ? Number(maxReceiveCount)
             : NaN;
-      if (!arn || !Number.isInteger(count) || count < 1 || count > 1000) throw refusal();
-      let url = explicit;
-      if (!url) {
-        if (!transport.getQueueUrl) throw refusal();
-        url = await bounded(() => transport.getQueueUrl!(arn[4]!, arn[3]!));
-        if (!url) throw refusal();
+      if (!arn || !Number.isInteger(count) || count < 1 || count > 1000) {
+        return refuse('policy-unreadable');
       }
+      if (explicit) return { url: explicit, maxReceiveCount: count };
+      if (!transport.getQueueUrl) return refuse('target-unresolvable');
+      const resolveUrl = transport.getQueueUrl.bind(transport);
+      const url = await bounded(() => resolveUrl(arn[4]!, arn[3]!), 'target-unresolvable');
+      if (!url) return refuse('target-unresolvable');
       return { url, maxReceiveCount: count };
-    } catch {
+    } catch (error) {
       if (explicit && !this.#closed) {
         warn(
-          `SQS "${name}": the queue's RedrivePolicy cannot be read; redrive policy cannot be detected; using explicit deadLetterQueues target without an attempt clamp`,
+          `SQS "${name}": ${TARGET_TEXT[refusal.reason]}, so a redrive policy cannot be detected; using the explicit deadLetterQueues target without an attempt clamp`,
         );
         return { url: explicit };
       }
-      throw refusal();
+      throw error;
     }
   }
 }

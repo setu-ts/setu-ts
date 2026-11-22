@@ -64,6 +64,7 @@ export { adaptSqsModule, loadSqsModule } from './adapters/sqs-queue.ts';
 export { adaptSnsModule, loadSnsModule } from './sns/sns-publisher.ts';
 
 // Error classes
+export type { SqsDeadLetterTargetMissingReason } from './errors.ts';
 export {
   SqsDeadLetterTargetMissingError,
   QueueBackendUnavailableError,

@@ -561,7 +561,7 @@ export class SqsQueue implements QueueAdapter {
             'unreadable',
           );
           this.#logger?.warn(
-            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; ${disposition === 'discarded' ? `discarded after ${validCount ? attempts : 0} attempts; deadLetterQueues[name] is false` : 'retired'}`,
+            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; ${disposition === 'discarded' ? 'discarded; deadLetterQueues[name] is false' : 'forwarded unchanged to its dead-letter target and deleted'}`,
           );
         } catch {
           this.#logger?.warn(
@@ -580,7 +580,10 @@ export class SqsQueue implements QueueAdapter {
       let maxAttempts = envelope.maxAttempts ?? this.#defaultMaxAttempts;
       if (target.maxReceiveCount !== undefined) {
         const budget = Math.max(1, Math.min(maxAttempts, target.maxReceiveCount - 1));
-        if (budget < maxAttempts && !this.#clampWarned.has(name)) {
+        if (
+          (budget < maxAttempts || target.maxReceiveCount === 1) &&
+          !this.#clampWarned.has(name)
+        ) {
           this.#clampWarned.add(name);
           this.#logger?.warn(
             `SQS "${name}": maxAttempts=${maxAttempts}, maxReceiveCount=${target.maxReceiveCount}, effective budget=${budget}; recommend maxReceiveCount = maxAttempts + 1` +
