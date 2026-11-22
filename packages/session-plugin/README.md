@@ -81,11 +81,11 @@ writes nothing; they expire one second after `maxAge` (for stores that round a T
 commit whose request loaded the session `maxAge` or more ago is refused, since no marker could still
 fence it (a regeneration or a `clear()` sign-out refused that way still revokes the old id). A
 commit that reaches its marker check that late, having passed the first check, cannot tell whether
-its session was signed out, so it ends the session (deleting its row under a `superseded` marker,
-which concurrent commits refuse; a regeneration deletes only its new row). A failed regeneration's
-cleanup never touches the link. A link names one successor: when two requests regenerate the same id
-(a double-submitted sign-in), the later link wins, and a sign-out racing both ends only the session
-it names.
+its session was signed out, so it ends the session (deleting its row under a `revoked` marker, which
+every concurrent commit and regeneration refuses, without following its successor links; a stalled
+regeneration deletes only its new row). A failed regeneration's cleanup never touches the link. A
+link names one successor: when two requests regenerate the same id (a double-submitted sign-in), the
+later link wins, and a sign-out racing both ends only the session it names.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`

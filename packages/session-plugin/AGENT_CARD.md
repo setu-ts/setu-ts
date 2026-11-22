@@ -58,4 +58,4 @@ export function registerCartFormRoutes(router: IRouterApi): void {
   sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
 - `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.
 - Signed-in, cookie-setting and token-reading responses are marked private, no-store unless the
-  handler sets public (cookie-setting: always); then a form fails CSRF.
+  handler sets public (cookie-setting: always); a form on a public page fails CSRF.

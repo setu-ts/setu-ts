@@ -44,8 +44,8 @@ const isCookieHeld = holdsOnlyReservedKeys;
 
 /**
  * The two revocation marker kinds. `revoked` is written for a sign-out (`destroy()`, or a commit
- * that moves a stored session back into the cookie); `superseded` for the old id of a
- * `regenerate()`. A marker lives under its own id, `<kind>:<session id>`, so a racing commit to the
+ * that moves a stored session back into the cookie) and for a commit that reached its fence past
+ * every marker; `superseded` for the old id of a `regenerate()`. A marker lives under its own id, `<kind>:<session id>`, so a racing commit to the
  * session id cannot overwrite it. Session ids are UUIDs and never contain `:`.
  */
 type MarkerKind = 'revoked' | 'superseded';
@@ -541,6 +541,7 @@ export class SessionService implements ISessionService {
     kind: MarkerKind,
     successor?: string,
     visited: Set<string> = new Set(),
+    followChain = true,
   ): Promise<void> {
     const store = this.#store!;
     const ttlMs = this.#config.maxAgeMs + MARKER_TTL_MARGIN_MS;
@@ -571,7 +572,7 @@ export class SessionService implements ISessionService {
       if (fault === undefined) throw error;
     }
     if (fault !== undefined) throw fault.error;
-    if (kind === 'revoked') {
+    if (kind === 'revoked' && followChain) {
       // The whole chain: every link names a committed regeneration, so it is finite, and the
       // visited set stops a cycle a hostile or corrupt store could form.
       const next = await this.#successorOf(id);
@@ -625,10 +626,10 @@ export class SessionService implements ISessionService {
       await this.#store!.destroy(written);
     } else if (stale) {
       // The row is this session's own, shared by every request on it, and no marker can now say
-      // whether it was signed out: delete it under a `superseded` marker, which every concurrent
-      // plain commit's fence refuses, while a regeneration in another tab (whose fence reads only
-      // `revoked`) still succeeds and no successor chain is ended.
-      await this.#revoke(source, 'superseded');
+      // whether it was signed out: end it under a `revoked` marker, which every concurrent commit
+      // and regeneration refuses, so a signed-out row this write put back cannot move to a new id.
+      // Its successor chain is not followed: this request signed nobody out.
+      await this.#revoke(source, 'revoked', undefined, undefined, false);
     }
     return marked || stale;
   }

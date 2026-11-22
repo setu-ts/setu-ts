@@ -940,6 +940,25 @@ directive names are parsed outside quoted arguments through one new `common` hel
 `cacheControlDirectives` (an unclosed quote fails safe per caller); Swagger UI's interceptor shares
 one in-flight token fetch.
 
+**Decision — a commit that reaches its fence past every marker (maintainer, 2026-11-22).** No marker
+can tell such a commit whether its session was signed out. It ends the session under a `revoked`
+marker, without following successor links (option a), so a concurrent plain commit and a
+regeneration in another tab are both refused and a row the stalled write may have put back cannot
+move to a new id. Option (b), a `superseded` marker that lets a racing regeneration succeed and
+documents the race as accepted, was declined; this branch had flipped between the two twice, so the
+comparison below is the recorded reason (looked up 2026-11-22):
+
+| Framework                         | Late write after a logout                                                                                   | Fits |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---- |
+| Django, database sessions         | the late save finds its row deleted, raises `SessionInterrupted`, the request errors (400); never recreated | a    |
+| Django, cache and file sessions   | the same race can undo a logout (tickets #37249, open, and #21608): treated as a bug                        | a    |
+| Rack (`rack-session`)             | concurrent requests restoring a deleted session: published as a security advisory and fixed                 | a    |
+| Spring Session with Redis (#1111) | the same late-write-after-logout race, reported as a bug                                                    | a    |
+| nextjs-auth0 (#1531)              | the same race, reported as a bug                                                                            | a    |
+
+Option (b) would ship what Rack treated as a vulnerability; under (a), the refused sign-in in the
+other tab is the price Django's database backend pays.
+
 ## 11. Plan review (2026-11-22)
 
 An independent agent that did not write the plan reviewed it against the row texts, the ROADMAP

@@ -448,9 +448,9 @@ describe('a commit that stalls past every marker after its age check', () => {
     expect(await store.read(inflightSession.id)).toBeNull();
   });
 
-  // No marker can tell a stalled commit whether its session was signed out, so it deletes the row
-  // under a `superseded` marker: a concurrent plain commit is refused, a sign-in in another tab is not.
-  it('ends an unrevoked session; a concurrent commit is refused, a regeneration is not', async () => {
+  // No marker can tell a stalled commit whether its session was signed out, so it ends the session
+  // under a `revoked` marker: a concurrent commit and a regeneration in another tab are refused.
+  it('ends an unrevoked session; a concurrent commit and a regeneration are refused', async () => {
     const { store, clock, config, service } = await stalledService();
     const cookie = await signedIn(service);
     const inflight = makeContext({ headers: { cookie } });
@@ -469,17 +469,33 @@ describe('a commit that stalls past every marker after its age check', () => {
     pause.release();
     expect(await committing).toBe('refused');
     expect(await store.read(inflightSession.id)).toBeNull();
-    expect(await store.read(`superseded:${inflightSession.id}`)).toEqual({
-      __setu_marker: 'superseded',
-    });
-    expect(await store.read(`revoked:${inflightSession.id}`)).toBeNull();
-    // A concurrent plain commit is refused at its fence...
+    expect(await store.read(`revoked:${inflightSession.id}`)).toEqual({ __setu_marker: 'revoked' });
     otherSession.set('cart', 2);
     expect(await service.commit(other.ctx, otherSession)).toBe('refused');
-    // ...while a sign-in in another tab still moves the session on.
+    // A regeneration cannot carry a row the stalled write may have put back to a new id.
     stepUpSession.regenerate();
-    expect(await service.commit(stepUp.ctx, stepUpSession)).toBe('written');
-    expect(await userOf(service, cookieOf(stepUp.response.setCookies()))).toBe('u1');
+    expect(await service.commit(stepUp.ctx, stepUpSession)).toBe('refused');
+  });
+
+  it('a stale fence follows no successor link: it signed nobody out', async () => {
+    const { store, clock, config, service } = await stalledService();
+    const cookie = await signedIn(service);
+    const inflight = makeContext({ headers: { cookie } });
+    const inflightSession = await service.load(inflight.ctx);
+    await store.write(
+      `successor:${inflightSession.id}`,
+      { __setu_marker: 'successor', next: 'elsewhere' },
+      60_000,
+    );
+    await store.write('elsewhere', { userId: 'u1' }, 60_000);
+    inflightSession.set('cart', 1);
+    const pause = store.pauseNextWrite();
+    const committing = service.commit(inflight.ctx, inflightSession);
+    await pause.landed;
+    clock.advance(config.maxAgeMs);
+    pause.release();
+    expect(await committing).toBe('refused');
+    expect(await store.read('elsewhere')).toEqual({ userId: 'u1' });
   });
 
   it('a stalled regeneration deletes only its new row', async () => {
