@@ -263,6 +263,45 @@ describe('project write lock', () => {
     expect(fs.writes).toEqual([]);
   });
 
+  it.each([
+    [
+      0,
+      1,
+      `The command completed, but its lock ${lock} could not be removed: release denied\nDo not run the command again; delete ${lock} before the next setu command.`,
+    ],
+    [2, 2, `Cannot release ${lock}: release denied`],
+    [1, 1, `Cannot release ${lock}: release denied`],
+  ])(
+    'says completed only for exit 0 when release fails, keeping a refusal status (exit %i)',
+    async (status, exit, message) => {
+      const fs = createFakeFs({ '/work/package.json': '{}' });
+      const errors: string[] = [];
+      const deps = {
+        fs: { ...fs, rm: () => Promise.reject(new Error('release denied')) },
+        error: (line: string) => errors.push(line),
+      };
+      expect(
+        await runWithProjectLock(deps, '/work', true, 'add', () => Promise.resolve(status)),
+      ).toBe(exit);
+      expect(errors).toEqual([message]);
+    },
+  );
+
+  it('keeps an incomplete result when release fails and nothing receives the report', async () => {
+    const fs = createFakeFs();
+    expect(
+      await withProjectLock(
+        { ...fs, rm: () => Promise.reject(new Error('release denied')) },
+        '/work',
+        undefined,
+        'add',
+        () => Promise.resolve(2),
+        undefined,
+        () => false,
+      ),
+    ).toBe(2);
+  });
+
   it('shares the workspace root across member writers and propagates non-lock callback errors', async () => {
     const fs = createFakeFs();
     const err = createRecorder();

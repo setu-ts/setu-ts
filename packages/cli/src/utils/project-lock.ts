@@ -1,7 +1,7 @@
 /** Exclusive CLI read-plan-write ownership of one project or workspace. @module */
 import type { IFileSystem } from '@setu-ts/common';
 import { workspaceMemberOf } from '../app-loader.ts';
-import { EXIT_ERROR } from '../constants.ts';
+import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { joinPath, readExistingText } from './file-writer.ts';
 import { detectProject } from './project-detector.ts';
 import { escapeName } from './names.ts';
@@ -73,9 +73,10 @@ function ownerIsAlive(isAlive: ((pid: number) => boolean) | undefined, pid: numb
  * @param isAlive - Host probe used only to choose the refusal message
  * @param command - The command name recorded as the owner (`add`, `generate`, `sync`)
  * @param fn - Command callback, invoked only after owner publication
- * @param report - Receives a release failure when the callback itself failed
+ * @param report - Receives a release failure when the callback failed or did not complete
+ * @param completed - Whether a resolved result means the command completed (default: always)
  * @returns The callback result
- * @throws {ProjectLockError} If ownership cannot be acquired, or released after a successful callback
+ * @throws {ProjectLockError} If ownership cannot be acquired, or released after a completed command
  * @throws The callback's own error, which a release failure never replaces
  */
 export async function withProjectLock<T>(
@@ -85,6 +86,7 @@ export async function withProjectLock<T>(
   command: string,
   fn: () => Promise<T>,
   report?: (message: string) => void,
+  completed: (result: T) => boolean = () => true,
 ): Promise<T> {
   const parent = joinPath(lockRoot, '.setu-ts');
   const lock = joinPath(parent, 'write.lock');
@@ -137,9 +139,18 @@ export async function withProjectLock<T>(
     }
     throw failure;
   }
-  // A lock left behind blocks the next command, so failing to release fails this one;
-  // the message says the command's own work is done, so it is not run again.
-  await releaseProjectLock(fs, lock, true);
+  if (completed(result)) {
+    // A lock left behind blocks the next command, so failing to release fails this one;
+    // the message says the command's own work is done, so it is not run again.
+    await releaseProjectLock(fs, lock, true);
+    return result;
+  }
+  // A refused or failed command keeps its own status; the release failure is reported beside it.
+  try {
+    await releaseProjectLock(fs, lock);
+  } catch (release) {
+    report?.((release as Error).message);
+  }
   return result;
 }
 
@@ -190,7 +201,15 @@ export async function runWithProjectLock(
       project.kind === 'workspace-root'
         ? dir
         : ((await workspaceMemberOf(deps.fs, dir))?.root ?? dir);
-    return await withProjectLock(deps.fs, root, deps.isProcessAlive, command, fn, deps.error);
+    return await withProjectLock(
+      deps.fs,
+      root,
+      deps.isProcessAlive,
+      command,
+      fn,
+      deps.error,
+      (status) => status === EXIT_OK,
+    );
   } catch (cause) {
     if (!(cause instanceof ProjectLockError)) throw cause;
     deps.error(cause.message);
