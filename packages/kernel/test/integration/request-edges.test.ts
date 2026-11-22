@@ -417,6 +417,74 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     expect(await stopsWithin(fake, stopping)).toBe(true);
   });
 
+  it('lets stop() finish at the drain bound while a source cancel() never settles, keeping its cleanups', async () => {
+    const fake = createFakeRuntime();
+    let cleaned = 0;
+    const deferring: IPlugin = {
+      name: 'deferring',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.middleware.add((c, next) => {
+          c.defer?.(() => {
+            cleaned++;
+          });
+          return next();
+        });
+      },
+    };
+    const stuck = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('message'));
+      },
+      cancel: () => new Promise<void>(() => {}),
+    });
+    const app = createApplication({
+      plugins: [fakeRuntime(fake), grpcReplying(stuck), deferring],
+    });
+    await app.start({ drainTimeoutMs: 50 });
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/pkg.Svc/Watch', { method: 'POST', signal: client.signal }),
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    client.abort();
+    await flush();
+    // The drain bound ends the wait; the cleanups stay with the source.
+    expect(await stopsWithin(fake, app.stop())).toBe(true);
+    expect(cleaned).toBe(0);
+  });
+
+  it('lets stop() finish at the drain bound for a plain streamed route whose source cancel() never settles', async () => {
+    const fake = createFakeRuntime();
+    let cleaned = 0;
+    const app = createApplication({ plugins: [fakeRuntime(fake)] });
+    app.router.get('/stuck', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned++;
+      });
+      return ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('event'));
+          },
+          cancel: () => new Promise<void>(() => {}),
+        }),
+      );
+    });
+    await app.start({ drainTimeoutMs: 50 });
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/stuck', { signal: client.signal }),
+    );
+    await response.body!.getReader().read();
+    client.abort();
+    await flush();
+    const stopping = app.stop();
+    expect(await stopsWithin(fake, stopping)).toBe(true);
+    expect(cleaned).toBe(0);
+  });
+
   it('does not hold the drain for a plain streamed route', async () => {
     const fake = createFakeRuntime();
     const app = createApplication({ plugins: [fakeRuntime(fake)] });

@@ -75,7 +75,8 @@ export function runDeferred(
  * signal is given and there is cleanup to run, when that signal aborts first
  * (a client that left on a runtime that never cancels the body, such as
  * workerd). On abort the source is cancelled first and the cleanups run once
- * its `cancel()` settles, or after 5000 ms if it does not.
+ * its `cancel()` settles, with no time limit; a consumer's cancel waits for
+ * the same `cancel()`.
  *
  * @param body - Source streaming body
  *
@@ -111,6 +112,11 @@ export function wrapDeferredStream(
   };
   const reader = body.getReader();
   let completed = false;
+  // One cancel of the source, shared by the abort and the consumer's cancel,
+  // so a second call cannot resolve at once on the closed stream while the
+  // first still waits for the source.
+  let cancelling: Promise<void> | undefined;
+  const cancelSource = (reason: unknown): Promise<void> => (cancelling ??= reader.cancel(reason));
   // Set while an abort waits for the source's cancel(); the stream's own end,
   // error or cancel joins it instead of running the cleanups early.
   let aborting: Promise<void> | undefined;
@@ -124,22 +130,15 @@ export function wrapDeferredStream(
   // `once()` removes this listener, so it never runs after completion.
   function aborted(): void {
     onAbort?.();
-    // Cancel first and wait for the source's own cancel(), so a source whose
-    // cancel() waits for work still running in its pull keeps the request's
-    // resources until that work settles. A pull itself is invisible from a
-    // reader, so cancel() is the source's one hook. Bounded by the cleanup
-    // bound: a cancel() that never settles must not leak the cleanups (the
-    // workerd case, V13-200), so past it they run under a pull still pending.
-    const cancelled = reader.cancel(signal?.reason).catch(() => {});
-    aborting = withDeadline(() => cancelled, {
-      timeoutMs: DEFERRED_CLEANUP_TIMEOUT_MS,
-      timing: resolveProbeTiming(registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
-      onTimeout: () =>
-        new Error(`Response stream cancel timeout after ${DEFERRED_CLEANUP_TIMEOUT_MS} ms`),
-    })
-      .catch((error: unknown) => {
-        report(registry, error);
-      })
+    // Cancel first and wait for the source's own cancel(), with no time
+    // limit: a source whose cancel() waits for work still running (in pull,
+    // or a pump it started) keeps the request's resources until it settles,
+    // so a limit released through defer still counts it. A pull itself is
+    // invisible from a reader, so cancel() is the source's one hook; one that
+    // never settles keeps the resources, as a handler that never settles
+    // does (security audit P15: a bounded wait let a limit be bypassed).
+    aborting = cancelSource(signal?.reason)
+      .catch(() => {})
       .then(() => {
         completed = true;
         return finish();
@@ -169,7 +168,7 @@ export function wrapDeferredStream(
       },
       async cancel(reason: unknown): Promise<void> {
         try {
-          await reader.cancel(reason);
+          await cancelSource(reason);
         } finally {
           await once();
         }

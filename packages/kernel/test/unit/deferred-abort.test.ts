@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 
@@ -89,9 +89,12 @@ describe('wrapDeferredStream and the request signal', () => {
     expect(order).toEqual(['aborted', 'source cancel', 'pull settled', 'cleanup', 'complete']);
   });
 
-  it('runs the cleanups once at the 5 s bound when cancel() never settles', async () => {
+  it('keeps the cleanups while cancel() never settles, with no timer (security audit P15)', async () => {
     let cleaned = 0;
-    const { registry, tick } = withRuntime();
+    const fake = createFakeRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+    const timers = vi.spyOn(fake.runtime, 'setTimeout');
     const source = new ReadableStream<Uint8Array>({
       cancel: () => new Promise<void>(() => {}),
     });
@@ -99,16 +102,51 @@ describe('wrapDeferredStream and the request signal', () => {
     wrapDeferredStream(source, [() => void cleaned++], registry, () => {}, client.signal);
     client.abort();
     await settle();
-    tick(4_999);
+    fake.tick(60_000);
     await settle();
+    // The request's resources stay held, so a limit released through defer
+    // still counts it; the kernel holds no timer for it.
     expect(cleaned).toBe(0);
-    // The fake runtime fires a timer whose delay fits in one tick.
-    tick(5_000);
+    expect(timers).not.toHaveBeenCalled();
+  });
+
+  it('runs the cleanups once, after the source settles, when the consumer cancels before the abort (code review)', async () => {
+    const order: string[] = [];
+    let finishPull!: () => void;
+    let pulling: Promise<void> | undefined;
+    const source = new ReadableStream<Uint8Array>({
+      pull() {
+        pulling ??= new Promise<void>((resolve) => {
+          finishPull = () => {
+            order.push('pull settled');
+            resolve();
+          };
+        });
+        return pulling;
+      },
+      cancel() {
+        order.push('source cancel');
+        return pulling;
+      },
+    });
+    const client = new AbortController();
+    const wrapped = wrapDeferredStream(
+      source,
+      [() => void order.push('cleanup')],
+      withRuntime().registry,
+      () => order.push('complete'),
+      client.signal,
+      () => order.push('aborted'),
+    );
     await settle();
-    expect(cleaned).toBe(1);
-    tick(10_000);
+    const consumerCancel = wrapped.cancel('consumer left');
+    client.abort();
     await settle();
-    expect(cleaned).toBe(1);
+    expect(order).toEqual(['source cancel', 'aborted']);
+    finishPull();
+    await consumerCancel;
+    await settle();
+    expect(order).toEqual(['source cancel', 'aborted', 'pull settled', 'cleanup', 'complete']);
   });
 
   it('runs the cleanups without waiting for a source with no cancel()', async () => {
