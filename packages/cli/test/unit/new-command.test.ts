@@ -11,6 +11,7 @@ import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 import { runExampleNew } from '../../src/examples/new.ts';
+import { newTargetRefusal } from '../../src/utils/new-target.ts';
 
 it('X93-8 new defers missing cards until the first install', async () => {
   const h = harness();
@@ -188,14 +189,37 @@ describe('new target validation', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  it.each([false, true])('V13-168 keeps the interrupted-run hint, dry run %s', async (dry) => {
-    const h = harness({ '/work/app/main.ts': 'partial run' });
-    expect(await h.run(['app', ...(dry ? ['--dry-run'] : [])])).toBe(1);
-    expect(h.err.lines[0]).toContain('already exists and is not empty');
-    expect(h.err.lines[1]).toContain('If an earlier run was interrupted');
-    expect(h.err.lines[1]).toContain('delete /work/app and run this again.');
-    expect(h.fs.writes).toEqual([]);
-  });
+  it.each([false, true])(
+    'V13-168 keeps the interrupted-run hint for its own output, dry run %s',
+    async (dry) => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+      // An interrupted run: some files written, the rest not. The secret file holds a
+      // different secret on the next run and still counts as this run's own; the rest
+      // match the formatted bytes the run writes.
+      const kept = ['/work/app/main.ts', '/work/app/package.json', '/work/app/.env'];
+      expect(h.fs.has('/work/app/.env')).toBe(true);
+      for (const path of h.fs.writes) if (!kept.includes(path)) await h.fs.rm(path);
+      const writes = h.fs.writes.length;
+      const err = createRecorder();
+      expect(
+        await runNewCommand(
+          parseArgs(['app', '--template', 'full-stack', ...(dry ? ['--dry-run'] : [])]),
+          {
+            secret: () => 'b'.repeat(64),
+            fs: h.fs,
+            cwd: '/work',
+            log: () => {},
+            error: err.sink,
+          },
+        ),
+      ).toBe(1);
+      expect(err.lines[0]).toContain('already exists and is not empty');
+      expect(err.lines[1]).toContain('If an earlier run was interrupted');
+      expect(err.lines[1]).toContain('delete /work/app and run this again.');
+      expect(h.fs.writes).toHaveLength(writes);
+    },
+  );
 
   it("V13-168 gives no delete hint for a directory holding the user's own files", async () => {
     const h = harness({ '/work/app/notes.txt': 'mine', '/work/app/main.ts': 'partial run' });
@@ -206,13 +230,15 @@ describe('new target validation', () => {
   });
 
   it.each([
-    ['an unplanned file under a planned directory', { '/work/app/src/valuable.ts': 'mine' }, false],
-    ['only planned files', { '/work/app/src/controllers/index.ts': 'partial run' }, true],
-    ['an unplanned directory', { '/work/app/notes/todo.md': 'mine' }, false],
-  ] as const)('V13-168 offers the delete hint only for %s', async (_, seed, hinted) => {
+    ['an unplanned file under a planned directory', { '/work/app/src/valuable.ts': 'mine' }],
+    ["a user's own file at a planned path", { '/work/app/main.ts': 'mine' }],
+    ['only a secret file', { '/work/app/.env': 'SESSION_SECRET=mine' }],
+    ['an unplanned directory', { '/work/app/notes/todo.md': 'mine' }],
+  ] as const)('V13-168 withholds the delete hint for %s', async (_, seed) => {
     const h = harness(seed);
     expect(await h.run(['app'])).toBe(1);
-    expect(h.err.text().includes('delete /work/app'), h.err.text()).toBe(hinted);
+    expect(h.err.text()).toContain('already exists and is not empty');
+    expect(h.err.text()).not.toContain('delete /work/app');
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -235,6 +261,15 @@ describe('new target validation', () => {
       }),
     ).toBe(1);
     expect(err.lines).toEqual([
+      '/work/app already exists and is not empty (1 entries); choose another name or empty it.',
+    ]);
+  });
+
+  it('V13-168 keeps the plain refusal when the planned bytes cannot be resolved', async () => {
+    const fs = createFakeFs({ '/work/app/main.ts': 'partial run' });
+    expect(
+      await newTargetRefusal(fs, '/work/app', () => Promise.reject(new Error('format failed'))),
+    ).toEqual([
       '/work/app already exists and is not empty (1 entries); choose another name or empty it.',
     ]);
   });

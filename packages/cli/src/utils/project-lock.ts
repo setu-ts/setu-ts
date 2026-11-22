@@ -207,15 +207,24 @@ export async function runWithProjectLock(
         ? real
         : (((await workspaceMemberOf(deps.fs, dir)) ?? (await workspaceMemberOf(deps.fs, real)))
             ?.root ?? real);
-    return await withProjectLock(
-      deps.fs,
-      root,
-      deps.isProcessAlive,
-      command,
-      fn,
-      deps.error,
-      (status) => status === EXIT_OK,
-    );
+    const lock = (lockRoot: string, body: () => Promise<number>) =>
+      withProjectLock(
+        deps.fs,
+        lockRoot,
+        deps.isProcessAlive,
+        command,
+        body,
+        deps.error,
+        (status) => status === EXIT_OK,
+      );
+    // A member linked to a project outside its workspace is also locked where a
+    // command run at its real path would lock (that path's own workspace, if any),
+    // after this one, so the two still exclude each other. Compared canonically: a
+    // root reached through a link is still the same directory.
+    const canonicalRoot = await canonicalDir(deps.fs, root);
+    if (real === canonicalRoot || real.startsWith(`${canonicalRoot}/`)) return await lock(root, fn);
+    const realRoot = (await workspaceMemberOf(deps.fs, real))?.root ?? real;
+    return await lock(root, () => lock(realRoot, fn));
   } catch (cause) {
     if (!(cause instanceof ProjectLockError)) throw cause;
     deps.error(cause.message);

@@ -165,11 +165,13 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
         expect(scripts[name], name).toContain(flag);
         expect(scripts[name], name).not.toContain('=.env ');
       }
-      // Bun drops its automatic `.env.test` once a file is named, so the test
-      // scripts name it after the custom dotenv (the later file wins).
+      // Bun drops its automatic `.env.test` and `.env.test.local` once a file is
+      // named, so the test scripts name both after the custom dotenv (the last wins).
       for (const name of ['test', 'test:e2e']) {
         expect(scripts[name], name).toContain(
-          runtime === 'bun' ? '--env-file=local.env --env-file=.env.test ' : flag,
+          runtime === 'bun'
+            ? '--env-file=local.env --env-file=.env.test --env-file=.env.test.local '
+            : flag,
         );
       }
     },

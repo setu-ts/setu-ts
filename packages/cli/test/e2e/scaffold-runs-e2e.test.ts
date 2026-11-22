@@ -145,6 +145,35 @@ describe('first-command scaffold gates', () => {
     expect(result.code, result.output).toBe(0);
   });
 
+  it.skipIf(!hasBun).each([
+    ['a custom dotenv', ['--dotenv', 'local.env'], 'local.env'],
+    ['the default dotenv', [], '.env'],
+  ] as const)(
+    'generated Bun test scripts layer %s, .env.test and .env.test.local, the last winning',
+    async (_, flags, appFile) => {
+      expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'bun', ...flags])).toBe(0);
+      const manifest = JSON.parse(await nodeFs.readFile(`${root}/svc/package.json`, 'utf8')) as {
+        scripts: Record<string, string>;
+      };
+      // The generated commands themselves, run where only probes and the two dotenv files exist.
+      const probe = `${root}/probe`;
+      await nodeFs.mkdir(probe);
+      await nodeFs.writeFile(`${probe}/${appFile}`, 'APP_VALUE=app\nSHARED=app\n');
+      await nodeFs.writeFile(`${probe}/.env.test`, 'TEST_VALUE=test\nSHARED=test\nLOCAL=test\n');
+      await nodeFs.writeFile(`${probe}/.env.test.local`, 'LOCAL=test-local\n');
+      const body =
+        "import { expect, test } from 'bun:test';\n" +
+        "test('dotenv layers', () => { expect([process.env.APP_VALUE, process.env.TEST_VALUE, process.env.SHARED, process.env.LOCAL]).toEqual(['app', 'test', 'test', 'test-local']); });\n";
+      await nodeFs.writeFile(`${probe}/layers.test.ts`, body);
+      await nodeFs.writeFile(`${probe}/layers.e2e.test.ts`, body);
+      for (const name of ['test', 'test:e2e']) {
+        const result = await runIn(probe, 'sh', ['-c', manifest.scripts[name]!]);
+        expect(result.code, `${name}: ${manifest.scripts[name]}\n${result.output}`).toBe(0);
+        expect(result.output).toContain('1 pass');
+      }
+    },
+  );
+
   it(
     'V13-36 Workers telemetry registration passes the project own workerd tests',
     { skip: noNpm, timeout: 900_000 },

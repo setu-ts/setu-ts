@@ -342,8 +342,16 @@ describe('project write lock', () => {
       expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
       return 0;
     });
-    // A member linked out of its workspace still locks the workspace it is listed in.
-    const linkedOut = { ...fs, realPath: () => Promise.resolve('/elsewhere/api') };
+    // A member linked out of its workspace locks the workspace it is listed in and,
+    // after it, the project it really is; a command run there is refused meanwhile.
+    const linkedOut = {
+      ...fs,
+      realPath: (path: string) =>
+        Promise.resolve(path === '/work/ws/apps/api' ? '/elsewhere/api' : path),
+    };
+    await fs.mkdir('/elsewhere/api', { recursive: true });
+    await fs.writeFile('/elsewhere/api/package.json', new TextEncoder().encode('{}'));
+    const errors: string[] = [];
     await runWithProjectLock(
       { ...deps, fs: linkedOut },
       '/work/ws/apps/api',
@@ -351,14 +359,89 @@ describe('project write lock', () => {
       'generate',
       async () => {
         expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        expect((await fs.stat('/elsewhere/api/.setu-ts/write.lock')).isDirectory).toBe(true);
+        expect(
+          await runWithProjectLock(
+            { ...deps, error: (line: string) => errors.push(line) },
+            '/elsewhere/api',
+            true,
+            'add',
+            () => Promise.resolve(0),
+          ),
+        ).toBe(1);
         return 0;
       },
     );
+    expect(errors.join('\n')).toContain('/elsewhere/api/.setu-ts/write.lock');
+    await expect(fs.stat('/work/ws/.setu-ts/write.lock')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat('/elsewhere/api/.setu-ts/write.lock')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
     const unresolvable = { ...aliased, realPath: () => Promise.reject(new Error('ELOOP')) };
     await runWithProjectLock({ ...deps, fs: unresolvable }, alias, true, 'generate', async () => {
       expect((await fs.stat(`${alias}/.setu-ts/write.lock`)).isDirectory).toBe(true);
       return 0;
     });
+  });
+
+  it('locks a member reached through a linked workspace path once, at the workspace', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    expect(await runCli(['g', 'app', 'api', '--dir', '/work/ws'], deps)).toBe(0);
+    const map = (path: string) =>
+      path === '/link' || path.startsWith('/link/') ? path.replace('/link', '/work') : path;
+    const linked = {
+      ...fs,
+      realPath: (path: string) => Promise.resolve(map(path)),
+      stat: (path: string) => fs.stat(map(path)),
+      readFile: (path: string) => fs.readFile(map(path)),
+      readdir: (path: string) => fs.readdir(map(path)),
+      mkdir: (path: string, options?: { recursive?: boolean }) => fs.mkdir(map(path), options),
+      writeFile: (path: string, data: Uint8Array) => fs.writeFile(map(path), data),
+      rm: (path: string, options?: { recursive?: boolean }) => fs.rm(map(path), options),
+    };
+    await runWithProjectLock(
+      { ...deps, fs: linked },
+      '/link/ws/apps/api',
+      true,
+      'add',
+      async () => {
+        expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        await expect(fs.stat('/work/ws/apps/api/.setu-ts')).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+        return 0;
+      },
+    );
+  });
+
+  it("locks a linked-out member's real path at that path's own workspace", async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    for (const base of ['/work', '/other']) {
+      expect(await runCli(['new', 'ws', '--workspace'], { ...deps, cwd: base })).toBe(0);
+      expect(await runCli(['g', 'app', 'api', '--dir', `${base}/ws`], deps)).toBe(0);
+    }
+    const linked = {
+      ...fs,
+      realPath: (path: string) =>
+        Promise.resolve(path === '/work/ws/apps/api' ? '/other/ws/apps/api' : path),
+    };
+    await runWithProjectLock(
+      { ...deps, fs: linked },
+      '/work/ws/apps/api',
+      true,
+      'add',
+      async () => {
+        expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        expect((await fs.stat('/other/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        await expect(fs.stat('/other/ws/apps/api/.setu-ts')).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+        return 0;
+      },
+    );
   });
 
   it('reports a schematic runtime typo as a usage error even while the lock is held', async () => {

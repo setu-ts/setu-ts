@@ -1682,11 +1682,14 @@ function generatedTestScripts(
   runtime: TargetRuntime,
   manifest?: TemplateManifest,
 ): Record<string, string> {
-  // Bun drops its automatic `.env.test` once any `--env-file` is named, and the
-  // later file wins, so a custom dotenv is followed by the test layer it hid.
+  // `bun test` loads `.env`, `.env.test` and `.env.test.local` in that order (the last
+  // wins) until any `--env-file` is named, so a custom dotenv is followed by both test
+  // layers it would otherwise hide (measured on Bun 1.4.5).
   const startEnv = dotenvFlag(runtime, manifest);
   const envFile =
-    runtime === 'bun' && startEnv !== '' ? `${startEnv}--env-file=.env.test ` : startEnv;
+    runtime === 'bun' && startEnv !== ''
+      ? `${startEnv}--env-file=.env.test --env-file=.env.test.local `
+      : startEnv;
   // A3 applies to every target, not just the Deno ones: `setu generate module`
   // emits a `<name>.test.ts` here too, and before this nothing could run it.
   // Each runtime's own runner, matching the harness the schematic emits — `bun

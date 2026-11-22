@@ -828,7 +828,18 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     const refusal = await newTargetRefusal(
       deps.fs,
       root,
-      plan.files.map((file) => file.path),
+      // The bytes a run writes are formatted, so ownership is judged against those.
+      () =>
+        formatForTarget(
+          plan.files.map((file) => ({
+            path: file.path,
+            contents: file.contents,
+            ...(file.secret === true ? { secret: true } : {}),
+          })),
+          runtime,
+          undefined,
+          () => {},
+        ),
     );
     if (refusal.length > 0) {
       for (const message of refusal)
