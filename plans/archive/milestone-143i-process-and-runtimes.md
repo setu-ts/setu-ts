@@ -696,8 +696,9 @@ https://raw.githubusercontent.com/pinojs/pino-http/master/logger.js
    `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade). The
    code-review narrowing to "only replaces a 5xx" was withdrawn by the maintainer on 2026-11-22
    (§3.9): every request whose client left before the response logs 499 with `aborted: true`. The
-   audit's Low about 5xx alerting is closed by that decision; the kernel's own error line still
-   records a server fault.
+   audit's Low about 5xx alerting is closed as a finding by that decision, its effect accepted by
+   the maintainer: a server fault on a request whose client left logs 499, so alerts that count 5xx
+   request lines miss it; the kernel's own error line still records the fault.
 
 The drain decision also asked that the library default and the generated value be stated together,
 with the reason, in one place: `PUBLIC_API.md`, "The two drain numbers, in one place"; the

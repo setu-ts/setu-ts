@@ -30,11 +30,12 @@ cutting a release renames that heading to the version and is a rename, not a rec
   the server closes, up to the drain bound. Other streams (SSE) are released as before.
 - **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
   `Process failed` (fatal), `Response stream failed`, `Request aborted before completion` and
-  `Startup cancelled` come through the registered logger. The request log records `101` for an
-  upgrade and `499` with `aborted: true` for a request whose client left before the response, where
-  it recorded `200` and the handler's status. On Deno, request logging now reads `request.signal`,
-  so Deno prints its legacy-abort notice once per process; run Deno with
-  `--unstable-no-legacy-abort` to remove it.
+  `Startup cancelled` come through the registered logger. The request log records `101` (was `200`)
+  for an accepted upgrade, and `499` with `aborted: true` (was the handler's status) for a request
+  whose client left before the response. Alerts that count 5xx request lines no longer count those
+  requests; the kernel's error line still records a server fault. In a Deno application that logs
+  requests, request logging now reads `request.signal`, so Deno prints its legacy-abort notice once
+  per process; run Deno with `--unstable-no-legacy-abort` to remove it.
 - **HEAD.** Every `GET` route answers `HEAD`. Remove a hand-written `HEAD` route that only repeated
   its `GET`.
 - **Node refused upgrades.** A refused WebSocket upgrade on Node carries the response the pipeline
