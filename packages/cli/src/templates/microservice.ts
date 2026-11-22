@@ -17,6 +17,7 @@ import { composeHost } from './style.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 import type { TargetRuntime } from '../constants.ts';
 import type { ResolvedHost } from './project-files.ts';
+import { TELEMETRY_PEERS } from './client-dependencies.ts';
 
 /**
  * What `microservice` adds on top of the REST set.
@@ -203,6 +204,7 @@ new_classes = ["ReplyInboxObject"]
 /** Development-transport guidance shared by both microservice styles. */
 const MICROSERVICE_MANIFEST = {
   ...FUNCTIONAL_MODULE_MANIFEST,
+  npmDependencies: { ...FUNCTIONAL_MODULE_MANIFEST.npmDependencies, ...TELEMETRY_PEERS },
   readmeSection: (cli: string, runtime: TargetRuntime, member?: boolean, host?: ResolvedHost) => {
     // A workspace member's messaging and queue options come from its CLI-owned
     // transport module (the workspace broker), and its discovery map is generated,
@@ -236,12 +238,16 @@ const MICROSERVICE_MANIFEST = {
   },
 } satisfies TemplateManifest;
 
-/** Keeps the class-based host's own manifest and adds only the transport README section. */
+/** Keeps the class-based manifest and adds the shared peers and transport README section. */
 function withReadmeSection(host: TemplateHost): TemplateHost {
   return {
     ...host,
     manifest: {
       ...host.manifest,
+      npmDependencies: {
+        ...host.manifest?.npmDependencies,
+        ...MICROSERVICE_MANIFEST.npmDependencies,
+      },
       readmeSection: MICROSERVICE_MANIFEST.readmeSection,
     },
   };

@@ -21,6 +21,7 @@ import { rootManifestSettings } from '../templates/root-settings.ts';
 import { LIBS_GLOB, BUNFIG_FILE, BUN_WORKSPACE_CONFIG } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { workspaceDevRunner } from './dev-runner.ts';
+import { workspaceTestRunner } from './test-runner.ts';
 import type { BrokerSpec } from './transport.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 import { maskUrlUserinfo } from '@setu-ts/common';
@@ -207,7 +208,9 @@ export function workspaceRootFiles(
               workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
               scripts: {
                 dev: profile.runAll,
-                ...(profile.rootTestTask ? { test: profile.testAll } : {}),
+                ...(profile.rootTestTask
+                  ? { test: `${profile.runtime === 'bun' ? 'bun' : 'node'} scripts/test.mjs` }
+                  : {}),
                 build: cliCommand(profile.runtime, 'workspace build'),
                 deploy: cliCommand(profile.runtime, 'workspace deploy'),
               },
@@ -293,6 +296,7 @@ ${wrapProse('Full-stack Bun members also run `bun run build`, and full-stack Den
   return [
     rootManifest,
     workspaceDevRunner(profile),
+    ...(profile.manifestKind === 'npm' ? [workspaceTestRunner(profile)] : []),
     {
       path: WORKSPACE_MANIFEST,
       contents: renderWorkspaceManifest({

@@ -13,6 +13,7 @@ import type { Config as DrizzleKitConfig } from 'drizzle-kit';
  */
 
 import { describe, expect, it } from 'vitest';
+import { brokerEnvVariables } from '../../../src/templates/broker.ts';
 
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
@@ -864,7 +865,9 @@ export function createApp(): IKernelApplication {
           expect(h.out.join('\n')).toContain('docker/compose.yaml');
           expect(h.out.join('\n')).toContain('setu.config.ts');
           expect(h.out.join('\n')).toContain(
-            `Would add ${spec.connection!.variable} to .env and .env.example.`,
+            `Would add ${brokerEnvVariables(spec)
+              .map(({ name }) => name)
+              .join(', ')} to .env and .env.example.`,
           );
           expect(await h.run(args), h.err.join('\n')).toBe(0);
           const config = h.read('/app/portal/setu.config.ts');
@@ -884,7 +887,11 @@ export function createApp(): IKernelApplication {
           expect(envAfter).toContain(`\n${variable}=${localDefault}\n`);
           const example = h.read('/app/portal/.env.example');
           expect(example.match(new RegExp(`^${variable}=$`, 'gm'))?.length).toBe(1);
-          expect(h.out.join('\n')).toContain(`Added ${variable} to .env and .env.example.`);
+          expect(h.out.join('\n')).toContain(
+            `Added ${brokerEnvVariables(spec)
+              .map(({ name }) => name)
+              .join(', ')} to .env and .env.example.`,
+          );
           const compose = h.read('/app/portal/docker/compose.yaml');
           const beforeReAdd = h.fs.projectWrites.length;
           expect(await h.run(args)).toBe(0);

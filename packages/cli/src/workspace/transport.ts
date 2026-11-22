@@ -74,6 +74,8 @@ export interface TransportConnection {
    * the CLI knows the local development topology and nothing else.
    */
   readonly localDefault: string;
+  /** The SDK's opt-in emulator setting, omitted for transports without one. */
+  readonly emulator?: { readonly variable: string; readonly localDefault: string };
   /**
    * Whether `--broker-url` may replace {@linkcode localDefault}.
    *
@@ -238,6 +240,12 @@ const SQL_EDGE_PASSWORD_VARIABLE = 'MSSQL_SA_PASSWORD';
  * README documents (`rr.req.<topic>` / `rr.inbox.<uuid>`).
  */
 const NATS_STREAM_SUBJECTS = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
+
+/** Pub/Sub's SDK reads this setting directly from the process environment. */
+const PUBSUB_EMULATOR = {
+  variable: 'PUBSUB_EMULATOR_HOST',
+  localDefault: '127.0.0.1:8085',
+} as const;
 
 const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
   ['memory']: {
@@ -419,10 +427,11 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
     connection: {
       variable: 'PUBSUB_PROJECT_ID',
       localDefault: 'setu-local',
+      emulator: PUBSUB_EMULATOR,
       urlOverridable: false,
       note:
-        'Point the SDK at the emulator by exporting PUBSUB_EMULATOR_HOST=127.0.0.1:8085 — it ' +
-        'honours that variable natively and skips authentication when it is set. Topics are NOT ' +
+        'The local dotenv points the SDK at the emulator through PUBSUB_EMULATOR_HOST; it ' +
+        'skips authentication when that variable is set. A deployment leaves it unset to reach Google Cloud. Topics are NOT ' +
         'created for you: `publish` posts to an existing topic and `subscribe` creates only the ' +
         'subscription, so create each topic before publishing to it (`curl -X PUT ' +
         '$PUBSUB_EMULATOR_HOST/v1/projects/$PUBSUB_PROJECT_ID/topics/<name>` against the ' +
@@ -447,7 +456,7 @@ const BROKER_SPECS: Readonly<Record<BrokerName, BrokerSpec>> = {
       condition: 'service_started',
       // Both variables: the SDK reads the emulator host itself, and reads it
       // from the environment only — there is no plugin option for it.
-      memberEnv: { PUBSUB_EMULATOR_HOST: 'pubsub:8085' },
+      memberEnv: { [PUBSUB_EMULATOR.variable]: 'pubsub:8085' },
     },
   },
   ['service-bus']: {

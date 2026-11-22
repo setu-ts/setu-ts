@@ -1160,7 +1160,7 @@ describe('runNewCommand', () => {
         expect(pkg.scripts.test).toBe(
           runtime === 'bun'
             ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-            : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+            : "tsx --env-file-if-exists=.env --test --test-force-exit '**/!(*.e2e).test.ts'",
         );
         expect(pkg.scripts.build).toBe(
           runtime === 'node' ? 'tsc --noEmit && setu build' : undefined,

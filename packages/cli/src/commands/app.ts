@@ -47,6 +47,7 @@ import {
 import { resolveTemplateChoice, type TemplateChoice } from '../templates/choice.ts';
 import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
+import { planWorkspacePeers } from '../utils/peer-dependencies.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
@@ -950,6 +951,22 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     ...modules,
     ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
+
+  if (profile.manifestKind === 'npm') {
+    try {
+      const peers = Object.entries(portHost.manifest?.npmDependencies ?? {}).map(
+        ([name, range]) => ({ name, range }),
+      );
+      const root = await planWorkspacePeers(deps.fs, deps.dir, peers, deps.log);
+      if (root !== undefined)
+        files.push({ path: root.path, contents: root.contents, managed: true });
+    } catch (cause) {
+      deps.error(
+        `Cannot record template peers in ${escapeName(joinPath(deps.dir, 'package.json'))}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
+      return EXIT_ERROR;
+    }
+  }
 
   if (generatedSecrets.length > 0) {
     try {
