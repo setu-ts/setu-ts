@@ -264,11 +264,11 @@ successful responses (legacy behavior)…"). Running Deno with `--unstable-no-le
 the notice and that post-response abort; the signal still aborts when a client disconnects before
 the response (measured on Deno 2.9.6). The kernel reads it for gRPC and Connect calls (which pass it
 to the call), for a request that calls `ctx.defer` (until the response is handed back), and for a
-streamed body it wraps (one whose request called `ctx.defer`, or an early middleware stream), so a
-client that leaves cancels the source; the request logger reads it on every request it logs. A Deno
-application that logs requests therefore prints the notice. On Node and Bun, an error the
-application handles itself is not reported by `onFatalError`: an `unhandledRejection` listener
-handles a rejection, an `uncaughtException` listener or a capture callback
+streamed body it wraps (one whose request called `ctx.defer`, an early middleware stream, or a gRPC
+or Connect reply), so a client that leaves cancels the source; the request logger reads it on every
+request it logs. A Deno application that logs requests therefore prints the notice. On Node and Bun,
+an error the application handles itself is not reported by `onFatalError`: an `unhandledRejection`
+listener handles a rejection, an `uncaughtException` listener or a capture callback
 (`process.setUncaughtExceptionCaptureCallback`) a throw (on Node both a rejection too; Bun never
 hands either one, so that rejection still ends the process and is reported). Deno cannot tell, and
 reports it. On Bun the observer assumes the default `--unhandled-rejections` mode; under `warn` or

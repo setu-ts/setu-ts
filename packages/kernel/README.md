@@ -43,7 +43,8 @@ internal.
   it would have.
 - `stop()` during `start()` cancels the start: `ctx.signal` aborts, `start()` rejects with
   `StartCancelledError`, the close hooks run and no later startup step runs (a `listen()` already
-  pending is closed when it resolves).
+  pending is closed when it resolves); once startup has passed its last step, a `stop()` waits for
+  `start()` to resolve and stops normally.
 - Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank;
   `inject()`, `dispatch()` and `app.fetch()` hand back a `HEAD` answer with no body.
 - A request that called `ctx.defer` and whose signal aborts before its response is logged as

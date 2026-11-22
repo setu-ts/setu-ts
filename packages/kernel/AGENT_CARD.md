@@ -37,7 +37,7 @@ try {
 - Starting without a port does not bind a socket; `app.start({ port: 3000 })` listens.
 - Duplicate method/path registrations throw rather than replace the first route.
 - Injection JSON-serializes plain object bodies; it drops bodies on GET and HEAD.
-- `app.inject` refuses streaming responses (a `HEAD` answer drops the body and cancels the stream);
+- `app.inject` refuses streaming responses (a HEAD answer drops the body and cancels the stream);
   use `app.fetch` and read the response stream.
 - Shutdown hooks run on `app.stop()`; repeated stops share the same shutdown operation.
 

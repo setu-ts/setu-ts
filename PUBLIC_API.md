@@ -326,7 +326,8 @@ startup step is abandoned, `start()` rejects with `StartCancelledError`, the clo
 `onStopping` or `onShutdown`), a close hook registered after that runs at once, and no later startup
 step runs: a `listen()` already pending when `stop()` is called may still bind, and the kernel
 closes that handle as soon as it resolves. `stop()` resolves; the kernel logs `Startup cancelled` at
-`warn`.
+`warn`. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
+for it and stops normally.
 
 ### HEAD, client aborts and failed streams (0.14.0)
 

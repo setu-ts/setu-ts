@@ -58,7 +58,8 @@ All notable changes to this project are documented here. The format follows
   logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
   gRPC-Web reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()`
   cancels the start: its close hooks run, a close hook registered later runs at once, no later
-  startup step runs, and a `listen()` already pending is closed when it resolves (V13-43).
+  startup step runs, and a `listen()` already pending is closed when it resolves; a `stop()` after
+  startup's last step waits for `start()` and stops normally (V13-43).
 - **`@setu-ts/runtime` (M143i, #611).** Node answers a refused WebSocket upgrade with the
   framework's response (status, reason phrase, headers, body), as Bun and Deno do;
   `rejectRawUpgrade` takes its reason phrases from a status table (V13-53). Bun keeps a quiet

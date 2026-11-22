@@ -25,7 +25,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
   before it finishes, and `stop()` resolves without running `onStopping` or `onShutdown` (the start
   never finished); close hooks still run. An entry that logs every start failure should treat
   `StartCancelledError` as a clean stop. A plugin that waits at startup can pass `ctx.signal` to the
-  wait.
+  wait. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
+  for it and stops normally.
 - **gRPC streams hold the drain.** A streamed RPC reply in flight at `stop()` now finishes before
   the server closes, up to the drain bound. Other streams (SSE) are released as before.
 - **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
