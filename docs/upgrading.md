@@ -12,6 +12,33 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
+
+Replace `setu new … --env-file <path>` and `setu generate app … --env-file <path>` with
+`--dotenv <path>`; the value is read exactly as before. Under Node the old flag never reached `setu`
+(Node read it itself and exited 9), so scripts that relied on it under Bun or Deno are the ones to
+change. Projects already generated are unaffected: the flag only chooses where `setu` writes the
+dotenv.
+
+### Node 22.9.0 or newer (`@setu-ts/cli`, `@setu-ts/create`)
+
+`setu` and `npm create @setu-ts` now refuse to start below Node 22.9.0. Upgrade to a supported
+release line (`^22.23.4 || ^24.22.1 || >=26.12.1`); versions between the two still run, with a
+warning.
+
+### `.setu-ts/write.lock` (`@setu-ts/cli`)
+
+`setu add`, `setu generate` and `setu sync` create `.setu-ts/write.lock/` while they write. New
+projects ignore it in `.gitignore`; add the line `.setu-ts/write.lock/` to an existing project's
+(and an existing workspace root's) `.gitignore`. If a command is killed, confirm no setu command is
+still running in the project, then delete the directory before running another.
+
+### Workspace root `test` (`@setu-ts/cli`)
+
+A new npm or Bun workspace's root `test` script runs `scripts/test.mjs`, which passes while the
+workspace has no members or libraries. To adopt it in an existing workspace, copy `scripts/test.mjs`
+and the root `test` script from a fresh `setu new <name> --workspace`.
+
 ### Module pages (`@setu-ts/cli`)
 
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no

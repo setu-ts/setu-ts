@@ -79,7 +79,8 @@ const PARSERS: Readonly<Record<string, string>> = {
  * @returns The parser name
  */
 export function parserFor(path: string): string | undefined {
-  const name = path.slice(path.lastIndexOf('/') + 1);
+  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+  if (name === 'package.json') return 'json-stringify';
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return undefined;
   const extension = name.slice(dot + 1);

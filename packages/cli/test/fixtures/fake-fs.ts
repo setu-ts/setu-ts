@@ -13,8 +13,12 @@ import type { IFileSystem, StatResult } from '@setu-ts/common';
 export interface FakeFs extends IFileSystem {
   /** Paths passed to `writeFile`, in call order. */
   readonly writes: readonly string[];
+  /** Project output writes, excluding the transient lock-owner file. Full calls remain in writes. */
+  readonly projectWrites: readonly string[];
   /** Paths passed to `mkdir`, in call order. */
   readonly mkdirs: readonly string[];
+  /** Output directories, excluding the CLI metadata parent and lock directory. */
+  readonly projectMkdirs: readonly string[];
   /**
    * Reads a file back as text.
    *
@@ -55,7 +59,9 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
   const store = new Map<string, Uint8Array>();
   const dirs = new Set<string>();
   const writes: string[] = [];
+  const projectWrites: string[] = [];
   const mkdirs: string[] = [];
+  const projectMkdirs: string[] = [];
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
@@ -68,12 +74,15 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
     if (store.has(path) || dirs.has(path)) return true;
     const prefix = `${path}/`;
     for (const key of store.keys()) if (key.startsWith(prefix)) return true;
+    for (const key of dirs) if (key.startsWith(prefix)) return true;
     return false;
   };
 
   return {
     writes,
+    projectWrites,
     mkdirs,
+    projectMkdirs,
 
     read(path) {
       const bytes = store.get(path);
@@ -92,6 +101,7 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
 
     writeFile(path, data) {
       writes.push(path);
+      if (!path.endsWith('/.setu-ts/write.lock/owner.json')) projectWrites.push(path);
       store.set(path, data);
       return Promise.resolve();
     },
@@ -112,6 +122,10 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
           return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
         }
       }
+      for (const key of dirs) {
+        if (key.startsWith(prefix))
+          return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
+      }
       if (dirs.has(path)) {
         return Promise.resolve({ isFile: false, isDirectory: true, size: 0 });
       }
@@ -130,18 +144,30 @@ export function createFakeFs(seed: Readonly<Record<string, string>> = {}): FakeF
       for (const key of store.keys()) {
         if (key.startsWith(prefix)) names.add(key.slice(prefix.length).split('/')[0]);
       }
+      for (const key of dirs) {
+        if (key.startsWith(prefix)) names.add(key.slice(prefix.length).split('/')[0]);
+      }
       return Promise.resolve([...names]);
     },
 
-    mkdir(path) {
+    mkdir(path, options) {
+      if (store.has(path) || (options?.recursive !== true && exists(path))) {
+        return Promise.reject(Object.assign(new Error(`EEXIST: ${path}`), { code: 'EEXIST' }));
+      }
       mkdirs.push(path);
+      if (!path.endsWith('/.setu-ts') && !path.endsWith('/.setu-ts/write.lock'))
+        projectMkdirs.push(path);
       dirs.add(path);
       return Promise.resolve();
     },
 
-    rm(path) {
+    rm(path, options) {
       store.delete(path);
       dirs.delete(path);
+      if (options?.recursive === true) {
+        for (const key of store.keys()) if (key.startsWith(`${path}/`)) store.delete(key);
+        for (const key of dirs) if (key.startsWith(`${path}/`)) dirs.delete(key);
+      }
       return Promise.resolve();
     },
   };

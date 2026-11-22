@@ -1435,9 +1435,9 @@ RuntimePlugin)
 | ---- | ---- | --- | ------- |
 | ✅   | ✅   | ❌  | N/A     |
 
-The table describes the importable package. The `setu` command itself is a Node program (Node 22 or
-later), published to npm with a `bin`; `--runtime` scaffolds projects for all four runtimes, Node by
-default.
+The table describes the importable package. The `setu` command itself is a Node program (Node 22.9.0
+or newer; supported `^22.23.4 || ^24.22.1 || >=26.12.1`), published to npm with a `bin`; `--runtime`
+scaffolds projects for all four runtimes, Node by default.
 
 **Commands:**
 

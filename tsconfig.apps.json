@@ -35,6 +35,9 @@
       "@setu-ts/cli/main": [
         "./packages/cli/src/main.ts"
       ],
+      "@setu-ts/cli/node-version": [
+        "./packages/cli/src/utils/node-version.ts"
+      ],
       "@setu-ts/localization-plugin/format": [
         "./packages/localization-plugin/src/format/index.ts"
       ],

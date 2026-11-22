@@ -421,13 +421,13 @@ function toMember(value: unknown): WorkspaceMember | undefined {
   const envFilePaths = record['envFilePaths'];
   if (typeof name !== 'string' || !isMemberName(name)) return undefined;
   // The path is rendered into the managed .dockerignore, so it is held to the
-  // same grammar `--env-file` is: relative segments of [A-Za-z0-9._-] only.
+  // same grammar `--dotenv` is: relative segments of [A-Za-z0-9._-] only.
   if (
     envFilePaths !== undefined &&
     (!Array.isArray(envFilePaths) ||
       !envFilePaths.every((entry) => {
         if (typeof entry !== 'string') return false;
-        const parsed = readEnvFilePath({ 'env-file': entry });
+        const parsed = readEnvFilePath(entry);
         return parsed.ok && parsed.path === entry;
       }))
   )

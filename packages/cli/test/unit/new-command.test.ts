@@ -1,3 +1,4 @@
+import { runCli } from '../../src/cli.ts';
 import { cliInvocation } from '../../src/templates/project-files.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
@@ -9,6 +10,8 @@ import { listTemplates } from '../../src/templates/registry.ts';
 import { NODE_START_BUILD_CHECK } from '../../src/templates/project-files.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
+import { runExampleNew } from '../../src/examples/new.ts';
+import { newTargetRefusal } from '../../src/utils/new-target.ts';
 
 it('X93-8 new defers missing cards until the first install', async () => {
   const h = harness();
@@ -52,6 +55,7 @@ interface Harness {
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
   run(argv: readonly string[]): Promise<number>;
+  dispatch(argv: readonly string[]): Promise<number>;
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: PortProbe): Harness {
@@ -62,6 +66,8 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
     fs,
     out,
     err,
+    dispatch: (argv) =>
+      runCli(['new', ...argv], { fs, cwd: '/work', now: () => 0, log: out.sink, error: err.sink }),
     run: (argv) =>
       runNewCommand(parseArgs(argv), {
         secret: () => 'a'.repeat(64),
@@ -74,13 +80,333 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
   };
 }
 
+describe('new target validation', () => {
+  it.each([false, true])(
+    'V13-161 refuses a file target through the example path, direct %s',
+    async (direct) => {
+      const fs = createFakeFs({ '/work/app': 'owned file' });
+      const err = createRecorder();
+      const deps = {
+        fs,
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+        fetch: (() => {
+          throw new Error('must not fetch');
+        }) as typeof fetch,
+      };
+      const args = parseArgs(direct ? ['--example', 'rest-api'] : ['app', '--example', 'rest-api']);
+      expect(await (direct ? runExampleNew('app', args, deps) : runNewCommand(args, deps))).toBe(1);
+      expect(err.lines).toEqual(['Cannot create /work/app: /work/app is a file, not a directory.']);
+      expect(fs.read('/work/app')).toBe('owned file');
+      expect(fs.writes).toEqual([]);
+    },
+  );
+  it.each([false, true])(
+    'keeps the collision guard after target inspection, example %s',
+    async (example) => {
+      const fs = createFakeFs({ '/work/app/README.md': 'mine' });
+      const err = createRecorder();
+      expect(
+        await runNewCommand(parseArgs(['app', ...(example ? ['--example', 'rest-api'] : [])]), {
+          fs: { ...fs, readdir: () => Promise.resolve([]) },
+          cwd: '/work',
+          secret: () => 'a'.repeat(64),
+          log: () => {},
+          error: err.sink,
+        }),
+      ).toBe(1);
+      expect(err.text()).toContain('Refusing to overwrite existing files:');
+      expect(fs.read('/work/app/README.md')).toBe('mine');
+      expect(fs.writes).toEqual([]);
+    },
+  );
+
+  it.each([false, true])(
+    'reports an example inspection failure without fetching, dry %s',
+    async (dry) => {
+      for (const late of [false, true]) {
+        const fs = createFakeFs();
+        const err = createRecorder();
+        expect(
+          await runExampleNew(
+            'app',
+            parseArgs(['--example', 'rest-api', ...(dry ? ['--dry-run'] : [])]),
+            {
+              fs: {
+                ...fs,
+                stat: (path) => {
+                  if ((!late && path === '/work') || (late && path.endsWith('/README.md')))
+                    return Promise.reject(new Error('EIO: inspection denied'));
+                  return fs.stat(path);
+                },
+              },
+              cwd: '/work',
+              secret: () => 'a'.repeat(64),
+              log: () => {},
+              error: err.sink,
+            },
+          ),
+        ).toBe(1);
+        expect(err.lines).toEqual(['Cannot inspect /work/app: EIO: inspection denied']);
+        expect(fs.writes).toEqual([]);
+      }
+    },
+  );
+  it.each([false, true])(
+    'V13-168 checks example targets through both entry points, direct %s',
+    async (direct) => {
+      const fs = createFakeFs({ '/work/app/notes.txt': 'mine' });
+      const err = createRecorder();
+      let fetched = false;
+      const args = parseArgs(direct ? ['--example', 'rest-api'] : ['app', '--example', 'rest-api']);
+      const deps = {
+        fs,
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+        fetch: (() => {
+          fetched = true;
+          throw new Error('must not fetch');
+        }) as typeof fetch,
+      };
+      expect(await (direct ? runExampleNew('app', args, deps) : runNewCommand(args, deps))).toBe(1);
+      expect(err.text()).toContain('/work/app already exists and is not empty');
+      expect(fetched).toBe(false);
+      expect(fs.writes).toEqual([]);
+    },
+  );
+  it.each([false, true])('V13-161 names a file ancestor in dry run %s', async (dry) => {
+    const h = harness({ '/work/file': 'mine' });
+    expect(await h.run(['app', '--dir', '/work/file/nested', ...(dry ? ['--dry-run'] : [])])).toBe(
+      1,
+    );
+    expect(h.err.text()).toContain(
+      `${dry ? 'WOULD REFUSE: ' : ''}Cannot create /work/file/nested/app: /work/file is a file, not a directory.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it.each([false, true])(
+    'V13-168 keeps the interrupted-run hint for its own output, dry run %s',
+    async (dry) => {
+      const h = harness();
+      expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+      // An interrupted run: some files written, the rest not, each holding the
+      // formatted bytes the run writes.
+      const kept = ['/work/app/main.ts', '/work/app/package.json'];
+      for (const path of h.fs.writes) if (!kept.includes(path)) await h.fs.rm(path);
+      const writes = h.fs.writes.length;
+      const err = createRecorder();
+      expect(
+        await runNewCommand(
+          parseArgs(['app', '--template', 'full-stack', ...(dry ? ['--dry-run'] : [])]),
+          {
+            secret: () => 'b'.repeat(64),
+            fs: h.fs,
+            cwd: '/work',
+            log: () => {},
+            error: err.sink,
+          },
+        ),
+      ).toBe(1);
+      expect(err.lines[0]).toContain('already exists and is not empty');
+      expect(err.lines[1]).toContain('If an earlier run was interrupted');
+      expect(err.lines[1]).toContain('delete /work/app and run this again.');
+      expect(h.fs.writes).toHaveLength(writes);
+    },
+  );
+
+  it("V13-168 gives no delete hint for a directory holding the user's own files", async () => {
+    const h = harness({ '/work/app/notes.txt': 'mine', '/work/app/main.ts': 'partial run' });
+    expect(await h.run(['app'])).toBe(1);
+    expect(h.err.text()).toContain('/work/app already exists and is not empty (2 entries)');
+    expect(h.err.text()).not.toContain('delete /work/app');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it.each([
+    ['an unplanned file under a planned directory', { '/work/app/src/valuable.ts': 'mine' }],
+    ["a user's own file at a planned path", { '/work/app/main.ts': 'mine' }],
+    ['only a secret file', { '/work/app/.env': 'SESSION_SECRET=mine' }],
+    ['an unplanned directory', { '/work/app/notes/todo.md': 'mine' }],
+  ] as const)('V13-168 withholds the delete hint for %s', async (_, seed) => {
+    const h = harness(seed);
+    expect(await h.run(['app'])).toBe(1);
+    expect(h.err.text()).toContain('already exists and is not empty');
+    expect(h.err.text()).not.toContain('delete /work/app');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('V13-168 withholds the delete hint for a matching file beside a user-owned .env', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+    for (const path of h.fs.writes) if (path !== '/work/app/main.ts') await h.fs.rm(path);
+    await h.fs.writeFile('/work/app/.env', new TextEncoder().encode('SESSION_SECRET=mine\n'));
+    const err = createRecorder();
+    expect(
+      await runNewCommand(parseArgs(['app', '--template', 'full-stack']), {
+        secret: () => 'a'.repeat(64),
+        fs: h.fs,
+        cwd: '/work',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toHaveLength(1);
+    expect(err.lines[0]).toContain('/work/app already exists and is not empty');
+    expect(h.fs.read('/work/app/.env')).toBe('SESSION_SECRET=mine\n');
+  });
+
+  it('V13-168 withholds the delete hint when an entry cannot be inspected', async () => {
+    const fs = createFakeFs({ '/work/app/src/main.ts': 'partial run' });
+    const err = createRecorder();
+    expect(
+      await runNewCommand(parseArgs(['app']), {
+        fs: {
+          ...fs,
+          stat: (path: string) =>
+            path === '/work/app/src/main.ts'
+              ? Promise.reject(new Error('EACCES: denied'))
+              : fs.stat(path),
+        },
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toEqual([
+      '/work/app already exists and is not empty (1 entries); choose another name or empty it.',
+    ]);
+  });
+
+  it.each([
+    ['the whole planned file', 'export const main = 1;\n', true],
+    ['a truncated planned file', 'export const', false],
+    ['an empty planned file alone', '', false],
+    ['bytes that are not the planned start', 'export let', false],
+  ])('V13-168 judges %s by the planned bytes', async (_, text, hinted) => {
+    const fs = createFakeFs({ '/work/app/main.ts': text });
+    const refusal = await newTargetRefusal(fs, '/work/app', () =>
+      Promise.resolve([{ path: 'main.ts', contents: 'export const main = 1;\n' }]),
+    );
+    expect(refusal.length).toBe(hinted ? 2 : 1);
+  });
+
+  it('V13-168 keeps the plain refusal when the planned bytes cannot be resolved', async () => {
+    const fs = createFakeFs({ '/work/app/main.ts': 'partial run' });
+    expect(
+      await newTargetRefusal(fs, '/work/app', () => Promise.reject(new Error('format failed'))),
+    ).toEqual([
+      '/work/app already exists and is not empty (1 entries); choose another name or empty it.',
+    ]);
+  });
+
+  it.each([false, true])(
+    'V13-168 gives no delete hint for a git clone, dry run %s',
+    async (dry) => {
+      const h = harness({
+        '/work/app/.git/HEAD': 'ref: refs/heads/main',
+        '/work/app/README.md': 'mine',
+      });
+      expect(await h.run(['app', ...(dry ? ['--dry-run'] : [])])).toBe(1);
+      expect(h.err.text()).toContain('/work/app already exists and is not empty (1 entries)');
+      expect(h.err.text()).not.toContain('delete /work/app');
+      expect(h.fs.read('/work/app/README.md')).toBe('mine');
+      expect(h.fs.writes).toEqual([]);
+    },
+  );
+
+  it('V13-168 accepts an existing empty directory', async () => {
+    const h = harness();
+    await h.fs.mkdir('/work');
+    await h.fs.mkdir('/work/app');
+    expect(await h.run(['app'])).toBe(0);
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, true],
+  ])('reports an inspection failure without a stack, dry %s late %s', async (dry, late) => {
+    const fs = createFakeFs();
+    const err = createRecorder();
+    const faultyFs = {
+      ...fs,
+      stat: (path: string) => {
+        if ((!late && path === '/work') || (late && path.endsWith('/main.ts')))
+          return Promise.reject(new Error('EACCES: inspection denied'));
+        return fs.stat(path);
+      },
+    };
+    expect(
+      await runNewCommand(parseArgs(['app', ...(dry ? ['--dry-run'] : [])]), {
+        fs: faultyFs,
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toEqual(['Cannot inspect /work/app: EACCES: inspection denied']);
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('reports a non-Error directory inspection failure', async () => {
+    const fs = createFakeFs({ '/work/app/.git/HEAD': 'ref' });
+    const err = createRecorder();
+    expect(
+      await runNewCommand(parseArgs(['app']), {
+        fs: { ...fs, readdir: () => Promise.reject('directory unavailable') },
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toEqual(['Cannot inspect /work/app: directory unavailable']);
+  });
+  it.each([
+    ['/work/app', { '/work/app': 'mine' }, 'app'],
+    ['/work/parent', { '/work/parent': 'mine' }, 'parent/app'],
+  ])('V13-161 refuses a file at %s', async (ancestor, seed, name) => {
+    const h = harness(seed);
+    const argv = name === 'app' ? ['app'] : ['app', '--dir', '/work/parent'];
+    expect(await h.run(argv)).toBe(1);
+    expect(h.err.text()).toContain(
+      `Cannot create /work/${name}: ${ancestor} is a file, not a directory.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it.each([false, true])('V13-168 refuses a non-empty target, dry run %s', async (dry) => {
+    const h = harness({ '/work/app/notes.txt': 'mine' });
+    expect(await h.run(['app', ...(dry ? ['--dry-run'] : [])])).toBe(1);
+    expect(h.err.text()).toContain(
+      `${dry ? 'WOULD REFUSE: ' : ''}/work/app already exists and is not empty (1 entries); choose another name or empty it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.read('/work/app/notes.txt')).toBe('mine');
+  });
+
+  it('V13-168 accepts a target containing only .git', async () => {
+    const h = harness({ '/work/app/.git/HEAD': 'ref: refs/heads/main' });
+    expect(await h.run(['app'])).toBe(0);
+    expect(h.fs.read('/work/app/.git/HEAD')).toBe('ref: refs/heads/main');
+    expect(h.fs.has('/work/app/package.json')).toBe(true);
+  });
+});
+
 // The guard itself is unit-tested in `file-writer.test.ts`, where it lives.
 // This is the invariant it protects, driven through the real command.
 describe('the duplicate-path guard', () => {
   it('dry-run collision refuses without writing', async () => {
     const h = harness({ '/work/app/main.ts': 'mine' });
     expect(await h.run(['app', '--dry-run'])).toBe(1);
-    expect(h.err.text()).toContain('WOULD REFUSE: /work/app/main.ts already exists');
+    expect(h.err.text()).toContain('WOULD REFUSE: /work/app already exists and is not empty');
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.read('/work/app/main.ts')).toBe('mine');
   });
@@ -523,7 +849,7 @@ describe('runNewCommand', () => {
           'rest',
           '--runtime',
           'cloudflare-workers',
-          '--env-file',
+          '--dotenv',
           '.env.local',
         ]),
       ).toBe(2);
@@ -582,7 +908,7 @@ describe('runNewCommand', () => {
   describe('--template', () => {
     it('emits an ignored dotenv file, a tracked example, and one matching ConfigPlugin path', async () => {
       const h = harness();
-      expect(await h.run(['app', '--template', 'rest', '--env-file', '.env.local'])).toBe(0);
+      expect(await h.run(['app', '--template', 'rest', '--dotenv', '.env.local'])).toBe(0);
 
       expect(h.fs.read('/work/app/.env.local')).toContain('Local configuration');
       expect(h.fs.read('/work/app/.env.local.example')).toContain('Copy this file');
@@ -596,7 +922,7 @@ describe('runNewCommand', () => {
 
     it('refuses an env file for a template without ConfigPlugin', async () => {
       const h = harness();
-      expect(await h.run(['app', '--env-file', '.env'])).toBe(2);
+      expect(await h.run(['app', '--dotenv', '.env'])).toBe(2);
       expect(h.err.text()).toContain('requires a template that registers ConfigPlugin');
       expect(h.fs.writes).toEqual([]);
     });
@@ -623,7 +949,7 @@ describe('runNewCommand', () => {
 
     it('refuses --depends-on, which only a workspace member can honour', async () => {
       // Every other misapplied flag is refused — `--port`, `--transport`,
-      // `--env-file` on a root — and this one was silently accepted, so a
+      // `--dotenv` on a root — and this one was silently accepted, so a
       // standalone project scaffolded successfully while the ordering the
       // developer asked for was read by nothing at all.
       const h = harness();
@@ -949,7 +1275,7 @@ describe('runNewCommand', () => {
         expect(pkg.scripts.test).toBe(
           runtime === 'bun'
             ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-            : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+            : "tsx --env-file-if-exists=.env --test --test-force-exit '**/!(*.e2e).test.ts'",
         );
         expect(pkg.scripts.build).toBe(
           runtime === 'node' ? 'tsc --noEmit && setu build' : undefined,
@@ -1237,7 +1563,7 @@ describe('runNewCommand', () => {
     expect(await h.run(['app'])).toBe(1);
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.read('/work/app/README.md')).toBe('MINE');
-    expect(h.err.text()).toContain('Refusing to overwrite');
+    expect(h.err.text()).toContain('/work/app already exists and is not empty');
   });
 
   it('returns 1 and reports the cause when the write fails', async () => {
@@ -1421,9 +1747,12 @@ describe('--workspace', () => {
     ] as const) {
       it(`refuses --port with ${label}`, async () => {
         const h = harness();
-        expect(await h.run([...argv])).toBe(2);
-        expect(h.err.text()).toContain('--port needs a value');
+        expect(await h.dispatch([...argv])).toBe(2);
+        expect(h.err.text()).toContain('Option --port needs a value');
         expect(h.fs.writes).toEqual([]);
+        const direct = harness();
+        expect(await direct.run([...argv])).toBe(2);
+        expect(direct.fs.writes).toEqual([]);
       });
     }
 
@@ -1552,15 +1881,25 @@ describe('--workspace --broker', () => {
     });
 
     it('refuses --broker with no value', async () => {
-      const { h, code } = await workspaceWith(['--broker']);
+      const h = harness();
+      const code = await h.dispatch(['acme', '--workspace', '--broker']);
       expect(code).toBe(2);
-      expect(h.err.text()).toContain('--broker needs a value');
+      expect(h.err.text()).toContain('Option --broker needs a value');
+      const direct = harness();
+      expect(await direct.run(['acme', '--workspace', '--broker'])).toBe(2);
+      expect(direct.err.text()).toContain('--broker needs a value:');
     });
 
     it('refuses --broker-url with no value', async () => {
-      const { h, code } = await workspaceWith(['--broker', 'redis', '--broker-url']);
+      const h = harness();
+      const code = await h.dispatch(['acme', '--workspace', '--broker', 'redis', '--broker-url']);
       expect(code).toBe(2);
-      expect(h.err.text()).toContain('--broker-url needs a value');
+      expect(h.err.text()).toContain('Option --broker-url needs a value');
+      const direct = harness();
+      expect(await direct.run(['acme', '--workspace', '--broker', 'redis', '--broker-url'])).toBe(
+        2,
+      );
+      expect(direct.err.text()).toContain('--broker-url needs a value.');
     });
 
     // The in-process broker has nothing to address, so storing the URL would put

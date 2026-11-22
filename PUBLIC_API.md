@@ -11309,9 +11309,9 @@ the chosen port; `new --devtool` also writes it into the project README. Re-enab
 standalone entry retains its recorded port without probing again.
 
 `@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation. It
-is a Node program (Node 22.23.4+, 24.22.1+ or 26.12.1+), published to npm with a `bin`, so it runs
-without an install or installs globally; `@setu-ts/create` makes `npm create @setu-ts` the same as
-`setu new`:
+is a Node program (Node 22.9.0 or newer; supported `^22.23.4 || ^24.22.1 || >=26.12.1`), published
+to npm with a `bin`, so it runs without an install or installs globally; `@setu-ts/create` makes
+`npm create @setu-ts` the same as `setu new`:
 
 ```bash
 npx @setu-ts/cli new my-app
@@ -11343,14 +11343,14 @@ workspace root also refuses the flag because it registers no logger. Interactive
 `Logger?` only for a host with logging; `--yes` takes the runtime default. `--dry-run` reports the
 selected logger and writes nothing.
 
-| Export          | Kind      | Description                                                                                                                                                             |
-| --------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                                             |
-| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                                          |
-| `nodeRuntime`   | function  | `() => MainRuntime` — the Node runtime both executables use: writes never follow a link, and a new file holding a generated secret is created owner-only (since 0.13.0) |
-| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                                                  |
-| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                                                      |
-| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?`                           |
+| Export          | Kind      | Description                                                                                                                                                                      |
+| --------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                                                      |
+| `nodeProcess`   | function  | `(onInterrupt?) => MainProcess` — the Node host: `process.argv`, `process.cwd()`, console output, one shared `readline` reader                                                   |
+| `nodeRuntime`   | function  | `() => MainRuntime` — the Node runtime both executables use: writes never follow a link, and a new file holding a generated secret is created owner-only (since 0.13.0)          |
+| `emitInterrupt` | function  | Delivers an interrupt to this process's `SIGINT` handlers as an event, never as a real signal; `nodeProcess`'s default                                                           |
+| `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                                                               |
+| `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?`, `nodeVersion?`, `isProcessAlive?` |
 
 <!-- version:history -->
 
@@ -11359,6 +11359,25 @@ an interrupt ends a pending question rather than waiting for Enter; `denoProcess
 replaced by `nodeProcess`. Both executables set `process.exitCode` rather than calling
 `process.exit`, so output still draining to a pipe is not cut off.
 
+`MainProcess.nodeVersion?` (since 0.14.0) is the host's Node version; when set and outside the
+supported range, `runMain` writes one warning line and continues. `nodeProcess` sets it on Node and
+leaves it unset under Bun and Deno. `MainProcess.isProcessAlive?` (since 0.14.0) tells the project
+lock whether the process named in a held `.setu-ts/write.lock` is still running, which only chooses
+between its two refusal messages; unset, the owner is treated as running. `nodeProcess` sets it.
+
+### `@setu-ts/cli/node-version` — the Node floor (since 0.14.0)
+
+Dependency-free, so an executable can import it before anything else. Both `setu` and
+`npm create @setu-ts` call `nodeFloorRefusal` first and stop with exit 1 when it returns a message.
+
+| Export             | Kind     | Description                                                                                                                                                                                        |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SUPPORTED_NODE`   | constant | `'^22.23.4 \|\| ^24.22.1 \|\| >=26.12.1'`, the `engines.node` range of both packages                                                                                                               |
+| `HARD_FLOOR_NODE`  | constant | `'22.9.0'`, the lowest Node on which the CLI and a generated project both work                                                                                                                     |
+| `isSupportedNode`  | function | `(version: string) => boolean` — whether a three-part version satisfies `SUPPORTED_NODE`                                                                                                           |
+| `isNodeBelowFloor` | function | `(version: string) => boolean` — whether a recognizable version is below `HARD_FLOOR_NODE`                                                                                                         |
+| `nodeFloorRefusal` | function | `(versions, isDeno: boolean) => string \| undefined` — the refusal message below the floor; `undefined` at or above it, under Bun (`versions.bun` set), under Deno, or for an unrecognized version |
+
 ### `@setu-ts/create`
 
 | Export       | Kind     | Description                                                                                |
@@ -11366,7 +11385,8 @@ replaced by `nodeProcess`. Both executables set `process.exitCode` rather than c
 | `createArgs` | function | `(argv: readonly string[]) => string[]` — the `setu new` arguments `npm create` stands for |
 
 Its `create` executable runs `runMain` with `createArgs(process.argv.slice(2))`, so it accepts
-exactly what `setu new` accepts.
+exactly what `setu new` accepts. Like `setu`, it first checks the Node floor through
+`@setu-ts/cli/node-version` and refuses below it.
 
 ### Commands
 
@@ -11409,7 +11429,7 @@ setu new my-app --template rest                # rest | microservice | class-bas
 setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template class-based          # byte-identical alias of --template rest --style class-based
-setu new my-app --template rest --env-file config/.env.local
+setu new my-app --template rest --dotenv config/.env.local
 setu new my-app --template rest --logger console  # console | pino; since 0.11.0
 
 # Scaffold a monorepo (creates ./acme, no member yet)
@@ -11490,7 +11510,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--example <app>`                               | `new`                                                              | Downloads a standalone Node example from the CLI release tag on GitHub. Dry-run lists paths without fetching. Refuses composition flags and non-Node runtimes; unknown or excluded examples exit 1 with alternatives.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `--workspace`                                   | `new`                                                              | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`                         | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `--env-file <path>`                             | `new`, `generate app`                                              | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a random 64-hex secret in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--dotenv <path>`                               | `new`, `generate app`                                              | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a random 64-hex secret in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `--depends-on <member>`                         | `generate app`                                                     | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`, and Compose adds a `depends_on` that waits for a prerequisite with health probes to be healthy (started, otherwise). Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `--module <name>`                               | `generate`, `add view`                                             | Place a `controller`, `route`, `service`, `sse` or `schema` (or `add view`'s controller) inside the named feature module. The name must be an admitted module, else the refusal lists them. The first four require it once the project has modules, and a flat project refuses it. The file lands in `src/modules/<name>/`; a function controller is registered by the module's CLI-owned `index.ts`, and a class controller or service is added to the `@Module` declaration's `controllers` or `providers` array when that is a plain array literal (otherwise the line to add is printed). A module-scoped controller mounts at `/<module>/<name>`, and a module-scoped service registers under the token `<module>.<name>-service`. Every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `--adopt-controllers`                           | `generate module`                                                  | The first module only: move every file under `src/controllers/` and `src/services/` into it, keeping subfolders and URL paths, rewriting relative imports and switching `setu.config.ts`, all or nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -11830,10 +11850,10 @@ startup, including brokers without a backing service. These values override deve
 files, and each member receives a distinct key.
 
 `WorkspaceMember.envFilePaths?: readonly string[]` records a member's custom dotenv paths when the
-generic `.env`/`.env.*` rules miss them. The parser holds each to the `--env-file` grammar and
-refuses the member otherwise. `generate app`, adoption and `setu add auth|session` add to the list
-and never remove from it, and the managed root `.dockerignore` lists `apps/<member>/<path>` for
-each. `--env-file` (and a configured `envFilePath`) is refused when it ends in `.example`.
+generic `.env`/`.env.*` rules miss them. The parser holds each to the `--dotenv` grammar and refuses
+the member otherwise. `generate app`, adoption and `setu add auth|session` add to the list and never
+remove from it, and the managed root `.dockerignore` lists `apps/<member>/<path>` for each.
+`--dotenv` (and a configured `envFilePath`) is refused when it ends in `.example`.
 
 `deno task dev` (or the Node/Bun equivalent) reads that dependency metadata at runtime. It starts a
 prerequisite first, waits until `http://127.0.0.1:<port>/ready` succeeds, then starts each
@@ -12479,6 +12499,13 @@ published-interface reason, and are supplied only when `--module` names an admit
 `setu generate app`, and `setu add auth`/`session`. By default the CLI generates 32 random bytes as
 64 lowercase hexadecimal characters. The value is written only to ignored local configuration;
 examples remain empty and dry runs list paths without revealing values.
+
+`CliDependencies.isProcessAlive?: (pid: number) => boolean` (since 0.14.0) is read only when
+`setu add`, `setu generate` or `setu sync` finds `.setu-ts/write.lock` already held: it chooses
+between the "another setu command is changing this project" refusal and the one saying the owner is
+no longer running. Unset, the owner is treated as running. A run records its own pid in the lock
+from an `invokingPid` number on the `fs` it is given, and `null` without one; `nodeRuntime()`
+supplies it.
 
 `GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
 

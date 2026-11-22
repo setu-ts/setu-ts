@@ -369,14 +369,17 @@ describe('setu agents', () => {
     expect(h.err.text()).toContain('Cannot inspect AGENTS.md');
   });
   it('propagates a new --agents writer failure after scaffolding', async () => {
-    const h = harness({ '/work/app/AGENTS.md': 'personal' }, (fs) => ({
+    const h = harness({}, (fs) => ({
       ...fs,
-      readFile: (path) =>
-        path.endsWith('AGENTS.md') ? Promise.reject(new Error('brief denied')) : fs.readFile(path),
+      writeFile: (path, bytes) =>
+        path.endsWith('AGENTS.md')
+          ? Promise.reject(new Error('brief denied'))
+          : fs.writeFile(path, bytes),
     }));
     expect(await h.run(['new', 'app', '--agents'])).toBe(1);
     expect(h.fs.has('/work/app/package.json')).toBe(true);
-    expect(h.fs.read('/work/app/AGENTS.md')).toBe('personal');
+    expect(h.fs.has('/work/app/AGENTS.md')).toBe(false);
+    expect(h.err.text()).toContain('brief denied');
   });
   it('dry-runs the verbs of the real run and never rewrites an unchanged brief', async () => {
     const create = harness({ '/work/package.json': '{}' });

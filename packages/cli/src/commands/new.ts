@@ -95,6 +95,7 @@ import {
 import { interruptionMessage } from '../utils/interruption.ts';
 import { runAgentsCommand } from './agents.ts';
 import { runExampleNew } from '../examples/new.ts';
+import { newTargetRefusal } from '../utils/new-target.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -213,10 +214,10 @@ function planWorkspace(
     };
   }
 
-  if (args.flags['env-file'] !== undefined) {
+  if (args.flags['dotenv'] !== undefined) {
     return {
       ok: false,
-      message: '--env-file applies to a generated application, not a workspace root.',
+      message: '--dotenv applies to a generated application, not a workspace root.',
     };
   }
 
@@ -517,7 +518,7 @@ async function planProject(
   const choice = resolveTemplateChoice(args);
   if (!choice.ok) return { ok: false, message: choice.message };
 
-  const envFile = readEnvFilePath(args.flags);
+  const envFile = readEnvFilePath(args.flags['dotenv']);
   if (!envFile.ok) return { ok: false, message: envFile.message };
 
   // The no-template path is a HOST like any other — that is what gives a bare
@@ -539,8 +540,8 @@ async function planProject(
       ok: false,
       message:
         runtime === 'cloudflare-workers'
-          ? '--env-file is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
-          : '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+          ? '--dotenv is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
+          : '--dotenv requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
     };
   }
 
@@ -635,7 +636,7 @@ async function planProject(
 export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Promise<number> {
   const usage =
     `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
-    `[--runtime <target>] [--env-file <path>] [--workspace] [--dir <path>]`;
+    `[--runtime <target>] [--dotenv <path>] [--workspace] [--dir <path>]`;
 
   // `--help` is never an error.
   if (args.flags['help'] === true || args.flags['h'] === true) {
@@ -654,7 +655,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
     deps.log('  --example <app>     Start a standalone Node project from a runnable example');
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
-    deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
+    deps.log('  --dotenv <path>     Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
     deps.log(
       `  --workspace         Create a monorepo root; add services with ` +
@@ -762,6 +763,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     return EXIT_USAGE;
   }
   const projectName = names.kebab;
+  const root = joinPath(resolveDir(deps.cwd, stringFlag(chosen.flags, 'dir')), projectName);
 
   // The alias notice, logged once, before anything else — informational, never
   // an error: the alias is byte-identical and stays. Only the standalone plan
@@ -810,8 +812,6 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     }
   }
 
-  const root = joinPath(resolveDir(deps.cwd, stringFlag(chosen.flags, 'dir')), projectName);
-
   // A template file whose path collides with the fixed set would otherwise be
   // written twice, last one winning, with nothing reported — the overwrite
   // check probes the filesystem and cannot see a duplicate inside one plan.
@@ -820,6 +820,31 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.error(
       `Template "${stringFlag(chosen.flags, 'template') ?? 'none'}" emits ${duplicate} twice; ` +
         `it collides with the generated project file of the same name.`,
+    );
+    return EXIT_ERROR;
+  }
+
+  try {
+    const refusal = await newTargetRefusal(
+      deps.fs,
+      root,
+      // The bytes a run writes are formatted, so ownership is judged against those.
+      () =>
+        formatForTarget(
+          plan.files.map((file) => ({ path: file.path, contents: file.contents })),
+          runtime,
+          undefined,
+          () => {},
+        ),
+    );
+    if (refusal.length > 0) {
+      for (const message of refusal)
+        deps.error(`${args.flags['dry-run'] === true ? 'WOULD REFUSE: ' : ''}${message}`);
+      return EXIT_ERROR;
+    }
+  } catch (cause) {
+    deps.error(
+      `Cannot inspect ${escapeName(root)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
     return EXIT_ERROR;
   }
@@ -833,11 +858,25 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
 
   if (args.flags['dry-run'] === true) {
     if (planLogger !== undefined) deps.log(`Logger: ${planLogger}`);
-    const code = await reportDryRunPlan(deps, files);
-    return code;
+    try {
+      return await reportDryRunPlan(deps, files);
+    } catch (cause) {
+      deps.error(
+        `Cannot inspect ${escapeName(root)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
+      return EXIT_ERROR;
+    }
   }
 
-  const existing = await findExisting(deps.fs, files);
+  let existing: readonly string[];
+  try {
+    existing = await findExisting(deps.fs, files);
+  } catch (cause) {
+    deps.error(
+      `Cannot inspect ${escapeName(root)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
+    return EXIT_ERROR;
+  }
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
     for (const path of existing) deps.error(`  ${escapeName(path)}`);

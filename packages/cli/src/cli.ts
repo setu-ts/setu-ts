@@ -8,7 +8,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { DuplicateArtifactNameError } from './utils/artifact-scanner.ts';
 import { parseArgs } from './args.ts';
 import { escapeName, escapeTerminalControls, hasControlCharacter } from './utils/names.ts';
-import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
+import { BUILT_IN_COMMANDS, builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
@@ -19,6 +19,7 @@ import {
   PROGRAM_NAME,
   TARGET_RUNTIMES,
   VERSION,
+  VALUE_FLAGS,
 } from './constants.ts';
 import { runBuildCommand } from './commands/build.ts';
 import { runCheckCommand } from './commands/check.ts';
@@ -54,6 +55,14 @@ import { InterruptedError } from './utils/interruption.ts';
  * misconfigured call silently degrade to "no filesystem" at runtime.
  */
 export interface CliDependencies {
+  /**
+   * Whether a process is still running, read only to choose between the two
+   * refusal messages for a held `.setu-ts/write.lock`; unset, its owner is
+   * treated as running. The pid recorded for this run's own lock is
+   * `fs.invokingPid` when the filesystem supplies one.
+   * @since 0.14.0
+   */
+  readonly isProcessAlive?: (pid: number) => boolean;
   /**
    * Creates secrets written only to ignored local configuration.
    * @since 0.13.0
@@ -223,6 +232,25 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
     return EXIT_USAGE;
   }
 
+  if (Object.hasOwn(args.flags, 'env-file')) {
+    deps.error(
+      "--env-file is Node's own option and never reaches setu under Node; use --dotenv <path>.",
+    );
+    return EXIT_USAGE;
+  }
+  if (BUILT_IN_COMMANDS.has(command)) {
+    const missing = Object.entries(args.flags).find(
+      ([flag, value]) => VALUE_FLAGS.has(flag) && value === true,
+    );
+    if (missing !== undefined) {
+      const flag = escapeName(missing[0]);
+      deps.error(
+        `Option --${flag} needs a value (write --${flag}=<value> when the value begins with "-").`,
+      );
+      return EXIT_USAGE;
+    }
+  }
+
   const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
   if (flagRefusal !== undefined) return flagRefusal;
 
@@ -268,6 +296,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
       case 'generate':
       case 'g':
         return await runGenerateCommand(rest, {
+          ...(deps.isProcessAlive === undefined ? {} : { isProcessAlive: deps.isProcessAlive }),
           ...(deps.secret === undefined ? {} : { secret: deps.secret }),
           fs: deps.fs,
           ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),

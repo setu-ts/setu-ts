@@ -145,7 +145,7 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
     ['node', '--env-file-if-exists=local.env'],
     ['bun', '--env-file=local.env'],
   ] as const)(
-    '%s scripts load a configured --env-file path (CodeRabbit #543)',
+    '%s scripts load a configured --dotenv path (CodeRabbit #543)',
     async (runtime, flag) => {
       const h = harness();
       expect(
@@ -156,7 +156,7 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
           'rest',
           '--runtime',
           runtime,
-          '--env-file',
+          '--dotenv',
           'local.env',
         ]),
       ).toBe(0);
@@ -165,6 +165,23 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
         expect(scripts[name], name).toContain(flag);
         expect(scripts[name], name).not.toContain('=.env ');
       }
+      // Bun drops its automatic `.env.test` and `.env.test.local` once a file is
+      // named, so the test scripts name both after the custom dotenv (the last wins).
+      for (const name of ['test', 'test:e2e']) {
+        expect(scripts[name], name).toContain(
+          runtime === 'bun'
+            ? '--env-file=local.env --env-file=.env.test --env-file=.env.test.local '
+            : flag,
+        );
+      }
     },
   );
+
+  it('keeps Bun test scripts free of env-file flags for the default dotenv', async () => {
+    const h = harness();
+    expect(await h.run(['new', 'svc', '--template', 'rest', '--runtime', 'bun'])).toBe(0);
+    const scripts = readScripts(h, '/work/svc/package.json');
+    for (const name of ['test', 'test:e2e'])
+      expect(scripts[name], name).not.toContain('--env-file');
+  });
 });

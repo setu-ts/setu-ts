@@ -1293,12 +1293,11 @@ function denoTasks(
   // M131a X88-2: a local start script loads `.env` into the environment before
   // the process starts (the plugin options are evaluated in createApp(), before
   // any plugin runs, so only the process environment is available there). Deno
-  // uses `--env-file`; a missing `.env` is a hard error, so the flag is passed
-  // only when the manifest writes the dotenv. Production images and Compose keep
+  // uses `--env-file`; a missing dotenv warns and continues. The flag is passed
+  // when the manifest declares the dotenv. Production images and Compose keep
   // the platform environment and pass no flag (the image CMD runs the entry
   // directly, never `npm start`), so this flag cannot reach a container.
-  const denoEnvFile =
-    manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
+  const denoEnvFile = dotenvFlag(runtime, manifest);
   const start = `NODE_ENV=production deno run ${denoPermissions(manifest)} ${denoEnvFile}${entry}`;
 
   // A3: every Deno template emits a `test` task now. `setu generate module`
@@ -1312,8 +1311,8 @@ function denoTasks(
   // executes them (V10-23). A `deno test --permit-no-files` task beside it was
   // the defect's visible symptom — a "test" command that ran nothing.
   const test = {
-    test: "deno test -A --ignore='**/*.e2e.test.ts'",
-    'test:e2e': "deno test -A '**/*.e2e.test.ts'",
+    test: `deno test -A ${denoEnvFile}--ignore='**/*.e2e.test.ts'`,
+    'test:e2e': `deno test -A ${denoEnvFile}'**/*.e2e.test.ts'`,
   };
   const development = {
     'start:dev': `deno run --watch ${denoPermissions(manifest)} ${denoEnvFile}main.ts`,
@@ -1405,9 +1404,9 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
 export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
   // M131a X88-2: the local `dev` task loads `.env` through the runtime, exactly
   // as the `start` task does, so `dev` differs from `start` only in the entry
-  // module and `start`'s `NODE_ENV=production` prefix (M140c). Deno's `--env-file` is a hard error when the file is missing, so
-  // the flag is passed only when the manifest writes the dotenv.
-  const envFile = manifest?.envFilePath !== undefined ? `--env-file=${manifest.envFilePath} ` : '';
+  // module and `start`'s `NODE_ENV=production` prefix. A missing Deno dotenv warns
+  // and continues; the flag names only a file declared by the manifest.
+  const envFile = dotenvFlag('deno', manifest);
   const run = `deno run ${denoPermissions(manifest)} ${envFile}${DEVTOOL_ENTRY_MODULE}`;
   return {
     dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
@@ -1645,13 +1644,32 @@ function denoCompilerOptions(
 }
 
 /**
+ * Renders only the runtime's dotenv fragment, shared by local start and test scripts.
+ *
+ * @param runtime - The runtime executing the generated command
+ * @param manifest - The declared dotenv path, when present
+ * @returns An env-file flag followed by a space, or an empty fragment
+ */
+function dotenvFlag(runtime: TargetRuntime, manifest?: TemplateManifest): string {
+  if (runtime === 'cloudflare-workers') return '';
+  if (runtime === 'deno')
+    return manifest?.envFilePath === undefined ? '' : `--env-file=${manifest.envFilePath} `;
+  const path = manifest?.envFilePath ?? '.env';
+  return runtime === 'bun'
+    ? path === '.env'
+      ? ''
+      : `--env-file=${path} `
+    : `--env-file-if-exists=${path} `;
+}
+
+/**
  * The `test` and `test:e2e` scripts a generated npm project runs.
  *
  * One owner for both manifest paths: a Node or Bun project merges them through
  * {@linkcode npmScripts}, and a Workers project — whose manifest comes from
  * `standaloneNpmFiles` — gets the same commands there (V10-23). Workers keeps
- * `node:test` as its harness, so its scripts are the Node arm's verbatim; the
- * generated tests themselves start the Worker on workerd through wrangler.
+ * `node:test` as its harness and gets no dotenv flag; the generated tests start
+ * the Worker on workerd through wrangler.
  *
  * A template with a frontend build builds first in both scripts, because the
  * entry a test boots imports the compiled server module.
@@ -1664,6 +1682,14 @@ function generatedTestScripts(
   runtime: TargetRuntime,
   manifest?: TemplateManifest,
 ): Record<string, string> {
+  // `bun test` loads `.env`, `.env.test` and `.env.test.local` in that order (the last
+  // wins) until any `--env-file` is named, so a custom dotenv is followed by both test
+  // layers it would otherwise hide (measured on Bun 1.4.5).
+  const startEnv = dotenvFlag(runtime, manifest);
+  const envFile =
+    runtime === 'bun' && startEnv !== ''
+      ? `${startEnv}--env-file=.env.test --env-file=.env.test.local `
+      : startEnv;
   // A3 applies to every target, not just the Deno ones: `setu generate module`
   // emits a `<name>.test.ts` here too, and before this nothing could run it.
   // Each runtime's own runner, matching the harness the schematic emits — `bun
@@ -1671,12 +1697,12 @@ function generatedTestScripts(
   // since the generated test is TypeScript.
   const test =
     runtime === 'bun'
-      ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-      : `${NODE_RUNNER} --test --test-force-exit '**/!(*.e2e).test.ts'`;
+      ? `bun test ${envFile}--path-ignore-patterns='**/*.e2e.test.ts'`
+      : `${NODE_RUNNER} ${envFile}--test --test-force-exit '**/!(*.e2e).test.ts'`;
   const e2e =
     runtime === 'bun'
-      ? 'bun test .e2e.test'
-      : `${NODE_RUNNER} --test --test-force-exit '**/*.e2e.test.ts'`;
+      ? `bun test ${envFile}.e2e.test`
+      : `${NODE_RUNNER} ${envFile}--test --test-force-exit '**/*.e2e.test.ts'`;
   const build = runtime === 'cloudflare-workers' ? 'npm run build' : manifest?.npmBuild?.script;
   return manifest?.npmBuild === undefined
     ? { test, 'test:e2e': e2e }
@@ -1717,19 +1743,14 @@ function npmScripts(
   // M131a X88-2: a local start script loads the project's dotenv file into the
   // environment before the process starts (the plugin options are evaluated in
   // createApp(), before any plugin runs, so only the process environment is
-  // available there). The file is the one the project declares (`--env-file
+  // available there). The file is the one the project declares (`--dotenv
   // local.env` included; CodeRabbit #543), `.env` by default. Node uses
   // `--env-file-if-exists` (safe when the file is absent); Bun loads `.env`
   // itself and takes `--env-file=` for any other name (measured, Bun 1.4: a
   // missing file is tolerated). Production images and Compose keep the platform
   // environment and pass no flag (the image CMD runs the entry directly, never
   // `npm start`), so this flag cannot reach a container.
-  const dotenv = manifest?.envFilePath ?? '.env';
-  const envFile = bun
-    ? dotenv === '.env'
-      ? ''
-      : `--env-file=${dotenv} `
-    : `--env-file-if-exists=${dotenv} `;
+  const envFile = dotenvFlag(runtime, manifest);
   // M131a X88-4: Node runs the OpenTelemetry preload first, so the hook is in
   // place before any driver loads. Bun gets none (see telemetry-preload.ts).
   const preload = bun ? '' : `${TELEMETRY_PRELOAD_FLAG} `;
@@ -2242,7 +2263,7 @@ docker run --rm -p 3000:3000 ${generatedVariables.map((variable) => `-e ${variab
   }`;
 
   // Deno's nodeModulesDir: 'auto' creates node_modules for standalone projects too.
-  const gitignore = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
+  const gitignore = `node_modules/\ncoverage/\n.setu-ts/write.lock/\n.env\n.env.*\n!.env.example\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output and its typegen directory are generated, so
     // they are ignored like any other build artifact — the generated file used
     // to list only `coverage/` and the env file, which left a minified bundle

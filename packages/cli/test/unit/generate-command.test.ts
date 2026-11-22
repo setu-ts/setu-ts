@@ -27,7 +27,7 @@ it('dry-run collision refuses without writing', async () => {
   expect(h.err.text()).toContain(
     'WOULD REFUSE: /app/src/services/widget.service.ts already exists',
   );
-  expect(h.fs.writes).toEqual([]);
+  expect(h.fs.projectWrites).toEqual([]);
   expect(h.fs.read('/app/src/services/widget.service.ts')).toBe('mine');
 });
 
@@ -87,7 +87,7 @@ describe('runGenerateCommand', () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(1);
     expect(h.err.text()).toContain(`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} add queue`);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     expect(await h.run(['--help'])).toBe(0);
     expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');
   });
@@ -95,32 +95,32 @@ describe('runGenerateCommand', () => {
   it('emits decorated ingress once the class-based project has queue', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin', 'queue-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(0);
-    expect(h.fs.writes.some((path) => path.includes('/ingress/'))).toBe(true);
+    expect(h.fs.projectWrites.some((path) => path.includes('/ingress/'))).toBe(true);
   });
   it('writes nothing when a JSONC comment splits a manifest token', async () => {
     const h = bareHarness({ '/app/deno.jsonc': '{"compilerOptions":{"strict":tru/*note*/e}}' });
     expect(await h.run(['service', 'billing'])).toBe(1);
     expect(h.err.text()).toContain('Cannot read /app/deno.jsonc:');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
   it('refuses to write outside a project', async () => {
     const h = bareHarness({ '/app/notes.txt': 'mine' });
     expect(await h.run(['service', 'billing'])).toBe(1);
     expect(h.err.text()).toContain('holds no deno.json, deno.jsonc or package.json');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses a workspace root and points at a member', async () => {
     const h = bareHarness({ '/app/setu.workspace.json': '{}' });
     expect(await h.run(['service', 'billing'])).toBe(2);
     expect(h.err.text()).toContain('--dir apps/<member>');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('generates an ungated schematic and reads the write back', async () => {
     const h = harness();
     expect(await h.run(['service', 'user-profile'])).toBe(0);
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/app/src/services/user-profile.service.ts',
       '/app/src/services/index.ts',
     ]);
@@ -133,7 +133,7 @@ describe('runGenerateCommand', () => {
   it('roots generated paths at --dir', async () => {
     const h = harness({ '/elsewhere/deno.json': '{}' });
     expect(await h.run(['service', 'billing', '--dir', '/elsewhere'])).toBe(0);
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/elsewhere/src/services/billing.service.ts',
       '/elsewhere/src/services/index.ts',
     ]);
@@ -142,15 +142,15 @@ describe('runGenerateCommand', () => {
   it('creates the parent directory before writing', async () => {
     const h = harness();
     await h.run(['service', 'billing']);
-    expect(h.fs.mkdirs).toEqual(['/app/src', '/app/src/services']);
+    expect(h.fs.projectMkdirs).toEqual(['/app/src', '/app/src/services']);
   });
 
   describe('--dry-run', () => {
     it('performs zero writes and zero mkdirs', async () => {
       const h = harness();
       expect(await h.run(['service', 'billing', '--dry-run'])).toBe(0);
-      expect(h.fs.writes).toEqual([]);
-      expect(h.fs.mkdirs).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
+      expect(h.fs.projectMkdirs).toEqual([]);
     });
 
     it('reports every path it would create', async () => {
@@ -169,8 +169,8 @@ describe('runGenerateCommand', () => {
     it('aborts with a non-zero code and writes nothing when a target exists', async () => {
       const h = harness({ '/app/src/services/billing.service.ts': 'MINE' });
       expect(await h.run(['service', 'billing'])).toBe(1);
-      expect(h.fs.writes).toEqual([]);
-      expect(h.fs.mkdirs).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
+      expect(h.fs.projectMkdirs).toEqual([]);
       expect(h.err.text()).toContain('Refusing to overwrite');
       expect(h.err.text()).toContain('/app/src/services/billing.service.ts');
     });
@@ -193,7 +193,7 @@ describe('runGenerateCommand', () => {
         });
       const h = harness({ '/app/b.ts': 'EXISTING' });
       expect(await h.run(['custom', 'triple', 'thing'], load)).toBe(1);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
       expect(h.fs.has('/app/a.ts')).toBe(false);
       expect(h.fs.has('/app/c.ts')).toBe(false);
     });
@@ -203,7 +203,7 @@ describe('runGenerateCommand', () => {
     it('refuses a gated schematic when its plugin is absent', async () => {
       const h = harness();
       expect(await h.run(['guard', 'admin'])).toBe(1);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
       expect(h.err.text()).toContain('@setu-ts/auth-plugin');
     });
 
@@ -365,7 +365,7 @@ describe('runGenerateCommand', () => {
     it('returns 0 for --help even when a schematic is named', async () => {
       const h = harness();
       expect(await h.run(['service', 'billing', '--help'])).toBe(0);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     it('marks a gated schematic unavailable in --help, naming the command that fixes it', async () => {
@@ -450,7 +450,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['custom', 'broken', 'thing'], load)).toBe(1);
       expect(h.err.text()).toContain('template blew up');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     it('reports a schematic that throws a non-Error value', async () => {
@@ -521,7 +521,13 @@ describe('runGenerateCommand', () => {
     const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
-      fs: { ...fs, writeFile: () => Promise.reject(new Error('read-only fs')) },
+      fs: {
+        ...fs,
+        writeFile: (path, bytes) =>
+          path.endsWith('/write.lock/owner.json')
+            ? fs.writeFile(path, bytes)
+            : Promise.reject(new Error('read-only fs')),
+      },
       cwd: '/app',
       now: () => 0,
       log: () => {},
@@ -547,7 +553,7 @@ describe('runGenerateCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.text()).toContain('Cannot read /app/bun.lock: EIO');
-    expect(fs.writes).toEqual([]);
+    expect(fs.projectWrites).toEqual([]);
   });
 
   describe('--runtime validation', () => {
@@ -555,7 +561,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['service', 'billing', '--runtime', 'solaris'])).toBe(2);
       expect(h.err.text()).toContain('Unknown runtime "solaris"');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     for (const flag of ['--runtime', '--runtime=']) {
@@ -563,7 +569,7 @@ describe('runGenerateCommand', () => {
         const h = harness();
         expect(await h.run(['service', 'billing', flag])).toBe(2);
         expect(h.err.text()).toContain('Option --runtime requires a value.');
-        expect(h.fs.writes).toEqual([]);
+        expect(h.fs.projectWrites).toEqual([]);
       });
     }
 
@@ -581,7 +587,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['service', '___'])).toBe(2);
       expect(h.err.text()).toContain('Invalid name "___"');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     it('rejects a digit-leading name, writing nothing', async () => {
@@ -589,7 +595,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['service', '2fa'])).toBe(2);
       expect(h.err.text()).toContain('Invalid name "2fa"');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     // The name guard bounds the KEBAB at 255 bytes, but a schematic appends a
@@ -607,7 +613,7 @@ describe('runGenerateCommand', () => {
         expect(h.err.text()).toContain('255 bytes');
         expect(h.err.text()).toContain(`${name}.controller.ts`);
         expect(h.out.text()).toBe('');
-        expect(h.fs.writes).toEqual([]);
+        expect(h.fs.projectWrites).toEqual([]);
       });
     }
 
@@ -620,7 +626,7 @@ describe('runGenerateCommand', () => {
       const h = harness();
       expect(await h.run(['service', 'a\\..\\evil'])).toBe(2);
       expect(h.err.text()).toContain('path separator');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     // `a:b` emitted `class A:bService`; `x'y` closed the `@Injectable` token
@@ -630,7 +636,7 @@ describe('runGenerateCommand', () => {
         const h = harness();
         expect(await h.run(['service', name])).toBe(2);
         expect(h.err.text()).toContain('Invalid name');
-        expect(h.fs.writes).toEqual([]);
+        expect(h.fs.projectWrites).toEqual([]);
       });
     }
 
@@ -647,7 +653,13 @@ describe('runGenerateCommand', () => {
     const fs = createFakeFs({ '/app/deno.json': '{}' });
     const err = createRecorder();
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
-      fs: { ...fs, writeFile: () => Promise.reject('EROFS') },
+      fs: {
+        ...fs,
+        writeFile: (path, bytes) =>
+          path.endsWith('/write.lock/owner.json')
+            ? fs.writeFile(path, bytes)
+            : Promise.reject('EROFS'),
+      },
       cwd: '/app',
       now: () => 0,
       log: () => {},
@@ -679,7 +691,7 @@ describe('runGenerateCommand', () => {
     expect(reported).toContain('unreachable');
     // It reports and does not refuse: the developer needs the generator to work
     // inside the project they are migrating.
-    expect(h.fs.writes).toContain('/app/src/controllers/billing.controller.ts');
+    expect(h.fs.projectWrites).toContain('/app/src/controllers/billing.controller.ts');
   });
 
   it('stays silent in a project that has no legacy directory', async () => {
@@ -694,7 +706,7 @@ describe('runGenerateCommand', () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
     expect(await h.run(['migration', 'orders'])).toBe(1);
     expect(h.err.text()).toContain('common');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('uses the injected clock for the migration filename', async () => {
@@ -702,7 +714,7 @@ describe('runGenerateCommand', () => {
     expect(await h.run(['migration', 'add-orders'])).toBe(0);
     // The runner and its barrel ride along since D5 — the migration used to be
     // an orphan that nothing imported and nothing could run.
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/app/src/migrations/20260728123045-add-orders.ts',
       '/app/src/migrations/index.ts',
       '/app/src/migrations/run.ts',
@@ -782,7 +794,7 @@ describe('runGenerateCommand — collisions with installed plugins (M70g, A1)', 
     expect(code).not.toBe(0);
     // Refused BEFORE writing: the whole point is that the project never reaches the
     // state where `app.start()` throws `Duplicate health indicator name: "database"`.
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     const report = h.err.lines.join('\n');
     expect(report).toContain('@setu-ts/database-plugin');
     expect(report).toContain('app.start()');
@@ -794,7 +806,7 @@ describe('runGenerateCommand — collisions with installed plugins (M70g, A1)', 
     const code = await h.run(['health-indicator', 'database']);
 
     expect(code).toBe(0);
-    expect(h.fs.writes.some((path) => path.includes('database'))).toBe(true);
+    expect(h.fs.projectWrites.some((path) => path.includes('database'))).toBe(true);
   });
 });
 
@@ -964,7 +976,7 @@ describe('bounded read of a managed file (L1 audit)', () => {
     expect(h.err.text()).toContain(
       `${barrel} is not a regular file; the CLI will not read or replace it.`,
     );
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('refuses a write with exit 1, leaving no partial files, when a managed file is not a regular file', async () => {
@@ -973,7 +985,7 @@ describe('bounded read of a managed file (L1 audit)', () => {
     expect(h.err.text()).toContain(
       `${barrel} is not a regular file; the CLI will not read or replace it.`,
     );
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
     expect(h.fs.read(barrel)).toBe('old');
   });
@@ -982,12 +994,12 @@ describe('bounded read of a managed file (L1 audit)', () => {
     const dry = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
     expect(await dry.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
     expect(dry.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
-    expect(dry.fs.writes).toEqual([]);
+    expect(dry.fs.projectWrites).toEqual([]);
 
     const real = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
     expect(await real.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
     expect(real.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
-    expect(real.fs.writes).toEqual([]);
+    expect(real.fs.projectWrites).toEqual([]);
     expect(real.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
     expect(real.fs.read(barrel)).toBe('old');
   });

@@ -21,6 +21,8 @@ import { createLineReader } from './terminal-line.ts';
 import { logicalCwdFor } from './utils/logical-cwd.ts';
 import { createCommandRunner, type CommandRunner } from './utils/run-command.ts';
 import { withRegularFileReads } from './utils/node-regular-file.ts';
+import { isSupportedNode, SUPPORTED_NODE } from './utils/node-version.ts';
+import type { IProjectLockFileSystem } from './utils/project-lock.ts';
 
 /** @ignore Runtime capabilities used by the executable boundary. */
 export interface MainRuntime {
@@ -31,6 +33,10 @@ export interface MainRuntime {
 
 /** @ignore Host process operations used by the executable boundary. */
 export interface MainProcess {
+  /** Probes owner liveness only to select the lock refusal message. */
+  readonly isProcessAlive?: (pid: number) => boolean;
+  /** Host Node version; omitted by Bun and Deno. */
+  readonly nodeVersion?: string;
   readonly args: readonly string[];
   readonly cwd: () => string;
   readonly isTerminal: () => boolean;
@@ -60,11 +66,21 @@ export interface MainProcess {
  */
 export function nodeRuntime(): MainRuntime {
   const runtime = createNodeRuntimeServices();
-  return runtime.fs === undefined ? runtime : { ...runtime, fs: withRegularFileReads(runtime.fs) };
+  if (runtime.fs === undefined) return runtime;
+  const fs: IProjectLockFileSystem = {
+    ...withRegularFileReads(runtime.fs),
+    invokingPid: process.pid,
+  };
+  return { ...runtime, fs };
 }
 
 /** @ignore Runs the CLI boundary and returns the code the host should exit with. */
 export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<number> {
+  if (host.nodeVersion !== undefined && !isSupportedNode(host.nodeVersion)) {
+    host.error(
+      `setu supports Node ${SUPPORTED_NODE}; this is Node ${host.nodeVersion}. Commands may fail; upgrade Node.`,
+    );
+  }
   const interruption = new AbortController();
   runtime.onSignal?.('SIGINT', () => interruption.abort());
 
@@ -97,6 +113,7 @@ export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<
       interrupt: interruption.signal,
       ...(prompter === undefined ? {} : { ask: prompter }),
       portAvailable: host.portAvailable,
+      ...(host.isProcessAlive === undefined ? {} : { isProcessAlive: host.isProcessAlive }),
       ...(host.runCommand === undefined ? {} : { runCommand: host.runCommand }),
     });
   } finally {
@@ -134,7 +151,11 @@ export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProces
   );
   return {
     ...(picker === undefined ? {} : { picker }),
+    ...('bun' in process.versions || 'Deno' in globalThis
+      ? {}
+      : { nodeVersion: process.versions.node }),
     args: process.argv.slice(2),
+    isProcessAlive: nodeIsProcessAlive,
     cwd: () => process.cwd(),
     isTerminal: () => process.stdin.isTTY === true,
     prompt: (message, signal) => reader.read(message, signal),
@@ -144,6 +165,16 @@ export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProces
     runCommand: createCommandRunner(),
     dispose: () => reader.close(),
   };
+}
+
+/** Probes without sending a signal; permission and unknown failures count as alive. */
+function nodeIsProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    return !(cause instanceof Error && 'code' in cause && cause.code === 'ESRCH');
+  }
 }
 
 /**

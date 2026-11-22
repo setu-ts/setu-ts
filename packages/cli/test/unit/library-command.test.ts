@@ -1,3 +1,4 @@
+import { runCli } from '../../src/cli.ts';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
@@ -17,6 +18,7 @@ interface Harness {
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
   run(argv: readonly string[]): Promise<number>;
+  dispatch(argv: readonly string[]): Promise<number>;
 }
 
 /**
@@ -55,6 +57,8 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
     fs,
     out,
     err,
+    dispatch: (argv) =>
+      runCli(['g', ...argv], { fs, cwd: '/acme', now: () => 0, log: out.sink, error: err.sink }),
     run: (argv) =>
       runLibraryCommand(parseArgs(argv), { fs, dir: '/acme', log: out.sink, error: err.sink }),
   };
@@ -174,9 +178,13 @@ describe('runLibraryCommand', () => {
 
   it('refuses --scope with no value', async () => {
     const h = harness();
-    expect(await h.run(['library', 'shared', '--scope'])).toBe(2);
-    expect(h.err.text()).toContain('--scope needs a value');
+    expect(await h.dispatch(['library', 'shared', '--scope'])).toBe(2);
+    expect(h.err.text()).toContain('Option --scope needs a value');
     expect(h.fs.writes).toEqual([]);
+    const direct = harness();
+    expect(await direct.run(['library', 'shared', '--scope'])).toBe(2);
+    expect(direct.err.text()).toContain('--scope needs a value:');
+    expect(direct.fs.writes).toEqual([]);
   });
 
   // A workspace this CLI created declares both globs already, so the common path

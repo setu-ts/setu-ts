@@ -210,7 +210,7 @@ it.each([
 it.each([false, true])(
   'refuses setu build in a fresh Bun scaffold (custom env file %s)',
   async (customEnvFile) => {
-    const flags = customEnvFile ? ['--env-file', 'local.env'] : [];
+    const flags = customEnvFile ? ['--dotenv', 'local.env'] : [];
     const fs = createFakeFs();
     const error = createRecorder();
     const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: error.sink };

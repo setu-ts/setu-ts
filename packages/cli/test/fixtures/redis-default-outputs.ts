@@ -33,7 +33,7 @@ export async function redisDefaultOutputs(): Promise<Record<string, string>> {
       if (workspace)
         await run(['generate', 'app', 'svc', '--template', 'microservice', '--dir', '/work/app']);
       const prefix = `${runtime}/${flags[0]}`;
-      for (const path of new Set(fs.writes)) outputs[`${prefix}${path}`] = fs.read(path);
+      for (const path of new Set(fs.projectWrites)) outputs[`${prefix}${path}`] = fs.read(path);
     }
     for (const [plugin, flag] of [
       ['messaging', '--broker'],
@@ -52,7 +52,7 @@ export async function redisDefaultOutputs(): Promise<Record<string, string>> {
         });
       await run(['new', 'app', '--runtime', runtime, '--template', 'rest']);
       await run(['add', plugin!, flag!, 'redis', '--dir', '/work/app']);
-      for (const path of new Set(fs.writes))
+      for (const path of new Set(fs.projectWrites))
         outputs[`${runtime}/add-${plugin}${path}`] = fs.read(path);
     }
   }
