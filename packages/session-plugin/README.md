@@ -102,7 +102,10 @@ matches is anonymous, and bumping the stamp on the user record is one write.
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
 to close it: every store-held restore then reads both markers beside the row (two extra keys per
 restore, twice for a request authenticated by `auth-plugin`'s session strategy). Use it where no
-request after a sign-out may be served signed in (a bank, an admin console).
+request after a sign-out may be served signed in (a bank, an admin console). It closes this window
+only: the limits above (two simultaneous regenerations of one id, a sign-out outliving `maxAge`
+under `rolling`) still apply, so such an application also sets `signIn.sessionStamp` in
+`@setu-ts/auth-plugin` to end every session of a user for certain.
 
 **Where the guarantee holds.** The store must be linearizable (a read sees every write that finished
 before it) and must not evict a live key:
