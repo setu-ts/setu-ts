@@ -335,8 +335,12 @@ streamed body. When the request's own signal aborts before the response is hande
 logs `Request aborted before completion` at once (for a request that called `ctx.defer`); its
 cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
 released under a running handler, and a handler that never settles keeps what it holds. A streamed
-body's cleanups run once when the signal aborts, even on a runtime that never cancels the body. A
-streamed body whose source fails is logged once as `Response stream failed`
+body's cleanups run once when the signal aborts, even on a runtime that never cancels the body: the
+kernel cancels the body first and runs them once its `cancel()` settles, or after 5000 ms if it does
+not. It waits for the source's `cancel()`, not for its `pull`, which no reader can see; a source
+that does work in `pull` must make its `cancel()` wait for that work, a source with no `cancel()`
+gets no wait, and past the bound cleanups can run while a `pull` is still pending. A streamed body
+whose source fails is logged once as `Response stream failed`
 (`{ requestId, method, path, status, error }`), and the error still aborts the response.
 
 ### Route Introspection
@@ -14111,12 +14115,13 @@ contract changed in 0.11.0:
 cleanups in reverse registration order only after the handler settles: normally before a buffered
 response is handed back (awaiting any that return a promise), and when a streaming body ends, errors
 or is cancelled. Since 0.14.0 a streamed body's cleanups also run, once, when the request's own
-signal aborts first (on Workers the signal needs the `enable_request_signal` compatibility flag
-before the 2026-11-17 compatibility date); an abort never runs cleanups under a running handler. An
-early middleware response returns immediately, but its cleanup and shutdown-drain accounting wait
-for the running handler; late handler cleanup registrations join that same cleanup list. A handler
-still running when `stop()`'s drain bound expires keeps its cleanup until it settles, which is then
-after `stop()` returned and the close hooks ran. On failure, cleanup follows the error response
+signal aborts first, after the body's `cancel()` settles (at most 5000 ms; the kernel cannot see a
+source's `pull`) (on Workers the signal needs the `enable_request_signal` compatibility flag before
+the 2026-11-17 compatibility date); an abort never runs cleanups under a running handler. An early
+middleware response returns immediately, but its cleanup and shutdown-drain accounting wait for the
+running handler; late handler cleanup registrations join that same cleanup list. A handler still
+running when `stop()`'s drain bound expires keeps its cleanup until it settles, which is then after
+`stop()` returned and the close hooks ran. On failure, cleanup follows the error response
 construction. Each asynchronous cleanup is bounded at 5000 ms: on expiry the kernel reports it and
 moves on, and the cleanup's later outcome is ignored. A cleanup's throw or rejection is reported at
 `warn` through the logger capability when one is registered, and never changes the response; a
