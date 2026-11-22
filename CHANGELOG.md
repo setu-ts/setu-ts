@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows
   `app.stop()` logs `Server stopping`, `Shutdown drain finished` (with `remaining` and `timedOut`)
   and `Server stopped`. `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000).
   `RuntimeSignal` adds `'SIGHUP'`. `IRuntimeServices.unrefTimer` (optional) lets the process exit
-  with a timer pending: Node and Bun `unref()`, Deno `Deno.unrefTimer`, nothing on Workers.
+  with a timer pending: the handle's `unref()` on Node, Bun and Deno 2, nothing on Workers.
   `IHttpAdapter.beginDrain` lets the Node adapter (which also serves Bun's HTTP/2) send HTTP/2
   `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
   `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).

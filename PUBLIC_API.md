@@ -882,7 +882,7 @@ interface IRuntimeServices {
   hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
-  unrefTimer?(handle: TimerHandle): void; // since 0.14.0; Node/Bun unref(), Deno.unrefTimer, no-op on Workers
+  unrefTimer?(handle: TimerHandle): void; // since 0.14.0; the handle's unref() on Node, Bun and Deno 2, no-op on Workers
   setInterval(fn: () => void, ms: number): TimerHandle;
   clearInterval(handle: TimerHandle): void;
 

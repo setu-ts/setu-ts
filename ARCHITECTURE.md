@@ -892,6 +892,7 @@ interface IRuntimeServices {
   hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
+  unrefTimer?(handle: TimerHandle): void; // since 0.14.0
   setInterval(fn: () => void, ms: number): TimerHandle;
   clearInterval(handle: TimerHandle): void;
 

@@ -372,7 +372,7 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
     `Request cleanup still waiting for the response stream to stop; its resources are still held`,
     with `{ requestId, method, path, waitedMs }` only, so an operator can see why a route stops
     admitting. It never releases anything. The timer comes from `IRuntimeServices` (`setTimeout`,
-    unref'd through the new optional `unrefTimer`: Node and Bun `unref()`, Deno `Deno.unrefTimer`,
+    unref'd through the new optional `unrefTimer`: the handle's `unref()` on Node, Bun and Deno 2,
     nothing on Workers), fires at most once, is cleared when `cancel()` settles and at `stop()` (the
     application keeps the pending clears in a set), and is never set without a logger. Tests:
     `deferred-abort.test.ts` (once after the bound, none when `cancel()` settles first, unref
