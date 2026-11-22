@@ -416,6 +416,29 @@ describe('project write lock', () => {
     );
   });
 
+  it('locks a member once when realPath returns native Windows paths', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    expect(await runCli(['g', 'app', 'api', '--dir', '/work/ws'], deps)).toBe(0);
+    const native = {
+      ...fs,
+      realPath: (path: string) => Promise.resolve(`C:${path.replaceAll('/', '\\')}`),
+    };
+    const before = fs.mkdirs.length;
+    await runWithProjectLock(
+      { ...deps, fs: native },
+      '/work/ws/apps/api',
+      true,
+      'add',
+      async () => {
+        expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        return 0;
+      },
+    );
+    expect(fs.mkdirs.slice(before)).toEqual(['/work/ws/.setu-ts', '/work/ws/.setu-ts/write.lock']);
+  });
+
   it("locks a linked-out member's real path at that path's own workspace", async () => {
     const fs = createFakeFs();
     const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };

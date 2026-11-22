@@ -227,7 +227,8 @@ run. No other `docs/` file is touched.
   followed by
   `Confirm no setu command is running in this project, then delete it and run this again.` A
   workspace member is locked at its workspace root, found from the path as given and then from its
-  real path; a member linked to a project outside the workspace also takes that project's own lock,
+  real path; a member linked to a project outside the workspace also takes the lock a command run at
+  its real path would take (that path's workspace, if it is a member, otherwise the project itself),
   after the workspace lock, so a command run in the project directly is refused (PR #610 review). A
   lock is left behind only when the process is killed without running its `finally` (SIGKILL, power
   loss); SIGINT and thrown errors release it. Released in a `finally` (SIGINT reaches the finally

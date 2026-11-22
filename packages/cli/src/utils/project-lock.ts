@@ -5,6 +5,7 @@ import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { joinPath, readExistingText } from './file-writer.ts';
 import { detectProject } from './project-detector.ts';
 import { escapeName } from './names.ts';
+import { memberPath } from './member-path.ts';
 
 /** Filesystem metadata supplied by the executable's process boundary. */
 export interface IProjectLockFileSystem extends IFileSystem {
@@ -221,8 +222,12 @@ export async function runWithProjectLock(
     // command run at its real path would lock (that path's own workspace, if any),
     // after this one, so the two still exclude each other. Compared canonically: a
     // root reached through a link is still the same directory.
-    const canonicalRoot = await canonicalDir(deps.fs, root);
-    if (real === canonicalRoot || real.startsWith(`${canonicalRoot}/`)) return await lock(root, fn);
+    // Compared with one separator: `realPath` returns native paths (`C:\ws\apps\api`).
+    const canonicalRoot = memberPath(await canonicalDir(deps.fs, root));
+    const realPath = memberPath(real);
+    if (realPath === canonicalRoot || realPath.startsWith(`${canonicalRoot}/`)) {
+      return await lock(root, fn);
+    }
     const realRoot = (await workspaceMemberOf(deps.fs, real))?.root ?? real;
     return await lock(root, () => lock(realRoot, fn));
   } catch (cause) {
