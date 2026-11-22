@@ -315,3 +315,41 @@ describe('the drain sends HTTP/2 GOAWAY (V13-23)', () => {
     }
   });
 });
+
+describe('a failed response stream over HTTP/2 (CodeRabbit)', () => {
+  it('resets the stream with INTERNAL_ERROR, so the client never sees a clean end', async () => {
+    const port = await unusedPort();
+    const app = createApplication({ plugins: [RuntimePlugin({ http2: true })] });
+    app.router.get('/broken', (ctx) => {
+      let sent = false;
+      return ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (!sent) {
+              sent = true;
+              controller.enqueue(encoder.encode('first'));
+              return;
+            }
+            controller.error(new Error('source failed'));
+          },
+        }),
+      );
+    });
+    await app.start({ port, hostname: '127.0.0.1', drainTimeoutMs: 5_000 });
+    apps.push(app);
+    const session = http2Connect(`http://127.0.0.1:${port}`);
+    try {
+      const stream = session.request({ ':path': '/broken' });
+      stream.resume();
+      const outcome = await new Promise<string>((resolve) => {
+        stream.on('end', () => resolve(`end rst=${stream.rstCode}`));
+        stream.on('error', () => resolve(`error rst=${stream.rstCode}`));
+        stream.on('close', () => resolve(`close rst=${stream.rstCode}`));
+      });
+      expect(outcome).not.toMatch(/^end/);
+      expect(stream.rstCode).toBe(2);
+    } finally {
+      session.destroy();
+    }
+  });
+});

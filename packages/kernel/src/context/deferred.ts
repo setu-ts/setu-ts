@@ -169,7 +169,13 @@ export function wrapDeferredStream(
   function aborted(): void {
     // Reported only where there is cleanup to wait for; a body with none is
     // still cancelled, so the source and the drain are released.
-    if (cleanups.length > 0) onAbort?.();
+    if (cleanups.length > 0) {
+      try {
+        onAbort?.();
+      } catch {
+        // Reporting is best effort: the source is still cancelled below.
+      }
+    }
     // Cancel first and wait for the source's own cancel(), with no time
     // limit: a source whose cancel() waits for work still running (in pull,
     // or a pump it started) keeps the request's resources until it settles,

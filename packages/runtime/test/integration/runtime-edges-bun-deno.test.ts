@@ -144,7 +144,11 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
       .then((response) => response.text())
       .catch(() => undefined);
     await until(() => records().some((record) => record['msg'] === 'Response stream failed'));
-    expect(records().some((record) => record['msg'] === 'Response stream failed')).toBe(true);
+    // A moment for a duplicate to arrive, if one would.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(records().filter((record) => record['msg'] === 'Response stream failed')).toHaveLength(
+      1,
+    );
     expect(stderr).not.toContain('source failed');
   });
 

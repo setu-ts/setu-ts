@@ -221,8 +221,11 @@ class RequestContext implements IRequestContext {
       return;
     }
     if (this.#deferred === undefined) {
-      this.#deferred = [];
+      // Stored before the watch attaches: an already-aborted signal is
+      // reported at once, and a failing report must not lose this cleanup.
+      this.#deferred = [cleanup];
       this.#watchAbort();
+      return;
     }
     this.#deferred.push(cleanup);
   }
@@ -245,7 +248,11 @@ class RequestContext implements IRequestContext {
       if (this.#abortWatch === undefined) return;
       this.disarmAbort();
       this.#abortReported = true;
-      this.#onAbort?.(this);
+      try {
+        this.#onAbort?.(this);
+      } catch {
+        // A broken reporter must not reach the handler that called defer().
+      }
     };
     this.#abortWatch = { signal, aborted };
     // Already aborted: reported now, before a synchronous settle in the same

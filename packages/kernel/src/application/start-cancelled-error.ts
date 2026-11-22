@@ -5,13 +5,17 @@
  */
 
 /**
- * Thrown by `start()` when `stop()` was called before the start finished.
+ * Thrown by `start()` when `stop()` cancelled a start that had not yet
+ * passed its last step. A `stop()` that lands after that point, but before
+ * `start()` settles, does not cancel: `start()` resolves and `stop()` shuts
+ * down normally.
  *
- * The close hooks of every plugin that registered have run by the time it is
- * thrown, and no later startup step runs: a `listen()` already pending may
- * still bind, and the kernel closes that handle as soon as it resolves. An entry point can
- * tell a cancelled start (the process is being stopped on purpose) from a
- * start that failed with `instanceof`.
+ * The close hooks registered before the cancellation have run by the time it
+ * is thrown; a close hook an abandoned step registers afterwards is started
+ * at once but not awaited. No later startup step runs: a `listen()` already
+ * pending may still bind, and the kernel closes that handle as soon as it
+ * resolves. An entry point can tell a cancelled start (the process is being
+ * stopped on purpose) from a start that failed with `instanceof`.
  *
  * @example
  * ```typescript

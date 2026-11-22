@@ -81,6 +81,33 @@ export interface NodeOutgoing {
    * @since 0.14.0
    */
   destroy?(): void;
+  /**
+   * The HTTP/2 stream behind an `Http2ServerResponse`. A failed body resets
+   * it with an error code: `destroy()` sends `RST_STREAM(NO_ERROR)`, which an
+   * HTTP/2 client reads as a clean end of a truncated response.
+   * @since 0.14.0
+   */
+  readonly stream?: { close?(code?: number): void };
+}
+
+/** HTTP/2 `INTERNAL_ERROR` (RFC 9113 §7), the reset for a failed response body. */
+const HTTP2_INTERNAL_ERROR = 2;
+
+/**
+ * How a failed streamed body ends its response: an HTTP/2 stream is reset
+ * with `INTERNAL_ERROR`, so the client sees a failure rather than a clean
+ * end; an HTTP/1.1 response destroys its connection.
+ *
+ * @param outgoing - The Node response
+ * @returns The function that ends it, or `undefined` when it has neither
+ * @internal - Not exported from package index
+ */
+export function failedBodyEnd(outgoing: NodeOutgoing | undefined): (() => void) | undefined {
+  const stream = outgoing?.stream;
+  if (typeof stream?.close === 'function') {
+    return () => stream.close!(HTTP2_INTERNAL_ERROR);
+  }
+  return outgoing?.destroy?.bind(outgoing);
 }
 
 /**
@@ -800,8 +827,9 @@ export class NodeHttpServerHandle {
           }),
       );
     }
-    if (outgoing?.destroy !== undefined) {
-      body = destroyOnSourceError(body, outgoing.destroy.bind(outgoing));
+    const end = failedBodyEnd(outgoing);
+    if (end !== undefined) {
+      body = destroyOnSourceError(body, end);
     }
     return body === snapshot.body
       ? mapSnapshotToWebResponse(snapshot)

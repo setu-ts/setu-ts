@@ -50,6 +50,18 @@ function manualStream(onCancel?: () => void): {
   };
 }
 
+/** A runtime plugin over a fake with a manual clock. */
+function fakeRuntimeFor(fake: ReturnType<typeof createFakeRuntime>): IPlugin {
+  return {
+    name: 'fake-runtime',
+    version: '1.0.0',
+    provides: [CAPABILITIES.RUNTIME],
+    register(ctx: IPluginContext) {
+      ctx.services.register(CAPABILITIES.RUNTIME, fake.runtime);
+    },
+  };
+}
+
 describe('implicit HEAD on GET routes (V13-113)', () => {
   it('answers HEAD from a GET route with its headers and no body', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
@@ -317,9 +329,16 @@ describe('resources a running handler holds when its client leaves (security aud
         client.abort();
         await flush();
       }
-      // The slots are still held by running handlers: the next request is refused.
-      const refused = await app.dispatch!(new Request('http://localhost/work'));
-      expect(refused.status).toBe(503);
+      // The slots are still held by running handlers: the next request is
+      // refused. Not awaited, so a limiter that admitted it would fail the
+      // assertions below instead of hanging on the gate (CodeRabbit).
+      let third: Response | undefined;
+      served.push(
+        app.dispatch!(new Request('http://localhost/work')).then((response) => (third = response)),
+      );
+      await flush();
+      expect(third?.status).toBe(503);
+      expect(active).toBe(LIMIT);
       expect(maxActive).toBeLessThanOrEqual(LIMIT);
     } finally {
       release();
@@ -490,6 +509,95 @@ describe('abort handling on the remaining settle paths (CodeRabbit)', () => {
   });
 });
 
+describe('round-2 review (CodeRabbit)', () => {
+  it('returns an inject() HEAD answer even when the source cancel() never settles', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    app.router.get('/stuck', (ctx) =>
+      ctx.response.stream(
+        new ReadableStream<Uint8Array>({ cancel: () => new Promise<void>(() => {}) }),
+      ),
+    );
+    await app.start();
+    const head = await app.inject({ method: 'HEAD', url: '/stuck' });
+    expect(head.statusCode).toBe(200);
+    expect(head.body).toBeNull();
+  });
+
+  it('treats a lowercase inject() head like HEAD', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    app.router.get('/doc', (ctx) => ctx.response.header('x-doc', 'yes').text('body'));
+    await app.start();
+    const head = await app.inject({ method: 'head' as never, url: '/doc' });
+    expect(head.statusCode).toBe(200);
+    expect(head.headers.get('x-doc')).toBe('yes');
+    expect(head.body).toBeNull();
+    await app.stop();
+  });
+
+  it('cancels a plain stream when its client leaves, without holding the drain', async () => {
+    const fake = createFakeRuntime();
+    const app = createApplication({ plugins: [fakeRuntimeFor(fake)] });
+    let cancelled = 0;
+    app.router.get('/events', (ctx) =>
+      ctx.response.stream(manualStream(() => void cancelled++).stream),
+    );
+    await app.start({ drainTimeoutMs: 1_000 });
+    const client = new AbortController();
+    await app.dispatch!(new Request('http://localhost/events', { signal: client.signal }));
+    client.abort();
+    await flush();
+    expect(cancelled).toBe(1);
+    let stopped = false;
+    void app.stop().then(() => {
+      stopped = true;
+    });
+    await flush();
+    expect(stopped).toBe(true);
+  });
+
+  it('warns once for an early stream whose source cancel() stalls past 30 s', async () => {
+    const fake = createFakeRuntime();
+    const calls: LogCall[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const early: IPlugin = {
+      name: 'early-stalled',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.middleware.add((c, next) => {
+          void next();
+          return c.response.stream(
+            new ReadableStream<Uint8Array>({ cancel: () => new Promise<void>(() => {}) }),
+          );
+        });
+      },
+    };
+    const app = createApplication({
+      plugins: [fakeRuntimeFor(fake), recordingLogger(calls), early],
+    });
+    app.router.get('/work', async (ctx) => {
+      await gate;
+      return ctx.response.text('late');
+    });
+    await app.start({ drainTimeoutMs: 50 });
+    const client = new AbortController();
+    await app.dispatch!(new Request('http://localhost/work', { signal: client.signal }));
+    client.abort();
+    release();
+    await flush();
+    fake.tick(30_000);
+    await flush();
+    expect(
+      withMessage(
+        calls,
+        'Request cleanup still waiting for the response stream to stop; its resources are still held',
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe('a failed response stream (V13-256)', () => {
   it('logs the failure once against the request and still errors the body', async () => {
     const calls: LogCall[] = [];
@@ -656,8 +764,10 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
         return;
       }
       await advance(fake, 50);
+      await advance(fake, 900);
+      // Still held 25 ms before the 1 000 ms bound (CodeRabbit).
       expect(stopped).toBe(false);
-      await advance(fake, 1_000);
+      await advance(fake, 50);
       // The drain bound ends the wait; the cleanups stay with the source.
       expect(stopped).toBe(true);
       expect(cleaned).toBe(0);
@@ -702,8 +812,9 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
         return;
       }
       await advance(fake, 50);
+      await advance(fake, 900);
       expect(stopped).toBe(false);
-      await advance(fake, 1_000);
+      await advance(fake, 50);
       expect(stopped).toBe(true);
       expect(cleaned).toBe(0);
     },

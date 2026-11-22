@@ -24,6 +24,7 @@ import {
 import type { RawUpgradeSocket } from '../../src/adapters/node/node-ws-upgrader.ts';
 import {
   destroyOnSourceError,
+  failedBodyEnd,
   NodeHttpAdapter,
 } from '../../src/adapters/node/node-http-adapter.ts';
 import type { NodeServeHost, NodeServer } from '../../src/adapters/node/node-http-adapter.ts';
@@ -456,5 +457,25 @@ describe('unrefTimer: a timer that does not keep the process alive', () => {
 
   it('is part of every runtime the shared base builds', () => {
     expect(createNodeRuntimeServices(buildNodeHost()).unrefTimer).toBe(crossUnrefTimer);
+  });
+});
+
+describe('failedBodyEnd: how a failed streamed body ends its response (CodeRabbit)', () => {
+  it('resets an HTTP/2 stream with INTERNAL_ERROR rather than destroying it with NO_ERROR', () => {
+    const calls: unknown[] = [];
+    const end = failedBodyEnd({
+      writeHead: () => undefined,
+      destroy: () => void calls.push('destroy'),
+      stream: { close: (code?: number) => void calls.push(['close', code]) },
+    });
+    end!();
+    expect(calls).toEqual([['close', 2]]);
+  });
+
+  it('destroys an HTTP/1.1 connection, and has nothing to call without a response', () => {
+    const calls: unknown[] = [];
+    failedBodyEnd({ writeHead: () => undefined, destroy: () => void calls.push('destroy') })!();
+    expect(calls).toEqual(['destroy']);
+    expect(failedBodyEnd(undefined)).toBeUndefined();
   });
 });

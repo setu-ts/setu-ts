@@ -101,6 +101,25 @@ describe('request context abort watcher', () => {
     expect(pre.aborts).toHaveLength(1);
   });
 
+  it('keeps the cleanup when reporting an already-aborted signal throws (CodeRabbit)', () => {
+    const client = new AbortController();
+    client.abort();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, createFakeRuntime().runtime);
+    const request = {
+      method: 'GET',
+      url: 'http://test/',
+      path: '/',
+      headers: new Headers(),
+      signal: client.signal,
+    } as IRequest;
+    const handle = createRequestContext(request, registry, createFakeRuntime().runtime, () => {
+      throw new Error('reporter broke');
+    });
+    expect(() => handle.ctx.defer?.(() => {})).not.toThrow();
+    expect(handle.takeDeferred()).toHaveLength(1);
+  });
+
   it('watches nothing for a request without a signal', () => {
     const { handle, aborts } = contextWith();
     handle.ctx.defer?.(() => {});

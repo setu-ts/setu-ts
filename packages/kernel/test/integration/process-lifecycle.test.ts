@@ -569,6 +569,87 @@ describe('a stop during start cancels the start (V13-43)', () => {
     },
   );
 
+  /** A logger plugin that runs `onInfo` for each info line, recording them. */
+  function reactingLogger(onInfo: (message: string) => void, lines: string[]): IPlugin {
+    const logger = {
+      level: 'info',
+      fatal: () => {},
+      error: () => {},
+      warn: (message: string) => void lines.push(message),
+      info: (message: string) => {
+        lines.push(message);
+        onInfo(message);
+      },
+      debug: () => {},
+      trace: () => {},
+      child: () => logger,
+    };
+    return {
+      name: 'reacting-logger',
+      version: '1.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.LOGGER, logger as never);
+      },
+    };
+  }
+
+  it('shuts down normally when a logger stops the app from the listening line (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    const lines: string[] = [];
+    let stopping: Promise<void> | undefined;
+    const app = createApplication({
+      plugins: [
+        runtimeWith(fake),
+        reactingLogger((message) => {
+          if (message === 'Server listening') stopping = app.stop();
+        }, lines),
+      ],
+    });
+    await app.start({ port: 4216 });
+    await stopping;
+    expect(lines).not.toContain('Startup cancelled');
+    expect(lines).toContain('Server stopped');
+  });
+
+  it('shares one shutdown when a logger calls stop() from the stopping line (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    const lines: string[] = [];
+    let shutdowns = 0;
+    let nested: Promise<void> | undefined;
+    const app = createApplication({
+      plugins: [
+        runtimeWith(fake, (ctx) => ctx.lifecycle.onShutdown(() => void shutdowns++)),
+        reactingLogger((message) => {
+          if (message === 'Server stopping') nested = app.stop();
+        }, lines),
+      ],
+    });
+    await app.start({ port: 4217 });
+    const outer = app.stop();
+    expect(nested).toBe(outer);
+    await outer;
+    expect(shutdowns).toBe(1);
+    expect(lines.filter((line) => line === 'Server stopping')).toHaveLength(1);
+  });
+
+  it('never waits past a 1 ms drain bound for a poll (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    const app = createApplication({ plugins: [runtimeWith(fake)] });
+    app.router.get('/hang', () => new Promise<never>(() => {}));
+    await app.start({ port: 4218, drainTimeoutMs: 1 });
+    void app.dispatch!(new Request('http://localhost/hang'));
+    await flush();
+    let stopped = false;
+    void app.stop().then(() => {
+      stopped = true;
+    });
+    await flush();
+    fake.tick(1);
+    await flush();
+    expect(stopped).toBe(true);
+  });
+
   it('runs no further startup hook once the start is cancelled (CodeRabbit)', async () => {
     const fake = createFakeRuntime();
     const first = deferred();

@@ -1008,6 +1008,7 @@ class Application implements IKernelApplication {
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       adapter.setHandler((request: IRequest) => this.#handleRequest(request));
     }
+    this.#continueStart();
 
     // 9. Listen only if adapter + port are available
     if (options?.port !== undefined) {
@@ -1047,6 +1048,9 @@ class Application implements IKernelApplication {
       if (listenOperation !== undefined) {
         collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
       }
+      // Committed before the listening line: a logger that calls stop() from
+      // it gets the normal shutdown, not a cancellation that cannot apply.
+      this.#startCommitted = true;
       this.#announceListening(options.port, options.hostname);
     }
     // Past the last cancellation check: a stop() from here on waits for the
@@ -1101,8 +1105,15 @@ class Application implements IKernelApplication {
     if (this.#stopPromise !== null) {
       return this.#stopPromise;
     }
-    this.#stopPromise = this.#doStop();
-    return this.#stopPromise;
+    // Published before `#doStop()` runs its first log line, so a logger that
+    // calls stop() from it shares this shutdown instead of starting another.
+    let settle!: { resolve: () => void; reject: (error: unknown) => void };
+    const stopping = new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    this.#stopPromise = stopping;
+    this.#doStop().then(settle.resolve, settle.reject);
+    return stopping;
   }
 
   async #doStop(): Promise<void> {
@@ -1305,7 +1316,7 @@ class Application implements IKernelApplication {
     }
 
     const syntheticRequest = new InjectedRequest(
-      request.method as HttpMethod,
+      request.method.toUpperCase() as HttpMethod,
       fullUrl,
       headers,
       bodyBytes,
@@ -1320,7 +1331,9 @@ class Application implements IKernelApplication {
     // what a real server sends, including for a streamed `GET`, whose source
     // is cancelled so its producer stops and its cleanups run.
     if (request.method.toUpperCase() === 'HEAD') {
-      if (snapshot.streaming) await snapshot.body.cancel().catch(() => undefined);
+      // Started, not awaited: a source whose cancel() never settles keeps its
+      // request's resources, but must not keep this answer from returning.
+      if (snapshot.streaming) void snapshot.body.cancel().catch(() => undefined);
       return {
         statusCode: snapshot.status,
         headers: snapshot.headers,
@@ -2174,6 +2187,10 @@ class Application implements IKernelApplication {
             this.#registry,
             complete,
             ctx.request.signal,
+            undefined,
+            // A source whose cancel() never settles holds the handler's
+            // resources past its settle: report that wait as for any stream.
+            this.#stallWatch(ctx),
           ),
           response.streamOptions,
         );
@@ -2190,15 +2207,33 @@ class Application implements IKernelApplication {
       response.stream(this.#guardStream(ctx, streamed), response.streamOptions);
     }
     // A streamed RPC reply holds the drain until it ends, so a gRPC server
-    // stream in flight at shutdown finishes instead of being cut. Other
-    // streams (SSE above all) are released here, as before: SSE closes its
+    // stream in flight at shutdown finishes instead of being cut, and so does
+    // a stream whose request registered `ctx.defer` cleanups. Other streams
+    // (SSE above all) are released here, as before: SSE closes its
     // connections only in `onClose`, after the drain, so holding them would
-    // make every stop wait out the whole bound.
+    // make every stop wait out the whole bound. They are still wrapped so a
+    // client that leaves cancels the source.
     const cleanups =
       handle.takeDeferred() ??
       (streamed !== undefined && this.#rpcStreams.has(ctx) ? [] : undefined);
     if (cleanups === undefined) {
       handle.disarmAbort();
+      if (streamed !== undefined) {
+        // A plain stream leaves the drain now, as before, but still learns
+        // that its client left: on a runtime that never cancels the body
+        // (workerd) the signal is the only notice. Its completion is not
+        // counted, so drain membership is unchanged.
+        response.stream(
+          wrapDeferredStream(
+            response.streamingBody ?? streamed,
+            [],
+            this.#registry,
+            () => {},
+            ctx.request.signal,
+          ),
+          response.streamOptions,
+        );
+      }
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
       return response;
@@ -3033,8 +3068,10 @@ class Application implements IKernelApplication {
 
     while (this.#inFlight > 0 && runtime.hrtime() < deadline && polls < maxPolls) {
       polls++;
+      // Never past the deadline: the last poll waits only the time remaining.
+      const wait = Math.min(DRAIN_POLL_MS, Math.max(0, deadline - runtime.hrtime()));
       await new Promise<void>((resolve) => {
-        runtime.setTimeout(() => resolve(), DRAIN_POLL_MS);
+        runtime.setTimeout(() => resolve(), wait);
       });
     }
     const remaining = this.#inFlight;

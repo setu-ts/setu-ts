@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 import { wrapDeferredStream } from '../../src/context/deferred.ts';
 import type { StallWatch } from '../../src/context/deferred.ts';
@@ -179,6 +180,81 @@ describe('wrapDeferredStream and the request signal', () => {
     return { stream: new ReadableStream<Uint8Array>({ cancel: () => held }), release };
   }
 
+  /** A fake runtime whose timers fire at absolute deadlines on a cumulative clock. */
+  function deadlineRuntime(): { runtime: IRuntimeServices; advance: (ms: number) => void } {
+    const base = createFakeRuntime().runtime;
+    let now = 0;
+    let next = 0;
+    const timers = new Map<number, { due: number; fn: () => void }>();
+    const runtime = Object.assign(Object.create(base) as IRuntimeServices, {
+      hrtime: () => now,
+      setTimeout: (fn: () => void, ms: number) => {
+        next++;
+        timers.set(next, { due: now + ms, fn });
+        return next;
+      },
+      clearTimeout: (handle: unknown) => void timers.delete(handle as number),
+    });
+    const advance = (ms: number): void => {
+      now += ms;
+      for (const [id, timer] of [...timers]) {
+        if (timer.due <= now) {
+          timers.delete(id);
+          timer.fn();
+        }
+      }
+    };
+    return { runtime, advance };
+  }
+
+  it('warns at exactly 30 000 ms, once (CodeRabbit)', async () => {
+    const { runtime, advance } = deadlineRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, runtime);
+    const stall = stallWatch();
+    const client = new AbortController();
+    wrapDeferredStream(
+      heldCancel().stream,
+      [() => {}],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      stall.watch,
+    );
+    client.abort();
+    await settle();
+    advance(29_999);
+    await settle();
+    expect(stall.warned).toEqual([]);
+    advance(1);
+    await settle();
+    expect(stall.warned).toEqual([30_000]);
+    advance(60_000);
+    await settle();
+    expect(stall.warned).toEqual([30_000]);
+  });
+
+  it('does not let a throwing abort reporter skip the cancel or the cleanups (CodeRabbit)', async () => {
+    let cancelled = 0;
+    let cleaned = 0;
+    const client = new AbortController();
+    client.abort();
+    wrapDeferredStream(
+      endless(() => void cancelled++),
+      [() => void cleaned++],
+      withRuntime().registry,
+      () => {},
+      client.signal,
+      () => {
+        throw new Error('reporter broke');
+      },
+    );
+    await settle();
+    expect(cancelled).toBe(1);
+    expect(cleaned).toBe(1);
+  });
+
   it('warns once, after 30 s, while cancel() has not settled, and still holds the cleanups', async () => {
     const fake = createFakeRuntime();
     const registry = new ServiceRegistry();
@@ -348,14 +424,32 @@ describe('wrapDeferredStream and the request signal', () => {
 
   it('runs the cleanups without waiting for a source with no cancel()', async () => {
     let cleaned = 0;
+    let pulling!: () => void;
+    const pulled = new Promise<void>((resolve) => {
+      pulling = resolve;
+    });
     const client = new AbortController();
-    wrapDeferredStream(
-      new ReadableStream<Uint8Array>({ pull: () => new Promise<void>(() => {}) }),
+    const wrapped = wrapDeferredStream(
+      new ReadableStream<Uint8Array>(
+        {
+          pull: () => {
+            pulling();
+            return new Promise<void>(() => {});
+          },
+        },
+        { highWaterMark: 0 },
+      ),
       [() => void cleaned++],
       withRuntime().registry,
       () => {},
       client.signal,
     );
+    // A pull is pending when the client leaves (CodeRabbit).
+    void wrapped
+      .getReader()
+      .read()
+      .catch(() => undefined);
+    await pulled;
     client.abort();
     await settle();
     expect(cleaned).toBe(1);
