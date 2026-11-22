@@ -660,7 +660,10 @@ describe('a stop during start cancels the start (V13-43)', () => {
       },
     };
     const app = createApplication({
-      plugins: [runtimeWith(fake, (ctx) => ctx.lifecycle.onInit(() => first.promise)), loggerPlugin],
+      plugins: [
+        runtimeWith(fake, (ctx) => ctx.lifecycle.onInit(() => first.promise)),
+        loggerPlugin,
+      ],
     });
     const starting = app.start({ port: 4219 });
     starting.catch(() => undefined);
