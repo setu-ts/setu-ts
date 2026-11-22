@@ -10,11 +10,18 @@
  */
 
 import process from 'node:process';
-import { nodeProcess, nodeRuntime, runMain } from '@setu-ts/cli/main';
-import { createArgs } from './index.ts';
+import { nodeFloorRefusal } from '@setu-ts/cli/node-version';
 
-const host = nodeProcess();
-process.exitCode = await runMain(nodeRuntime(), {
-  ...host,
-  args: createArgs(host.args),
-});
+const refusal = nodeFloorRefusal(process.versions, 'Deno' in globalThis);
+if (refusal !== undefined) {
+  process.stderr.write(`${refusal}\n`);
+  process.exitCode = 1;
+} else {
+  const { nodeProcess, nodeRuntime, runMain } = await import('@setu-ts/cli/main');
+  const { createArgs } = await import('./index.ts');
+  const host = nodeProcess();
+  process.exitCode = await runMain(nodeRuntime(), {
+    ...host,
+    args: createArgs(host.args),
+  });
+}

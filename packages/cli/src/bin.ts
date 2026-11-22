@@ -10,6 +10,13 @@
  */
 
 import process from 'node:process';
-import { nodeProcess, nodeRuntime, runMain } from './main.ts';
+import { nodeFloorRefusal } from './utils/node-version.ts';
 
-process.exitCode = await runMain(nodeRuntime(), nodeProcess());
+const refusal = nodeFloorRefusal(process.versions, 'Deno' in globalThis);
+if (refusal !== undefined) {
+  process.stderr.write(`${refusal}\n`);
+  process.exitCode = 1;
+} else {
+  const { nodeProcess, nodeRuntime, runMain } = await import('./main.ts');
+  process.exitCode = await runMain(nodeRuntime(), nodeProcess());
+}
