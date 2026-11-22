@@ -331,9 +331,12 @@ never listens. `stop()` resolves; the kernel logs `Startup cancelled` at `warn`.
 `router.match('HEAD', path)` ranks the `GET` routes with the `HEAD` routes, so every `GET` route
 answers `HEAD`; at equal rank an explicit `HEAD` route wins. Over a server the adapter sends no
 body; `inject()` and `dispatch()` drop the body themselves and keep the headers, cancelling a
-streamed body. A request's `ctx.defer` cleanups also run, once, when the request's own signal aborts
-before the response is handed back, logged as `Request aborted before completion`. A streamed body
-whose source fails is logged once as `Response stream failed`
+streamed body. When the request's own signal aborts before the response is handed back, the kernel
+logs `Request aborted before completion` at once (for a request that called `ctx.defer`); its
+cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
+released under a running handler, and a handler that never settles keeps what it holds. A streamed
+body's cleanups run once when the signal aborts, even on a runtime that never cancels the body. A
+streamed body whose source fails is logged once as `Response stream failed`
 (`{ requestId, method, path, status, error }`), and the error still aborts the response.
 
 ### Route Introspection

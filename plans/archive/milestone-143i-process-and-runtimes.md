@@ -60,12 +60,12 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                                                          | Doc deliverable (same PR)                                                                            |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| C1  | `IRequestContext.defer` JSDoc (`common/src/http.ts:382-399`) promises cleanup on stream end, error or cancellation; on workerd a client leaving triggers none of the three. | The code is brought up to the contract (§3.12); the JSDoc gains "or the request's signal aborting".                                               | `common/src/http.ts` JSDoc; `PUBLIC_API.md` defer paragraph.                                         |
-| C2  | grpc-plugin README "a server shutting down refuses a call already on the wire" vs the kernel answering 503 for the drain and closing sessions after it.                     | The kernel sends GOAWAY at drain start (§3.6); the README stays, the remaining 503 window is M143c's half.                                        | None in this lane (grpc-plugin README belongs to M143c; §9 names the sentence).                      |
-| C4  | `PUBLIC_API.md:238-239` documents `gracefulShutdown`/`shutdownTimeout`, which do not exist; this PR adds the real bound, `StartOptions.drainTimeoutMs`.                     | Delete the two stale lines and point at `StartOptions.drainTimeoutMs` in this PR (the `PUBLIC_API.md` half of V13-129; M143n is told it is done). | `PUBLIC_API.md`.                                                                                     |
-| C3  | `RuntimeSignal` JSDoc says the two signals are "the only two every non-edge runtime can register for"; SIGHUP is registrable on Node, Bun and Deno-on-POSIX.                | Widen to SIGHUP with the reason written down (§3.2).                                                                                              | `common/src/runtime.ts` JSDoc; `PUBLIC_API.md`; `docs/deployment.md` shutdown block is M143n's (§9). |
+| #   | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                                                                                                                                      | Doc deliverable (same PR)                                                                            |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| C1  | `IRequestContext.defer` JSDoc (`common/src/http.ts:382-399`) promises cleanup on stream end, error or cancellation; on workerd a client leaving triggers none of the three. | The code is brought up to the contract for a streamed body (§3.12); the JSDoc gains "or the request's signal aborting" and states that an abort never runs cleanups under a running handler (maintainer decision 2026-11-22). | `common/src/http.ts` JSDoc; `PUBLIC_API.md` defer paragraph.                                         |
+| C2  | grpc-plugin README "a server shutting down refuses a call already on the wire" vs the kernel answering 503 for the drain and closing sessions after it.                     | The kernel sends GOAWAY at drain start (§3.6); the README stays, the remaining 503 window is M143c's half.                                                                                                                    | None in this lane (grpc-plugin README belongs to M143c; §9 names the sentence).                      |
+| C4  | `PUBLIC_API.md:238-239` documents `gracefulShutdown`/`shutdownTimeout`, which do not exist; this PR adds the real bound, `StartOptions.drainTimeoutMs`.                     | Delete the two stale lines and point at `StartOptions.drainTimeoutMs` in this PR (the `PUBLIC_API.md` half of V13-129; M143n is told it is done).                                                                             | `PUBLIC_API.md`.                                                                                     |
+| C3  | `RuntimeSignal` JSDoc says the two signals are "the only two every non-edge runtime can register for"; SIGHUP is registrable on Node, Bun and Deno-on-POSIX.                | Widen to SIGHUP with the reason written down (§3.2).                                                                                                                                                                          | `common/src/runtime.ts` JSDoc; `PUBLIC_API.md`; `docs/deployment.md` shutdown block is M143n's (§9). |
 
 ## 3. Design decisions
 
@@ -315,6 +315,34 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   real Node server (Bun and Deno arms guarded on the binary) a fully read stream runs its cleanups
   once, after the last chunk, so no runtime aborts the signal early, and a client that leaves runs
   them once; verification on local `wrangler dev` (§7), recorded in the PR.
+
+- **Revised 2026-11-22 after the security audit (maintainer decision: "accept your change to
+  §3.12").** The audit measured the original rule's hazard: cleanups run on abort under a handler
+  that is still running, so a DI request scope was disposed under it
+  (`handler resumed (conn.open=false)`) and a concurrency limit of 2 released through `defer` let
+  connect-and-leave clients run 12 handlers at once. The rule is now:
+  - an abort before the response settles logs `Request aborted before completion` at once (for a
+    request that called `ctx.defer`; the request-context watcher only logs);
+  - `ctx.defer` cleanups run once the handler has settled, through the settle path; if it has
+    already settled (a streamed body the isolate produces), `wrapDeferredStream` runs them at once
+    on the signal, as before;
+  - a handler that never settles keeps its resources. The "a non-streaming handler that never
+    settles still runs its cleanups on abort" case is dropped, its test removed, and the JSDoc and
+    READMEs say so.
+  - Test home: `di-plugin/test/e2e/request-scope-e2e.test.ts` (a request scope is not disposed under
+    a live handler whose client left, and is disposed when it settles);
+    `kernel/test/integration/request-edges.test.ts` (a limit of 2 released through `defer` never
+    admits more than 2 handlers under connect-and-leave clients; a stream the client stops reading
+    still runs its cleanup); the workerd stream half re-proved on local `wrangler dev`.
+
+  | Framework     | When a client leaves mid-request                                                                                                                           |
+  | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | ASP.NET Core  | `HttpContext.RequestAborted` is a cancellation token the handler must observe; nothing is cancelled for it (scope disposal timing not found in the lookup) |
+  | Fastify       | `onRequestAbort` fires; the guide's handler runs to completion                                                                                             |
+  | Go `net/http` | Not looked up                                                                                                                                              |
+
+  Looked up 2026-11-22, evidence partial. Nothing found releases request resources under a running
+  handler; the decision rests mainly on the audit's measurement.
 
 ### 3.13 Bun idle streams (V13-42)
 
@@ -676,6 +704,6 @@ response and then gives up the socket; it holds no descriptor after its bytes ar
 | `HEAD` skips a `GET` route's authorization                    | `HEAD` matches the `GET` route itself, so its middleware runs (§3.10).                                |
 | Stream-source error text reaches a body or stderr             | One logged line; Node destroys, Bun errors silently, Deno's `onError` stays quiet (§3.14).            |
 | The fatal-error observer changes whether the process ends     | Observes only; on Bun it removes itself and raises the rejection again rather than rethrowing (§3.1). |
-| Abort-time cleanup releases resources under a running handler | As §3.12 decides (see the maintainer's decision recorded there).                                      |
+| Abort-time cleanup releases resources under a running handler | Cleanups wait for the handler to settle; only a streamed body's run on the signal (§3.12, revised).   |
 | A 499 hides a server fault from status-based alerting         | Accepted under decision 3 (§10); the kernel's error line still records the fault.                     |
 | Bun streams lose the 10 s idle limit                          | Deliberate parity with Node and Deno (§3.13); a stream's own heartbeat or the drain bound applies.    |

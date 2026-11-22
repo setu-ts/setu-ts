@@ -39,9 +39,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
   produced (for example a Problem Details 401) instead of a bare status line, and `rejectRawUpgrade`
   writes `401 Unauthorized` (not `401 Bad Request`), with an empty reason phrase for a status it
   does not name.
-- **Workers.** `ctx.defer` cleanups run when a client leaves only if the request's signal fires: add
-  `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the compatibility date
-  is before 2026-11-17.
+- **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
+  signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
+  compatibility date is before 2026-11-17.
 
 ### Module pages (`@setu-ts/cli`)
 

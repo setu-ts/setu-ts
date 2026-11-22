@@ -41,13 +41,14 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/kernel` (M143i).** Every `GET` route answers `HEAD` with the `GET`'s headers and no
   body; an explicit `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all
-  `HEAD` (V13-113). A request's `ctx.defer` cleanups also run when its own signal aborts first, so a
-  client that leaves on workerd, or a handler that never settles, still runs them, with a
-  `Request aborted before completion` line (V13-200). A failed response stream is logged once,
-  `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or gRPC-Web
-  reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()` cancels the
-  start: its close hooks run, a close hook registered later runs at once, and the application never
-  listens (V13-43).
+  `HEAD` (V13-113). A client that leaves before the response is logged at once as
+  `Request aborted before completion`; a streamed body's `ctx.defer` cleanups run when the request's
+  signal aborts, so a client that leaves on workerd still runs them, while other cleanups wait for
+  the handler to settle and are never run under it (V13-200). A failed response stream is logged
+  once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
+  gRPC-Web reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()`
+  cancels the start: its close hooks run, a close hook registered later runs at once, and the
+  application never listens (V13-43).
 - **`@setu-ts/runtime` (M143i).** Node answers a refused WebSocket upgrade with the framework's
   response (status, reason phrase, headers, body), as Bun and Deno do; `rejectRawUpgrade` takes its
   reason phrases from a status table (V13-53). Bun keeps a quiet response stream open past its 10 s
