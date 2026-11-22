@@ -5,7 +5,8 @@
  * at run time, so Node (type stripping), Bun and Deno all run it from source.
  *
  * Arguments: `throw` | `reject`, and optionally `own-listener` to give the
- * application its own `unhandledRejection` listener first.
+ * application its own `unhandledRejection` listener first, or
+ * `own-exception-listener` to give it its own `uncaughtException` listener.
  *
  * @module
  */
@@ -28,6 +29,12 @@ const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 if (extra === 'own-listener') {
   process.on('unhandledRejection', () => {
     process.stdout.write('{"own":true}\n');
+  });
+}
+
+if (extra === 'own-exception-listener') {
+  process.on('uncaughtException', () => {
+    process.stdout.write('{"caught":true}\n');
   });
 }
 

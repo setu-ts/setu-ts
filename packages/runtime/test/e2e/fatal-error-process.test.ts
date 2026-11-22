@@ -63,3 +63,18 @@ describe('fatal-error observer on bun with an application listener', () => {
     expect(status).toBe(0);
   });
 });
+
+describe('a rejection when the application has its own uncaughtException listener', () => {
+  it.skipIf(!installed('bun'))('still ends Bun, which never routes a rejection to it', () => {
+    const { status, lines, stderr } = run(runtimes[1]!, 'reject', 'own-exception-listener');
+    expect(lines).toEqual([{ origin: 'unhandledRejection', message: 'fatal-reject' }]);
+    expect(status).toBe(1);
+    expect(stderr).toContain('fatal-reject');
+  });
+
+  it('leaves Node alive with nothing reported, as Node hands the rejection to that listener', () => {
+    const { status, lines } = run(runtimes[0]!, 'reject', 'own-exception-listener');
+    expect(lines).toEqual([{ caught: true }, { alive: true }]);
+    expect(status).toBe(0);
+  });
+});

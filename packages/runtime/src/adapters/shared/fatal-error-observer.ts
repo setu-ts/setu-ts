@@ -132,42 +132,46 @@ function nodeObserver(proc: ProcessEventHost): Subscribe {
  * never a rejection, and a Bun `unhandledRejection` listener suppresses the
  * crash (measured on Bun 1.4.5: the process lived and exited 0). So the
  * rejection listener reports and then, when it is the only
- * `unhandledRejection` listener, rethrows the reason, which crashes the
- * process as Bun would have. When the application registered its own
- * listener it chose not to crash, and nothing is reported or rethrown; nor is
- * a thrown error the application's own `uncaughtException` listener handles. The rethrown
- * reason is remembered so the monitor does not report the crash twice.
+ * `unhandledRejection` listener, removes itself and raises the reason again
+ * as a fresh rejection: with no listener left, Bun ends the process exactly
+ * as it would have (exit 1, its own `error:` line). A rethrow would land in an
+ * application `uncaughtException` listener, which Bun never hands a rejection
+ * to (measured: such a listener does not keep a rejecting Bun process alive).
+ * When the application registered its own rejection listener it chose not to
+ * crash, and nothing is reported or raised; nor is a thrown error the
+ * application's own `uncaughtException` listener handles.
  *
  * @param proc - The process
+ * @param raise - Raises the reason as a fresh rejection; a seam for tests
  * @returns The `onFatalError` implementation
  */
 export function createBunFatalErrorObserver(
   proc: ProcessEventHost,
+  raise: (reason: unknown) => void = raiseRejection,
 ): (handler: FatalErrorHandler) => () => void {
-  return shared(proc, 'bun', () => bunObserver(proc));
+  return shared(proc, 'bun', () => bunObserver(proc, raise));
+}
+
+/** Raises a reason as a fresh, unhandled rejection. */
+function raiseRejection(reason: unknown): void {
+  void Promise.reject(reason);
 }
 
 /** Builds the Bun observer for {@linkcode createBunFatalErrorObserver}. */
-function bunObserver(proc: ProcessEventHost): Subscribe {
+function bunObserver(proc: ProcessEventHost, raise: (reason: unknown) => void): Subscribe {
   return handlerSet((notify) => {
-    const rethrown = new WeakSet<object>();
     const monitor = (error: unknown): void => {
-      if (typeof error === 'object' && error !== null && rethrown.has(error)) return;
       // The application's own `uncaughtException` listener keeps it alive.
       if (proc.listenerCount('uncaughtException') > 0) return;
       notify(error, 'uncaughtException');
     };
     const rejection = (reason: unknown): void => {
       // Another listener is the application's own: it chose not to crash, so
-      // nothing is ending and nothing is reported or rethrown.
+      // nothing is ending and nothing is reported or raised.
       if (proc.listenerCount('unhandledRejection') !== 1) return;
       notify(reason, 'unhandledRejection');
-      const thrown =
-        typeof reason === 'object' && reason !== null
-          ? reason
-          : new Error(`Unhandled rejection: ${String(reason)}`);
-      rethrown.add(thrown);
-      throw thrown;
+      proc.off('unhandledRejection', rejection as (...args: unknown[]) => void);
+      raise(reason);
     };
     proc.on('uncaughtExceptionMonitor', monitor as (...args: unknown[]) => void);
     proc.on('unhandledRejection', rejection as (...args: unknown[]) => void);

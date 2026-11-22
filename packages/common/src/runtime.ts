@@ -464,10 +464,11 @@ export interface IRuntimeServices {
    * Observes an error that is about to end the process: an uncaught exception
    * or an unhandled rejection. The handler runs before the process dies, so a
    * structured logger can record why it died. On Node and Bun an error the
-   * application handles itself (its own `uncaughtException` or
-   * `unhandledRejection` listener) is not reported, since the process survives
-   * it; Deno cannot tell whether a later listener calls `preventDefault()`, so
-   * it reports such an error too.
+   * application handles itself is not reported, since the process survives
+   * it: an `unhandledRejection` listener handles a rejection, an
+   * `uncaughtException` listener a throw (and on Node a rejection too; Bun
+   * never hands it one). Deno cannot tell whether a later listener calls
+   * `preventDefault()`, so it reports such an error too.
    *
    * It OBSERVES only. The process still ends with the runtime's own exit code
    * and the runtime still prints its own report on stderr; registering a
@@ -476,8 +477,9 @@ export interface IRuntimeServices {
    * `unhandledrejection` events, without `preventDefault()`; Bun
    * `uncaughtExceptionMonitor` for thrown errors and, because a Bun
    * `unhandledRejection` listener would otherwise suppress the crash, an
-   * `unhandledRejection` listener that rethrows the reason unless the
-   * application registered its own. Each handler is called once per crash.
+   * `unhandledRejection` listener that removes itself and raises the reason
+   * again, so Bun ends the process itself, unless the application registered
+   * its own. Each handler is called once per crash.
    *
    * Absent on Cloudflare Workers, where an exception ends a request, not the
    * isolate. A handler that throws is ignored.

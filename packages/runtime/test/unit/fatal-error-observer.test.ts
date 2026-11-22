@@ -88,36 +88,32 @@ describe('Node observer', () => {
 });
 
 describe('Bun observer', () => {
-  it('rethrows an unhandled rejection when it is the only listener, reporting it once', () => {
+  it('reports an unhandled rejection once, then removes itself and raises it again', () => {
     const proc = new FakeProcess();
-    const subscribe = createBunFatalErrorObserver(proc);
+    const raised: unknown[] = [];
+    const subscribe = createBunFatalErrorObserver(proc, (reason) => raised.push(reason));
     const seen = recorder();
     subscribe(seen.handler);
     const reason = new Error('rejected');
-    expect(() => proc.emit('unhandledRejection', reason)).toThrow(reason);
-    // Bun turns the rethrow into an uncaught exception: not reported again.
-    proc.emit('uncaughtExceptionMonitor', reason, 'uncaughtException');
+    proc.emit('unhandledRejection', reason);
     expect(seen.seen).toEqual([[reason, 'unhandledRejection']]);
+    expect(raised).toEqual([reason]);
+    // With no listener left, Bun itself ends the process on the raised rejection.
+    expect(proc.listenerCount('unhandledRejection')).toBe(0);
   });
 
-  it('wraps a primitive reason so the rethrow is recognised too', () => {
+  it('raises it even when the application has an uncaughtException listener (code-review)', () => {
     const proc = new FakeProcess();
-    const subscribe = createBunFatalErrorObserver(proc);
+    proc.on('uncaughtException', () => {});
+    const raised: unknown[] = [];
     const seen = recorder();
-    subscribe(seen.handler);
-    let thrown: unknown;
-    try {
-      proc.emit('unhandledRejection', 'plain');
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(Error);
-    expect((thrown as Error).message).toBe('Unhandled rejection: plain');
-    proc.emit('uncaughtExceptionMonitor', thrown, 'uncaughtException');
+    createBunFatalErrorObserver(proc, (reason) => raised.push(reason))(seen.handler);
+    proc.emit('unhandledRejection', 'plain');
     expect(seen.seen).toEqual([['plain', 'unhandledRejection']]);
+    expect(raised).toEqual(['plain']);
   });
 
-  it('does not rethrow when the application has its own rejection listener', () => {
+  it('does not raise when the application has its own rejection listener', () => {
     const proc = new FakeProcess();
     proc.on('unhandledRejection', () => {});
     const subscribe = createBunFatalErrorObserver(proc);
@@ -158,12 +154,15 @@ describe('one observer per process (code-review M1)', () => {
     const proc = new FakeProcess();
     const first = recorder();
     const second = recorder();
-    createBunFatalErrorObserver(proc)(first.handler);
-    createBunFatalErrorObserver(proc)(second.handler);
+    const raised: unknown[] = [];
+    const raise = (reason: unknown): void => void raised.push(reason);
+    createBunFatalErrorObserver(proc, raise)(first.handler);
+    createBunFatalErrorObserver(proc, raise)(second.handler);
     expect(proc.listenerCount('unhandledRejection')).toBe(1);
     expect(proc.listenerCount('uncaughtExceptionMonitor')).toBe(1);
     const reason = new Error('boom');
-    expect(() => proc.emit('unhandledRejection', reason)).toThrow(reason);
+    proc.emit('unhandledRejection', reason);
+    expect(raised).toEqual([reason]);
     expect(first.seen).toEqual([[reason, 'unhandledRejection']]);
     expect(second.seen).toEqual([[reason, 'unhandledRejection']]);
   });
