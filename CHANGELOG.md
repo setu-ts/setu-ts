@@ -42,17 +42,17 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
-  no body; an explicit `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all
-  `HEAD` (V13-113). A client that leaves before the response is logged at once as
-  `Request aborted before completion` (for a request that called `ctx.defer`); a streamed body's
-  `ctx.defer` cleanups run when the request's signal aborts, so a client that leaves on workerd
-  still runs them, while other cleanups wait for the handler to settle and are never run under it
-  (V13-200). On that abort the kernel cancels the body and runs the cleanups once its `cancel()`
-  settles, with no time limit, so a `cancel()` that never settles keeps the request's resources. It
-  cannot see a source's `pull` or a pump it started: a source that does work of its own must make
-  `cancel()` wait for it, and a source with no `cancel()` gets no wait, so a limit released through
-  `defer` does not cover work in its `pull`. With a logger registered, a wait still pending after 30
-  s logs one `warn` line,
+  no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
+  `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A
+  client that leaves before the response is logged at once as `Request aborted before completion`
+  (for a request that called `ctx.defer`); a streamed body's `ctx.defer` cleanups run when the
+  request's signal aborts, so a client that leaves on workerd still runs them, while other cleanups
+  wait for the handler to settle and are never run under it (V13-200). On that abort the kernel
+  cancels the body and runs the cleanups once its `cancel()` settles, with no time limit, so a
+  `cancel()` that never settles keeps the request's resources. It cannot see a source's `pull` or a
+  pump it started: a source that does work of its own must make `cancel()` wait for it, and a source
+  with no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its
+  `pull`. With a logger registered, a wait still pending after 30 s logs one `warn` line,
   `Request cleanup still waiting for the response stream to stop; its resources are still held`,
   with `{ requestId, method, path, waitedMs }`, and releases nothing. A failed response stream is
   logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
@@ -67,7 +67,10 @@ All notable changes to this project are documented here. The format follows
   runtime cannot honour it (V13-41). A failed response stream is cut off without the runtime
   printing it on Node, Bun and Deno, and Node no longer writes `Error: <message>` into the body
   (V13-256). A Deno server configured for HTTP/2 states at listen that it sends no `GOAWAY` when
-  draining.
+  draining. A rejecting response-trailers promise on Node is reported as `Response trailers failed`.
+  Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain) are logged at `warn`, faults at
+  `error`. `onFatalError` does not report a throw an application captures with
+  `process.setUncaughtExceptionCaptureCallback`.
 - **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
   accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
   for a request whose client left before the response (the logger-plugin half of V13-110), so alerts

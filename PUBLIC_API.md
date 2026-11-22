@@ -332,14 +332,16 @@ closes that handle as soon as it resolves. `stop()` resolves; the kernel logs `S
 
 `router.match('HEAD', path)` ranks the `GET` routes with the `HEAD` routes, so every `GET` route
 answers `HEAD`; at equal rank an explicit `HEAD` route wins. Over a server the adapter sends no
-body; `inject()` and `dispatch()` drop the body themselves and keep the headers, cancelling a
-streamed body. When the request's own signal aborts before the response is handed back, the kernel
-logs `Request aborted before completion` at once (for a request that called `ctx.defer`); its
-cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
-released under a running handler, and a handler that never settles keeps what it holds. A streamed
-body's cleanups run once when the signal aborts, even on a runtime that never cancels the body: the
-kernel cancels the body first and runs them once its `cancel()` settles, with no time limit, so a
-`cancel()` that never settles keeps the request's resources. It waits for the source's `cancel()`,
+body; `inject()`, `dispatch()` and `app.fetch()` drop the body themselves and keep the headers,
+cancelling a streamed body. When the request's own signal aborts before the response is handed back,
+the kernel logs `Request aborted before completion` at once (for a request that called `ctx.defer`);
+its cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
+released under a running handler, and a handler that never settles keeps what it holds. Every
+streamed body the kernel wraps is cancelled when the request's signal aborts, with or without
+cleanups (an early middleware stream too), so a client that leaves releases the source and the drain
+even on a runtime that never cancels the body. A streamed body's cleanups run once on that abort:
+the kernel cancels the body first and runs them once its `cancel()` settles, with no time limit, so
+a `cancel()` that never settles keeps the request's resources. It waits for the source's `cancel()`,
 not for its `pull` or any pump it started, which no reader can see; a source that does work of its
 own (in `pull`, or a pump it started) must make its `cancel()` wait for that work, and a source with
 no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`.
@@ -975,7 +977,8 @@ stderr are unchanged. Node uses `uncaughtExceptionMonitor`; Deno the global `err
 the reason again, so Bun ends the process itself, unless the application has its own. Each handler
 is called once per crash. On Node and Bun an error the application handles itself is not reported:
 Node's `uncaughtException` listener handles a throw or a rejection, Bun's only a throw (Bun never
-hands it a rejection, which still ends the process and is reported), and an `unhandledRejection`
+hands it a rejection, which still ends the process and is reported), a capture callback
+(`process.setUncaughtExceptionCaptureCallback`) handles a throw, and an `unhandledRejection`
 listener handles a rejection on both. Deno cannot tell and reports it. On Bun the observer assumes
 the default `--unhandled-rejections` mode: under `warn` or `none`, where Bun survives a rejection,
 it reports the first one as fatal and observes no later rejection. One process listener per
