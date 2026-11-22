@@ -1,4 +1,5 @@
 /** Rewrites only CLI-managed barrels using their schematic renderers. @module */
+import { runWithProjectLock, type IProjectLockDependencies } from '../utils/project-lock.ts';
 import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { stringFlag, type ParsedArgs } from '../args.ts';
 import { forEachProject, type ICheckDependencies } from './check.ts';
@@ -49,7 +50,22 @@ async function workspaceTransportModule(fs: IFileSystem, dir: string): Promise<s
 }
 
 /** Plans, formats and transactionally writes the same barrels as generate. */
-export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies): Promise<number> {
+export async function runSyncCommand(
+  args: ParsedArgs,
+  deps: ICheckDependencies & IProjectLockDependencies,
+): Promise<number> {
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  return await runWithProjectLock(
+    deps,
+    dir,
+    args.flags['dry-run'] !== true && args.flags.help !== true && args.flags.h !== true,
+    'sync',
+    () => syncUnlocked(args, deps),
+  );
+}
+
+/** Reconciles workspace members beneath the callers single lock. */
+async function syncUnlocked(args: ParsedArgs, deps: ICheckDependencies): Promise<number> {
   if (args.flags.help === true || args.flags.h === true) {
     deps.log('Usage: setu sync [--dir <path>] [--dry-run]');
     deps.log('  --dir <path>  Sync this project or workspace instead of the CWD');

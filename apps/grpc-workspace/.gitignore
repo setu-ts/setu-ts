@@ -2,6 +2,7 @@ node_modules/
 apps/*/node_modules/
 libs/*/node_modules/
 coverage/
+.setu-ts/write.lock/
 apps/*/dist/
 apps/*/build/
 .react-router/

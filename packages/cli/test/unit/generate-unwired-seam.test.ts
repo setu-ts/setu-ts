@@ -249,7 +249,7 @@ it('refuses an uninstalled starter-owned job queue before writing, including dry
         '/app/setu.config.ts': `import { ${symbol} } from '@setu-ts/${pkg}';`,
       });
       expect(await h.run(['job', 'email', ...(dryRun ? ['--dry-run'] : [])])).toBe(1);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
       expect(h.out.lines).toEqual([]);
       expect(h.err.text()).toContain(
         'The "job" schematic requires @setu-ts/queue-plugin, which is not installed in /app.',
@@ -283,7 +283,7 @@ it('M140b names the Workers refusal instead of an add command that would refuse'
       });
       expect(await h.run([...args])).toBe(1);
       if (runtime === 'cloudflare-workers') {
-        expect(h.fs.writes).toEqual([]);
+        expect(h.fs.projectWrites).toEqual([]);
         expect(h.err.text()).toContain(
           '@setu-ts/queue-plugin is not available on a cloudflare-workers project:',
         );

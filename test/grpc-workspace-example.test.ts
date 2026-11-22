@@ -67,6 +67,8 @@ const DELETED: Readonly<Record<string, string>> = {
   'apps/billing/proto/billing/v1/billing.proto':
     'the stub proto; the contract lives in libs/contracts',
   'apps/billing/proto/README.md': 'describes the per-member toolchain the example removes',
+  'scripts/test.mjs':
+    'the npm runner behind the generated root test; the root test here runs every member through pnpm',
 };
 
 /** Generated files the example keeps under another name, unchanged. */

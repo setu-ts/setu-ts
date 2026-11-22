@@ -87,7 +87,7 @@ describe('setu generate, with seams', () => {
 
     expect(await h.run(['health-indicator', 'external-api'])).toBe(0);
 
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/app/src/health/external-api.indicator.ts',
       '/app/src/health/index.ts',
     ]);
@@ -129,13 +129,13 @@ describe('setu generate, with seams', () => {
     const h = harness();
     expect(await h.run(['health-indicator', 'billing'])).toBe(0);
     const before = h.fs.read('/app/src/health/index.ts');
-    const writesAfterFirst = [...h.fs.writes];
+    const writesAfterFirst = [...h.fs.projectWrites];
 
     expect(await h.run(['health-indicator', 'billing'])).toBe(1);
 
     expect(h.err.lines.join('\n')).toContain('billing.indicator.ts');
     // Check-all-then-write-all: the barrel is not touched either.
-    expect([...h.fs.writes]).toEqual(writesAfterFirst);
+    expect([...h.fs.projectWrites]).toEqual(writesAfterFirst);
     expect(h.fs.read('/app/src/health/index.ts')).toBe(before);
   });
 
@@ -148,7 +148,7 @@ describe('setu generate, with seams', () => {
       'would create /app/src/health/external-api.indicator.ts',
       'would create /app/src/health/index.ts',
     ]);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   // The skip report exists to name a STALE artifact. Pointing it at a correct one is
@@ -256,7 +256,7 @@ describe('setu generate, with seams', () => {
     it('still exits 0, because the generate itself succeeded', async () => {
       const h = harness(PRE_M60);
       expect(await h.run(['middleware', 'request-id'])).toBe(0);
-      expect(h.fs.writes).toContain('/app/src/middleware/request-id.middleware.ts');
+      expect(h.fs.projectWrites).toContain('/app/src/middleware/request-id.middleware.ts');
     });
 
     it('admits it again once it is regenerated', async () => {
@@ -316,7 +316,7 @@ describe('setu generate, with seams', () => {
     it('still exits 0, because the generate itself succeeded', async () => {
       const h = harness(PRE_M70D);
       expect(await h.run(['command-handler', 'current'])).toBe(0);
-      expect(h.fs.writes).toContain('/app/src/cqrs/current.command-handler.ts');
+      expect(h.fs.projectWrites).toContain('/app/src/cqrs/current.command-handler.ts');
     });
   });
 
@@ -363,7 +363,7 @@ describe('setu generate, with seams', () => {
       expect(await h.run(['service', 'widget'])).toBe(2);
 
       expect(h.err.lines.join('\n')).toContain('This project uses modules; pass --module <name>');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     it('refuses a module whose path a controller already mounts', async () => {
@@ -377,7 +377,7 @@ describe('setu generate, with seams', () => {
       expect(await h.run(['module', 'widget'])).toBe(1);
 
       expect(h.err.lines.join('\n')).toContain('the HTTP path /widget');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
 
     it('refuses before printing a --dry-run plan', async () => {
@@ -404,7 +404,7 @@ describe('setu generate, with seams', () => {
       expect(await h.run(['service', 'widget'])).toBe(0);
       // The barrel it writes is the functional one — a re-export, not the
       // `APP_SERVICES` registration, which is what would actually collide.
-      expect(h.fs.writes).toEqual([
+      expect(h.fs.projectWrites).toEqual([
         '/app/src/services/widget.service.ts',
         '/app/src/services/index.ts',
       ]);

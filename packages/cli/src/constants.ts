@@ -97,7 +97,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'lock',
   'backplane',
   'logger',
-  'env-file',
+  'dotenv',
   'depends-on',
   'scope',
   'name',

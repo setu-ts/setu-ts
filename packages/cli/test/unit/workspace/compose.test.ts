@@ -398,10 +398,10 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('!**/.env.example');
       // M120 audit F2: registry credentials never reach the context.
       expect(contents).toContain('\n**/.npmrc\n');
-      // The rules cover .env and .env.* only; a custom --env-file name is listed
+      // The rules cover .env and .env.* only; a custom --dotenv name is listed
       // from the workspace record (M140a F9), so the comment says so.
       expect(contents).toContain('Dotenv files whose names are .env or .env.*');
-      expect(contents).toContain('A custom --env-file name such as local.env is listed');
+      expect(contents).toContain('A custom --dotenv name such as local.env is listed');
     });
 
     it('lists each member custom env file from the manifest, after the generic rules', () => {

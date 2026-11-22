@@ -57,7 +57,7 @@ describe('feature-scoped generation', () => {
       const h = harness();
       expect(await h.run([name, 'billing', '--module', 'invoices'])).toBe(2);
       expect(h.err.text()).toContain('--module places a feature file');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
   }
   it('refuses module --module and malformed or missing flag values', async () => {
@@ -68,7 +68,7 @@ describe('feature-scoped generation', () => {
     ]) {
       const h = harness();
       expect(await h.run(args)).toBe(2);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     }
   });
   it('lists admitted modules when the selected module is unknown', async () => {
@@ -86,11 +86,11 @@ describe('feature-scoped generation', () => {
   it('refuses a top-level route once the project has modules', async () => {
     const h = harness();
     expect(await h.run(['module', 'invoices'])).toBe(0);
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     // Once the project has modules, nothing is generated outside them.
     expect(await h.run(['route', 'invoices'])).toBe(2);
     expect(h.err.text()).toContain('This project uses modules; pass --module <name>');
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
   });
   it('namespaces scoped artifacts and regenerates only the functional module index', async () => {
     const h = harness();
@@ -231,8 +231,8 @@ describe('feature-scoped generation', () => {
     expect(scoped).not.toContain("token: 'billing-invoice-service'");
     expect(scoped).toContain("@Inject('billing.invoice-service')");
     expect(h.out.text()).toContain("@Inject('billing.invoice-service')");
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     expect(await h.run(['service', 'billing.invoice'])).toBe(2);
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
   });
 });

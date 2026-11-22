@@ -172,10 +172,10 @@ describe('setu add view placement', () => {
     ];
     for (const [modular, argv, code, message] of cases) {
       const h = await project('functional', modular);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run(argv), argv.join(' ')).toBe(code);
       expect(h.err.text(), argv.join(' ')).toContain(message);
-      expect(h.fs.writes.length, argv.join(' ')).toBe(writes);
+      expect(h.fs.projectWrites.length, argv.join(' ')).toBe(writes);
     }
   });
 });
@@ -221,14 +221,14 @@ describe('setu check, generate and sync on the one-home findings', () => {
       );
     expect(await h.run(['check'])).toBe(1);
     expect(h.err.text()).toContain('error setu.E016: Two controller files share a base name');
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     for (const argv of [['g', 'controller', 'other'], ['sync']]) {
       expect(await h.run(argv), argv.join(' ')).toBe(1);
       expect(h.err.text()).toContain(
         'Duplicate controller base name: src/controllers/a/twin.controller.ts, src/controllers/b/twin.controller.ts. Rename one file before generating or syncing.',
       );
     }
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
   });
 
   it('re-points a class-based declaration at a controller moved into a subfolder', async () => {

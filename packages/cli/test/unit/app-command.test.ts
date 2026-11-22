@@ -1,3 +1,4 @@
+import { runCli } from '../../src/cli.ts';
 import { describe, expect, it, vi } from 'vitest';
 import * as templates from '../../src/templates/registry.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
@@ -159,6 +160,7 @@ interface Harness {
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
   run(argv: readonly string[]): Promise<number>;
+  dispatch(argv: readonly string[]): Promise<number>;
 }
 
 /**
@@ -233,6 +235,8 @@ function harness(
     fs,
     out,
     err,
+    dispatch: (argv) =>
+      runCli(['g', ...argv], { fs, cwd: '/ws', now: () => 0, log: out.sink, error: err.sink }),
     run: (argv) =>
       runAppCommand(parseArgs(argv), {
         fs,
@@ -259,7 +263,7 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', '--help'])).toBe(0);
       expect(h.out.text()).toContain('generate app <name>');
       expect(h.out.text()).toContain('--template');
-      expect(h.out.text()).toContain('--env-file');
+      expect(h.out.text()).toContain('--dotenv');
     });
 
     // Plan §3.2: BOTH help renderers annotate the alias — `generate app --help`
@@ -425,8 +429,11 @@ describe('runAppCommand', () => {
 
     it('refuses a bare --rpc', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--rpc'])).toBe(2);
-      expect(h.err.text()).toContain('--rpc needs a value: http | grpc.');
+      expect(await h.dispatch(['app', 'orders', '--rpc'])).toBe(2);
+      expect(h.err.text()).toContain('Option --rpc needs a value');
+      const direct = harness([]);
+      expect(await direct.run(['app', 'orders', '--rpc'])).toBe(2);
+      expect(direct.err.text()).toContain('--rpc needs a value:');
     });
 
     it('refuses an unknown template through the shared selector', async () => {
@@ -456,9 +463,12 @@ describe('runAppCommand', () => {
     // than as the number the user typed.
     it('refuses --port with no value', async () => {
       const h = harness([]);
-      expect(await h.run(['app', 'orders', '--port'])).toBe(2);
-      expect(h.err.text()).toContain('--port needs a value');
+      expect(await h.dispatch(['app', 'orders', '--port'])).toBe(2);
+      expect(h.err.text()).toContain('Option --port needs a value');
       expect(h.fs.writes).toEqual([]);
+      const direct = harness([]);
+      expect(await direct.run(['app', 'orders', '--port'])).toBe(2);
+      expect(direct.fs.writes).toEqual([]);
     });
   });
 
@@ -901,14 +911,14 @@ describe('runAppCommand', () => {
     });
   });
 
-  describe('--env-file', () => {
+  describe('--dotenv', () => {
     it('refuses a member whose template registers no ConfigPlugin', async () => {
       // The one refusal this path can produce. A Workers arm would be
       // unreachable: a workspace refuses `--runtime cloudflare-workers` at
       // creation, and `readWorkspaceManifest` refuses a manifest naming it, so
       // no member can have a runtime without a filesystem.
       const h = harness([{ name: 'orders', port: 3000 }]);
-      expect(await h.run(['app', 'bare', '--env-file', '.env'])).toBe(2);
+      expect(await h.run(['app', 'bare', '--dotenv', '.env'])).toBe(2);
 
       expect(h.err.text()).toContain('registers ConfigPlugin');
       expect(h.fs.writes).toEqual([]);
@@ -919,7 +929,7 @@ describe('runAppCommand', () => {
     it('lists a custom env-file the generated container rules do not cover', async () => {
       const custom = harness([{ name: 'orders', port: 3000 }]);
       expect(
-        await custom.run(['app', 'billing', '--template', 'rest', '--env-file', 'local.env']),
+        await custom.run(['app', 'billing', '--template', 'rest', '--dotenv', 'local.env']),
       ).toBe(0);
       expect(custom.fs.read('/ws/.dockerignore').split('\n')).toContain('apps/billing/local.env');
       expect(
@@ -932,7 +942,7 @@ describe('runAppCommand', () => {
 
       const covered = harness([{ name: 'orders', port: 3000 }]);
       expect(
-        await covered.run(['app', 'billing', '--template', 'rest', '--env-file', '.env.prod']),
+        await covered.run(['app', 'billing', '--template', 'rest', '--dotenv', '.env.prod']),
       ).toBe(0);
       expect(covered.fs.read('/ws/.dockerignore')).not.toContain('apps/billing/');
       expect(covered.fs.read('/ws/setu.workspace.json')).not.toContain('envFilePaths');

@@ -234,7 +234,7 @@ describe('M140a scaffold security defaults', () => {
       secret: () => 'b'.repeat(64),
     };
     expect(
-      await runCli(['new', 'shop', '--template', 'rest', '--env-file', 'config/local.env'], deps),
+      await runCli(['new', 'shop', '--template', 'rest', '--dotenv', 'config/local.env'], deps),
     ).toBe(0);
     await fs.writeFile('/work/shop/.gitignore', new TextEncoder().encode('node_modules/\n'));
     expect(await runCli(['add', 'session'], { ...deps, cwd: '/work/shop' })).toBe(0);
@@ -318,7 +318,7 @@ describe('M140a scaffold security defaults', () => {
         secret: () => 'c'.repeat(64),
       };
       const args = ['new', 'shop', '--template', 'rest', '--runtime', 'bun'];
-      if (envFile !== '.env') args.push('--env-file', envFile);
+      if (envFile !== '.env') args.push('--dotenv', envFile);
       expect(await runCli(args, deps)).toBe(0);
       const path = '/work/shop/.dockerignore';
       const scaffolded = fs.read(path);
@@ -349,7 +349,7 @@ describe('M140a scaffold security defaults', () => {
     expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
     const inWs = { ...deps, cwd: '/work/ws' };
     expect(
-      await runCli(['g', 'app', 'api', '--template', 'rest', '--env-file', 'secrets.env'], inWs),
+      await runCli(['g', 'app', 'api', '--template', 'rest', '--dotenv', 'secrets.env'], inWs),
     ).toBe(0);
     const manifestPath = '/work/ws/setu.workspace.json';
     const docker = '/work/ws/.dockerignore';
@@ -401,7 +401,7 @@ describe('M140a scaffold security defaults', () => {
     };
     expect(
       await runCli(
-        ['new', 'shop', '--template', 'full-stack', '--runtime', 'bun', '--env-file', 'local.env'],
+        ['new', 'shop', '--template', 'full-stack', '--runtime', 'bun', '--dotenv', 'local.env'],
         deps,
       ),
     ).toBe(0);
@@ -422,7 +422,7 @@ describe('M140a scaffold security defaults', () => {
       },
     };
     expect(
-      await runCli(['new', 'shop', '--template', 'rest', '--env-file', '.env.local'], deps),
+      await runCli(['new', 'shop', '--template', 'rest', '--dotenv', '.env.local'], deps),
     ).toBe(0);
     const ignore = fs.read('/work/shop/.gitignore').split('\n');
     expect(ignore).toEqual(expect.arrayContaining(['.env.*', '.env.local', '!.env.local.example']));

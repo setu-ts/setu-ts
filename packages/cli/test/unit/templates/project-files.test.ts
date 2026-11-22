@@ -142,18 +142,24 @@ describe('functional hosts and generated test tasks', () => {
             target === 'deno' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
         }
+        const env =
+          target === 'node'
+            ? '--env-file-if-exists=.env '
+            : target === 'deno' && files.some(({ path }) => path === '.env')
+              ? '--env-file=.env '
+              : '';
         const unit =
           target === 'deno'
-            ? "deno test -A --ignore='**/*.e2e.test.ts'"
+            ? `deno test -A ${env}--ignore='**/*.e2e.test.ts'`
             : target === 'bun'
               ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-              : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'";
+              : `tsx ${env}--test --test-force-exit '**/!(*.e2e).test.ts'`;
         const e2e =
           target === 'deno'
-            ? "deno test -A '**/*.e2e.test.ts'"
+            ? `deno test -A ${env}'**/*.e2e.test.ts'`
             : target === 'bun'
               ? 'bun test .e2e.test'
-              : "tsx --test --test-force-exit '**/*.e2e.test.ts'";
+              : `tsx ${env}--test --test-force-exit '**/*.e2e.test.ts'`;
         const prefix =
           name !== 'full-stack'
             ? ''
@@ -596,7 +602,7 @@ describe('a template with a frontend build, on a Deno target', () => {
     expect(manifest.tasks['install']).toBeUndefined();
     // But it DOES get a `test` task: `setu generate module` emits a
     // `*.service.test.ts` into every host, and no template ran it (A3).
-    expect(manifest.tasks['test']).toBe("deno test -A --ignore='**/*.e2e.test.ts'");
+    expect(manifest.tasks['test']).toBe("deno test -A --env-file=.env --ignore='**/*.e2e.test.ts'");
     // Every Deno project links node_modules since 0.9, so the Node-hosted CLI
     // can import its config; that is the only one of the three it gains.
     expect(manifest.nodeModulesDir).toBe('auto');
