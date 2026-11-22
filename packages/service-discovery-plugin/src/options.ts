@@ -257,7 +257,7 @@ export function resolveOptions(options: ServiceDiscoveryPluginOptions): Resolved
   }
   if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0 || cacheTtlMs > MAX_CACHE_TTL_MS) {
     throw new RangeError(
-      `cacheTtlMs must be a finite number from 0 to ${MAX_CACHE_TTL_MS} (0 refreshes on every warm call); got ${String(cacheTtlMs)}.`,
+      `cacheTtlMs must be a finite number from 0 to ${MAX_CACHE_TTL_MS} (0 refreshes on every warm call).`,
     );
   }
   const watchIntervalMs =

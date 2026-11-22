@@ -85,7 +85,8 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         source: `service-discovery-plugin: ${provider.kind}`,
         logger: () => ctx.logger,
       });
-      // One shared budget caps the warn lines of every per-name resolve reporter.
+      // One shared budget caps the warn lines of names that never resolved
+      // (possibly taken from requests); a warm name's outage always warns.
       const resolveLogger = createWarnBudget(
         () => ctx.logger,
         () => ctx.runtime.hrtime(),
@@ -96,10 +97,10 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         ctx.runtime,
         resolved,
         reporter,
-        (serviceName) =>
+        (serviceName, warm) =>
           createConnectionErrorReporter({
             source: `service-discovery-plugin: ${provider.kind} resolve '${serviceName}'`,
-            logger: resolveLogger,
+            logger: warm ? () => ctx.logger : resolveLogger,
           }),
         (serviceName, error) =>
           ctx.logger?.warn(`service-discovery-plugin: watch listener for '${serviceName}' failed`, {

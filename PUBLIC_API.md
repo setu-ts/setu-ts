@@ -13422,9 +13422,11 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
   16, then 30 s; success resets spacing. Cold failures are not spaced and leave no cached failure
   state. A name keeps its reporter while its failure run is open and drops it at recovery; at most
-  256 names keep one at once, a 257th failing name evicts the one whose last failure is oldest.
-  Per-name reporters warn on first/changed error, debug on identical repeats, info on recovery, with
-  URL userinfo masked. DNS can also log its probe failure.
+  256 names keep one at once, resolve warnings of names that have never resolved share a budget of
+  20 `warn` lines a minute (past it `debug`, with one notice; a warm name always warns), a 257th
+  failing name evicts the one whose last failure is oldest. Per-name reporters warn on first/changed
+  error, debug on identical repeats, info on recovery, with URL userinfo masked. DNS can also log
+  its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
   other failures reject. Use a trusted host resolver. The runtime currently retains only the first
   failed address family, so an absent A record can conceal a timed-out AAAA lookup.

@@ -991,3 +991,28 @@ it('drops an evicted name retry spacing and reporter with its cache entry', asyn
   reset.mockRestore();
   service.close();
 });
+
+it('tells the reporter factory whether a failing name is warm', async () => {
+  const provider = createFakeProvider([a]);
+  const seen: [string, boolean][] = [];
+  const service = new ServiceDiscoveryService(
+    provider,
+    createFakeRuntime(),
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+    undefined,
+    (name, warm) => {
+      seen.push([name, warm]);
+      return createConnectionErrorReporter({ source: name, logger: () => undefined });
+    },
+  );
+  await service.resolve('known');
+  provider.failWith(new Error('down'));
+  await expect(service.resolve('never')).rejects.toThrow();
+  await service.resolve('known'); // Background refresh fails for a warm name.
+  await flush();
+  expect(seen).toEqual([
+    ['never', false],
+    ['known', true],
+  ]);
+  service.close();
+});

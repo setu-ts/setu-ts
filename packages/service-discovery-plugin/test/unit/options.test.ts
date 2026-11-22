@@ -150,7 +150,15 @@ it('keeps a valid cacheTtlMs, including 0 and the largest timer value', () => {
   }
 });
 
-it('names the cacheTtlMs meaning of 0 in its refusal', () => {
+it('names the cacheTtlMs meaning of 0 in its refusal and never echoes the value', () => {
+  let message = '';
+  try {
+    resolveOptions({ provider: 'static', services: {}, cacheTtlMs: -12345 });
+  } catch (error) {
+    message = (error as Error).message;
+  }
+  expect(message).toContain('cacheTtlMs');
+  expect(message).not.toContain('12345');
   expect(() =>
     resolveOptions({ provider: 'static', services: {}, cacheTtlMs: Number.NaN }),
   ).toThrow(/0 refreshes on every warm call/);

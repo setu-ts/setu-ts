@@ -691,10 +691,11 @@ because the drain answer is written through the application's error responder wh
   past that the oldest is evicted (a failing one last, its retry spacing and reporter with it), and
   watched names are never evicted (a first version that stored nothing broke the watch race, made
   every call to an empty name read the backend, and left joiners without the list; caught in
-  review). A warm name keeps the §3.2 grace rule. The per-name resolve warnings share a budget of 20
-  `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn`
-  notice per window. The README says discovery names should be chosen by the application, not taken
-  from requests.
+  review). A warm name keeps the §3.2 grace rule. The per-name resolve warnings of names that have
+  never resolved (a warm name's outage always warns; re-audit F7) share a budget of 20 `warn` lines
+  a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn` notice per
+  window. The README says discovery names should be chosen by the application, not taken from
+  requests.
 - **F3, a payload that makes a healthy handler throw (held for the maintainer).** OD10 counts a
   handler's `Internal` as an instance failure, so crafted input can eject healthy replicas.
   `EjectionTracker.record` clears an instance's failure window on any success. Measured with two
@@ -703,6 +704,27 @@ because the drain answer is written through the application's error responder wh
   20, 100 or 400 calls/s, 400 sequential bad calls (or bursts of 5) eject nothing; bursts of 20
   concurrent bad calls eject one instance after 20–40 bad calls at every background rate. Options
   are in the coordinator report; the outcome rule is unchanged until the maintainer decides.
+
+- **Re-audit of 8fd05553c (2026-11-23).** F1 and F4 closed; F2 closed for peers that advertise a
+  limit. Fixed after it: F6 (the `cacheTtlMs` refusal no longer echoes the value) and F7 (only names
+  that never resolved share the warning budget; a warm name's outage always warns). Held for the
+  maintainer with F3:
+  - **F2 residual.** Setu's and Node's default HTTP/2 servers advertise no limit, so the guard never
+    runs and an oversized header still ejects a healthy Setu replica (6 calls of 70 KiB). Deferral
+    **proposed by the coordinator, pending the maintainer**, to the Core follow-up that starts after
+    M143i (#611) merges: Setu's Node HTTP/2 listener advertises its real `maxHeaderListSize` (§11).
+  - **F5.** A peer that advertises a limit below normal callers' headers fails every call routed to
+    it without being reported, so it is never ejected (1 of 2 such replicas: 50 % of calls fail;
+    before F2 it was ejected after 5). Options: A, exempt only a call over the peer's limit AND over
+    a floor; B, resend once without reporting; C, document only; D, revert the F2 guard and defer
+    the whole case to the Core follow-up. Facts for A's floor: gRPC core documents
+    `GRPC_ARG_MAX_METADATA_SIZE` as "Defaults to maximum of 8 KB and" 0.8 × the absolute limit, and
+    `GRPC_ARG_ABSOLUTE_MAX_METADATA_SIZE` as 16 KB by default
+    (`include/grpc/impl/channel_arg_names.h`; the numeric constant in `src/core` not verified);
+    grpc-go defaults to 16 MiB with an 8 KiB default behind
+    `GRPC_GO_EXPERIMENTAL_ENABLE_8KB_DEFAULT_HEADER_LIST_SIZE`, and fails an over-limit send locally
+    with `Internal`, no transparent retry (`internal/transport/http2_client.go`, `defaults.go`);
+    grpc-java's javadoc says "The default is 8 KiB" (`GrpcUtil` constant not verified).
 
 ## 4. Exported surface — every symbol names its consumer
 

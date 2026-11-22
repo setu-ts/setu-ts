@@ -78,7 +78,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #watches = new Set<Unsubscribe>();
   readonly #backoff: RefreshBackoff;
   readonly #resolveReporters = new Map<string, ConnectionErrorReporter>();
-  readonly #resolveReporter: (name: string) => ConnectionErrorReporter;
+  readonly #resolveReporter: (name: string, warm: boolean) => ConnectionErrorReporter;
   readonly #onListenerError: (name: string, error: unknown) => void;
   readonly #listenerFailures = new Map<
     string,
@@ -104,7 +104,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param options - Options after defaults
    * @param reporter - Receives each probe failure's reason and each recovery
    *   (M139f X10-3); the plugin passes a logging reporter
-   * @param resolveReporter - Builds an independent reporter for each failing name
+   * @param resolveReporter - Builds an independent reporter for each failing name;
+   *   `warm` says whether the name already has a cached list
    * @param onListenerError - Receives one listener error per name until every failing listener has succeeded or unsubscribed, or the watch stopped
    */
   constructor(
@@ -112,7 +113,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     runtime: IRuntimeServices,
     options: ResolvedDiscoveryOptions,
     reporter: ConnectionErrorReporter = SILENT_REPORTER,
-    resolveReporter: (name: string) => ConnectionErrorReporter = () => SILENT_REPORTER,
+    resolveReporter: (name: string, warm: boolean) => ConnectionErrorReporter = () =>
+      SILENT_REPORTER,
     onListenerError: (name: string, error: unknown) => void = () => {},
   ) {
     this.#backoff = new RefreshBackoff(() => runtime.hrtime());
@@ -418,7 +420,10 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   #resolveReporterFor(name: string): ConnectionErrorReporter {
-    const reporter = this.#resolveReporters.get(name) ?? this.#resolveReporter(name);
+    // `warm`: the name has a list in hand, so a failure is an outage of a
+    // service already in use (the plugin never caps those warnings).
+    const reporter =
+      this.#resolveReporters.get(name) ?? this.#resolveReporter(name, this.#cache.has(name));
     this.#resolveReporters.delete(name);
     this.#resolveReporters.set(name, reporter);
     if (this.#resolveReporters.size > 256)
