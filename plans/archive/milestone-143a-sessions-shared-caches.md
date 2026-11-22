@@ -960,6 +960,63 @@ flipped between the two twice, so the comparison below is the recorded reason (l
 Option (b) would ship what Rack treated as a vulnerability; under (a), the refused sign-in in the
 other tab is the price Django's database backend pays.
 
+**Decision — close both documented gaps (maintainer, 2026-11-23).** Neither is accepted as a limit.
+The designs below were checked against the source at `e351b5c26`.
+
+_Gap 1: an inner cache stores an anonymous page without `Vary: Cookie`._ At the first application
+read the plugin appends `Vary: Cookie` (`cache-marking.ts`, `onFirstRead`); a handler can then
+replace `Vary` (`response.header('vary', …)` replaces, so this happens by accident too) and set
+`public`, and `finish()` appends `Vary: Cookie` again only after the handler. A `cacheMiddleware`
+inside the session middleware captures in between.
+
+- New additive `common` key `COOKIE_DEPENDENT_RESPONSE_STATE_KEY`
+  (`session-plugin:cookie-dependent-response`), named by subject: the response depends on the
+  request's cookies. The session plugin sets it at the first application read, beside the
+  per-visitor key.
+- `cacheMiddleware` reads it in `captureOrigin` as a `Vary: Cookie` the headers may have lost:
+  - a request carrying a cookie or `Authorization` does not store the response (as for a response
+    whose `Vary` names `Cookie`);
+  - a cookie-less request stores it with `Cookie` added to the stored payload's `Vary`, so a later
+    request with a cookie is never served it and a replay carries the header. A coalesced leader
+    stores and shares that payload, and its joiners are cookie-less by construction.
+- The handler's `public` stays honoured for cookie-less visitors and on the wire.
+- `Vary` sweep: `cors-middleware.ts`, `locale-middleware.ts`, `auth-plugin` guards and the session
+  plugin append. `static-plugin`'s handler replaces it (`static-handler.ts:298`, `:417`, `:447`,
+  `:480`, `.header('Vary', 'Accept-Encoding')`), which also drops CORS's `Vary: Origin` on an asset:
+  outside the Web lane, a hand-over.
+- The README paragraphs that documented this as a limit are removed. Compared with: Django documents
+  only an ordering requirement (cache middleware before the middleware that changes `Vary`, naming
+  the session middleware); this closes it whatever the order.
+
+_Gap 2: a sign-out that outlives `maxAge` misses a regenerated session._ Confirmed: the window needs
+`rolling: true` (default `false`, `options.ts:295`). `regenerate()` keeps the session's expiry
+(`session.ts:259-269`), so without `rolling` every regenerated id expires by the original
+`exp ≤ creation + maxAge`, and a link written later with TTL `maxAge + 1 s` outlives it.
+
+- With `rolling` only, a session's lineage, `{ ancestors, linkExp }`, is kept in its store row under
+  `__setu_lineage`. The service strips the field from the row at restore, so `get`, `toJSON`,
+  `holdsOnlyReservedKeys`, `clear()` and the cookie never see it, and keeps it beside the session
+  (as it does `loadedAt`). It is written back only into store rows, never into a cookie.
+- A regeneration that stays in the store records `ancestors = [source, …loaded ancestors]`, capped
+  at the 8 most recent, and writes a link `successor:<a> → <new id>` for every ancestor before its
+  `superseded` marker. Each ancestor then points directly at the current id. A sign-out still
+  follows the chain, so an ancestor dropped by the cap reaches the current id through the newest
+  one, while its last link lives.
+- With `rolling`, links are written with TTL `2 × maxAge + 1 s` and `linkExp` is recorded. A rolling
+  commit that passes its fence rewrites every ancestor's link (and `linkExp`) only when
+  `linkExp − now < maxAge + 1 s`: about one extra write per ancestor per `maxAge` of activity, none
+  per request. Invariant: after every commit, each ancestor link outlives the session's own expiry
+  (`exp ≤ now + maxAge`).
+- Without `rolling`, nothing changes: no lineage is kept, a regeneration writes its one link with
+  TTL `maxAge + 1 s`, and the chain walk reaches the current id because every link outlives the
+  shared expiry. Write counts are exactly today's.
+- `storeCommit: 'changes'` takes the lineage from the row it re-reads, so a concurrent renewal is
+  kept. The cookie strategy has no links and is unchanged.
+- Tests that fail first, on the fake clock: CodeRabbit's timeline (`maxAge` 2 s, a sign-out loads X
+  at 0, a regeneration at 1, rolling commits at 2 and 3, the sign-out resumes at 4) ends Y; X→Y→Z, a
+  sign-out that loaded X ends Z; the cap; N rolling commits inside one `maxAge` add no link writes;
+  `rolling: false` writes what it did; a negative control for each.
+
 ## 11. Plan review (2026-11-22)
 
 An independent agent that did not write the plan reviewed it against the row texts, the ROADMAP
