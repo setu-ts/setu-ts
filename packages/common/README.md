@@ -401,6 +401,7 @@ package fits the plugin architecture.
 | `MCP_TOOL_METADATA`                   | const     |
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
+| `PER_VISITOR_RESPONSE_STATE_KEY`      | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `RATE_LIMIT_METADATA`                 | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |

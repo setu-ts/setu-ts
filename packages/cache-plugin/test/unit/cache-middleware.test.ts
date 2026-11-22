@@ -9,6 +9,7 @@ import type {
   IServiceRegistry,
   ITenant,
 } from '@setu-ts/common';
+import { PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
@@ -797,6 +798,20 @@ describe('cacheMiddleware — per-visitor responses', () => {
       }
     },
   );
+
+  it('never stores a response captured after the per-visitor flag was set', async () => {
+    const { app, calls } = await appWith((ctx) => {
+      ctx.state.set(PER_VISITOR_RESPONSE_STATE_KEY, true);
+      return ctx.response.header('cache-control', 'public, max-age=60').text('page');
+    });
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
 
   // RFC 9111 §4.1: a stored `Vary: *` response can never be reused.
   it('never stores a Vary: * response', async () => {

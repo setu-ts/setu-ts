@@ -455,7 +455,9 @@ visitor. The session middleware marks such a response `Cache-Control: private, n
   `Vary: Cookie` follows at the first application read or after the handler (an error page carries
   the `Cache-Control` alone);
 - the response carries the session cookie (a written commit or a destroy): marked at the first
-  application write;
+  application write, which also sets `PER_VISITOR_RESPONSE_STATE_KEY` (`@setu-ts/common`) on the
+  request, so `cacheMiddleware` inside the session middleware does not store it even when the
+  handler then sets `public`;
 - a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read.
 
 A response that only _read_ the session for an anonymous visitor is the anonymous variant of a page:

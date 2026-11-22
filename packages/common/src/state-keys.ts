@@ -28,6 +28,7 @@
  * | tenant cache prefix | `multi-tenancy-plugin` | `multi-tenancy-plugin:cache-prefix`   |
  * | credential source   | `auth-plugin`          | `auth-plugin:credential-source`       |
  * | CSRF token access   | `session-plugin`       | `session-plugin:csrf-token-access`    |
+ * | per-visitor response | `session-plugin`      | `session-plugin:per-visitor-response` |
  *
  * @module
  */

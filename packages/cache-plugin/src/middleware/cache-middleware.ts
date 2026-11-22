@@ -6,7 +6,9 @@
  * handler's response on MISS and stores it when the status is cacheable.
  *
  * It never stores a per-visitor response. A response whose `Cache-Control`
- * says `private` or `no-store` is not stored. A request carrying
+ * says `private` or `no-store` is not stored, nor one captured after a
+ * component set {@linkcode PER_VISITOR_RESPONSE_STATE_KEY} (the session plugin
+ * does, at a request's first session write). A request carrying
  * `Authorization` or a credential cookie (any cookie by default, see
  * {@linkcode CacheMiddlewareOptions.credentialCookies}) is credentialed: it is
  * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`
@@ -22,7 +24,7 @@
  * @module
  */
 import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, parseCookie } from '@setu-ts/common';
+import { CAPABILITIES, parseCookie, PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
 import { cacheCoalescer } from '../services/coalescer.ts';
 import { composeCacheKey } from '../utils/cache-key.ts';
@@ -164,6 +166,7 @@ async function captureOrigin(
     snapshot.streaming ||
     !cacheableStatuses.includes(snapshot.status) ||
     hasSetCookie(snapshot.headers) ||
+    ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY) === true ||
     isPrivate(snapshot.headers.get('cache-control')) ||
     varyFields(snapshot.headers.get('vary')).includes('*') ||
     (withCookies && !servableWithCookies(snapshot.headers, credentialed))

@@ -19,7 +19,7 @@
  * @module
  */
 import type { ILogger, IRequestContext, IResponse, ISession } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
 
 import type { SessionCommitOutcome, SessionCommitPolicy } from './session-service.ts';
 import type { Session } from './session.ts';
@@ -190,7 +190,12 @@ export class RequestCacheMarking {
     if (this.#restoredApplicationData) {
       this.#ctx.response.header('cache-control', PRIVATE_DIRECTIVE);
     }
-    this.#session.onFirstWrite(() => markPerVisitor(this.#ctx.response));
+    // The first write also flags the request, so a cache inside this middleware does not store the
+    // response even when the handler then sets `public` before the commit adds `Set-Cookie`.
+    this.#session.onFirstWrite(() => {
+      markPerVisitor(this.#ctx.response);
+      this.#ctx.state.set(PER_VISITOR_RESPONSE_STATE_KEY, true);
+    });
     // A page that read the session depends on the cookie: vary on it at once, so a cache inside
     // this middleware does not store the anonymous variant without `Vary: Cookie`.
     this.#session.onFirstRead(() => appendVaryCookie(this.#ctx.response));

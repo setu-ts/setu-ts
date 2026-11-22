@@ -923,6 +923,14 @@ session middleware store a signed-in page that renders `ctx.request.user`); a `V
 is stored and served only for a request carrying no cookie at all, also with `credentialCookies`
 narrowed; a `Vary: *` response is never stored.
 
+**Audit on `3a4900885` (2026-11-22).** One Medium: with `cacheMiddleware` inside the session
+middleware, a new visitor's session write followed by a handler `public` (a React Router `headers`
+export does the same) was captured as `public, Vary: Cookie` before the commit added `Set-Cookie`,
+and rule A stored it for every cookie-less visitor. Fixed with an additive `common` key,
+`PER_VISITOR_RESPONSE_STATE_KEY` (`session-plugin:per-visitor-response`): the first application
+write sets it, and `cacheMiddleware` never stores a response captured with it set. The Workers Cache
+API half (M143o, §0.2 X6) should read the same key.
+
 ## 11. Plan review (2026-11-22)
 
 An independent agent that did not write the plan reviewed it against the row texts, the ROADMAP

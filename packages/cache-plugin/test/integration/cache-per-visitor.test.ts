@@ -21,7 +21,7 @@ function cookieOf(headers: Headers): string {
 }
 
 async function buildApp(priority: number) {
-  const calls = { page: 0, form: 0, plain: 0, write: 0, profile: 0 };
+  const calls = { page: 0, form: 0, plain: 0, write: 0, profile: 0, cart: 0 };
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -58,6 +58,14 @@ async function buildApp(priority: number) {
           ctx.router.get('/form', (c) => {
             calls.form += 1;
             return c.response.text(`token ${getCsrfToken(c)}`);
+          });
+          // A new visitor's session write, then an explicit `public` (as a route's headers export
+          // may set): the commit adds Set-Cookie only after a cache inside it has captured.
+          ctx.router.get('/cart', (c) => {
+            calls.cart += 1;
+            getSession(c).set('cart', `cart-${calls.cart}`);
+            c.response.header('cache-control', 'public, max-age=60');
+            return c.response.text(`cart-${calls.cart}`);
           });
           ctx.router.get('/write', (c) => {
             calls.write += 1;
@@ -108,6 +116,20 @@ describe.each([
       expect(own.headers.get('cache-control')).toBe('private, no-store');
       expect((await app.inject(get('/profile'))).body).toBe('profile guest');
       expect(calls.profile).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("never replays a new visitor's session write marked public to another visitor", async () => {
+    const { app, calls } = await buildApp(priority);
+    try {
+      const first = await app.inject(get('/cart'));
+      expect(first.headers.get('cache-control')).toBe('private, no-store');
+      expect(first.headers.getSetCookie()).toHaveLength(1);
+      const second = await app.inject(get('/cart'));
+      expect([second.body, second.headers.get('x-cache')]).toEqual(['cart-2', 'MISS']);
+      expect(calls.cart).toBe(2);
     } finally {
       await app.stop();
     }
