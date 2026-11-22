@@ -483,6 +483,11 @@ directive can make a session cookie safe to share:
 - a public asset fetched by a signed-in visitor keeps its directive and gets no `Vary: Cookie`; a
   directive set by an outer middleware (below priority 260) is kept the same way.
 
+The plugin cannot see who a page was rendered for when it reads `ctx.request.user` rather than the
+session: `auth-plugin`'s session strategy restores the principal through `fromHeaders`, which counts
+as no read. Such a page with an explicit `public` directive keeps it with no `Vary: Cookie` and no
+warning, exactly like a public asset. Never mark a route behind `requireAuth()` `public`.
+
 So a page you mark `public` gets no session cookie for a new visitor's CSRF token or a `rolling`
 refresh: a form on such a page fails CSRF on submit. Do not mark a page carrying a form `public`.
 
