@@ -208,8 +208,8 @@ An outage is an error, never "not there". On every cloud arm:
   `delete` is two requests, each under its own `requestTimeoutMs`.
 - A key with a `.` or `..` path segment is refused with a `400` by every `StorageService` call, and
   by the S3, B2, GCS and Azure providers used directly: on Azure the SDK resolves `..` in the blob
-  URL, so such a key could reach another container. An empty key, or one that is not a string (a
-  `String` object included), is refused the same way.
+  URL, so such a key could reach another container. An empty key or one of only `/`, or one that is
+  not a string (a `String` object included), is refused the same way.
 - `local` `get` resolves `null` (`404`) only for an absent file; a permission or I/O failure
   rejects.
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/

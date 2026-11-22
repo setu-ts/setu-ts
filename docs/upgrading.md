@@ -38,8 +38,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
   throws `RangeError` for a `maxSize` or `maxFiles` that is not a whole number of at least 1, a
   `fieldname` that is not a non-empty string, or an `allowedMimeTypes` that is not an array of
   strings.
-- **Storage keys.** A key with a `.` or `..` path segment is refused with a `400`. An empty key, or
-  one that is not a string (a `String` object included), is refused the same way.
+- **Storage keys.** A key with a `.` or `..` path segment is refused with a `400`. An empty key or
+  one of only `/`, or one that is not a string (a `String` object included), is refused the same
+  way.
 - **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
   `timeout`, not `timeoutSeconds`. `initTimeoutSeconds` must be a finite number in `(0, 2147483]`,
   so `0` is refused.

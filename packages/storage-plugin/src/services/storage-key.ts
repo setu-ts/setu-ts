@@ -14,7 +14,7 @@
 import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
- * Returns the refusal for a key that is empty, is not a string or has a `.`
+ * Returns the refusal for a key that is empty or only `/`, is not a string or has a `.`
  * or `..` path segment, or `undefined` for a key that may be used. A `String` object
  * is refused: an SDK reads it as its value, so it would carry `..` past a
  * check that only looked at primitives. The message does not quote the key:
@@ -32,13 +32,14 @@ export function storageKeyRefusal(path: unknown): Error | undefined {
       detail: 'A storage key must be a string.',
     });
   }
-  // An empty key names the bucket or container itself: on S3 `get('')` is
-  // `GET /<bucket>/`, a listing of every key.
-  if (path === '') {
-    return withHttpStatusHint(new Error('storage-plugin: a key is empty'), {
+  // A key with nothing but '/' names no object: an empty key on S3 is
+  // `GET /<bucket>/`, a listing of every key, and '/' on the local provider is
+  // its root directory.
+  if (!/[^/]/.test(path)) {
+    return withHttpStatusHint(new Error('storage-plugin: a key names no object'), {
       status: 400,
       title: 'Bad Request',
-      detail: 'A storage key may not be empty.',
+      detail: "A storage key may not be empty or only '/'.",
     });
   }
   if (!path.split('/').some((segment) => segment === '.' || segment === '..')) {
@@ -52,12 +53,12 @@ export function storageKeyRefusal(path: unknown): Error | undefined {
 }
 
 /**
- * Refuses a key that is empty, is not a string or has a `.` or `..` path
+ * Refuses a key that is empty or only `/`, is not a string or has a `.` or `..` path
  * segment.
  *
  * @param path - The object key
- * @throws {Error} With a `400` status hint, when the key is empty or not a
- *   string, or a segment is `.` or `..`
+ * @throws {Error} With a `400` status hint, when the key is empty, only `/` or
+ *   not a string, or a segment is `.` or `..`
  */
 export function assertStorageKey(path: string): void {
   const refusal = storageKeyRefusal(path);
