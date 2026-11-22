@@ -131,20 +131,23 @@ export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['
 
 `credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a page that
 carries a CSRF token or belongs to a signed-in visitor is marked `private` unless the handler sets
-its own shared-cacheable directive (see below); an anonymous page that only read the session is
-marked `Vary: Cookie`, so it is stored for visitors without cookies only. The session plugin also
-sets `PER_VISITOR_RESPONSE_STATE_KEY` on a request that writes its session (an application key set,
+its own shared-cacheable directive (see below; a response whose commit writes the session cookie is
+marked `private` whatever the handler set); an anonymous page that only read the session is marked
+`Vary: Cookie`, so it is stored for visitors without cookies only. The session plugin also sets
+`PER_VISITOR_RESPONSE_STATE_KEY` on a request that writes its session (an application key set,
 deleted or cleared, a `regenerate()` or a `destroy()`), reads a CSRF token, or reads a restored
 session holding application data, and `cacheMiddleware` never stores such a response, even when the
 handler marks it `public`. One case stays the application's: a signed-in visitor's response that
 never touches the session API but is personalised another way (through `ctx.request.user`, say) and
 that the handler marks `public` keeps that directive with no `Vary: Cookie`, so it can be stored and
 replayed (`RequestCacheMarking.finish()` keeps an application directive, as it must for public
-assets). So does an anonymous page whose handler replaces the plugin's `Vary: Cookie` and sets
-`public`: it is stored for visitors without cookies and, varying on nothing, replayed to signed-in
-ones too. Never mark a personalised response `public`, and never drop `Vary: Cookie` from a page
-that read the session. Register `cacheMiddleware` outside the session middleware (a priority
-below 260) where you can, so a cached anonymous page is replayed before any session work.
+assets). With `cacheMiddleware` registered inside the session middleware (a priority above 260), so
+does an anonymous page whose handler replaces the plugin's `Vary: Cookie` and sets `public`: the
+cache captures it before the plugin restores `Vary: Cookie` after the handler, stores it for
+visitors without cookies and, varying on nothing, replays it to signed-in ones too. Never mark a
+personalised response `public`, and never drop `Vary: Cookie` from a page that read the session.
+Register `cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a
+cached anonymous page is replayed before any session work.
 
 ## Exports
 

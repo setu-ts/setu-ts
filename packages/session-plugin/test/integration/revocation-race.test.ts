@@ -403,7 +403,7 @@ describe('a commit that outlives every marker', () => {
 });
 
 describe('a commit that stalls past every marker after its age check', () => {
-  it('is refused at its fence and leaves no row', async () => {
+  async function stalledService() {
     const store = new PausingStore(memoryStore());
     const clock = makeClock();
     const config = resolveSessionConfig({
@@ -424,6 +424,11 @@ describe('a commit that stalls past every marker after its age check', () => {
       },
       store,
     );
+    return { store, clock, config, service };
+  }
+
+  it('is refused at its fence and leaves no row', async () => {
+    const { store, clock, config, service } = await stalledService();
     const cookie = await signedIn(service);
     const inflight = makeContext({ headers: { cookie } });
     const inflightSession = await service.load(inflight.ctx);
@@ -441,5 +446,23 @@ describe('a commit that stalls past every marker after its age check', () => {
     pause.release();
     expect(await committing).toBe('refused');
     expect(await store.read(inflightSession.id)).toBeNull();
+  });
+
+  // No marker can tell a stalled commit whether its session was signed out, so it ends the
+  // session as a sign-out does, marker included, and a concurrent commit is refused too.
+  it('ends an unrevoked session as a sign-out, so concurrent commits agree', async () => {
+    const { store, clock, config, service } = await stalledService();
+    const cookie = await signedIn(service);
+    const inflight = makeContext({ headers: { cookie } });
+    const inflightSession = await service.load(inflight.ctx);
+    inflightSession.set('cart', 1);
+    const pause = store.pauseNextWrite();
+    const committing = service.commit(inflight.ctx, inflightSession);
+    await pause.landed;
+    clock.advance(config.maxAgeMs);
+    pause.release();
+    expect(await committing).toBe('refused');
+    expect(await store.read(inflightSession.id)).toBeNull();
+    expect(await store.read(`revoked:${inflightSession.id}`)).toEqual({ __setu_marker: 'revoked' });
   });
 });

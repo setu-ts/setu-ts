@@ -50,8 +50,9 @@ All notable changes to this project are documented here. The format follows
   commit to a restored session checks it after its write and deletes its own write when present,
   sending no cookie. A regeneration whose source was signed out meanwhile is refused, and a sign-out
   that lands after a regeneration's check also ends the regenerated session. A commit whose request
-  loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), and
-  a regeneration or a `clear()` sign-out refused that way still revokes the old id.
+  loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), a
+  regeneration or `clear()` sign-out refused that way still revokes the old id, and a commit that
+  reaches its marker check that late ends its session as a sign-out does.
   `restoreRevocationCheck: true` also checks the markers on every store-held restore. Store commits
   write this request's changes onto the current row (`storeCommit: 'changes'`, the new default;
   `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.

@@ -1930,8 +1930,8 @@ last outbound).
 | 45       | LocaleMiddleware          | Resolve request locale   |
 | 50       | LoggingMiddleware         | Log incoming request     |
 | 100      | RequestIdMiddleware       | Generate request ID      |
-| 150      | CorrelationIdMiddleware   | Propagate correlation ID |
 | 125      | CorsMiddleware            | Handle CORS              |
+| 150      | CorrelationIdMiddleware   | Propagate correlation ID |
 | 260      | SessionMiddleware         | Load/commit the session  |
 | 270      | CsrfMiddleware            | Origin/Referer check     |
 | 300      | AuthMiddleware            | Authenticate request     |

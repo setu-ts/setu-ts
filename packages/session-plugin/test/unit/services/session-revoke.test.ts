@@ -181,6 +181,20 @@ describe('revocation markers', () => {
     expect(store.calls.slice(1, 3)).toEqual([`write:successor:${id}`, `write:superseded:${id}`]);
   });
 
+  it('a failed link write still marks and deletes the old id, then rethrows', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.regenerate();
+    store.failing = { step: 'write', key: (k) => k.startsWith('successor:') };
+    await expect(service.commit(c.ctx, s)).rejects.toThrow('write failed');
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded' });
+    expect(store.rows.has(s.id)).toBe(false);
+  });
+
   it("a failed regeneration's cleanup keeps a committed regeneration's link", async () => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);

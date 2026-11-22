@@ -79,8 +79,8 @@ function isMarkerId(id: string): boolean {
 /**
  * What a {@linkcode SessionService.commit} did: `'written'` (the session was persisted and its
  * cookie sent, or a destroy cleared it), `'refused'` (the session was revoked or superseded while
- * this request ran, or its row was gone; nothing was written and no cookie sent), or `'skipped'`
- * (nothing needed writing, or the policy declined the commit).
+ * this request ran, its row was gone, or the request loaded the session `maxAge` or more ago; no
+ * cookie was sent), or `'skipped'` (nothing needed writing, or the policy declined the commit).
  * @since 0.14.0
  */
 export type SessionCommitOutcome = 'written' | 'refused' | 'skipped';
@@ -89,7 +89,8 @@ export type SessionCommitOutcome = 'written' | 'refused' | 'skipped';
  * Which commits a response allows, computed by the session middleware from the response. Both
  * default to `true`. A response a shared cache may store sets both to `false`, so it carries no
  * session cookie for a commit that only refreshes the expiry or only stores a new session's
- * reserved keys (a CSRF mint, a tenant binding).
+ * reserved keys (a CSRF mint, a tenant binding). A `404` to a request that is not a document
+ * navigation sets `reservedOnlyNew` to `false` too, so a missing asset starts no session.
  * @since 0.14.0
  */
 export interface SessionCommitPolicy {
@@ -523,16 +524,17 @@ export class SessionService implements ISessionService {
    * delete then fails. A marker write that fails still attempts the delete and
    * then rethrows, so a sign-out never reports success with its marker missing.
    *
-   * A committed regeneration also writes a successor link, `successor:<old>`,
-   * naming its new id. A sign-out then reads its id's link and revokes the id
+   * A regeneration also writes a successor link, `successor:<old>`, naming
+   * its new id, before its fence (a regeneration the fence refuses leaves a
+   * link to the id it deleted, which a sign-out revokes harmlessly). A sign-out then reads its id's link and revokes the id
    * it names, and so on along the whole chain: a regeneration writes its link
    * before its fence reads `revoked`, and a sign-out writes `revoked` before
    * reading the link, so on a linearizable store one of them always sees the
    * other — the regeneration refuses, or the sign-out ends the new session. A
    * failed regeneration's cleanup writes only the `superseded` marker, never
    * the link. The link names one successor: when two requests regenerate the
-   * same id and both commit, the later link overwrites the earlier, and a
-   * sign-out racing both follows only the id the later one names.
+   * same id, the later link overwrites the earlier, and a sign-out racing both
+   * follows only the id the later one names.
    */
   async #revoke(
     id: string,
@@ -543,19 +545,25 @@ export class SessionService implements ISessionService {
     const store = this.#store!;
     const ttlMs = this.#config.maxAgeMs + MARKER_TTL_MARGIN_MS;
     visited.add(id);
+    let fault: { readonly error: unknown } | undefined;
     if (successor !== undefined) {
       // Before the marker, so the link exists whenever a sign-out can see the regeneration at all.
-      await store.write(
-        `${SUCCESSOR_PREFIX}:${id}`,
-        { [MARKER_FIELD]: SUCCESSOR_PREFIX, [SUCCESSOR_FIELD]: successor },
-        ttlMs,
-      );
+      // A failed link write still marks and deletes the old id below: the commit then throws
+      // before writing the new row, so no successor exists for a link to name.
+      try {
+        await store.write(
+          `${SUCCESSOR_PREFIX}:${id}`,
+          { [MARKER_FIELD]: SUCCESSOR_PREFIX, [SUCCESSOR_FIELD]: successor },
+          ttlMs,
+        );
+      } catch (error) {
+        fault = { error };
+      }
     }
-    let fault: { readonly error: unknown } | undefined;
     try {
       await store.write(`${kind}:${id}`, { [MARKER_FIELD]: kind }, ttlMs);
     } catch (error) {
-      fault = { error };
+      fault ??= { error };
     }
     try {
       await store.destroy(id);
@@ -613,8 +621,12 @@ export class SessionService implements ISessionService {
     // commit that stalled past it (after its first age check) is refused too.
     const now = this.#deps.now();
     const stale = now - (this.#loadedAt.get(session) ?? now) >= this.#config.maxAgeMs;
-    if (marked || stale) {
+    if (marked || (stale && session.wasRegenerated)) {
       await this.#store!.destroy(written);
+    } else if (stale) {
+      // The row is this session's own, shared by every request on it, and no marker can now say
+      // whether it was signed out: end it as a sign-out does, so concurrent commits agree.
+      await this.#revoke(source, 'revoked');
     }
     return marked || stale;
   }

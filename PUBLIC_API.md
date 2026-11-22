@@ -5508,8 +5508,9 @@ package README's "What `SameSite` does not separate".
   evict live keys. `restoreRevocationCheck` closes the one-round-trip window for a request that
   starts during a racing commit. Markers expire one second after `maxAge`, and a commit whose
   request loaded the session `maxAge` or more ago is refused (a regeneration or a `clear()` sign-out
-  refused that way still revokes the old id). A committed regeneration also writes a link,
-  `successor:<old id>`, naming the new id, and a sign-out of the old id revokes the whole chain of
+  refused that way still revokes the old id); a commit that reaches its marker check that late ends
+  its session as a sign-out does. A regeneration also writes a link, `successor:<old id>`, before
+  its marker check, naming the new id, and a sign-out of the old id revokes the whole chain of
   linked ids (a failed regeneration's cleanup never touches a link); when two requests regenerate
   one id at once, only the later successor is named.
 - **Cache marking (0.14.0).** The middleware writes `Cache-Control: private, no-store` and

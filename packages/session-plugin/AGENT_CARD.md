@@ -48,8 +48,8 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 - `csrf.exemptBearer` defaults true: authenticated header credentials with a new session skip CSRF
   and commit no cookie, even on excluded paths. Restored sessions/non-Bearer Authorization prevent
   exemption. Bearer/API-key-to-cookie exchanges need false; see README.
-- Secrets: option → secrets manager → config → environment; ≥32 characters. Arrays rotate keys, with
-  index 0 sealing new cookies.
+- Secrets: option → secrets manager → config → environment; ≥32 characters. Arrays rotate keys
+  (index 0 seals).
 
 ## Other options
 
@@ -57,3 +57,5 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 - `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
   sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
 - `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.
+- Signed-in, cookie-setting and token-reading responses are marked private, no-store; a form on a
+  page marked public fails CSRF. Store commits write only this request's changes.
