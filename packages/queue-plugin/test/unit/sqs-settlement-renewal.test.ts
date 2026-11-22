@@ -39,9 +39,93 @@ describe('SQS settlement and renewal ordering', () => {
     }
   });
 
-  for (const kind of ['ack', 'requeue', 'deadLetter'] as const) {
-    it(`makes no renewal call after ${kind} begins`, async () => {
+  it.each(['preparation', 'send'] as const)(
+    'renews throughout dead-letter %s and fences only the source delete',
+    async (phase) => {
       const { queue, transport, runtime } = await sqsHarness();
+      await transport.send('source', envelope(1));
+      const [job] = await queue.reserve('build', 1, 0);
+      const work = Promise.withResolvers<void>();
+      const deletion = Promise.withResolvers<void>();
+      const originalSend = transport.send.bind(transport);
+      if (phase === 'preparation')
+        vi.spyOn(queue, 'prepareConsumer').mockReturnValueOnce(work.promise);
+      else
+        vi.spyOn(transport, 'send').mockImplementationOnce(async (...args) => {
+          await work.promise;
+          return originalSend(...args);
+        });
+      const originalDelete = transport.delete.bind(transport);
+      const deleted = vi.spyOn(transport, 'delete').mockImplementationOnce(async (...args) => {
+        await deletion.promise;
+        return originalDelete(...args);
+      });
+      const visibility = vi.spyOn(transport, 'changeVisibility');
+      const terminal = queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      const settled = Promise.allSettled([terminal]);
+      try {
+        await drain();
+        await runtime.advanceMs(1000);
+        expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
+        expect(visibility).toHaveBeenCalledExactlyOnceWith('source', 'rh-2', 3);
+        expect(deleted).not.toHaveBeenCalled();
+        work.resolve();
+        await drain();
+        expect(deleted).toHaveBeenCalledTimes(1);
+        expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
+        expect(visibility).toHaveBeenCalledTimes(1);
+        deletion.resolve();
+        await terminal;
+        expect(transport.depth('source')).toBe(0);
+        expect(transport.depth('dead')).toBe(1);
+      } finally {
+        work.resolve();
+        deletion.resolve();
+        await settled;
+        await queue.disconnect();
+      }
+    },
+  );
+
+  it('keeps a slow terminal forward leased without a second onFailed or duplicate copy', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    const service = new QueueService(queue, runtime, { pollIntervalMs: 100 });
+    const forwarding = Promise.withResolvers<void>();
+    const send = transport.send.bind(transport);
+    vi.spyOn(transport, 'send').mockImplementation(async (...args) => {
+      if (args[0] === 'dead') await forwarding.promise;
+      return send(...args);
+    });
+    const failed = vi.fn();
+    const processor = vi.fn(() => {
+      throw new Error('terminal');
+    });
+    await service.connect();
+    service.process('build', processor, { concurrency: 2, onFailed: failed });
+    await transport.send('source', envelope(1));
+    try {
+      await runtime.advanceMs(10_000);
+      expect(failed).toHaveBeenCalledTimes(1);
+      expect(processor).toHaveBeenCalledTimes(1);
+      expect(transport.visibilityChanges.length).toBeGreaterThanOrEqual(9);
+      expect(transport.depth('source')).toBe(1);
+      expect(transport.depth('dead')).toBe(0);
+      forwarding.resolve();
+      await runtime.advanceMs(500);
+      expect(transport.depth('source')).toBe(0);
+      expect(transport.depth('dead')).toBe(1);
+      expect(failed).toHaveBeenCalledTimes(1);
+      expect(transport.deleted).toHaveLength(1);
+    } finally {
+      forwarding.resolve();
+      await runtime.advanceMs(100);
+      await service.disconnect();
+    }
+  });
+
+  for (const kind of ['ack', 'requeue', 'deadLetter'] as const) {
+    it(`makes no renewal call after the final ${kind} receipt operation begins`, async () => {
+      const { queue, transport } = await sqsHarness();
       await transport.send('source', envelope());
       const [job] = await queue.reserve('build', 1, 0);
       const gate = Promise.withResolvers<void>();
@@ -56,15 +140,40 @@ describe('SQS settlement and renewal ordering', () => {
             : queue.deadLetter('build', job!.id, 0, job!.claimToken!);
       await drain();
       const initiallyExtended = await queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
-      await runtime.advanceMs(3000);
-      const extended = await queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
       const callsDuringSettle = visibility.mock.calls.length;
       gate.resolve();
       await settling;
       try {
         expect(initiallyExtended).toBe(true);
-        expect(extended).toBe(true);
         expect(callsDuringSettle).toBe(kind === 'requeue' ? 1 : 0);
+      } finally {
+        await queue.disconnect();
+      }
+    });
+
+    it(`reports an expired claim during the final ${kind} receipt operation`, async () => {
+      const { queue, transport, runtime } = await sqsHarness();
+      await transport.send('source', envelope());
+      const [job] = await queue.reserve('build', 1, 0);
+      const gate = Promise.withResolvers<void>();
+      const visibility = vi.spyOn(transport, 'changeVisibility');
+      if (kind === 'requeue') visibility.mockReturnValueOnce(gate.promise);
+      else vi.spyOn(transport, 'delete').mockReturnValueOnce(gate.promise);
+      const settling =
+        kind === 'ack'
+          ? queue.ack('build', job!.id, job!.claimToken!)
+          : kind === 'requeue'
+            ? queue.requeue('build', job!.id, 1000, 2, job!.claimToken!)
+            : queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      await drain();
+      await runtime.advanceMs(3000);
+      const extended = await queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+      const calls = visibility.mock.calls.length;
+      gate.resolve();
+      await settling;
+      try {
+        expect(extended).toBe(false);
+        expect(calls).toBe(kind === 'requeue' ? 1 : 0);
       } finally {
         await queue.disconnect();
       }
@@ -173,6 +282,35 @@ describe('SQS settlement and renewal ordering', () => {
       if (result!.status === 'rejected') expect(result.reason.name).toBe('StaleClaimError');
     } finally {
       await queue.disconnect();
+    }
+  });
+
+  it('reports lease expiry through the service while a source delete is pending', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { pollIntervalMs: 100, logger });
+    const deletion = Promise.withResolvers<void>();
+    const remove = transport.delete.bind(transport);
+    vi.spyOn(transport, 'delete').mockImplementationOnce(async (...args) => {
+      await deletion.promise;
+      return remove(...args);
+    });
+    await service.connect();
+    service.process('build', () => {
+      throw new Error('terminal');
+    });
+    await transport.send('source', envelope(1));
+    try {
+      await runtime.advanceMs(4000);
+      const renewalErrors = logger.error.mock.calls.filter(
+        ([message]) => message === 'queue job claim renewal failed',
+      );
+      expect(renewalErrors).toHaveLength(1);
+      expect(renewalErrors[0]![1]).toMatchObject({ error: 'queue job claim is stale' });
+    } finally {
+      deletion.resolve();
+      await runtime.advanceMs(100);
+      await service.disconnect();
     }
   });
 

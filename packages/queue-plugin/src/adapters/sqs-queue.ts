@@ -303,6 +303,9 @@ interface ReceiptEntry {
   readonly messageId: string;
   /** Shared by renewed snapshots of this delivery, never by a redelivery. */
   readonly activity: {
+    /** Owns the entire settle, including preparation and forwarding. */
+    settlementInProgress: boolean;
+    /** Fences renewal only around the final receipt operation. */
     settling: boolean;
     renewal: Promise<boolean> | undefined;
   };
@@ -348,12 +351,13 @@ export class SqsQueue implements QueueAdapter {
     /** Renewal cadence in milliseconds, one third of visibility. @since 0.14.0 */
     readonly intervalMs: number;
     /**
-     * Extends the current, unexpired receipt, or succeeds without I/O while
-     * that delivery is settling.
+     * Extends the current, unexpired receipt, including during dead-letter
+     * preparation and forwarding. A valid fenced receipt succeeds without I/O
+     * during its final delete or visibility change; an expired one returns false.
      * @param name - Job name
      * @param id - Job id
      * @param claimToken - Delivery fence
-     * @returns True after extension or when settlement already owns the receipt
+     * @returns True after extension or while a valid final receipt operation is fenced
      * @throws Never
      * @since 0.14.0
      */
@@ -616,7 +620,7 @@ export class SqsQueue implements QueueAdapter {
         claimToken,
         attempts,
         messageId: msg.messageId ?? 'unknown',
-        activity: { settling: false, renewal: undefined },
+        activity: { settlementInProgress: false, settling: false, renewal: undefined },
       });
       jobs.push({
         id: envelope.id,
@@ -633,9 +637,10 @@ export class SqsQueue implements QueueAdapter {
   }
 
   ack(name: string, id: string, claimToken: string): Promise<void> {
-    return this.#settle(name, id, claimToken, (entry, transport) =>
-      transport.delete(this.#getQueueUrl(name), entry.receiptHandle),
-    );
+    return this.#settle(name, id, claimToken, async (entry, fence, transport) => {
+      await fence();
+      await transport.delete(this.#getQueueUrl(name), entry.receiptHandle);
+    });
   }
 
   requeue(
@@ -645,9 +650,10 @@ export class SqsQueue implements QueueAdapter {
     _attempts: number,
     claimToken: string,
   ): Promise<void> {
-    return this.#settle(name, id, claimToken, (entry, transport) => {
+    return this.#settle(name, id, claimToken, async (entry, fence, transport) => {
+      await fence();
       const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
-      return transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+      await transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
     });
   }
 
@@ -670,7 +676,7 @@ export class SqsQueue implements QueueAdapter {
     claimToken: string,
     reason: 'attempts-exhausted' | 'abandoned' = 'attempts-exhausted',
   ): Promise<void | 'discarded'> {
-    return this.#settle(name, id, claimToken, (entry) =>
+    return this.#settle(name, id, claimToken, (entry, fence) =>
       this.#retire(
         name,
         entry.body,
@@ -679,31 +685,36 @@ export class SqsQueue implements QueueAdapter {
         entry.attempts,
         reason,
         id,
+        fence,
       ),
     );
   }
 
-  /** Fences renewal before settlement and rechecks ownership after an older renewal finishes. */
+  /** Owns one settle while allowing renewal until its final receipt operation takes the fence. */
   async #settle<T>(
     name: string,
     id: string,
     token: string,
-    call: (entry: ReceiptEntry, transport: ISqsTransport) => Promise<T>,
+    call: (entry: ReceiptEntry, fence: () => Promise<void>, transport: ISqsTransport) => Promise<T>,
   ): Promise<T> {
     const transport = this.#transport;
     if (!transport) throw new Error('SqsQueue is not connected');
     const entry = this.#claim(name, id, token);
     const activity = entry.activity;
-    if (activity.settling) throw new StaleClaimError();
-    activity.settling = true;
-    try {
+    if (activity.settlementInProgress) throw new StaleClaimError();
+    activity.settlementInProgress = true;
+    const fence = async (): Promise<void> => {
+      activity.settling = true;
       if (activity.renewal !== undefined) await activity.renewal;
-      const current = this.#claim(name, id, token);
-      const result = await call(current, transport);
-      this.#forget(id, current);
+      this.#claim(name, id, token);
+    };
+    try {
+      const result = await call(entry, fence, transport);
+      this.#forget(id, entry);
       return result;
     } finally {
       activity.settling = false;
+      activity.settlementInProgress = false;
     }
   }
 
@@ -715,11 +726,13 @@ export class SqsQueue implements QueueAdapter {
     attempts: number,
     reason: 'attempts-exhausted' | 'abandoned' | 'unreadable',
     id = messageId,
+    fence?: () => Promise<void>,
   ): Promise<void | 'discarded'> {
     await this.prepareConsumer(name);
     const transport = this.#transport!;
     const target = this.#targets.get(name)!;
     if (target.url === false) {
+      if (fence !== undefined) await fence();
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
       if (reason !== 'unreadable') {
         this.#logger?.warn(
@@ -734,6 +747,7 @@ export class SqsQueue implements QueueAdapter {
       'setu-source-message-id': { DataType: 'String', StringValue: messageId },
     });
     try {
+      if (fence !== undefined) await fence();
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
     } catch (error) {
       this.#logger?.error(
@@ -745,13 +759,12 @@ export class SqsQueue implements QueueAdapter {
 
   async #extend(name: string, id: string, token: string): Promise<boolean> {
     const transport = this.#transport;
-    const entry = this.#receipts.get(id);
+    const entry = this.findReceiptEntry(id);
     if (!this.#ready || !transport || !entry || entry.name !== name || entry.claimToken !== token)
       return false;
-    // Settlement owns this receipt until it finishes. A suppressed renewal is
-    // successful, including while its transport response is still pending.
+    // Only the final receipt operation suppresses renewal, and only while the
+    // claim is still valid. Slow preparation and forwarding keep renewing.
     if (entry.activity.settling) return true;
-    if (this.findReceiptEntry(id) === undefined) return false;
     if (entry.activity.renewal !== undefined) return entry.activity.renewal;
     const pending = Promise.withResolvers<boolean>();
     entry.activity.renewal = pending.promise;
