@@ -30,15 +30,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`@setu-ts/service-discovery-plugin`.** Warm names answer from cache with background refresh;
-  `cacheTtlMs: 0` refreshes every warm call. Empty answers hold a warm list during the grace on read
-  and watch paths. DNS absent names resolve `[]`, and health reflects the last lookup outcome.
-  Consul ids default to `<serviceName>-<address>-<port>` across restarts. Kubernetes probe timeouts
-  name the API server and bound.
-- **`@setu-ts/grpc-plugin`.** Instance outcomes count no answer, peer cancel and server-fault codes
-  as failures; wire application errors succeed and caller cancellation reports nothing. Streaming
-  success remains at headers. Cancelling a response stream aborts its handler signal before awaiting
-  cleanup without a bound. Document per-pod discovery for balancing; drain 503s are not resent.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** Provider reads now default to a 2 s bound; set
+  `resolveTimeoutMs: 0` to restore unbounded reads.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** Warm names always answer from cache and
+  refresh in the background. `cacheTtlMs: 0` now refreshes every warm call, coalesced; no setting
+  restores waiting on every warm read. Applications requiring that policy must provide their own
+  `IServiceDiscovery` implementation.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** Empty answers hold a nonempty list for 30000
+  ms; set `emptyAnswerGraceMs: 0` to restore immediate replacement. A grace timer re-reads without
+  another backend event and broadcasts replacement to all watchers; read changes also reach watchers
+  once.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** DNS absent-name answers now resolve `[]`; no
+  built-in DNS option restores the old rejection/stale-on-absence behavior. Set `provider: 'custom'`
+  with a `discovery` provider that rejects absent-name lookups if that policy is required.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** Consul ids default to
+  `<serviceName>-<address>-<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
+  an existing identity; `address` must be the instance's own address, never a shared hostname.
+- **BREAKING — `@setu-ts/grpc-plugin`.** Instance outcomes now distinguish wire application answers,
+  server faults and evidenced transport faults. Caller aborts and local serialization/write-limit
+  faults report nothing. No option restores the old outcome mapping; `ejection: false` on discovery
+  disables automatic ejection if the changed classifications are unsuitable, without restoring old
+  reports. A response-stream cancel now aborts the handler's signal before awaiting cleanup without
+  a bound.
+- **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
+  on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
+  failures discard their failure state/reporters. Kubernetes probe timeouts name the API and bound.
+- **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
+  for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
+  delivery, the shared 5 s provider-health cache and instance-address requirements for registration.
 
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the

@@ -118,7 +118,7 @@ describe('ServiceDiscoveryPlugin — registration', () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         await expect(discovery.resolve('billing')).rejects.toThrow(/token.*apiServer/);
       }
-      expect(warnings).toHaveLength(2);
+      expect(warnings).toHaveLength(3);
       expect(warnings.join()).not.toContain('API_SERVER_CANARY');
     } finally {
       await app.stop();

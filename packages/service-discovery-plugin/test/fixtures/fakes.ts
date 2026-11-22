@@ -106,7 +106,7 @@ export function createFakeRuntime(options?: FakeRuntimeOptions): FakeRuntime {
     timeouts,
     intervals,
     runTimeouts(): void {
-      for (const entry of timeouts) {
+      for (const entry of [...timeouts]) {
         if (!entry.cleared) {
           entry.cleared = true;
           entry.fn();

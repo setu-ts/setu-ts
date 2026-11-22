@@ -8,7 +8,7 @@ throws a TypeError, and on Deno the client can crash the process when a peer goe
 
 ## Serve generated service descriptors
 
-Pass your generated descriptor and implementation into this config helper:
+Register a generated descriptor and implementation:
 
 ```ts
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
@@ -47,9 +47,10 @@ export function registerRpcService(
   gRPC-Web are served.
 - Registering the same service type name twice throws. Omitting the implementation registers a
   service for reflection only.
-- Client instance failures include no answer, peer cancel and server-fault codes, wire or not; wire
-  application errors succeed, caller abort reports nothing. Streaming reports at headers only.
-- Drain 503s are not resent. Discover pods for balancing; one Service address pins calls.
+- Wire application answers succeed. Non-wire faults need headers, a system cause, refusal, deadline
+  or peer cancel. Local encoding/write-limit faults and caller abort report nothing; server faults
+  fail. Streaming reports at headers.
+- Drain 503s are not resent. Discover pods to balance calls.
 - Stream cancellation aborts `ctx.signal`, then awaits cleanup unbounded.
 - The health bridge reports serving without a health capability; an aggregate degraded status is not
   serving.

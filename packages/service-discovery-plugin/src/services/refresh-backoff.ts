@@ -8,8 +8,13 @@ export class RefreshBackoff {
 
   /** Whether another refresh may start for this name. */
   ready(name: string): boolean {
+    return this.remainingMs(name) === 0;
+  }
+
+  /** Remaining retry delay, for a scheduled empty-answer refresh. */
+  remainingMs(name: string): number {
     const state = this.#states.get(name);
-    return state === undefined || this.#now() >= state.retryAt;
+    return state === undefined ? 0 : Math.max(0, state.retryAt - this.#now());
   }
 
   /** Space failures by 1, 2, 4, 8, 16, then 30 seconds. */

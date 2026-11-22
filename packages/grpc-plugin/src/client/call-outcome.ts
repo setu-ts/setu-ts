@@ -70,7 +70,7 @@ const ANSWER_CODES: ReadonlySet<number> = new Set([
  * @param error - The rejected call
  * @param signal - The caller's signal
  * @param isWireError - Whether Connect decoded this error from a server answer
- * @returns The discovery outcome, or no report for caller cancellation
+ * @returns The discovery outcome, or no report for caller cancellation or local client faults
  */
 export function callOutcome(
   error: unknown,
@@ -81,10 +81,32 @@ export function callOutcome(
   if (isRefusedStream(error)) return 'failure';
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
+  const wire = isWireError(error);
+  if (
+    !wire &&
+    code !== GRPC_CODE.DeadlineExceeded &&
+    code !== GRPC_CODE.Canceled &&
+    !hasInstanceEvidence(error)
+  )
+    return undefined;
   if (typeof code === 'number' && SERVER_FAULT_CODES.has(code)) return 'failure';
   if (code === GRPC_CODE.Canceled) return 'failure';
-  if (typeof code === 'number' && isWireError(error) && ANSWER_CODES.has(code)) return 'success';
+  if (typeof code === 'number' && wire && ANSWER_CODES.has(code)) return 'success';
   return 'failure';
+}
+
+/** Response headers or a system-error cause distinguish transport faults from local encoding faults. */
+function hasInstanceEvidence(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { metadata } = error as { metadata?: unknown };
+  if (metadata instanceof Headers && !metadata.keys().next().done) return true;
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    const record = current as { code?: unknown; cause?: unknown };
+    if (typeof record.code === 'string') return true;
+    current = record.cause;
+  }
+  return false;
 }
 
 /** connect-node's message for a `REFUSED_STREAM` reset code (`connectErrorFromH2ResetCode`). */

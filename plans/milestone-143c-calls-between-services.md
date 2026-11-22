@@ -211,10 +211,12 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     ("served from cache", "`0` disables caching") and the README row (`README.md:224`, "`0` disables
     caching") are rewritten to the sentence above, and the PUBLIC_API note "read-through … with …
     stale-on-failure" becomes "served from cache, refreshed in the background".
-  - **State flags.** `degraded` becomes a computed value: true while ANY name's last read failed or
-    §3.2 holds an empty answer for it, tracked per name on the cache entry. Today it is one global
-    flag that any name's success clears (`service-discovery-service.ts:217`, `:247`), which would
-    let `degraded: false` sit beside `staleForMs > 0`. `everResolved` is unchanged.
+  - **State flags.** `degraded` becomes a computed value: true while any WARM name's last read
+    failed or §3.2 holds an empty answer for it, tracked per name on the cache entry. A cold failure
+    is answered by the rejected call and the warn line and does not set it, so a name asked for once
+    and never again cannot keep the plugin degraded for good (code review, 2026-11-23). Today it is
+    one global flag that any name's success clears (`service-discovery-service.ts:217`, `:247`),
+    which would let `degraded: false` sit beside `staleForMs > 0`. `everResolved` is unchanged.
   - **Logging.** A failed provider read (cold or background) goes to a `ConnectionErrorReporter` PER
     NAME, built like the probe's (`service-discovery-plugin.ts:83-86`) with source
     `service-discovery-plugin: <kind> resolve '<serviceName>'`, created on the name's first failure
@@ -278,7 +280,13 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     stored at once.
   - **What a watch caller sees.** The watch listener (`service-discovery-service.ts:212-219`) is
     called after `#accept` with the list the cache now holds, so during the grace it receives the
-    held instances, never `[]`, and `resolve()` and `watch()` callers always agree.
+    held instances, never `[]`. Because DNS (fingerprint dedupe), Consul (index) and Kubernetes (one
+    `DELETED` event) never re-deliver an unchanged empty answer, the service also (a) keeps each
+    name's watch listeners and notifies them whenever `#accept` changes the cached list, from the
+    read path or the watch path, and (b) arms one timer per held name at
+    `emptySince + emptyAnswerGraceMs` that starts a background read, whose empty answer replaces the
+    list and reaches watchers. The timer is cleared on a non-empty answer, on replacement and on
+    `close()`. So `resolve()` and `watch()` callers always agree (code and docs review, 2026-11-23).
   - **With §3.1's background refresh:** the empty answers arrive through background refreshes (and
     watch deliveries), never through a waiting caller, so callers keep the old list without delay
     throughout the grace. Because the next refresh starts only when a call arrives after
@@ -474,7 +482,15 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
   in the README: a streaming call is reported `success` when its response headers arrive.
 - **Decision:** `#attempt` classifies an error that rejected `run` with one function,
   `callOutcome(error, signal)`, in a new internal file `client/call-outcome.ts`. The rows, in order:
-  1. the caller's own signal is aborted: no report (a `Canceled` the caller caused);
+  1. the caller's own signal is aborted: no report (a `Canceled` the caller caused); 1b. a
+     client-side fault reports nothing: a non-wire error with no response metadata, no Node system
+     or http2 error (string `code`) in its cause chain, and a code other than `DeadlineExceeded`,
+     refused stream or a peer `Canceled`. connect throws such errors before the instance is
+     contacted: a non-wire `Internal` for a request it cannot serialize
+     (`protocol/serialization.js:105`, `:137`) and a non-wire `ResourceExhausted` over
+     `writeMaxBytes` (`limit-io.js:59`). Counting them would let bad inputs eject healthy replicas
+     (code review, 2026-11-23); this refines OD10, which did not consider faults raised before the
+     call left the client;
   2. a refused stream (`isRefusedStream`): `failure` (unchanged);
   3. server-fault codes, wire or not: `Unavailable`, `Unimplemented`, `Internal`, `Unknown`,
      `DataLoss`, `DeadlineExceeded`: `failure`;

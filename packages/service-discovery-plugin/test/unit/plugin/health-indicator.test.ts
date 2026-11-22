@@ -65,7 +65,7 @@ it('reports DNS failures and abandoned reads down, and warm failures up with a g
       const result = await check();
       expect(result).toMatchObject({
         status: warm ? 'up' : 'down',
-        data: { reachable: false, degraded: true, staleForMs: warm ? 50 : 0 },
+        data: { reachable: false, degraded: warm, staleForMs: warm ? 50 : 0 },
       });
     }
   }

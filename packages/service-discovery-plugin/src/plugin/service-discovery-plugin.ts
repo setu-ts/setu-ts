@@ -118,8 +118,9 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
       // M70c: the indicator composes three facts. `everResolved` is `false`
       // until the first successful provider read (so a backend that was never
       // reached is `down`, not `up` — the X10-3 case the old comment hid);
-      // `degraded` means a stale cache is being served; `isHealthy()` is the
-      // live reachability probe. Mapping: never resolved AND not reachable is
+      // `degraded` means a warm name's last read failed or an empty answer is held
+      // during its grace. `isHealthy()` is the provider probe or DNS's last lookup
+      // outcome, read through the same 5 s cache. Never resolved AND not reachable is
       // `down`; otherwise `up`. A serving warm cache stays in rotation while
       // the shared backend failure remains visible in data.
       const discoveryIndicator = async (): Promise<HealthCheckResult> => {

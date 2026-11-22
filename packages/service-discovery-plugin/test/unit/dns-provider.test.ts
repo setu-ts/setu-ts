@@ -387,3 +387,64 @@ describe('DNS lookup outcomes', () => {
     expect(calls).toBe(2);
   });
 });
+
+for (const previousFailure of [false, true]) {
+  it(`does not change DNS health when a hung watch is stopped (previous failure ${previousFailure})`, async () => {
+    const runtime = createFakeRuntime();
+    let hung = false;
+    const error = new Error('previous DNS failure');
+    const resolver = {
+      resolveSrv: () => Promise.resolve([]),
+      resolveHost: () =>
+        hung
+          ? new Promise<never>(() => {})
+          : previousFailure
+            ? Promise.reject(error)
+            : Promise.resolve(['10.0.0.1']),
+    };
+    const provider = new DnsProvider(resolver, runtime, {
+      mode: 'a',
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+    });
+    await provider.resolve('billing').catch(() => {});
+    hung = true;
+    const stop = await provider.watch('billing', () => {
+      throw new Error('hung tick delivered');
+    });
+    await flushOutcomes();
+    stop();
+    await flushOutcomes();
+    if (previousFailure) await expect(provider.isHealthy()).rejects.toBe(error);
+    else expect(await provider.isHealthy()).toBe(true);
+    expect(runtime.timeouts.every((timer) => timer.cleared)).toBe(true);
+    expect(runtime.intervals.every((timer) => timer.cleared)).toBe(true);
+  });
+}
+for (const value of [-1, NaN, Infinity, 2147483648]) {
+  it(`refuses direct DNS resolveTimeoutMs=${value}`, () => {
+    expect(
+      () =>
+        new DnsProvider(createFakeDns({}), createFakeRuntime(), {
+          mode: 'srv',
+          domainTemplate: '{service}',
+          watchIntervalMs: 100,
+          resolveTimeoutMs: value,
+        }),
+    ).toThrow('resolveTimeoutMs');
+  });
+}
+it('accepts a directly constructed DNS watch with an unbounded tick', async () => {
+  const runtime = createFakeRuntime();
+  const provider = new DnsProvider(createFakeDns({}), runtime, {
+    mode: 'srv',
+    domainTemplate: '{service}',
+    watchIntervalMs: 100,
+    resolveTimeoutMs: 0,
+  });
+  const stop = await provider.watch('billing', () => {});
+  await flushOutcomes();
+  stop();
+  expect(runtime.timeouts).toHaveLength(0);
+});

@@ -112,10 +112,13 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   target and is checked the same way at `GrpcPlugin()`. After each call the client reports to
   discovery: an instance fails when it did not answer, or answered with a server-fault code
   (`Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded`), wire or
-  not. Peer `Canceled` fails; caller cancellation reports nothing. Wire application/caller codes
+  not, provided a non-wire error is attributable to the instance: response headers, a system-error
+  object with a string `code` within five cause-chain objects, a refused stream, a deadline, or peer
+  cancellation. Local serialization and write-limit failures have no such evidence and report
+  nothing. Peer `Canceled` fails; caller cancellation reports nothing. Wire application/caller codes
   (`InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
-  `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed; every other error
-  fails. Streaming reports success when response headers arrive; later iteration errors report
+  `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed; other attributable
+  errors fail. Streaming reports success when response headers arrive; later iteration errors report
   nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
   discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
 - **Connections.** A Service address that balances connections pins every call to one pod. Discover

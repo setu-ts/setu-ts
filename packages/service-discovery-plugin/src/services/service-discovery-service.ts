@@ -21,6 +21,7 @@ import type {
   PickOptions,
   ServiceInstance,
   ServiceOutcome,
+  TimerHandle,
   Unsubscribe,
 } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
@@ -42,6 +43,14 @@ interface CacheEntry {
   emptySince?: number;
 }
 
+/** One backend watch shared by a name's subscribers. */
+interface INameWatch {
+  readonly listeners: Set<(instances: readonly ServiceInstance[]) => void>;
+  ready: Promise<void>;
+  stop: Unsubscribe | undefined;
+  closed: boolean;
+}
+
 /**
  * Resolves, balances, and learns from reported outcomes.
  *
@@ -61,7 +70,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #backoff: RefreshBackoff;
   readonly #resolveReporters = new Map<string, ConnectionErrorReporter>();
   readonly #resolveReporter: (name: string) => ConnectionErrorReporter;
-  readonly #failedNames = new Set<string>();
+  readonly #nameWatches = new Map<string, INameWatch>();
+  readonly #emptyTimers = new Map<string, TimerHandle>();
   #closed = false;
   /**
    * M70c: set on the first successful provider read. Distinct from
@@ -125,11 +135,10 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     return this.#provider.kind;
   }
 
-  /** Whether any name last failed or holds an empty answer during its grace. */
+  /** Whether a warm name last failed or holds an empty answer during its grace. */
   get degraded(): boolean {
-    return (
-      this.#failedNames.size > 0 ||
-      [...this.#cache.values()].some((entry) => entry.emptySince !== undefined)
+    return [...this.#cache.values()].some(
+      (entry) => entry.failed || entry.emptySince !== undefined,
     );
   }
 
@@ -198,6 +207,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   #startRead(serviceName: string): Promise<readonly ServiceInstance[]> {
     const read = this.#read(serviceName).finally(() => {
       if (this.#inFlight.get(serviceName) === read) this.#inFlight.delete(serviceName);
+      this.#scheduleEmptyRefresh(serviceName);
     });
     this.#inFlight.set(serviceName, read);
     return read;
@@ -233,19 +243,42 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     serviceName: string,
     listener: (instances: readonly ServiceInstance[]) => void,
   ): Promise<Unsubscribe> {
-    const unsubscribe = await this.#provider.watch(serviceName, (instances) => {
-      if (this.#closed) return;
-      listener(this.#accept(serviceName, instances));
-    });
-
+    if (this.#closed) return () => {};
+    let state = this.#nameWatches.get(serviceName);
+    const joining = state !== undefined;
+    if (state === undefined) {
+      state = { listeners: new Set(), ready: Promise.resolve(), stop: undefined, closed: false };
+      this.#nameWatches.set(serviceName, state);
+      const created = state;
+      created.ready = Promise.resolve()
+        .then(() =>
+          this.#provider.watch(serviceName, (instances) => {
+            if (!created.closed) this.#accept(serviceName, instances, true);
+          }),
+        )
+        .then((stop) => {
+          created.stop = stop;
+          if (created.closed) stop();
+        });
+    }
+    const subscribed = (instances: readonly ServiceInstance[]): void => listener(instances);
+    state.listeners.add(subscribed);
+    try {
+      const cached = this.#cache.get(serviceName);
+      if (joining && cached !== undefined) subscribed(cached.instances);
+      await state.ready;
+    } catch (error) {
+      state.listeners.delete(subscribed);
+      if (state.listeners.size === 0) this.#stopWatch(serviceName, state);
+      throw error;
+    }
+    const active = state;
     const wrapped = (): void => {
       this.#watches.delete(wrapped);
-      unsubscribe();
+      active.listeners.delete(subscribed);
+      if (active.listeners.size === 0) this.#stopWatch(serviceName, active);
     };
-    if (this.#closed) {
-      unsubscribe();
-      return () => {};
-    }
+    if (this.#closed) return () => {};
     this.#watches.add(wrapped);
     return wrapped;
   }
@@ -257,16 +290,61 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#inFlight.clear();
     this.#backoff.clear();
     this.#resolveReporters.clear();
-    this.#failedNames.clear();
+    for (const name of this.#emptyTimers.keys()) this.#clearEmptyTimer(name);
     for (const unsubscribe of [...this.#watches]) {
       unsubscribe();
     }
     this.#watches.clear();
+    for (const [name, state] of this.#nameWatches) this.#stopWatch(name, state);
     this.#ejection?.clear();
   }
 
+  #stopWatch(name: string, state: INameWatch): void {
+    if (state.closed) return;
+    state.closed = true;
+    state.listeners.clear();
+    if (this.#nameWatches.get(name) === state) this.#nameWatches.delete(name);
+    state.stop?.();
+  }
+
+  #clearEmptyTimer(name: string): void {
+    const timer = this.#emptyTimers.get(name);
+    if (timer !== undefined) this.#runtime.clearTimeout(timer);
+    this.#emptyTimers.delete(name);
+  }
+
+  #scheduleEmptyRefresh(name: string): void {
+    const entry = this.#cache.get(name);
+    if (this.#closed || entry?.emptySince === undefined || this.#emptyTimers.has(name)) return;
+    const delay = Math.max(
+      entry.emptySince + this.#options.emptyAnswerGraceMs - this.#runtime.hrtime(),
+      this.#backoff.remainingMs(name),
+    );
+    const timer = this.#runtime.setTimeout(
+      () => {
+        this.#emptyTimers.delete(name);
+        if (this.#closed || this.#cache.get(name)?.emptySince === undefined) return;
+        if (!this.#backoff.ready(name)) {
+          this.#scheduleEmptyRefresh(name);
+          return;
+        }
+        if (!this.#inFlight.has(name)) {
+          void this.#startRead(name).catch(() => {
+            /* #read records the failure. */
+          });
+        }
+      },
+      Math.max(0, delay),
+    );
+    this.#emptyTimers.set(name, timer);
+  }
+
   /** Store every successful read and watch delivery through the same empty rule. */
-  #accept(serviceName: string, instances: readonly ServiceInstance[]): readonly ServiceInstance[] {
+  #accept(
+    serviceName: string,
+    instances: readonly ServiceInstance[],
+    watchDelivery = false,
+  ): readonly ServiceInstance[] {
     const old = this.#cache.get(serviceName);
     const now = this.#runtime.hrtime();
     const emptySince = old?.emptySince ?? now;
@@ -282,10 +360,16 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       failed: false,
       ...(held ? { emptySince } : {}),
     });
-    this.#failedNames.delete(serviceName);
     this.#backoff.reset(serviceName);
     this.#resolveReporters.get(serviceName)?.recovered();
     this.#everResolved = true;
+    if (held) this.#scheduleEmptyRefresh(serviceName);
+    else this.#clearEmptyTimer(serviceName);
+    const changed = old === undefined || JSON.stringify(old.instances) !== JSON.stringify(accepted);
+    if (changed || watchDelivery) {
+      const state = this.#nameWatches.get(serviceName);
+      for (const listener of [...(state?.listeners ?? [])]) listener(accepted);
+    }
     return accepted;
   }
 
@@ -308,15 +392,15 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       if (!this.#closed) {
         const reporter =
           this.#resolveReporters.get(serviceName) ?? this.#resolveReporter(serviceName);
-        this.#resolveReporters.set(serviceName, reporter);
         reporter.report(error);
-        this.#failedNames.add(serviceName);
         const stale = this.#cache.get(serviceName);
         if (stale !== undefined) {
+          this.#resolveReporters.set(serviceName, reporter);
           stale.failed = true;
           this.#backoff.failed(serviceName);
           return stale.instances;
         }
+        this.#resolveReporters.delete(serviceName);
       }
       // A provider's own DiscoveryUnavailableError is a configuration fault (a
       // multi-port Kubernetes service with no portName), not an outage: it

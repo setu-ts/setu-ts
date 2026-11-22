@@ -1,7 +1,7 @@
-# @setu-ts/service-discovery-plugin — locate service instances
+# @setu-ts/service-discovery-plugin
 
-**Add it:** `setu add service-discovery` adds it and prints the registration for `setu.config.ts`.
-It provides `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
+**Add:** `setu add service-discovery`; register the printed plugin in `setu.config.ts`. It provides
+`CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
 
 ## Configure a static service pool
 
@@ -37,23 +37,23 @@ export function registerBillingRoutes(router: IRouterApi): void {
 
 ## Behaviour the types do not show
 
-- `resolveUrl` and `pick` return `null` for an empty pool. `resolve` lists all known instances,
-  including ejected ones; `pick` filters ejected instances, falling back to the full pool if needed.
-- Selection defaults to round-robin; per-call `strategy` overrides it.
+- `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
+  return `null` for an empty pool. Default strategy: round-robin.
 - Warm reads use cache; `cacheTtlMs` starts background refresh (30000 ms; `0` every call). Cold
-  reads coalesce with `resolveTimeoutMs` (2000 ms; `0` unbounded).
-- Failed refreshes retry after 1, 2, 4, 8, 16, then 30 s. `staleForMs` reports age; warm names stay
-  ready.
-- Reads/watches hold warm lists on empty answers for `emptyAnswerGraceMs` (30000 ms; `0` immediate).
-  DNS absent names resolve `[]`; other lookup failures are unhealthy.
-- Consul ids default to `<serviceName>-<address>-<port>`, stable across restarts.
-- Ejection depends on application `report(instance, outcome)` calls. By default five failures within
-  30000 ms eject for 30000 ms, subject to a 50% pool cap; success clears the state.
-- Stop watches with the returned unsubscribe.
+  reads share `resolveTimeoutMs` (2000 ms; `0` unbounded).
+- Failures retry after 1, 2, 4, 8, 16, then 30 s. `staleForMs` reports age; warm names stay ready.
+- `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
+  at expiry; an empty result reaches all watchers without another backend event. Reads notify
+  changes once. Nonempty answers, replacement and close clear the timer; watches still refresh by
+  TTL.
+- `degraded` covers warm failures and held empty answers. Cold failures discard state/reporters.
+  Every provider's health result uses a 5 s cache; DNS uses the last lookup outcome.
+- Consul ids default to `<serviceName>-<address>-<port>`; use the instance's own address.
+- Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears the state.
+- Unsubscribe stops watches. DNS absent names resolve `[]`; other errors reject.
 
 ## Other options
 
-- `provider` also selects `'consul'`, `'kubernetes'`, `'dns'` or `'custom'` with `discovery`.
-- `strategy` also accepts `'random'` and `'weighted-random'`; `ejection: false` disables ejection.
+- Providers: static, consul, kubernetes, dns, or custom with `discovery`.
+- Strategies: random/weighted-random; `ejection: false` disables ejection.
 - DNS requires runtime DNS; unsupported self-registration is refused.
-- Failed deregistration warns with URL userinfo masked.

@@ -41,7 +41,11 @@ for (const [code, wireOutcome] of rows) {
   for (const wire of [false, true]) {
     it(`classifies ${Code[code]} with isWireError=${wire}`, async () => {
       const runtime = await loadConnectModule();
-      const fallback = new ConnectError('answer', code);
+      const fallback = new ConnectError(
+        'answer',
+        code,
+        new Headers({ 'content-type': 'application/grpc' }),
+      );
       const jsonFallback = wire && (code === Code.Unimplemented || code === Code.Unavailable);
       const error = jsonFallback ? errorFromJson({}, undefined, fallback) : fallback;
       if (jsonFallback) expect(error.isWireError).toBe(true);
@@ -60,6 +64,50 @@ it('gives caller abort first priority, refused streams second, and defaults unkn
   });
   expect(callOutcome(refused, abort.signal, () => true)).toBeUndefined();
   expect(callOutcome(refused, undefined, () => true)).toBe('failure');
-  for (const error of [null, 'bad', {}, { code: 0 }, { code: 999 }])
+  for (const error of [null, 'bad', {}, { code: 0 }, { code: 999 }]) {
     expect(callOutcome(error, undefined, () => true)).toBe('failure');
+    expect(callOutcome(error, undefined, () => false)).toBeUndefined();
+  }
+});
+
+it('does not attribute local serialization or write-limit faults to the instance', async () => {
+  const runtime = await loadConnectModule();
+  const serialization = ConnectError.from(new Error('cannot serialize request'), Code.Internal);
+  const writeLimit = new ConnectError(
+    'message size 10 is larger than configured writeMaxBytes 1',
+    Code.ResourceExhausted,
+  );
+  for (const error of [
+    serialization,
+    writeLimit,
+    new ConnectError('local setup failed', Code.Unavailable),
+  ]) {
+    expect(error.metadata.keys().next().done).toBe(true);
+    expect(callOutcome(error, undefined, runtime.isWireError)).toBeUndefined();
+  }
+});
+
+it('requires non-wire response headers, system cause evidence, deadline or peer cancellation', async () => {
+  const runtime = await loadConnectModule();
+  for (const code of ['ECONNRESET', 'ECONNREFUSED', 'ERR_HTTP2_STREAM_ERROR']) {
+    const system = Object.assign(new Error('system fault'), { code });
+    const error = new ConnectError(
+      'transport',
+      Code.Internal,
+      undefined,
+      undefined,
+      new Error('wrapper', { cause: system }),
+    );
+    expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
+  }
+  const headers = new ConnectError('HTTP 404', Code.Unimplemented, {
+    'content-type': 'text/plain',
+  });
+  expect(callOutcome(headers, undefined, runtime.isWireError)).toBe('failure');
+  let cause: Error = Object.assign(new Error('deep'), { code: 'ECONNRESET' });
+  for (let n = 0; n < 5; n++) cause = new Error('wrapper', { cause });
+  expect(callOutcome(cause, undefined, runtime.isWireError)).toBeUndefined();
+  expect(
+    callOutcome(Object.assign(new Error(), { cause: null }), undefined, runtime.isWireError),
+  ).toBeUndefined();
 });

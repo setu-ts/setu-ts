@@ -145,9 +145,12 @@ const unsubscribe = await discovery.watch('billing', (instances) => {
 });
 ```
 
-The listener always receives the **full** instance list, never a delta, and a change invalidates
-that service's cache entry immediately — so the TTL is a safety net for unwatched services rather
-than the freshness mechanism for watched ones.
+The listener receives the **full** list. Each delivery updates the cache through the same rule as
+reads: an empty change to a nonempty list is held for `emptyAnswerGraceMs`. One timer then starts a
+coalesced background read at the grace deadline; an empty answer replaces the list and is delivered
+to every watcher, even if the backend never repeats the empty change. Read-path list changes also
+reach watchers, once per change. Watched names still refresh in the background once `cacheTtlMs`
+old.
 
 ## Self-registration (Consul only)
 
@@ -173,7 +176,9 @@ leave callers routed at a closed port for up to one check interval on every roll
 stale instance list are served rather than refused while the change propagates.
 
 The default id is `<serviceName>-<address>-<port>`, unique within the agent and stable across
-restarts, so a restarted process replaces its own orphan. Set `id` explicitly for another identity.
+restarts, so a restarted process replaces its own orphan. `address` must be this instance's own
+address: a shared hostname gives two instances the same default id, so one replaces the other's
+entry. Set `id` explicitly for another identity.
 
 The health check is **not optional**: it defaults to
 `{ httpPath: '/health', intervalSeconds: 10, deregisterAfterSeconds: 60 }` and cannot be disabled.
@@ -257,9 +262,11 @@ reject with a branded 503 when it fails. A failed background refresh spaces retr
 
 An empty answer holds a nonempty list for `emptyAnswerGraceMs` (default 30000 ms; `0` replaces at
 once). Read and watch callers see the same held list, with `degraded: true`. Nonempty answers reset
-the grace. Replacement happens on the first empty answer at or after the grace, so with both default
-intervals it can take about 30–60 seconds after disappearance. Cold empty answers are stored at
-once. An empty answer succeeded, so it does not raise `staleForMs` or incur failure spacing.
+the grace and clear its timer. A per-name timer starts a background read at the grace deadline,
+coalesced with any active read and subject to normal failure retry spacing. Its empty answer
+replaces the list and reaches every watcher without another backend event. Cold empty answers are
+stored at once; replacement and close clear the timer. An empty answer succeeded, so it does not
+raise `staleForMs` or incur failure spacing.
 
 DNS NXDOMAIN/no-record answers (`ENOTFOUND`, `ENODATA`, Deno `NotFound`, including wrapped causes)
 resolve to `[]`. Other DNS errors reject. Use a trusted host resolver: a spoofed absent-name answer
@@ -268,7 +275,8 @@ family, so an absent A answer can conceal a timed-out AAAA lookup. DNS record TT
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked.
-Reporters are independent per name. A DNS failure may also produce a probe reporter line.
+Reporters are independent per cached name; a cold failure logs and discards its reporter. A DNS
+failure may also produce a probe reporter line.
 
 ## Health indicator
 
@@ -276,11 +284,13 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 
 - `everResolved` — `false` until the first successful provider read, so a backend that was never
   reached is `down`, not `up` (the X10-3 fix).
-- `degraded` — any name's last read failed, or an empty answer is held during the grace.
+- `degraded` — a warm name's last read failed, or an empty answer is held during its grace. Cold
+  failures reject and warn, then leave no cached failure state or retained reporter.
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST). DNS uses the last lookup outcome: an absent name is success; any
   other failure, including a lookup abandoned at its bound, is unreachable. Before a lookup DNS
-  reports reachable and issues no health lookup of its own.
+  reports reachable and issues no health lookup of its own. Stopping a DNS watch preserves the prior
+  lookup outcome. Every provider's `isHealthy()` result passes through the same 5 s cache.
 
 | Status | Meaning                                                                                                                                                                                                                                         |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

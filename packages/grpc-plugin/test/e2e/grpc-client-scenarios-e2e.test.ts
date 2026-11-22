@@ -26,6 +26,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
+import { isRefusedStream } from '../../src/client/call-outcome.ts';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
@@ -166,7 +167,32 @@ describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on 
         { clients: { billing: { basePath: '/grpc', protocol, timeoutMs: 500 } } },
       );
       const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
-      await failure(billing.echo({ message: 'first' }));
+      const error = await failure(billing.echo({ message: 'first' }));
+      const causes: { code: unknown; name: unknown }[] = [];
+      let current: unknown = error;
+      for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+        const record = current as { code?: unknown; name?: unknown; cause?: unknown };
+        causes.push({ code: record.code, name: record.name });
+        current = record.cause;
+      }
+      const attributable =
+        error.isWireError ||
+        !error.metadata.keys().next().done ||
+        causes.some((cause) => typeof cause.code === 'string') ||
+        isRefusedStream(error) ||
+        error.code === Code.DeadlineExceeded ||
+        error.code === Code.Canceled;
+      expect(
+        attributable,
+        JSON.stringify({
+          fault,
+          protocol,
+          code: error.code,
+          wire: error.isWireError,
+          metadata: [...error.metadata],
+          causes,
+        }),
+      ).toBe(true);
       const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
       expect((await discovery.pick('billing'))?.id).toBe('live');
       for (let n = 0; n < 5; n++)

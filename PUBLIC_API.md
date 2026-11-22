@@ -13398,20 +13398,28 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   including a bounded-out lookup; before a lookup or after an absent-name answer it is reachable.
   `down` means never resolved and unreachable; otherwise `up`, so a warm cache at any age stays
   ready.
-- `degraded` is true if any name's last read failed or its empty answer is held. `staleForMs` is the
-  age of the oldest list whose last refresh failed, zero when none is failing. Empty grace does not
-  raise the age. Both read and watch paths hold nonempty lists for `emptyAnswerGraceMs`; the watch
-  listener receives the held list. Cold empty answers are stored at once.
+- `degraded` is true if a warm name's last read failed or an empty answer is held during its grace.
+  `staleForMs` is the age of the oldest list whose last refresh failed, zero when none is failing.
+  Empty grace does not raise the age. Both read and watch paths hold nonempty lists for
+  `emptyAnswerGraceMs`; the watch listener receives the held list. A per-name timer starts a
+  coalesced, retry-spaced background read at the grace deadline. If still empty, replacement reaches
+  every watcher without another backend event. Changes from reads also notify watchers once;
+  unchanged watch deliveries still notify. Nonempty answers, replacement and close clear the timer.
+  Cold empty answers are stored at once. Watched names still refresh in the background once
+  `cacheTtlMs` old.
 - Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
   await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
-  16, then 30 s; success resets spacing. Per-name reporters warn on first/changed error, debug on
-  repeats, info on recovery, with URL userinfo masked. DNS can also log its probe failure.
+  16, then 30 s; success resets spacing. Cold failures discard failure state/reporters; reporters
+  persist only for cached names. Per-name reporters warn on first/changed error, debug on repeats,
+  info on recovery, with URL userinfo masked. DNS can also log its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
   other failures reject. Use a trusted host resolver. The runtime currently retains only the first
   failed address family, so an absent A record can conceal a timed-out AAAA lookup.
 - `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
   Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
-  bounded, never overlap, and arm the interval before the first lookup.
+  bounded, never overlap, and arm the interval before the first lookup. An abandoned lookup may keep
+  running in the resolver until its own timeout: the resolver takes no signal. Stopping a watch
+  preserves the prior lookup outcome.
 - `onClose` stops watches and clears cache, in-flight, retry, reporter and ejection state. Late
   refreshes do not write state.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
@@ -13429,19 +13437,20 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
 
 Since M70c the indicator composes three facts. `everResolved` is `false` until the first successful
 provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix). `degraded`
-means a stale cache is being served. `isHealthy()` is the cached reachability probe (Consul
-`/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
+means a warm name's last read failed or an empty answer is held during its grace. `isHealthy()` is
+Consul's `/v1/status/leader` probe, Kubernetes' `limit=1` EndpointSlice LIST, or DNS's last lookup
+outcome. Every provider's `isHealthy()` is read through the same 5 s cache.
 
 Since 0.13.0 a failing probe logs its reason through the application logger: one `warn` naming the
 cause when the failure starts (a Deno `UnknownIssuer` TLS rejection, an HTTP status), `debug` for
 identical repeats, and one `info` on recovery, under the source `service-discovery-plugin: <kind>`.
 `DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
-service counts a rejection as unreachable, and the Kubernetes provider rejects this way. A
-cold-resolve `DiscoveryUnavailableError` message now ends with the cause; its public `503` detail is
-unchanged. A Kubernetes service-account token or Consul ACL token holding anything but visible ASCII
-is refused with a fixed `DiscoveryUnavailableError` that never contains the token, before any
-request is built; as a configuration fault it passes through unbranded, so a cold resolve that needs
-it answers `500`.
+service counts a rejection as unreachable. The Kubernetes provider (since 0.13.0) and the DNS
+provider (since 0.14.0) reject this way. A cold-resolve `DiscoveryUnavailableError` message now ends
+with the cause; its public `503` detail is unchanged. A Kubernetes service-account token or Consul
+ACL token holding anything but visible ASCII is refused with a fixed `DiscoveryUnavailableError`
+that never contains the token, before any request is built; as a configuration fault it passes
+through unbranded, so a cold resolve that needs it answers `500`.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -13449,7 +13458,7 @@ it answers `500`.
 | `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
-`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved, staleForMs }`.
 
 Since M113o, serving a stale cache or losing backend reachability after resolution keeps `up`.
 `data.degraded` and `data.reachable` preserve visibility without draining serving replicas.
@@ -16332,11 +16341,14 @@ A failed call reports instance failure for no answer, a refused stream, peer `Ca
 faults `Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded` (wire
 or not). Wire `InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
 `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted` report success. Caller abort
-reports nothing; everything else fails. Streaming reports success at headers; later iteration errors
-report nothing. Tight caller deadlines can eject healthy instances under discovery's ejection
-limits. Only refused unary streams are resent once within the remaining deadline; a drain 503 is not
-resent. The plugin's own post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode
-`'a'` or Kubernetes) to balance calls: one Service address pins the session to one pod.
+reports nothing. Non-wire errors require instance evidence: at least one response header, a string
+system-error `code` within five cause-chain objects, a refused stream, DeadlineExceeded, or peer
+Canceled. Otherwise they report nothing, including local serialization and writeMaxBytes errors;
+other attributable errors fail. Streaming reports success at headers; later iteration errors report
+nothing. Tight caller deadlines can eject healthy instances under discovery's ejection limits. Only
+refused unary streams are resent once within the remaining deadline; a drain 503 is not resent. The
+plugin's own post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode `'a'` or
+Kubernetes) to balance calls: one Service address pins the session to one pod.
 
 Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals

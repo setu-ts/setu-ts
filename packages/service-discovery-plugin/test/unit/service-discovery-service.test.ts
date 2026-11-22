@@ -533,7 +533,7 @@ describe('ServiceDiscoveryService — M70c everResolved', () => {
     await expect(service.resolve('billing')).rejects.toThrow(DiscoveryUnavailableError);
     // A failure must not flip everResolved: there was no prior success.
     expect(service.everResolved).toBe(false);
-    expect(service.degraded).toBe(true);
+    expect(service.degraded).toBe(false);
   });
 
   it('is set by a watch push (a delivered list is a successful read)', async () => {
@@ -654,4 +654,40 @@ describe('ServiceDiscoveryService — M139f X10-3 probe reasons and the cold-res
       detail: 'Service discovery is temporarily unavailable.',
     });
   });
+});
+
+it('drops cold failure state and reporters while retaining one reporter for a warm failure run', async () => {
+  const provider = createFakeProvider([a]);
+  const runtime = createFakeRuntime();
+  let created = 0;
+  const logger = new RecordingLogger();
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+    undefined,
+    (name) => {
+      created++;
+      return createConnectionErrorReporter({ source: name, logger: () => logger });
+    },
+  );
+  provider.failWith(new Error('down'));
+  for (const name of ['forgotten', 'forgotten', 'other']) {
+    await expect(service.resolve(name)).rejects.toThrow();
+    expect(service.degraded).toBe(false);
+  }
+  expect(created).toBe(3);
+  expect(logger.forSource('forgotten').map((entry) => entry.level)).toEqual(['warn', 'warn']);
+  provider.failWith(null);
+  await service.resolve('billing');
+  provider.failWith(new Error('down'));
+  await service.resolve('billing');
+  await flush();
+  runtime.advance(1000);
+  await service.resolve('billing');
+  await flush();
+  expect(created).toBe(4);
+  expect(logger.forSource('billing').map((entry) => entry.level)).toEqual(['warn', 'debug']);
+  expect(service.degraded).toBe(true);
+  service.close();
 });

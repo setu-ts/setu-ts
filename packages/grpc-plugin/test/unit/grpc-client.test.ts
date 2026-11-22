@@ -460,7 +460,9 @@ describe('GrpcClients', () => {
       'http://127.0.0.1:1/grpc',
       'http://127.0.0.1:2/grpc',
     ]);
-    fail = new FakeUnavailableError('refused');
+    fail = Object.assign(new FakeUnavailableError('refused'), {
+      cause: Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' }),
+    });
     await expect(call(client)).rejects.toBe(fail);
     fail = Object.assign(new Error('InvalidArgument from the server'), {
       code: 3,
@@ -1093,7 +1095,9 @@ it('reports unary deadline failure, omits caller abort, and reports streaming su
 it('does not resend an unmarked drain 503', async () => {
   let calls = 0;
   const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
-  const error = new FakeUnavailableError('HTTP 503');
+  const error = Object.assign(new FakeUnavailableError('HTTP 503'), {
+    metadata: new Headers({ 'content-type': 'text/plain' }),
+  });
   const { clients: clientSet } = clients(
     { discovery: () => discovery },
     fakeNode(() => {
@@ -1104,5 +1108,29 @@ it('does not resend an unmarked drain 503', async () => {
   await expect(call(clientSet.client(BILLING, 'billing'))).rejects.toBe(error);
   expect(calls).toBe(1);
   expect(discovery.reports).toEqual([['a', 'failure']]);
+  clientSet.close();
+});
+
+it('neither reports nor retries a caller-aborted refused stream', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  const abort = new AbortController();
+  const refused = Object.assign(new Error('NGHTTP2_REFUSED_STREAM'), {
+    code: 'ERR_HTTP2_STREAM_ERROR',
+  });
+  let calls = 0;
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      abort.abort();
+      return Promise.reject(refused);
+    }),
+  );
+  const client = clientSet.client(BILLING, 'billing') as { transport: ClientTransportLike };
+  await expect(client.transport.unary({}, abort.signal, undefined, undefined, {})).rejects.toBe(
+    refused,
+  );
+  expect(calls).toBe(1);
+  expect(discovery.reports).toEqual([]);
   clientSet.close();
 });

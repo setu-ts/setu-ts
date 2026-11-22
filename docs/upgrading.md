@@ -17,14 +17,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
 Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`
 is the age that starts a refresh; `0` refreshes every warm call, coalesced. Failed refreshes retain
 the last list indefinitely with retries after 1, 2, 4, 8, 16, then 30 s. Alert on `staleForMs` and
-`degraded`; warm lists at any age stay ready. Cold reads use `resolveTimeoutMs` (2000 ms default,
-`0` unbounded). Both new timing options accept finite values from 0 to 2147483647.
+`degraded` (warm read failures or held empty answers); warm lists at any age stay ready. Cold reads
+use `resolveTimeoutMs` (2000 ms default, `0` unbounded). Both new timing options accept finite
+values from 0 to 2147483647.
 
 Empty answers hold warm nonempty lists for `emptyAnswerGraceMs` (30000 ms default); set `0` to
-replace immediately. Reads and watches share this rule. Missing DNS names now resolve `[]`, as
-static unknown names do, rather than causing a cold 503 or retaining removed records indefinitely.
-Use a trusted host resolver. Other DNS errors remain failures, reflected in health, including hung
-lookups.
+replace immediately. Reads and watches share this rule. At the grace deadline a per-name timer
+starts a coalesced background read, respecting failure retry spacing. A still-empty answer replaces
+the list and notifies all watchers, even without a repeated backend event. Nonempty answers,
+replacement and close clear the timer. Changes from background reads also reach watchers once.
+Missing DNS names now resolve `[]`, as static unknown names do, rather than causing a cold 503 or
+retaining removed records indefinitely. Use a trusted host resolver. Other DNS errors remain
+failures, reflected in health, including hung lookups.
 
 Consul defaults the registration id to `<serviceName>-<address>-<port>` so restarts replace their
 own entry. Explicit ids still win. Once after upgrading, list `/v1/agent/services`, identify old
@@ -33,11 +37,14 @@ uuid entries left by crashed processes, and deregister each via
 
 The gRPC client reports no answer, peer cancellation and server-fault codes as instance failures,
 including `Internal` and `DeadlineExceeded`, wire or not. Wire application/caller errors succeed;
-caller abort reports nothing. Tight deadlines can therefore eject healthy instances; size deadlines
-for normal latency. Streaming still reports success at response headers only. A drain 503 is not
-resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a single
-Service address pins a connection to one pod. Cancelling a response stream aborts the handler's
-`ctx.signal` before awaiting cleanup without a bound; handlers must observe it to exit promptly.
+caller abort and client-side serialization/write-limit errors report nothing. A non-wire error is
+attributable to the instance only with response headers, a system-error cause, a refused stream, a
+deadline, or peer cancellation. Tight deadlines can therefore eject healthy instances; size
+deadlines for normal latency. Streaming still reports success at response headers only. A drain 503
+is not resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a
+single Service address pins a connection to one pod. Cancelling a response stream aborts the
+handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it to exit
+promptly.
 
 ### Module pages (`@setu-ts/cli`)
 

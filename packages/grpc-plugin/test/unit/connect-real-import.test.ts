@@ -21,6 +21,7 @@ import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.
 import { dispatchRpc, type DispatchEntry } from '../../src/transports/rpc-dispatcher.ts';
 import type { ConnectRuntime, UniversalHandlerLike } from '../../src/interfaces/connect-runtime.ts';
 import type { GrpcServiceDefinition, RpcCall } from '@setu-ts/common';
+import { callOutcome } from '../../src/client/call-outcome.ts';
 
 /** Whether all three specifiers can actually be imported here. */
 async function connectAvailable(): Promise<boolean> {
@@ -33,6 +34,53 @@ async function connectAvailable(): Promise<boolean> {
 }
 
 const available = await connectAvailable();
+
+it.skipIf(!available)(
+  'does not report real Connect request serialization and writeMaxBytes failures',
+  async () => {
+    const { ConnectError, Code } = await import('@connectrpc/connect');
+    const { createClientMethodSerializers, limitSerialization } =
+      await import('@connectrpc/connect/protocol');
+    const { createFileRegistry, fromBinary } = await import('@bufbuild/protobuf');
+    const { FileDescriptorSetSchema } = await import('@bufbuild/protobuf/wkt');
+    const { ECHO_DESCRIPTOR_BASE64 } = await import('../fixtures/echo-descriptors.ts');
+    const set = fromBinary(
+      FileDescriptorSetSchema,
+      Uint8Array.from(atob(ECHO_DESCRIPTOR_BASE64), (char) => char.charCodeAt(0)),
+    );
+    const method = createFileRegistry(set).getService('example.EchoService')!.method['echo']!;
+    const serializers = createClientMethodSerializers(method, true);
+    const runtime = await loadConnectModule();
+    const input = {
+      get $typeName(): string {
+        throw new Error('cannot serialize request');
+      },
+    };
+    const errors: unknown[] = [];
+    try {
+      serializers.serialize(input);
+    } catch (error) {
+      errors.push(error);
+    }
+    const limited = limitSerialization(
+      { serialize: () => new Uint8Array(10), parse: () => ({}) },
+      { writeMaxBytes: 1, readMaxBytes: 100 },
+    );
+    try {
+      limited.serialize({});
+    } catch (error) {
+      errors.push(error);
+    }
+    expect(errors).toHaveLength(2);
+    for (const [index, error] of errors.entries()) {
+      if (!(error instanceof ConnectError)) throw new Error('Expected a real ConnectError');
+      expect(error.code).toBe([Code.Internal, Code.ResourceExhausted][index]);
+      expect(runtime.isWireError(error)).toBe(false);
+      expect([...error.metadata]).toEqual([]);
+      expect(callOutcome(error, undefined, runtime.isWireError)).toBeUndefined();
+    }
+  },
+);
 
 it.skipIf(!available)('adapts the wire flag on real Connect errors', async () => {
   const { ConnectError, Code } = await import('@connectrpc/connect');

@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { withDeadline, resolveProbeTiming } from '@setu-ts/common';
+import { withDeadline, resolveProbeTiming, deadlineRangeError } from '@setu-ts/common';
 import type {
   IDnsResolver,
   IRuntimeServices,
@@ -16,6 +16,9 @@ import type {
   Unsubscribe,
 } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
+
+/** Watch teardown is cancellation by the owner, not a DNS lookup failure. */
+const WATCH_STOPPED = Object.freeze({});
 
 /** Options shared by both DNS modes. */
 interface DnsProviderCommon {
@@ -89,8 +92,11 @@ export class DnsProvider implements DiscoveryProvider {
    * @param resolver - The DNS resolver from `IRuntimeServices.dns`
    * @param runtime - Supplies timers for the poll
    * @param options - Mode, template, port, and poll interval
+   * @throws {RangeError} When resolveTimeoutMs is outside the runtime timer range
    */
   constructor(resolver: IDnsResolver, runtime: IRuntimeServices, options: DnsProviderOptions) {
+    const refusal = deadlineRangeError('resolveTimeoutMs', options.resolveTimeoutMs ?? 2000);
+    if (refusal !== null) throw refusal;
     this.#resolver = resolver;
     this.#runtime = runtime;
     this.#options = options;
@@ -134,6 +140,7 @@ export class DnsProvider implements DiscoveryProvider {
       this.#lastFailure = undefined;
       return instances;
     } catch (error) {
+      if (signal?.aborted && signal.reason === WATCH_STOPPED) throw error;
       if (!signal?.aborted && isNameAbsent(error)) {
         this.#lastFailure = undefined;
         return [];
@@ -227,7 +234,7 @@ export class DnsProvider implements DiscoveryProvider {
     return Promise.resolve(() => {
       stopped = true;
       this.#runtime.clearInterval(handle);
-      active?.abort();
+      active?.abort(WATCH_STOPPED);
     });
   }
 }
