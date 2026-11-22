@@ -267,6 +267,9 @@ describe('first-command scaffold gates', () => {
         expect(await nodeFs.readFile(`${project}/.env`, 'utf8')).toContain(
           'PUBSUB_EMULATOR_HOST=127.0.0.1:8085\n',
         );
+        // The generated tests boot the app against the broker, and no emulator runs
+        // here: the row proves only that the project's own test script loads the dotenv.
+        await nodeFs.rm(`${project}/test`, { recursive: true, force: true });
         await nodeFs.writeFile(
           `${project}/dotenv-probe.test.ts`,
           "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\ntest('emulator dotenv', () => { assert.equal(process.env.PUBSUB_EMULATOR_HOST, '127.0.0.1:8085'); });\n",
