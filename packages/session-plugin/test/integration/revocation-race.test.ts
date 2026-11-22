@@ -401,3 +401,45 @@ describe('a commit that outlives every marker', () => {
     expect(await userOf(service, cookie)).toBeUndefined();
   });
 });
+
+describe('a commit that stalls past every marker after its age check', () => {
+  it('is refused at its fence and leaves no row', async () => {
+    const store = new PausingStore(memoryStore());
+    const clock = makeClock();
+    const config = resolveSessionConfig({
+      mode: 'encrypt',
+      store,
+      storeCommit: 'snapshot',
+      rolling: true,
+    });
+    const ring = await deriveKeyRing(crypto.subtle, [SECRET], 'encrypt');
+    const service = new SessionService(
+      config,
+      ring,
+      {
+        subtle: crypto.subtle,
+        randomBytes: (n) => crypto.getRandomValues(new Uint8Array(n)),
+        now: clock.now,
+        uuid: clock.uuid,
+      },
+      store,
+    );
+    const cookie = await signedIn(service);
+    const inflight = makeContext({ headers: { cookie } });
+    const inflightSession = await service.load(inflight.ctx);
+    const logout = makeContext({ headers: { cookie } });
+    const ls = await service.load(logout.ctx);
+    ls.destroy();
+    await service.commit(logout.ctx, ls);
+    // The commit passes its age check, writes, and stalls; meanwhile the marker's lifetime passes.
+    inflightSession.set('cart', 1);
+    const pause = store.pauseNextWrite();
+    const committing = service.commit(inflight.ctx, inflightSession);
+    await pause.landed;
+    await store.destroy(`revoked:${inflightSession.id}`);
+    clock.advance(config.maxAgeMs);
+    pause.release();
+    expect(await committing).toBe('refused');
+    expect(await store.read(inflightSession.id)).toBeNull();
+  });
+});

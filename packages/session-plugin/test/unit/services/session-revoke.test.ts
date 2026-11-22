@@ -97,7 +97,7 @@ describe('revocation markers', () => {
     s.destroy();
     expect(await service.commit(c.ctx, s)).toBe('written');
     // ...and then reads the id's `superseded` marker for a regeneration to follow.
-    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:superseded:${id}`]);
+    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:successor:${id}`]);
     expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
   });
 
@@ -166,44 +166,70 @@ describe('revocation markers', () => {
     expect(store.rows.has(`revoked:${id}`)).toBe(false);
   });
 
-  it('a regeneration records its new id on the superseded marker', async () => {
+  it('a committed regeneration links its new id under its own key, then marks the old id', async () => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);
     const { cookie, id } = await signedIn(service);
     const c = makeContext({ headers: { cookie } });
     const s = await service.load(c.ctx);
     s.regenerate();
+    store.calls.length = 0;
     expect(await service.commit(c.ctx, s)).toBe('written');
-    expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded', next: s.id });
+    expect(store.rows.get(`successor:${id}`)).toEqual({ __setu_marker: 'successor', next: s.id });
+    expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded' });
+    // After the pre-check: the link, then the marker.
+    expect(store.calls.slice(1, 3)).toEqual([`write:successor:${id}`, `write:superseded:${id}`]);
+  });
+
+  it("a failed regeneration's cleanup keeps a committed regeneration's link", async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie } = await signedIn(service);
+    const logout = makeContext({ headers: { cookie } });
+    const ls = await service.load(logout.ctx);
+    // R1 regenerates and commits; R2 regenerates and throws, so the middleware cleans up.
+    const r1 = makeContext({ headers: { cookie } });
+    const s1 = await service.load(r1.ctx);
+    const r2 = makeContext({ headers: { cookie } });
+    const s2 = await service.load(r2.ctx);
+    s1.regenerate();
+    expect(await service.commit(r1.ctx, s1)).toBe('written');
+    s2.regenerate();
+    await service.revokeSuperseded(s2);
+    // The sign-out that loaded the old id still ends R1's session.
+    ls.destroy();
+    await service.commit(logout.ctx, ls);
+    expect(store.rows.has(s1.id)).toBe(false);
+    expect(store.rows.get(`revoked:${s1.id}`)).toEqual({ __setu_marker: 'revoked' });
   });
 
   it.each([
     ['a non-string successor', 42],
     ['a marker id as successor', 'revoked:other'],
+    ['a link id as successor', 'successor:other'],
   ] as const)('a sign-out ignores %s', async (_name, next) => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);
     const { cookie, id } = await signedIn(service);
-    store.rows.set(`superseded:${id}`, { __setu_marker: 'superseded', next });
+    store.rows.set(`successor:${id}`, { __setu_marker: 'successor', next });
     store.rows.set('other', { userId: 'u2' });
     const c = makeContext({ headers: { cookie } });
     const s = await service.load(c.ctx);
     store.calls.length = 0;
     s.destroy();
     expect(await service.commit(c.ctx, s)).toBe('written');
-    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:superseded:${id}`]);
+    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:successor:${id}`]);
     expect(store.rows.has('other')).toBe(true);
   });
 
-  it('a sign-out follows a chain of regenerations, to a bound', async () => {
+  it('a sign-out follows the whole chain of regenerations', async () => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);
     const { cookie, id } = await signedIn(service);
-    // A chain of twelve successors: the sign-out revokes the first eight after its own id.
     const chain = Array.from({ length: 12 }, (_v, i) => `succ-${i}`);
     let previous = id;
     for (const next of chain) {
-      store.rows.set(`superseded:${previous}`, { __setu_marker: 'superseded', next });
+      store.rows.set(`successor:${previous}`, { __setu_marker: 'successor', next });
       store.rows.set(next, { userId: 'u1' });
       previous = next;
     }
@@ -211,10 +237,20 @@ describe('revocation markers', () => {
     const s = await service.load(c.ctx);
     s.destroy();
     await service.commit(c.ctx, s);
-    expect(chain.map((next) => store.rows.has(next))).toEqual([
-      ...Array<boolean>(8).fill(false),
-      ...Array<boolean>(4).fill(true),
-    ]);
+    expect(chain.map((next) => store.rows.has(next))).toEqual(Array<boolean>(12).fill(false));
+  });
+
+  it('a sign-out stops at a cycle a corrupt store forms', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    store.rows.set(`successor:${id}`, { __setu_marker: 'successor', next: 'loop' });
+    store.rows.set(`successor:loop`, { __setu_marker: 'successor', next: id });
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.destroy();
+    expect(await service.commit(c.ctx, s)).toBe('written');
+    expect(store.rows.get('revoked:loop')).toEqual({ __setu_marker: 'revoked' });
   });
 
   it('a fault reading the successor fails the sign-out after its own revocation', async () => {
@@ -223,7 +259,7 @@ describe('revocation markers', () => {
     const { cookie, id } = await signedIn(service);
     const c = makeContext({ headers: { cookie } });
     const s = await service.load(c.ctx);
-    store.failing = { step: 'read', key: (k) => k.startsWith('superseded:') };
+    store.failing = { step: 'read', key: (k) => k.startsWith('successor:') };
     s.destroy();
     await expect(service.commit(c.ctx, s)).rejects.toThrow();
     expect(store.rows.has(id)).toBe(false);
@@ -308,6 +344,7 @@ describe('revocation markers', () => {
     expect(await service.commit(c.ctx, s)).toBe('written');
     expect(store.calls).toEqual([
       `read:revoked:${id}`,
+      `write:successor:${id}`,
       `write:superseded:${id}`,
       `destroy:${id}`,
       `write:${s.id}`,

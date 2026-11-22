@@ -55,14 +55,15 @@ const MARKER_FIELD = '__setu_marker';
 
 const MARKER_KINDS: readonly MarkerKind[] = ['revoked', 'superseded'];
 
-/** The field of a `superseded` marker naming the id the regeneration moved the session to. */
-const SUCCESSOR_FIELD = 'next';
-
 /**
- * How many regenerations a sign-out follows from the id it signs out. A chain longer than this
- * within one marker lifetime is not a real session's history.
+ * The prefix of a successor link, `successor:<old id>`, which a committed regeneration writes
+ * naming the id it moved the session to. It lives under its own key, apart from the `superseded`
+ * marker, so a failed regeneration's cleanup (which writes only the marker) cannot erase it.
  */
-const SUCCESSOR_DEPTH = 8;
+const SUCCESSOR_PREFIX = 'successor';
+
+/** The field of a successor link naming the new id. */
+const SUCCESSOR_FIELD = 'next';
 
 /**
  * How much longer than `maxAge` a marker lives, so a store that rounds a TTL down to whole seconds
@@ -72,7 +73,7 @@ const MARKER_TTL_MARGIN_MS = 1000;
 
 /** Whether an id is a marker id rather than a session id. */
 function isMarkerId(id: string): boolean {
-  return MARKER_KINDS.some((kind) => id.startsWith(`${kind}:`));
+  return [...MARKER_KINDS, SUCCESSOR_PREFIX].some((kind) => id.startsWith(`${kind}:`));
 }
 
 /**
@@ -522,25 +523,37 @@ export class SessionService implements ISessionService {
    * delete then fails. A marker write that fails still attempts the delete and
    * then rethrows, so a sign-out never reports success with its marker missing.
    *
-   * A `superseded` marker names the regeneration's new id. A sign-out then
-   * reads its id's `superseded` marker and revokes the id it names too: a
-   * regeneration writes that marker before its fence reads `revoked`, and a
-   * sign-out writes `revoked` before reading `superseded`, so on a
-   * linearizable store one of them always sees the other — the regeneration
-   * refuses, or the sign-out ends the new session. The marker names one
-   * successor: when two requests regenerate the same id at once, the later
-   * marker overwrites the earlier, and a sign-out racing both follows only
-   * the id the later one names.
+   * A committed regeneration also writes a successor link, `successor:<old>`,
+   * naming its new id. A sign-out then reads its id's link and revokes the id
+   * it names, and so on along the whole chain: a regeneration writes its link
+   * before its fence reads `revoked`, and a sign-out writes `revoked` before
+   * reading the link, so on a linearizable store one of them always sees the
+   * other — the regeneration refuses, or the sign-out ends the new session. A
+   * failed regeneration's cleanup writes only the `superseded` marker, never
+   * the link. The link names one successor: when two requests regenerate the
+   * same id and both commit, the later link overwrites the earlier, and a
+   * sign-out racing both follows only the id the later one names.
    */
-  async #revoke(id: string, kind: MarkerKind, successor?: string, depth = 0): Promise<void> {
+  async #revoke(
+    id: string,
+    kind: MarkerKind,
+    successor?: string,
+    visited: Set<string> = new Set(),
+  ): Promise<void> {
     const store = this.#store!;
+    const ttlMs = this.#config.maxAgeMs + MARKER_TTL_MARGIN_MS;
+    visited.add(id);
+    if (successor !== undefined) {
+      // Before the marker, so the link exists whenever a sign-out can see the regeneration at all.
+      await store.write(
+        `${SUCCESSOR_PREFIX}:${id}`,
+        { [MARKER_FIELD]: SUCCESSOR_PREFIX, [SUCCESSOR_FIELD]: successor },
+        ttlMs,
+      );
+    }
     let fault: { readonly error: unknown } | undefined;
-    const marker =
-      successor === undefined
-        ? { [MARKER_FIELD]: kind }
-        : { [MARKER_FIELD]: kind, [SUCCESSOR_FIELD]: successor };
     try {
-      await store.write(`${kind}:${id}`, marker, this.#config.maxAgeMs + MARKER_TTL_MARGIN_MS);
+      await store.write(`${kind}:${id}`, { [MARKER_FIELD]: kind }, ttlMs);
     } catch (error) {
       fault = { error };
     }
@@ -550,19 +563,21 @@ export class SessionService implements ISessionService {
       if (fault === undefined) throw error;
     }
     if (fault !== undefined) throw fault.error;
-    if (kind === 'revoked' && depth < SUCCESSOR_DEPTH) {
+    if (kind === 'revoked') {
+      // The whole chain: every link names a committed regeneration, so it is finite, and the
+      // visited set stops a cycle a hostile or corrupt store could form.
       const next = await this.#successorOf(id);
-      if (next !== undefined) {
-        await this.#revoke(next, 'revoked', undefined, depth + 1);
+      if (next !== undefined && !visited.has(next)) {
+        await this.#revoke(next, 'revoked', undefined, visited);
       }
     }
   }
 
-  /** The id a regeneration of `id` moved the session to, from its `superseded` marker. */
+  /** The id a committed regeneration of `id` moved the session to, from its successor link. */
   async #successorOf(id: string): Promise<string | undefined> {
-    const row = await this.#store!.read(`superseded:${id}`);
+    const row = await this.#store!.read(`${SUCCESSOR_PREFIX}:${id}`);
     const next = row?.[SUCCESSOR_FIELD];
-    return row?.[MARKER_FIELD] === 'superseded' && typeof next === 'string' && !isMarkerId(next)
+    return row?.[MARKER_FIELD] === SUCCESSOR_PREFIX && typeof next === 'string' && !isMarkerId(next)
       ? next
       : undefined;
   }
@@ -593,10 +608,15 @@ export class SessionService implements ISessionService {
       await this.#store!.destroy(written).catch(() => false);
       throw error;
     }
-    if (marked) {
+    // The read above saw every marker still alive when it ran. A marker lives at least `maxAgeMs`
+    // past the load, so only a fence that finishes within that window has covered the write: a
+    // commit that stalled past it (after its first age check) is refused too.
+    const now = this.#deps.now();
+    const stale = now - (this.#loadedAt.get(session) ?? now) >= this.#config.maxAgeMs;
+    if (marked || stale) {
       await this.#store!.destroy(written);
     }
-    return marked;
+    return marked || stale;
   }
 
   /** A refused commit: no cookie, one `debug` line carrying no id. */

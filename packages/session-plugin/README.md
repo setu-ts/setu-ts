@@ -72,13 +72,14 @@ restored session writes its row and then reads the markers, and deletes its own 
 present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
 cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
 tab) is refused too, so it cannot carry the old session's data to a fresh id. A committed
-regeneration's `superseded` marker names the new id, and a sign-out of the old id also revokes the
-id it names: a sign-out that lands after a regeneration's marker check therefore still ends the
-regenerated session. Markers are written only for an id that had a row, so anonymous `POST /logout`
-traffic writes nothing; they expire one second after `maxAge` (for stores that round a TTL down),
-and a commit whose request loaded the session `maxAge` or more ago is refused, since no marker could
-still fence it (a regeneration or a `clear()` sign-out refused that way still revokes the old id). A
-marker names one successor: when two requests regenerate the same id at once (a double-submitted
+regeneration also writes a link, `successor:<old id>`, naming the new id, and a sign-out of the old
+id also revokes the id it names, along the whole chain: a sign-out that lands after a regeneration's
+marker check therefore still ends the regenerated session. Markers are written only for an id that
+had a row, so anonymous `POST /logout` traffic writes nothing; they expire one second after `maxAge`
+(for stores that round a TTL down), and a commit whose request loaded the session `maxAge` or more
+ago is refused, since no marker could still fence it (a regeneration or a `clear()` sign-out refused
+that way still revokes the old id). A failed regeneration's cleanup never touches the link. A link
+names one successor: when two requests regenerate the same id and both commit (a double-submitted
 sign-in), a sign-out racing both ends only the session the later one moved to.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
@@ -100,10 +101,10 @@ before it) and must not evict a live key:
 | Your own `ISessionStore`                            | When it is linearizable and does not evict                                                                     |
 
 An evicted or not-yet-visible marker reverts that one revocation to an unfenced delete. Your own
-store sees ids of the form `revoked:<uuid>` and `superseded:<uuid>` beside session ids, holding the
-payload `{ "__setu_marker": "revoked" }` (a `superseded` marker written by a committed regeneration
-also carries `"next": "<new id>"`). The cookie strategy has no row to revoke; `signIn.sessionStamp`
-(below) is its answer.
+store sees ids of the form `revoked:<uuid>`, `superseded:<uuid>` and `successor:<uuid>` beside
+session ids, holding the payload `{ "__setu_marker": "revoked" }` (or `"superseded"`), or
+`{ "__setu_marker": "successor", "next": "<new id>" }` for a link. The cookie strategy has no row to
+revoke; `signIn.sessionStamp` (below) is its answer.
 
 ### Concurrent requests
 
