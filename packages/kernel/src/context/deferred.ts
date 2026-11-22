@@ -161,8 +161,16 @@ export function wrapDeferredStream(
     // invisible from a reader, so cancel() is the source's one hook; one that
     // never settles keeps the resources, as a handler that never settles
     // does (security audit P15: a bounded wait let a limit be bypassed).
-    const stopWatching = watchStall(registry, stall);
-    aborting = cancelSource(signal?.reason)
+    const cancelled = cancelSource(signal?.reason);
+    // Started after the cancel, so a runtime whose timer throws cannot stop
+    // the source being cancelled; such a runtime only loses the warning.
+    let stopWatching = (): void => {};
+    try {
+      stopWatching = watchStall(registry, stall);
+    } catch {
+      // No warning without a working timer; the wait itself is unchanged.
+    }
+    aborting = cancelled
       .catch(() => {})
       .then(() => {
         stopWatching();

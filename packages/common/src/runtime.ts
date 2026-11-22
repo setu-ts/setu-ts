@@ -380,9 +380,10 @@ export interface IRuntimeServices {
    */
   clearTimeout(handle: TimerHandle): void;
   /**
-   * Lets the process exit while this timer is still pending: Node and Bun
-   * call the handle's `unref()`, Deno calls `Deno.unrefTimer`. On Cloudflare
-   * Workers it does nothing, since an isolate does not outlive its requests.
+   * Lets the process exit while this timer is still pending: Node, Bun and
+   * Deno 2 call the handle's `unref()` (a numeric id falls back to
+   * `Deno.unrefTimer` where that exists). On Cloudflare Workers it does
+   * nothing, since an isolate does not outlive its requests.
    * Optional; a caller that needs it calls it as `runtime.unrefTimer?.(h)`.
    *
    * @param handle - A handle from {@linkcode setTimeout} or {@linkcode setInterval}

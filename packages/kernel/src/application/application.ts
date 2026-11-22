@@ -354,6 +354,8 @@ class Application implements IKernelApplication {
   readonly #rpcStreams = new WeakSet<IRequestContext>();
   /** Clears each pending stream-cancel stall timer; `stop()` runs them all. */
   readonly #stallTimers = new Set<() => void>();
+  /** Set once `stop()` has cleared the stall timers: an abort after it starts none. */
+  #stallTimersClosed = false;
   /**
    * The kernel diagnostics collector — `undefined` unless the application was
    * created with `diagnostics` explicitly enabled. Every read of this field
@@ -1080,6 +1082,7 @@ class Application implements IKernelApplication {
     } finally {
       this.#unsubscribeFatalErrors();
       // A stuck stream's stall warning has nothing left to say after stop.
+      this.#stallTimersClosed = true;
       for (const clear of [...this.#stallTimers]) clear();
       this.#collector?.markClosed(shutdownFailed);
     }
@@ -2207,7 +2210,9 @@ class Application implements IKernelApplication {
         );
       },
       track: (clear) => {
-        this.#stallTimers.add(clear);
+        // An abort after stop() has nothing left to report.
+        if (this.#stallTimersClosed) clear();
+        else this.#stallTimers.add(clear);
       },
       untrack: (clear) => {
         this.#stallTimers.delete(clear);

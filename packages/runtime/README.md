@@ -243,14 +243,15 @@ native runtime's own limit.
 
 ## Runtime differences, stated (since 0.14.0)
 
-| Behaviour                       | Node                                  | Bun                                          | Deno                                         |
-| ------------------------------- | ------------------------------------- | -------------------------------------------- | -------------------------------------------- |
-| Uncaught exception or rejection | `onFatalError` observes, crash kept   | `onFatalError` observes, crash kept          | `onFatalError` observes, crash kept          |
-| Drain start (`beginDrain`)      | HTTP/2 `GOAWAY`, idle HTTP/1.1 closed | through the Node adapter when `http2` is set | none; stated once at `listen` with `http2`   |
-| Refused WebSocket upgrade       | the pipeline's response, whole        | the pipeline's response                      | the pipeline's response                      |
-| WebSocket per-message ceiling   | none (the sink's limit)               | 16 MiB, reported once if the limit is higher | 64 MiB, reported once if the limit is higher |
-| Quiet response stream           | stays open                            | stays open (idle timeout off for streams)    | stays open                                   |
-| Response stream that fails      | connection cut, nothing printed       | connection cut, nothing printed              | connection cut, nothing printed              |
+| Behaviour                                       | Node                                  | Bun                                          | Deno                                         |
+| ----------------------------------------------- | ------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| Uncaught exception or rejection                 | `onFatalError` observes, crash kept   | `onFatalError` observes, crash kept          | `onFatalError` observes, crash kept          |
+| A pending timer and process exit (`unrefTimer`) | the handle's `unref()`                | the handle's `unref()`                       | the handle's `unref()`                       |
+| Drain start (`beginDrain`)                      | HTTP/2 `GOAWAY`, idle HTTP/1.1 closed | through the Node adapter when `http2` is set | none; stated once at `listen` with `http2`   |
+| Refused WebSocket upgrade                       | the pipeline's response, whole        | the pipeline's response                      | the pipeline's response                      |
+| WebSocket per-message ceiling                   | none (the sink's limit)               | 16 MiB, reported once if the limit is higher | 64 MiB, reported once if the limit is higher |
+| Quiet response stream                           | stays open                            | stays open (idle timeout off for streams)    | stays open                                   |
+| Response stream that fails                      | connection cut, nothing printed       | connection cut, nothing printed              | connection cut, nothing printed              |
 
 A failed stream is logged once by the kernel, `Response stream failed`, through the application's
 logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (internal); the exported

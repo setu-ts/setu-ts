@@ -598,6 +598,33 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     await advance(fake, 1_000);
   });
 
+  it('starts no stall timer for an abort that comes after stop()', async () => {
+    const fake = createFakeRuntime();
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [fakeRuntime(fake), recordingLogger(calls)] });
+    app.router.get('/stuck', (ctx) => {
+      ctx.defer?.(() => {});
+      return ctx.response.stream(heldCancel().stream);
+    });
+    await app.start({ drainTimeoutMs: 50 });
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/stuck', { signal: client.signal }),
+    );
+    await response.body!.getReader().read();
+    let stopped = false;
+    void app.stop().then(() => {
+      stopped = true;
+    });
+    await advance(fake, 50);
+    expect(stopped).toBe(true);
+    // The client leaves only after the application stopped.
+    client.abort();
+    await flush();
+    await advance(fake, 30_000);
+    expect(withMessage(calls, STALL)).toHaveLength(0);
+  });
+
   it('clears a pending stall timer at stop()', async () => {
     const { fake, calls, app } = await stuckAfterAbort(true);
     let stopped = false;

@@ -48,8 +48,9 @@ export function crossSetTimeout(fn: () => void, ms: number): TimerHandle {
 }
 
 /**
- * Lets the process exit while a timer is pending: a Node or Bun handle's
- * `unref()`, or `Deno.unrefTimer` for Deno's numeric ids; nothing elsewhere
+ * Lets the process exit while a timer is pending: the handle's `unref()` on
+ * Node, Bun and Deno 2 (all return a timer object; measured on Deno 2.9.6),
+ * or `Deno.unrefTimer` for a numeric id where that exists; nothing elsewhere
  * (workerd's numeric ids, where an isolate does not outlive its requests).
  *
  * @param handle - A timer handle from this runtime
