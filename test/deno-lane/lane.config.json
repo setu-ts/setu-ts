@@ -138,6 +138,7 @@
     "@setu-ts/testing": "./../../packages/testing/src/index.ts",
     "@setu-ts/cli": "./../../packages/cli/src/index.ts",
     "@setu-ts/cli/main": "./../../packages/cli/src/main.ts",
+    "@setu-ts/cli/node-version": "./../../packages/cli/src/utils/node-version.ts",
     "@setu-ts/create": "./../../packages/create/src/index.ts",
     "@setu-ts/sdk": "./../../packages/sdk/src/index.ts",
     "@setu-ts/rest-starter": "./../../packages/starters/rest-starter/src/index.ts",

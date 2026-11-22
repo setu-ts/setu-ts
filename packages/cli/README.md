@@ -845,6 +845,16 @@ MIT
 | `MainProcess`   | interface |
 | `MainRuntime`   | interface |
 
+### `@setu-ts/cli/node-version`
+
+| Export             | Kind     |
+| ------------------ | -------- |
+| `isNodeBelowFloor` | function |
+| `isSupportedNode`  | function |
+| `nodeFloorRefusal` | function |
+| `HARD_FLOOR_NODE`  | const    |
+| `SUPPORTED_NODE`   | const    |
+
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
