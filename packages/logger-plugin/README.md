@@ -123,8 +123,9 @@ to emit both arrival and completion again. When the child's exposed level exclud
 middleware skips building arrival metadata; if no level is readable, it delegates filtering to
 `debug()`. Slow requests still add a `warn` entry and thrown errors retain their predicted
 completion status. Since 0.14.0 an accepted WebSocket upgrade is recorded as `status: 101`, and a
-request whose client left before the response (its signal aborted) as `status: 499` with
-`aborted: true`, whatever status the handler set. Durations use the monotonic clock
+request whose status would be a 5xx after its client left (its signal aborted) as `status: 499` with
+`aborted: true`. Any other status is logged as served; the signal is read only for a 5xx, because on
+Deno the first read prints the runtime's legacy-abort notice. Durations use the monotonic clock
 (`runtime.hrtime()`), never a wall-clock epoch.
 
 The request logger records `method` and the concrete `path` (no query string) on every record it

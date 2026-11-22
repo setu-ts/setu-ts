@@ -17,7 +17,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 - **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
   bound. Keep it below the orchestrator's grace period minus any pre-stop delay and the time the
   shutdown hooks need; `PUBLIC_API.md` ("The two drain numbers, in one place") gives the default and
-  the value a generated project passes, with the arithmetic.
+  the value that fits the generated deployment manifests, with the arithmetic.
 - **SIGHUP.** `RuntimeSignal` now includes `'SIGHUP'`. Add it to an entry's signal loop so a closed
   terminal stops the application cleanly. An exhaustive `switch` over `RuntimeSignal` needs a new
   arm.
@@ -31,8 +31,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 - **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
   `Process failed` (fatal), `Response stream failed`, `Request aborted before completion` and
   `Startup cancelled` come through the registered logger. The request log records `101` for an
-  upgrade and `499` with `aborted: true` for a client that left, where it recorded `200` and the
-  handler's status.
+  upgrade and `499` with `aborted: true` for a request that would have been logged as a 5xx after
+  its client left, where it recorded `200` and the 5xx.
 - **HEAD.** Every `GET` route answers `HEAD`. Remove a hand-written `HEAD` route that only repeated
   its `GET`.
 - **Node refused upgrades.** A refused WebSocket upgrade on Node carries the response the pipeline
@@ -1157,9 +1157,9 @@ application without `DiPlugin` is unaffected.
 - **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
   disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
   `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
-  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
-  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
-  settle after the kernel's own 5 s bound.
+  hold `app.stop()` for about k × 5 s — longer than the drain bound (10 s unless `drainTimeoutMs`
+  sets it) once k exceeds 2. A request scope's disposal failures are logged at `warn` as
+  `Request scope disposal failed`, even when they settle after the kernel's own 5 s bound.
 - **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
   means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays

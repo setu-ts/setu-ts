@@ -14,11 +14,12 @@ All notable changes to this project are documented here. The format follows
   the error without changing how the process ends (Node, Deno and Bun; absent on Workers).
   `app.stop()` logs `Server stopping`, `Shutdown drain finished` (with `remaining` and `timedOut`)
   and `Server stopped`. `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000).
-  `RuntimeSignal` adds `'SIGHUP'`. `IHttpAdapter.beginDrain` lets the Node adapter send HTTP/2
-  `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
-  `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
-  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`; the pool honours it
-  with V13-131's worker-pool half (M143r). V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
+  `RuntimeSignal` adds `'SIGHUP'`. `IHttpAdapter.beginDrain` lets the Node adapter (which also
+  serves Bun's HTTP/2) send HTTP/2 `GOAWAY` when the drain begins. `IPluginContext.signal` aborts
+  when `stop()` is called during `start()`, which now rejects with `StartCancelledError` (new,
+  `@setu-ts/kernel`). `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
+  `@setu-ts/worker-pool-plugin` does not read it yet (V13-131's worker-pool half, M143r). V13-11,
+  V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -56,8 +57,8 @@ All notable changes to this project are documented here. The format follows
   no longer writes `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2
   states at listen that it sends no `GOAWAY` when draining.
 - **`@setu-ts/logger-plugin` (M143i).** The request log records `101` for an accepted WebSocket
-  upgrade (V13-223), and `499` with `aborted: true` for a client that left (the logger-plugin half
-  of V13-110).
+  upgrade (V13-223), and `499` with `aborted: true` for a request whose client left and whose status
+  would have been a 5xx (the logger-plugin half of V13-110).
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

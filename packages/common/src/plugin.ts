@@ -432,8 +432,9 @@ export interface StartOptions {
    *
    * Keep it below the time your orchestrator allows between `SIGTERM` and
    * `SIGKILL`, less any pre-stop delay and the time your shutdown hooks need.
-   * The value the generated entry passes, and why, sit beside this default
-   * in PUBLIC_API.md ("The two drain numbers, in one place").
+   * The value that fits the generated deployment manifests, and why, sits
+   * beside this default in PUBLIC_API.md ("The two drain numbers, in one
+   * place").
    *
    * @since 0.14.0
    */

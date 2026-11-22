@@ -260,10 +260,11 @@ The drain bound is `StartOptions.drainTimeoutMs`; there is no other shutdown opt
 **The two drain numbers, in one place.** The bound must fit inside the orchestrator's grace period
 (the time between `SIGTERM` and `SIGKILL`) minus the pre-stop delay and the time the shutdown and
 close hooks need. The library default is **10 000 ms**, which fits a 30 s grace with room to spare.
-The entry `setu new` generates passes **20 000 ms** (from 0.14.0): the generated Kubernetes
-manifests give 30 s of grace and a 5 s pre-stop sleep, leaving 25 s, of which 20 s drain and 5 s
-close the server and run the hooks. Change any one of the grace period, the pre-stop sleep or
-`drainTimeoutMs`, and recheck the other two.
+For a project deployed with the manifests `setu new` generates, **20 000 ms** fits: they give 30 s
+of grace and a 5 s pre-stop sleep, leaving 25 s, of which 20 s drain and 5 s close the server and
+run the hooks. The generated entry does not pass it yet, so such a project drains for the default.
+Change any one of the grace period, the pre-stop sleep or `drainTimeoutMs`, and recheck the other
+two.
 
 ### Usage
 
@@ -953,11 +954,13 @@ deliberately: it would let a caller conclude its shutdown handler runs when it n
 removes the handler. It never keeps the process alive: the exit code and the runtime's own report on
 stderr are unchanged. Node uses `uncaughtExceptionMonitor`; Deno the global `error` and
 `unhandledrejection` events; Bun `uncaughtExceptionMonitor` for throws and, because a Bun
-`unhandledRejection` listener would suppress the crash, a listener that rethrows the reason unless
-the application has its own. Each handler is called once per crash. On Node and Bun an error the
-application handles itself (its own `uncaughtException` or `unhandledRejection` listener) is not
-reported; Deno cannot tell and reports it. One process listener per mechanism exists while any
-handler is subscribed.
+`unhandledRejection` listener would suppress the crash, a listener that removes itself and raises
+the reason again, so Bun ends the process itself, unless the application has its own. Each handler
+is called once per crash. On Node and Bun an error the application handles itself is not reported:
+Node's `uncaughtException` listener handles a throw or a rejection, Bun's only a throw (Bun never
+hands it a rejection, which still ends the process and is reported), and an `unhandledRejection`
+listener handles a rejection on both. Deno cannot tell and reports it. One process listener per
+mechanism exists while any handler is subscribed.
 
 ```typescript
 interface IDnsResolver {
@@ -14155,9 +14158,9 @@ Contract notes:
   the Node adapter sends HTTP/2 `GOAWAY` to every session (and to any that opens later) and closes
   idle HTTP/1.1 connections. Deno omits it (`Deno.serve` has no session control) and says so once at
   `listen` when HTTP/2 is configured; Bun serves HTTP/2 through the Node adapter.
-- `WorkerRunOptions.signal?: AbortSignal` (0.14.0, honoured by `@setu-ts/worker-pool-plugin` with
-  M143r) cancels a worker-pool call: an aborted signal rejects with `signal.reason`, a queued call
-  is withdrawn, a running call's worker is terminated.
+- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; `@setu-ts/worker-pool-plugin` does not read it
+  yet, V13-131, M143r) is to cancel a worker-pool call: an aborted signal rejects with
+  `signal.reason`, a queued call is withdrawn, a running call's worker is terminated.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop

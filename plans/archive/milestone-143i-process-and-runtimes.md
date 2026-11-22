@@ -239,10 +239,13 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 ### 3.9 The request log records 101 for an upgrade and the client leaving (V13-223, V13-110 half)
 
 - **Decision:** after `next()`, the request logger's status is: `101` when
-  `upgradeIntentOf(ctx.request)` is set; else, when `ctx.signal.aborted`, `499` with `aborted: true`
-  added to the line; else the error-predicted or snapshot status as today. The message stays
-  `'request completed'`. The 101 records the accepted upgrade; a handshake that then fails is
-  reported separately by the adapter (`'WebSocket handshake failed'`,
+  `upgradeIntentOf(ctx.request)` is set; else, when the status would be a 5xx and
+  `ctx.request.signal?.aborted`, `499` with `aborted: true` added to the line; else the
+  error-predicted or snapshot status as today. Narrowed to a 5xx in the code-review fix (M2): on
+  Deno the first read of `request.signal` prints the runtime's legacy-abort notice, so the signal is
+  read only where a client that left changes the line — a render that failed because it went away.
+  The message stays `'request completed'`. The 101 records the accepted upgrade; a handshake that
+  then fails is reported separately by the adapter (`'WebSocket handshake failed'`,
   `node-http-adapter.ts:547-557`), which the README states.
 - **Why:** the wire said 101; a client that left received nothing and must not page a 5xx alert. 499
   is the established "client closed request" code in access logs.
@@ -580,10 +583,99 @@ https://raw.githubusercontent.com/pinojs/pino-http/master/logger.js
    499; Envoy logs 0 with `DC`, HAProxy -1 or 400, the Node loggers no code. The request log line is
    written before the adapter sends anything, so an aborted request there is that case. Decision:
    keep `499` with `aborted: true`; the telemetry span is to agree (a CLI-lane half:
-   `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade).
+   `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade). As shipped
+   the 499 replaces only a 5xx (§3.9), and the kernel's own error line still records the fault, so
+   status-based alerting that counts 5xx misses it (security audit, Low; accepted under this
+   decision).
 
 The drain decision also asked that the library default and the generated value be stated together,
 with the reason, in one place: `PUBLIC_API.md`, "The two drain numbers, in one place"; the
 `StartOptions.drainTimeoutMs` JSDoc and the upgrade note point there. The telemetry half (499 and an
 unset span status for an aborted request, 101 for an upgrade intent) belongs to M143k, as a new half
 for the ROADMAP.
+
+## 11. Design security review
+
+**Status:** completed 2026-11-22, AFTER implementation. The committed-tree audit of `880b61ae6`
+found the plan had none (blocking); this section is that review, written from the design decisions
+above, and the audit is re-run against it. It does not restate the audit's results as obligations
+met.
+
+**Reviewed flows.**
+
+1. A client opens a request and leaves before the response: the adapter's `request.signal` aborts →
+   the kernel's abort watch (only when the request called `ctx.defer`) → `ctx.defer` cleanups and
+   `Request aborted before completion`; the request logger's 499.
+2. A client sends `HEAD` to any path: the router ranks `GET` routes with `HEAD` routes → the matched
+   route's middleware and handler → the adapter, `inject()` or `dispatch()` drops the body.
+3. A client sends a WebSocket upgrade on Node that the pipeline refuses: the raw `upgrade` socket →
+   the pipeline → `writeRawUpgradeResponse` (status, headers, body) or `rejectRawUpgrade`.
+4. `stop()` while requests, HTTP/2 sessions and RPC streams are open: `onStopping` hooks →
+   `beginDrain` (GOAWAY, idle closes) → the drain bounded by `drainTimeoutMs` → close.
+5. `stop()` while `start()` is still registering plugins: `ctx.signal` aborts, `start()` rejects
+   with `StartCancelledError`, late registrations are ignored or closed at once.
+6. A response stream whose source errors: `guardEmptyChunks` / `wrapDeferredStream` → one
+   `Response stream failed` line → each adapter aborts the response.
+7. An uncaught exception or unhandled rejection: `onFatalError` → one `Process failed` line → the
+   process ends as the runtime would have ended it.
+
+**Assets.** Process availability (it must not be crashed or kept alive against the runtime's rule);
+file descriptors and sockets; admission and concurrency limits released through `ctx.defer`;
+request-scoped resources (DI request scopes, connections) released through `ctx.defer`; server-side
+error text (stream-source errors, fatal errors); the authorization a `GET` route's middleware
+enforces; the response headers and body a refused upgrade carries; the operator's view of status
+(request log, drain lines).
+
+**Attackers.**
+
+- An anonymous network client: connects and leaves, resets connections (RST) at any point,
+  half-closes and never sends FIN, sends `HEAD` to probe guarded routes, sends upgrades to any path.
+- A client holding HTTP/2 sessions open across a stop, or opening streams after GOAWAY.
+- A stream source or dependency whose error text carries secrets.
+- Application code with hostile values: a status no `Response` can carry, header values with CR, LF
+  or NUL, hostile error objects reaching `onFatalError`, a `drainTimeoutMs` that is not a whole
+  number in range.
+
+**Approved budgets.** `drainTimeoutMs` (default 10 000 ms, at most 2 147 483 647) bounds the drain;
+each asynchronous `ctx.defer` cleanup keeps its 5 000 ms bound. A refused upgrade writes one
+response and then gives up the socket; it holds no descriptor after its bytes are flushed.
+
+**Obligations on the committed-tree audit.**
+
+1. Reset a refused upgrade's connection after the refusal and while the pipeline decides; prove the
+   process survives and still serves (positive control: a later upgrade is answered).
+2. Refuse upgrades to a client that never sends FIN; prove the server releases each descriptor
+   (positive control: an idle keep-alive connection closed by the server in the same window).
+3. Drive the raw refusal writer with statuses no `Response` can carry (NaN, 0, 1xx, 600+, a
+   fraction) and with CR, LF and NUL header values; prove the wire never carries them.
+4. Leave mid-request while a handler holds a DI request scope and an admission slot released through
+   `ctx.defer`; prove what the design states about when those are released, and that
+   connect-and-leave clients cannot run more handlers than the limit.
+5. Send `HEAD` to a guarded `GET` route without credentials; prove the route's middleware refuses
+   it, that an explicit `HEAD` route still wins, and that no other method falls back to `GET`.
+6. Plant canaries in a failing stream source's error and in a fatal error; prove none reaches a
+   response body, `console.*` or stderr from the framework on Node, Bun and Deno, and that each
+   stream failure is logged once.
+7. Drive `onFatalError` with hostile error objects and with application `uncaughtException` and
+   `unhandledRejection` listeners on Node, Bun and Deno; prove the process ends, or survives,
+   exactly as it would with no observer.
+8. Stop during a hung startup hook; prove `stop()` is not held and nothing listens afterwards.
+9. Hold HTTP/2 sessions across a stop; prove GOAWAY reaches sessions opened before and during the
+   drain and that a stream opened after it never reaches a handler.
+10. Feed `drainTimeoutMs` hostile values; prove each is refused before any plugin registers and the
+    message does not echo the value.
+11. Revert each new control in turn and show its probe detects the reversion (negative controls).
+
+**Design-review findings.**
+
+| Threat                                                        | Resolution                                                                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| A reset on the raw upgrade socket ends the process            | An `'error'` listener is added the moment the upgrade arrives (`node-http-adapter.ts`).               |
+| A refused upgrade's half-open socket holds a descriptor       | The writer ends the socket and destroys it on `'finish'` (`writeRawUpgradeResponse`).                 |
+| A hostile status reaches the raw status line                  | A status outside 200–599 is written as 500.                                                           |
+| `HEAD` skips a `GET` route's authorization                    | `HEAD` matches the `GET` route itself, so its middleware runs (§3.10).                                |
+| Stream-source error text reaches a body or stderr             | One logged line; Node destroys, Bun errors silently, Deno's `onError` stays quiet (§3.14).            |
+| The fatal-error observer changes whether the process ends     | Observes only; on Bun it removes itself and raises the rejection again rather than rethrowing (§3.1). |
+| Abort-time cleanup releases resources under a running handler | As §3.12 decides (see the maintainer's decision recorded there).                                      |
+| A 499 hides a server fault from status-based alerting         | Accepted under decision 3 (§10); the kernel's error line still records the fault.                     |
+| Bun streams lose the 10 s idle limit                          | Deliberate parity with Node and Deno (§3.13); a stream's own heartbeat or the drain bound applies.    |
