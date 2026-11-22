@@ -961,8 +961,9 @@ flipped between the two twice, so the comparison below is the recorded reason (l
 Option (b) would ship what Rack treated as a vulnerability; under (a), the refused sign-in in the
 other tab is the price Django's database backend pays.
 
-**Decision — close both documented gaps (maintainer, 2026-11-23).** Neither is accepted as a limit.
-The designs below were checked against the source at `e351b5c26`.
+**Decision — close both documented gaps (maintainer, 2026-11-23; gap 2 later withdrawn, see
+below).** Gap 1 is fixed; the gap 2 design is kept here as the record of what was reviewed. The
+designs below were checked against the source at `e351b5c26`.
 
 _Gap 1: an inner cache stores an anonymous page without `Vary: Cookie`._ At the first application
 read the plugin appends `Vary: Cookie` (`cache-marking.ts`, `onFirstRead`); a handler can then
@@ -1047,6 +1048,18 @@ _Gap 2: a sign-out that outlives `maxAge` misses a regenerated session._ Confirm
   `cloudflare-plugin/src/cache-api/cache-api-middleware.ts:332`); none defeats the key-based fix.
 - §3.1's "marker TTL is `maxAgeMs`" is corrected below: markers live `maxAgeMs + 1000`.
 - The 8-ancestor cap is put to the maintainer.
+
+**Gap 2 withdrawn (maintainer, 2026-11-23).** After the design review the maintainer dropped the gap
+2 fix; the successor link stays as it shipped at `e351b5c26`, and the limit is documented in the
+session-plugin README ("One limit"): it applies only with `rolling: true` on the store strategy and
+needs one sign-out request that runs longer than `maxAge`, whose own cookie is still cleared.
+Reasons: no compared framework links an old session id to its replacement (Django `cycle_key`, Rails
+`reset_session` and Spring Session `changeSessionId` keep no link; express-session not confirmed);
+the fix would add a hidden field every custom `ISessionStore` must preserve, and more logic to
+revocation code that had already changed direction twice; and frameworks get a guaranteed sign-out
+from a stamp on the user instead (ASP.NET Core Identity's security stamp, re-validated every 30
+minutes by default; Django's session auth hash), which Setu has as `auth-plugin`'s
+`signIn.sessionStamp`. The design-review findings that concern gap 2 are moot.
 
 ## 11. Plan review (2026-11-22)
 

@@ -86,9 +86,17 @@ every commit and regeneration that checks its markers afterwards refuses (one th
 the stall keeps its new id), without following its successor links; a stalled regeneration deletes
 only its new row). A failed regeneration's cleanup never touches the link. A link names one
 successor: when two requests regenerate the same id (a double-submitted sign-in), the later link
-wins, and a sign-out racing both ends only the session it names. A link lives one second past
-`maxAge` from the regeneration and is not renewed, so a sign-out request that loaded the old id and
-runs longer than that may no longer find it while rolling commits keep the new session alive.
+wins, and a sign-out racing both ends only the session it names.
+
+**One limit.** A link lives one second past `maxAge` from the regeneration and is never renewed.
+Without `rolling` that is always enough: a regeneration keeps the session's expiry and only
+`rolling` moves it, so the regenerated session expires before its link. With `rolling: true`,
+rolling commits can keep the regenerated session alive past its link, so a single sign-out request
+that loaded the old id and runs longer than `maxAge` may no longer find the link and leave the
+regenerated session signed in; that request still clears its own browser's cookie. An application
+that must end every session of a user for certain sets `signIn.sessionStamp` in
+`@setu-ts/auth-plugin`: the stamp is read on every request, a session whose recorded stamp no longer
+matches is anonymous, and bumping the stamp on the user record is one write.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
@@ -478,7 +486,9 @@ visitor. The session middleware marks such a response `Cache-Control: private, n
   `PER_VISITOR_RESPONSE_STATE_KEY`, as does a read of a restored session holding application data.
 
 A response that only _read_ the session for an anonymous visitor is the anonymous variant of a page:
-it gets `Vary: Cookie` alone. What counts as a read:
+it gets `Vary: Cookie` alone, and the read sets `COOKIE_DEPENDENT_RESPONSE_STATE_KEY`
+(`@setu-ts/common`), so `cacheMiddleware` keeps it apart from visitors with cookies even when the
+handler replaces that `Vary`. What counts as a read:
 
 | Read                                                                   | Counts |
 | ---------------------------------------------------------------------- | ------ |

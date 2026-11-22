@@ -141,13 +141,13 @@ such a response, even when the handler marks it `public`. One case stays the app
 response personalised without the session API (through `ctx.request.user` or a bearer token, say)
 that the handler marks `public` keeps that directive with no `Vary: Cookie`, so it can be stored and
 replayed (`RequestCacheMarking.finish()` keeps an application directive, as it must for public
-assets). With `cacheMiddleware` registered inside the session middleware (a priority above 260), so
-does an anonymous page whose handler replaces the plugin's `Vary: Cookie` and sets `public`: the
-cache captures it before the plugin restores `Vary: Cookie` after the handler, stores it for
-visitors without cookies and, varying on nothing, replays it to visitors with cookies too. Never
-mark a personalised response `public`, and never drop `Vary: Cookie` from a page that read the
-session. Register `cacheMiddleware` outside the session middleware (a priority below 260) where you
-can, so a cached anonymous page is replayed before any session work.
+assets). A page that read the session depends on the visitor's cookies even when its handler
+replaces the plugin's `Vary: Cookie` and sets `public`: the session plugin sets
+`COOKIE_DEPENDENT_RESPONSE_STATE_KEY` at the first read, and `cacheMiddleware` stores such a
+response only for a request carrying no cookie and no `Authorization`, with `Cookie` added to the
+stored `Vary`, whichever side of the session middleware it runs on. Never mark a personalised
+response `public`. Register `cacheMiddleware` outside the session middleware (a priority below 260)
+where you can, so a cached anonymous page is replayed before any session work.
 
 ## Exports
 

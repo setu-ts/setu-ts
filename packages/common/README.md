@@ -381,6 +381,7 @@ package fits the plugin architecture.
 | `VectorVersionConflictError`          | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
+| `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
 | `CSRF_EXEMPT_STATE_KEY`               | const     |
 | `CSRF_TOKEN_ACCESS_STATE_KEY`         | const     |

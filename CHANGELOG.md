@@ -89,7 +89,10 @@ All notable changes to this project are documented here. The format follows
   `Authorization` never joins or leads a coalesced flight, and a response captured after the session
   plugin set `PER_VISITOR_RESPONSE_STATE_KEY` (new in `@setu-ts/common`; set at a request's first
   application write, a CSRF token read and a read of a restored session holding application data) is
-  never stored. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
+  never stored; one captured after it set `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` (new in
+  `@setu-ts/common`, set at the first application read) is stored only for a request carrying no
+  cookie and no `Authorization`, with `Cookie` added to the stored `Vary`, whatever the handler did
+  to its headers. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
   arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
   uses too; a value with an unclosed quote is never stored.
 - **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
