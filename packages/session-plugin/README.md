@@ -86,7 +86,9 @@ every commit and regeneration that checks its markers afterwards refuses (one th
 the stall keeps its new id), without following its successor links; a stalled regeneration deletes
 only its new row). A failed regeneration's cleanup never touches the link. A link names one
 successor: when two requests regenerate the same id (a double-submitted sign-in), the later link
-wins, and a sign-out racing both ends only the session it names.
+wins, and a sign-out racing both ends only the session it names. A link lives one second past
+`maxAge` from the regeneration and is not renewed, so a sign-out request that loaded the old id and
+runs longer than that may no longer find it while rolling commits keep the new session alive.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
