@@ -110,7 +110,9 @@ export async function withProjectLock<T>(
     const details = owner === undefined ? '' : ` (${escapeName(owner.command)}, pid ${owner.pid})`;
     if (owner !== undefined && !ownerIsAlive(isAlive, owner.pid)) {
       throw new ProjectLockError(
-        `A setu command${details} that is no longer running left ${escapeName(lock)}; delete it and run this again.`,
+        // The probe follows the read, so the lock may have changed hands since: the
+        // user confirms before deleting it.
+        `A setu command${details} that is no longer running may have left ${escapeName(lock)}.\nConfirm no setu command is running in this project, then delete it and run this again.`,
       );
     }
     throw new ProjectLockError(
@@ -197,10 +199,14 @@ export async function runWithProjectLock(
   const project = await detectProject(deps.fs, dir);
   if (project.kind === 'none' || project.kind === 'unreadable') return fn();
   try {
+    // The lexical path first (a member linked out of its workspace still locks the
+    // workspace), then the real path (an alias of a member locks its workspace too).
+    const real = await canonicalDir(deps.fs, dir);
     const root =
       project.kind === 'workspace-root'
-        ? dir
-        : ((await workspaceMemberOf(deps.fs, dir))?.root ?? dir);
+        ? real
+        : (((await workspaceMemberOf(deps.fs, dir)) ?? (await workspaceMemberOf(deps.fs, real)))
+            ?.root ?? real);
     return await withProjectLock(
       deps.fs,
       root,
@@ -214,5 +220,20 @@ export async function runWithProjectLock(
     if (!(cause instanceof ProjectLockError)) throw cause;
     deps.error(cause.message);
     return EXIT_ERROR;
+  }
+}
+
+/**
+ * The real path of a project directory where the host can resolve one.
+ *
+ * @param fs - Filesystem, optionally able to resolve symlinks
+ * @param dir - The resolved target directory
+ * @returns The canonical directory, or `dir` when it cannot be resolved
+ */
+async function canonicalDir(fs: IFileSystem, dir: string): Promise<string> {
+  try {
+    return (await fs.realPath?.(dir)) ?? dir;
+  } catch {
+    return dir;
   }
 }

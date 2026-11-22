@@ -190,9 +190,11 @@ run. No other `docs/` file is touched.
   `--env-file-if-exists=<dotenv>`, Bun `--env-file=<dotenv>` only for a non-default name — the
   `bun test --env-file=` form is measured before it is used, Deno `--env-file=<dotenv>` when the
   manifest declares one). One helper returns ONLY the env-file fragment and both the start and test
-  scripts call it; the Node telemetry preload is not added to test scripts. Workers test scripts get
-  no flag (Workers reads `.dev.vars` through wrangler and has no `envFilePath`). The comment at
-  `project-files.ts:1296` is corrected to the measured Deno behaviour.
+  scripts call it; a Bun test script with a non-default dotenv also appends `--env-file=.env.test`,
+  because naming any file stops `bun test` loading `.env.test` and the later file wins (measured on
+  Bun 1.4.5, PR #610 review); the Node telemetry preload is not added to test scripts. Workers test
+  scripts get no flag (Workers reads `.dev.vars` through wrangler and has no `envFilePath`). The
+  comment at `project-files.ts:1296` is corrected to the measured Deno behaviour.
 - **Why:** the SDK takes the emulator only from the environment; `setu.config.ts` is evaluated
   before ConfigPlugin runs, so only the process environment reaches it, and the test scripts had
   none. Deno 2.9 warns on a missing env file and continues; Node's flag is `-if-exists`.
@@ -220,12 +222,14 @@ run. No other `docs/` file is touched.
   with the owner details omitted when unknown, followed by
   `If no setu command is running, delete <lockRoot>/.setu-ts/write.lock and run this again.`; an
   owner whose pid is not running:
-  `A setu command (<command>, pid <pid>) that is no longer running left <lockRoot>/.setu-ts/write.lock; delete it and run this again.`
-  A lock is left behind only when the process is killed without running its `finally` (SIGKILL,
-  power loss); SIGINT and thrown errors release it. Released in a `finally` (SIGINT reaches the
-  finally through the existing interruption path). Each command acquires it itself, after project
-  detection has succeeded (so a refused `add` outside a project leaves no `.setu-ts/` behind) and
-  before its first read of a file it will rewrite. There is exactly one acquisition per process run:
+  `A setu command (<command>, pid <pid>) that is no longer running may have left <lockRoot>/.setu-ts/write.lock.`
+  followed by
+  `Confirm no setu command is running in this project, then delete it and run this again.` A lock is
+  left behind only when the process is killed without running its `finally` (SIGKILL, power loss);
+  SIGINT and thrown errors release it. Released in a `finally` (SIGINT reaches the finally through
+  the existing interruption path). Each command acquires it itself, after project detection has
+  succeeded (so a refused `add` outside a project leaves no `.setu-ts/` behind) and before its first
+  read of a file it will rewrite. There is exactly one acquisition per process run:
   `runGenerateCommand` acquires it before it dispatches to schematics, `runAppCommand` or
   `runLibraryCommand`, and those two never acquire it themselves. The lock is not re-entrant: a
   second acquisition by the same pid refuses like any live owner, which is what the concurrency test

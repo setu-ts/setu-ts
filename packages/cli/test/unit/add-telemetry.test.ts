@@ -47,6 +47,19 @@ it.each([
   },
 );
 
+it('moves an optional peer out of devDependencies when it records the runtime pin', () => {
+  const source = JSON.stringify({
+    peerDependencies: { ws: '^8.18.0' },
+    peerDependenciesMeta: { ws: { optional: true } },
+    devDependencies: { ws: '^8.17.0', vitest: '^4.0.0' },
+  });
+  const result = withPeerDependencies(source, [{ name: 'ws', range: '^8.20.0' }], 'dependencies');
+  const manifest = JSON.parse(result.contents) as Record<string, Record<string, string>>;
+  expect(manifest['dependencies']).toEqual({ ws: '^8.17.0' });
+  expect(manifest['devDependencies']).toEqual({ vitest: '^4.0.0' });
+  expect(result).toMatchObject({ added: [], moved: ['ws'] });
+});
+
 it('V13-36 shares the telemetry peer table between add and both microservice styles', () => {
   expect(TELEMETRY_PEERS).toEqual(COMMON_PEERS);
   expect(ADDABLE.get('telemetry')?.peers?.packages).toEqual(Object.keys(COMMON_PEERS));

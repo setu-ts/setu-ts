@@ -119,7 +119,7 @@ it.each([['add', 'cache'], ['g', 'service', 'billing'], ['sync']])(
       };
       expect(await runMain({ fs, now: () => 0 }, host)).toBe(1);
       expect(err.text()).toContain(
-        alive === false ? 'that is no longer running left' : 'is changing this project',
+        alive === false ? 'that is no longer running may have left' : 'is changing this project',
       );
       expect(err.text()).toContain('/work/.setu-ts/write.lock');
       expect(fs.read(path)).toBe(owner);

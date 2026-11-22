@@ -133,6 +133,7 @@ it('prints a dry-run plan without writing, then fixes drift and leaves non-barre
   expect(await h.run(['sync', '--dry-run'])).toBe(0);
   expect(h.log.text()).toContain('would create /app/src/controllers/index.ts');
   expect(h.fs.projectWrites).toEqual([]);
+  expect([...h.fs.writes, ...h.fs.mkdirs].some((path) => path.includes('/.setu-ts/'))).toBe(false);
   expect(await h.run(['sync'])).toBe(1);
   expect(h.err.text()).toContain('setu.E001');
   expect(h.fs.read('/app/src/controllers/index.ts')).toContain('./good.controller.ts');

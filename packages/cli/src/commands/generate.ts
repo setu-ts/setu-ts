@@ -188,6 +188,14 @@ export async function runGenerateCommand(
     kind === CUSTOM_SCHEMATIC ||
     getSchematic(kind ?? '') !== undefined;
   const complete = args.positionals.length >= (kind === CUSTOM_SCHEMATIC ? 3 : 2);
+  // A schematic's invalid `--runtime` is a usage error, reported unlocked so a held
+  // lock cannot turn it into a contention refusal; `app` and `library` own theirs.
+  const runtimeValue = args.flags['runtime'];
+  const usableRuntime =
+    kind === APP_VERB ||
+    kind === LIBRARY_VERB ||
+    runtimeValue === undefined ||
+    (typeof runtimeValue === 'string' && isTargetRuntime(runtimeValue));
   return await runWithProjectLock(
     deps,
     dir,
@@ -195,7 +203,8 @@ export async function runGenerateCommand(
       args.flags.help !== true &&
       args.flags.h !== true &&
       known &&
-      complete,
+      complete &&
+      usableRuntime,
     'generate',
     () => generateUnlocked(args, deps),
   );

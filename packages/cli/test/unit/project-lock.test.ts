@@ -70,7 +70,7 @@ describe('project write lock', () => {
         ),
       ).rejects.toThrow(
         state === false
-          ? `A setu command (generate, pid 321) that is no longer running left ${lock}; delete it and run this again.`
+          ? `A setu command (generate, pid 321) that is no longer running may have left ${lock}.\nConfirm no setu command is running in this project, then delete it and run this again.`
           : `Another setu command (generate, pid 321) is changing this project; run this again when it finishes.\nIf no setu command is running, delete ${lock} and run this again.`,
       );
       expect(fs.read(ownerPath)).toBe(owner);
@@ -319,6 +319,63 @@ describe('project write lock', () => {
       }),
     ).rejects.toBe(failure);
     await expect(fs.stat('/work/ws/.setu-ts/write.lock')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('locks a symlinked workspace member at the workspace root', async () => {
+    const fs = createFakeFs();
+    const deps = { fs, cwd: '/work', now: () => 0, log: () => {}, error: () => {} };
+    expect(await runCli(['new', 'ws', '--workspace'], deps)).toBe(0);
+    expect(await runCli(['g', 'app', 'api', '--dir', '/work/ws'], deps)).toBe(0);
+    const alias = '/work/alias';
+    const target = (path: string) =>
+      path === alias || path.startsWith(`${alias}/`)
+        ? path.replace(alias, '/work/ws/apps/api')
+        : path;
+    const aliased = {
+      ...fs,
+      realPath: (path: string) => Promise.resolve(target(path)),
+      stat: (path: string) => fs.stat(target(path)),
+      readFile: (path: string) => fs.readFile(target(path)),
+      readdir: (path: string) => fs.readdir(target(path)),
+    };
+    await runWithProjectLock({ ...deps, fs: aliased }, alias, true, 'generate', async () => {
+      expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+      return 0;
+    });
+    // A member linked out of its workspace still locks the workspace it is listed in.
+    const linkedOut = { ...fs, realPath: () => Promise.resolve('/elsewhere/api') };
+    await runWithProjectLock(
+      { ...deps, fs: linkedOut },
+      '/work/ws/apps/api',
+      true,
+      'generate',
+      async () => {
+        expect((await fs.stat('/work/ws/.setu-ts/write.lock')).isDirectory).toBe(true);
+        return 0;
+      },
+    );
+    const unresolvable = { ...aliased, realPath: () => Promise.reject(new Error('ELOOP')) };
+    await runWithProjectLock({ ...deps, fs: unresolvable }, alias, true, 'generate', async () => {
+      expect((await fs.stat(`${alias}/.setu-ts/write.lock`)).isDirectory).toBe(true);
+      return 0;
+    });
+  });
+
+  it('reports a schematic runtime typo as a usage error even while the lock is held', async () => {
+    const owner = JSON.stringify({ pid: 123, command: 'add' });
+    const fs = createFakeFs({ '/work/package.json': '{}', [ownerPath]: owner });
+    const errors = createRecorder();
+    expect(
+      await runCli(['g', 'service', 'orders', '--runtime', 'typo'], {
+        fs,
+        cwd: '/work',
+        now: () => 0,
+        log: () => {},
+        error: errors.sink,
+      }),
+    ).toBe(2);
+    expect(errors.text()).toContain('Unknown runtime "typo"');
+    expect(fs.read(ownerPath)).toBe(owner);
   });
 
   it('creates no lock for dry runs, informational commands or a refused add outside a project', async () => {

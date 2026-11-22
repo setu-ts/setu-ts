@@ -240,18 +240,18 @@ export function withPeerDependencies(
   for (const peer of peers) {
     if (peer.name in dependencies || declared.has(peer.name)) continue;
     const optionalPin = section === 'dependencies' ? optionalPins.get(peer.name) : undefined;
-    if (optionalPin !== undefined) {
-      dependencies[peer.name] = optionalPin;
-      added.push(peer.name);
-      continue;
-    }
     const devPin = dev?.[peer.name];
     if (dev !== undefined && typeof devPin === 'string') {
-      // A runtime peer declared only for development: `--omit=dev` would drop
-      // it, so its existing pin moves to `dependencies` unchanged.
+      // A runtime peer declared for development, optional peer or not: `--omit=dev`
+      // would drop it, so its existing pin moves to `dependencies` unchanged.
       dependencies[peer.name] = devPin;
       delete dev[peer.name];
       moved.push(peer.name);
+      continue;
+    }
+    if (optionalPin !== undefined) {
+      dependencies[peer.name] = optionalPin;
+      added.push(peer.name);
       continue;
     }
     dependencies[peer.name] = section === 'imports' ? `npm:${peer.name}@${peer.range}` : peer.range;

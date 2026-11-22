@@ -205,6 +205,40 @@ describe('new target validation', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it.each([
+    ['an unplanned file under a planned directory', { '/work/app/src/valuable.ts': 'mine' }, false],
+    ['only planned files', { '/work/app/src/controllers/index.ts': 'partial run' }, true],
+    ['an unplanned directory', { '/work/app/notes/todo.md': 'mine' }, false],
+  ] as const)('V13-168 offers the delete hint only for %s', async (_, seed, hinted) => {
+    const h = harness(seed);
+    expect(await h.run(['app'])).toBe(1);
+    expect(h.err.text().includes('delete /work/app'), h.err.text()).toBe(hinted);
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('V13-168 withholds the delete hint when an entry cannot be inspected', async () => {
+    const fs = createFakeFs({ '/work/app/src/main.ts': 'partial run' });
+    const err = createRecorder();
+    expect(
+      await runNewCommand(parseArgs(['app']), {
+        fs: {
+          ...fs,
+          stat: (path: string) =>
+            path === '/work/app/src/main.ts'
+              ? Promise.reject(new Error('EACCES: denied'))
+              : fs.stat(path),
+        },
+        cwd: '/work',
+        secret: () => 'a'.repeat(64),
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toEqual([
+      '/work/app already exists and is not empty (1 entries); choose another name or empty it.',
+    ]);
+  });
+
   it.each([false, true])(
     'V13-168 gives no delete hint for a git clone, dry run %s',
     async (dry) => {

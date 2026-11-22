@@ -30,8 +30,8 @@ warning.
 
 `setu add`, `setu generate` and `setu sync` create `.setu-ts/write.lock/` while they write. New
 projects ignore it in `.gitignore`; add the line `.setu-ts/write.lock/` to an existing project's
-(and an existing workspace root's) `.gitignore`. If a command is killed, delete the directory before
-running another.
+(and an existing workspace root's) `.gitignore`. If a command is killed, confirm no setu command is
+still running in the project, then delete the directory before running another.
 
 ### Workspace root `test` (`@setu-ts/cli`)
 
