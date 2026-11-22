@@ -239,13 +239,26 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
 ### 3.9 The request log records 101 for an upgrade and the client leaving (V13-223, V13-110 half)
 
 - **Decision:** after `next()`, the request logger's status is: `101` when
-  `upgradeIntentOf(ctx.request)` is set; else, when the status would be a 5xx and
-  `ctx.request.signal?.aborted`, `499` with `aborted: true` added to the line; else the
-  error-predicted or snapshot status as today. Narrowed to a 5xx in the code-review fix (M2): on
-  Deno the first read of `request.signal` prints the runtime's legacy-abort notice, so the signal is
-  read only where a client that left changes the line — a render that failed because it went away.
-  The message stays `'request completed'`. The 101 records the accepted upgrade; a handshake that
-  then fails is reported separately by the adapter (`'WebSocket handshake failed'`,
+  `upgradeIntentOf(ctx.request)` is set; else, when `ctx.request.signal?.aborted`, `499` with
+  `aborted: true` added to the line, whatever status the handler produced; else the error-predicted
+  or snapshot status as today. The line is written before the adapter sends anything, so an abort
+  seen then is a client that left before the response; a response not yet aborted, including a
+  stream later cut off mid-body, logs its real status. Compared with: nginx logs 499 only when the
+  client closes before nginx has sent the response, which is this rule. **History:** the code-review
+  fix (M2) narrowed this to "only replaces a 5xx", to avoid Deno's legacy-abort notice on the first
+  read of `request.signal`. That narrowing was never brought back to the maintainer, and the
+  maintainer **withdrew it on 2026-11-22**: a client that left during a handler that then returned
+  200 was logged `200`, a response it never received. The maintainer chose to read the signal on
+  every logged request on every runtime (option A). Measured on Deno 2.9.6: the notice prints once
+  per process, on the first access of `request.signal`, read or listener, aborted or not; there is
+  no signal-free source on Deno, since `info.completed` settles only after a response. The kernel's
+  watcher reads the same signal, but only for `ctx.defer` and RPC requests.
+  `--unstable-no-legacy-abort` removes the notice, and Deno still aborts the signal on a disconnect
+  before the response (client destroyed at 108 ms, abort event at 111 ms, with and without the
+  flag). A completed request is never read as aborted, and the kernel never reports one aborted
+  after its response (guarded test on Bun and Deno, `runtime-edges-bun-deno.test.ts`). The message
+  stays `'request completed'`. The 101 records the accepted upgrade; a handshake that then fails is
+  reported separately by the adapter (`'WebSocket handshake failed'`,
   `node-http-adapter.ts:547-557`), which the README states.
 - **Why:** the wire said 101; a client that left received nothing and must not page a 5xx alert. 499
   is the established "client closed request" code in access logs.
@@ -577,6 +590,11 @@ child-process crash on all three.
 - The HEAD body drop could leak a stream → the stream is cancelled, not dropped, so `defer` runs.
 - Bun's `server.timeout` or Bun's crash hooks may differ on the installed Bun (1.4.5) → each is
   measured before it is relied on; a missing mechanism is stated in JSDoc, not faked.
+- The restored 499 rule reads `request.signal` on every logged request. On Node, `@hono/node-server`
+  creates the request's `AbortController` lazily on the first `signal` read, so request logging now
+  adds one per logged request; on Deno it prints the runtime's legacy-abort notice once per process
+  (`--unstable-no-legacy-abort` removes it). Accepted by the maintainer with no benchmark first
+  (2026-11-22).
 
 ## 9. Out of scope
 
@@ -675,10 +693,11 @@ https://raw.githubusercontent.com/pinojs/pino-http/master/logger.js
    499; Envoy logs 0 with `DC`, HAProxy -1 or 400, the Node loggers no code. The request log line is
    written before the adapter sends anything, so an aborted request there is that case. Decision:
    keep `499` with `aborted: true`; the telemetry span is to agree (a CLI-lane half:
-   `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade). As shipped
-   the 499 replaces only a 5xx (§3.9), and the kernel's own error line still records the fault, so
-   status-based alerting that counts 5xx misses it (security audit, Low; accepted under this
-   decision).
+   `telemetry-plugin` should record 499 for an aborted request and 101 for an upgrade). The
+   code-review narrowing to "only replaces a 5xx" was withdrawn by the maintainer on 2026-11-22
+   (§3.9): every request whose client left before the response logs 499 with `aborted: true`. The
+   audit's Low about 5xx alerting is closed by that decision; the kernel's own error line still
+   records a server fault.
 
 The drain decision also asked that the library default and the generated value be stated together,
 with the reason, in one place: `PUBLIC_API.md`, "The two drain numbers, in one place"; the

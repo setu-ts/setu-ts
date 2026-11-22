@@ -68,8 +68,10 @@ All notable changes to this project are documented here. The format follows
   no longer writes `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2
   states at listen that it sends no `GOAWAY` when draining.
 - **`@setu-ts/logger-plugin` (M143i).** The request log records `101` for an accepted WebSocket
-  upgrade (V13-223), and `499` with `aborted: true` for a request whose client left and whose status
-  would have been a 5xx (the logger-plugin half of V13-110).
+  upgrade (V13-223), and `499` with `aborted: true` for a request whose client left before the
+  response, whatever status the handler produced (the logger-plugin half of V13-110). On Deno,
+  request logging now triggers Deno's one-time legacy-abort notice; `--unstable-no-legacy-abort`
+  removes it.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

@@ -1190,7 +1190,11 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
   lets the logger filter.
 - One `request completed` at `info` (method, path, status, duration in ms), including a request that
   threw: the status is the one `errorHandler`'s responder predicts through `statusFor` (`500`
-  without it), so a custom `respond` hook that chooses another status is not reflected
+  without it), so a custom `respond` hook that chooses another status is not reflected. Since 0.14.0
+  an accepted upgrade is logged `101`, and a request whose client left before the response (its
+  signal aborted when the line is written) `499` with `aborted: true`, whatever the handler
+  produced; a stream cut off after the line keeps its status. On Deno the read prints Deno's
+  legacy-abort notice once per process (`--unstable-no-legacy-abort` removes it)
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
 It does not log the error itself; `errorHandler` logs it once (V9-80). The database-plugin scrub
