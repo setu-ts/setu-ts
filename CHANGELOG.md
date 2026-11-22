@@ -25,8 +25,40 @@ All notable changes to this project are documented here. The format follows
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
 
+- **`@setu-ts/queue-plugin` (M143p).** `SnsPublisher.publishJob(name, data, options?)` publishes the
+  job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped (SNS
+  `Notification`) subscription; with the new `SnsPublisherOptions.telemetry` the publish runs in a
+  producer span and carries its `traceparent` in the envelope, and `SnsPublisherOptions.runtime`
+  supplies job ids (V13-212). `SqsDeadLetterTargetMissingError` and its
+  `SqsDeadLetterTargetMissingReason` are exported. `ISqsTransport` gains optional
+  `getQueueAttributes` and `getQueueUrl` and an `attributes` argument on `send`;
+  `SqsReceivedMessage` gains `messageId`.
+
 ### Changed
 
+- **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p).**
+  - A job longer than `visibilityTimeoutSeconds` runs once: the adapter extends its visibility every
+    third of the timeout, up to SQS's 12-hour limit (V13-198). `visibilityTimeoutSeconds` outside 1
+    to 43,200 is refused with a `RangeError`.
+  - A consumed name needs a dead-letter target: `deadLetterQueues[name]`, the queue's own redrive
+    policy, or `deadLetterQueues[name]: false` to discard exhausted jobs. Without one the consumer
+    is refused before its first poll with `SqsDeadLetterTargetMissingError`, so a declared processor
+    fails `app.start()`; a name only enqueued to is never checked (V13-199). An exhausted job is no
+    longer deleted when no target is configured.
+  - When the queue's redrive policy has `maxReceiveCount` at or below a job's `maxAttempts`, the
+    job's attempts are lowered to `maxReceiveCount - 1` (at least 1) with one warning per name, so
+    `onFailed` runs before SQS takes the message (V13-214).
+  - A forwarded dead letter carries `setu-dead-letter-reason`, `setu-attempts` and
+    `setu-source-message-id` message attributes. A failed forward keeps the source message.
+  - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
+    deleted, and its warning carries the message id, never the body (V13-213).
+  - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
+    of logging and returning.
+  - Consuming needs `sqs:GetQueueAttributes`, and `sqs:GetQueueUrl` and `sqs:SendMessage` on a
+    policy target.
+- **`@setu-ts/queue-plugin`, every adapter (M143p).** `queue_jobs_total` counts an outcome only
+  after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle that
+  fails is no longer counted.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

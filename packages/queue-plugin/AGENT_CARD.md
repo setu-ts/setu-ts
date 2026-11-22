@@ -53,14 +53,15 @@ export function createReceiptJobProcessor(
 - Read-back state can live in a module both files import; the factory gets `services` to resolve
   capabilities at `onInit` (a capability resolved there must be registered, e.g. `LoggerPlugin`).
 - `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
-- `onFailed` runs once after attempts are exhausted, before dead-lettering, not on retries.
+- `onFailed` runs once, after the last attempt, before dead-lettering.
 - Default processor concurrency is 1 per name.
-- The default memory adapter is process-local. Processor factories resolve at `onInit`, when
-  capabilities are registered; shutdown stops polling and disconnects the adapter.
+- The default memory adapter is process-local; shutdown stops polling and disconnects it.
 
 ## Other options
 
 - `adapter: 'redis'` or `'rabbitmq'` uses `url` (node-redis: `client`); `'sqs'` uses `sqs`.
+- An SQS consumer needs `deadLetterQueues[name]` (URL or `false` to discard) or a redrive policy, or
+  it will not start.
 - `schedule` registers cron-recurring jobs.
 - `behaviors` wraps processor execution; `diagnostics` observes approved queue names only.
 

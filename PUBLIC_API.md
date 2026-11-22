@@ -8275,14 +8275,46 @@ Provides background job queue with Memory and Redis adapters.
 - **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`,
   `persistentMessages?`, `publishTimeoutMs?`, `reportWarning?`)
 - **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
-  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
-- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
-  `credentials?`, `endpoint?`, `client?`)
-- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`)
-- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle,
-  approximateReceiveCount)
-- **`SnsPublisher`** — SNS publisher for fan-out (SNS→SQS pairing)
-- **`SnsPublisherOptions`** — SNS publisher configuration
+  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, claim renewal every third of
+  the visibility timeout capped at SQS's 12-hour limit, dead-letter forwarding). Constructor
+  `(runtime, options, logger?, defaults?)`: `logger` is `{ error, warn }`; `defaults.maxAttempts`
+  (default 3) applies to an envelope without `maxAttempts`, and `QueuePlugin` fills it from
+  `defaultMaxAttempts`. Since 0.14.0: a stale `ack`, retry or dead-letter rejects instead of logging
+  and returning; a consumed name is prepared before its first poll and refused with
+  `SqsDeadLetterTargetMissingError` when no dead-letter target can be proved; when the queue has a
+  `RedrivePolicy`, each job's attempts are lowered to
+  `max(1, min(maxAttempts, maxReceiveCount - 1))` with one warning per name; an exhausted, abandoned
+  or unreadable message is sent to the target with `setu-dead-letter-reason`, `setu-attempts` and
+  `setu-source-message-id` attributes and then deleted; an unreadable message is never logged with
+  its body.
+- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`,
+  `visibilityTimeoutSeconds?`, `region?`, `credentials?`, `endpoint?`, `client?`).
+  `deadLetterQueues` maps a consumed job name to a target URL, or to `false` to discard that name's
+  exhausted jobs (`onFailed` still runs, the message is deleted with a warning and counted
+  `discarded`); a URL wins over the queue's redrive policy. `visibilityTimeoutSeconds` (default 30)
+  must be an integer from 1 to 43,200, else a `RangeError`.
+- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`). Since
+  0.14.0: `send(queueUrl, body, delaySeconds?, attributes?)` takes optional SQS message attributes,
+  and two optional members are used to find a dead-letter target:
+  `getQueueAttributes?(queueUrl, names)` and `getQueueUrl?(queueName, ownerAccountId)`. A transport
+  without `getQueueAttributes` can consume only names with an explicit `deadLetterQueues` entry.
+- **`SqsReceivedMessage`** — SQS received message shape (`messageId?`, `body`, `receiptHandle`,
+  `approximateReceiveCount`)
+- **`SqsSdkModule`** additions (0.14.0) — `GetQueueAttributesCommand`, `GetQueueUrlCommand`
+- **`SqsDeadLetterTargetMissingError`** — Thrown when a consumed SQS name has no dead-letter target:
+  no `deadLetterQueues` entry and no provable redrive policy. Carries `reason` and, for a failed
+  read, the read error as `cause`; its message names the three ways past it and the AWS rights a
+  consumer needs. A declared processor makes `app.start()` fail.
+- **`SqsDeadLetterTargetMissingReason`** —
+  `'no-target' | 'policy-unreadable' | 'attributes-unavailable' | 'target-unresolvable'`
+- **`SnsPublisher`** — SNS publisher. `publishJob<T>(name, data, options?)` (0.14.0) publishes the
+  job envelope `SqsQueue` reads, through a raw or a wrapped subscription; `options` is
+  `{ id?, maxAttempts?, headers? }`; without `id` it uses `runtime.uuid()` and without `runtime`
+  either it throws a `TypeError`; an absent `maxAttempts` leaves the consuming queue's default.
+  `publish(message)` sends a raw body that `SqsQueue` cannot read.
+- **`SnsPublisherOptions`** — SNS publisher configuration. Since 0.14.0:
+  `runtime?: IRuntimeServices` (job ids for `publishJob`) and `telemetry?: ITelemetryService`
+  (`publishJob` runs in a producer span and writes its `traceparent` into the envelope headers)
 - **`ISnsTransport`** — Structural SNS transport port
 - **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
 - **`SqsSdkModule`** — Shape of the SQS SDK module `adaptSqsModule` consumes; exported so a consumer
@@ -8362,7 +8394,9 @@ app.register(
         'send-welcome-email': 'https://sqs.us-east-1.amazonaws.com/123456789012/welcome-emails',
         'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments',
       },
+      // Every consumed name needs a target: a URL here, the queue's redrive policy, or `false`.
       deadLetterQueues: {
+        'send-welcome-email': false,
         'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments-dlq',
       },
     },

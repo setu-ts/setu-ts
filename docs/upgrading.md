@@ -12,6 +12,37 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### SQS dead-letter targets and long jobs (`@setu-ts/queue-plugin`)
+
+**BREAKING.** Every SQS job name a process consumes now needs a dead-letter target, and a consumer
+without one is refused before its first poll with `SqsDeadLetterTargetMissingError`. A processor
+declared in `QueuePlugin({ processors })` makes `app.start()` fail. Names a process only enqueues to
+are not checked. Pick one per consumed name:
+
+- `sqs: { deadLetterQueues: { 'report.build': '<dead-letter queue URL>' } }`;
+- a redrive policy on the queue itself, used when `deadLetterQueues` has no entry for the name;
+- `deadLetterQueues: { 'report.build': false }` to discard exhausted jobs: `onFailed` still runs,
+  the message is deleted with a warning, and `queue_jobs_total` counts `discarded`.
+
+Before 0.14.0 an exhausted job with no `deadLetterQueues` entry was deleted and counted as
+dead-lettered.
+
+A consumer role now needs `sqs:GetQueueAttributes` on the source queue, plus `sqs:GetQueueUrl` and
+`sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` for a customer-managed KMS
+key). With a redrive policy whose `maxReceiveCount` is at or below a job's `maxAttempts`, attempts
+are lowered to `maxReceiveCount - 1` and a warning says so; set `maxReceiveCount` to
+`maxAttempts + 1` to keep them all.
+
+Other changes you may notice: a job longer than `visibilityTimeoutSeconds` now runs once instead of
+again on every timeout, and `visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a message the
+adapter cannot read moves to the dead-letter target instead of returning every timeout; a stale
+settle is reported as `queue job settlement failed`; and on every adapter `queue_jobs_total` counts
+an outcome only after its settle succeeded. A custom `ISqsTransport` without `getQueueAttributes`
+can consume only names with a `deadLetterQueues` entry.
+
+`SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
+`publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
+
 ### Module pages (`@setu-ts/cli`)
 
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
