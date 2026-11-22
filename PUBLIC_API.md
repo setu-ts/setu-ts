@@ -14108,18 +14108,19 @@ contract changed in 0.11.0:
 **`IRequestContext.defer?(cleanup)`** (M125) — registers per-request cleanup. The kernel runs
 cleanups in reverse registration order only after the handler settles: normally before a buffered
 response is handed back (awaiting any that return a promise), and when a streaming body ends, errors
-or is cancelled. Since 0.14.0, whichever comes first, the request's own signal aborting also runs
-them once (on Workers the signal needs the `enable_request_signal` compatibility flag before the
-2026-11-17 compatibility date). An early middleware response returns immediately, but its cleanup
-and shutdown-drain accounting wait for the running handler; late handler cleanup registrations join
-that same cleanup list. A handler still running when `stop()`'s drain bound expires keeps its
-cleanup until it settles, which is then after `stop()` returned and the close hooks ran. On failure,
-cleanup follows the error response construction. Each asynchronous cleanup is bounded at 5000 ms: on
-expiry the kernel reports it and moves on, and the cleanup's later outcome is ignored. A cleanup's
-throw or rejection is reported at `warn` through the logger capability when one is registered, and
-never changes the response; a `defer` after completion runs at once. The member is optional, so no
-implementor breaks: the kernel's context implements it, `createTestContext` does not. A request that
-never calls it stays on the synchronous path.
+or is cancelled. Since 0.14.0 a streamed body's cleanups also run, once, when the request's own
+signal aborts first (on Workers the signal needs the `enable_request_signal` compatibility flag
+before the 2026-11-17 compatibility date); an abort never runs cleanups under a running handler. An
+early middleware response returns immediately, but its cleanup and shutdown-drain accounting wait
+for the running handler; late handler cleanup registrations join that same cleanup list. A handler
+still running when `stop()`'s drain bound expires keeps its cleanup until it settles, which is then
+after `stop()` returned and the close hooks ran. On failure, cleanup follows the error response
+construction. Each asynchronous cleanup is bounded at 5000 ms: on expiry the kernel reports it and
+moves on, and the cleanup's later outcome is ignored. A cleanup's throw or rejection is reported at
+`warn` through the logger capability when one is registered, and never changes the response; a
+`defer` after completion runs at once. The member is optional, so no implementor breaks: the
+kernel's context implements it, `createTestContext` does not. A request that never calls it stays on
+the synchronous path.
 
 **`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
 value this request holds under `key`, compared by object identity, and on the first call for that

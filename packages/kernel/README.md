@@ -44,10 +44,10 @@ internal.
 - `stop()` during `start()` cancels the start: `ctx.signal` aborts, `start()` rejects with
   `StartCancelledError`, the close hooks run and the application never listens.
 - Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank.
-- A request whose signal aborts before its response is logged as `Request aborted before completion`
-  at once; its `ctx.defer` cleanups wait for the handler to settle (a streamed body's run when the
-  signal aborts), so a handler that never settles keeps what it holds; a failed response stream is
-  logged once as `Response stream failed`.
+- A request that called `ctx.defer` and whose signal aborts before its response is logged as
+  `Request aborted before completion` at once; its `ctx.defer` cleanups wait for the handler to
+  settle (a streamed body's run when the signal aborts), so a handler that never settles keeps what
+  it holds; a failed response stream is logged once as `Response stream failed`.
 
 <!-- version:history -->
 
