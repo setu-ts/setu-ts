@@ -4,19 +4,68 @@
  * a failed response stream is logged once and the runtime prints nothing raw
  * (V13-256); a fully read stream runs its cleanup once, after the last chunk
  * (V13-200); and on Bun a stream quiet past 10 s stays open (V13-42). Each
- * arm runs only when its binary is installed; the kernel is read from its
- * build, so run after `pnpm run check`.
+ * arm runs only when its binary is installed. The fixture is bundled first
+ * with the workspace packages taken from source, so no build is needed.
  *
  * @module
  */
 import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { unusedPort } from '../../../../test/node-helpers.ts';
 
-const fixture = fileURLToPath(new URL('../fixtures/edge-server.ts', import.meta.url));
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const source = fileURLToPath(new URL('../fixtures/edge-server.ts', import.meta.url));
+const fixture = resolve(root, '.tmp/runtime-edge-server/edge-server.mjs');
+
+/**
+ * Bundles the fixture once: `@setu-ts/*` from each package's `src` (CI builds
+ * no `dist`), other packages external at their resolved paths, so Bun and
+ * Deno run one plain module.
+ */
+let bundled: Promise<unknown> | undefined;
+function bundleFixture(): Promise<unknown> {
+  bundled ??= mkdir(resolve(root, '.tmp/runtime-edge-server'), { recursive: true }).then(() =>
+    build({
+      entryPoints: [source],
+      outfile: fixture,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      logLevel: 'silent',
+      tsconfig: resolve(root, 'tsconfig.check.json'),
+      plugins: [
+        {
+          name: 'source-workspace',
+          setup(builder) {
+            builder.onResolve({ filter: /^@setu-ts\// }, (args) => ({
+              path: resolve(root, 'packages', args.path.slice('@setu-ts/'.length), 'src/index.ts'),
+            }));
+            builder.onResolve({ filter: /^[^./]/ }, async (args) => {
+              if (args.pluginData === 'resolve-external') return undefined;
+              if (args.path.startsWith('node:')) return { path: args.path, external: true };
+              const dependency = await builder.resolve(args.path, {
+                resolveDir: args.resolveDir,
+                kind: args.kind,
+                pluginData: 'resolve-external',
+              });
+              // An optional peer that is not installed stays a bare import; the
+              // runtime's guarded loader reports it if it is ever reached.
+              if (dependency.errors.length > 0) return { path: args.path, external: true };
+              return { path: dependency.path, external: true };
+            });
+          },
+        },
+      ],
+    }),
+  );
+  return bundled;
+}
 
 /** Whether a binary runs here. */
 function installed(binary: string): boolean {
@@ -47,6 +96,7 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
   }
 
   beforeAll(async () => {
+    await bundleFixture();
     port = await unusedPort();
     child = spawn(runtime.command, runtime.args(port), { stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout!.setEncoding('utf8').on('data', (chunk: string) => {
