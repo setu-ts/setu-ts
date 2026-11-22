@@ -62,6 +62,54 @@ function fakeRuntimeFor(fake: ReturnType<typeof createFakeRuntime>): IPlugin {
   };
 }
 
+/**
+ * A fake runtime whose timers fire at their absolute deadlines on a
+ * cumulative clock (the shared fixture compares each timer with one tick).
+ * Same shape as `createFakeRuntime()` for `runtime` and `tick`.
+ */
+function deadlineFake(): ReturnType<typeof createFakeRuntime> & { run(ms: number): Promise<void> } {
+  const base = createFakeRuntime();
+  let now = 0;
+  let next = 0;
+  const timers = new Map<number, { due: number; fn: () => void }>();
+  const runtime = Object.assign(Object.create(base.runtime) as typeof base.runtime, {
+    hrtime: () => now,
+    setTimeout: (fn: () => void, ms: number) => {
+      next++;
+      timers.set(next, { due: now + ms, fn });
+      return next;
+    },
+    clearTimeout: (handle: unknown) => void timers.delete(handle as number),
+  });
+  /** The earliest timer due by `target`, if any. */
+  const earliest = (target: number): [number, { due: number; fn: () => void }] | undefined => {
+    let found: [number, { due: number; fn: () => void }] | undefined;
+    for (const entry of timers) {
+      if (entry[1].due <= target && (found === undefined || entry[1].due < found[1].due)) {
+        found = entry;
+      }
+    }
+    return found;
+  };
+  /**
+   * Advances to `now + ms`, firing each timer at its deadline and letting the
+   * promise callbacks it starts run before the next, so a timer scheduled by
+   * a continuation (the next drain poll) fires within the same advance.
+   */
+  const run = async (ms: number): Promise<void> => {
+    const target = now + ms;
+    for (let due = earliest(target); due !== undefined; due = earliest(target)) {
+      timers.delete(due[0]);
+      now = due[1].due;
+      due[1].fn();
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    }
+    now = target;
+    await flush();
+  };
+  return { ...base, runtime, tick: (ms) => void run(ms), run };
+}
+
 describe('implicit HEAD on GET routes (V13-113)', () => {
   it('answers HEAD from a GET route with its headers and no body', async () => {
     const app = createApplication({ plugins: [runtimePlugin()] });
@@ -720,7 +768,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
   it.each([false, true])(
     'holds stop() while a streamed RPC reply source cancel() is pending, until it settles or the drain bound (released: %s)',
     async (released) => {
-      const fake = createFakeRuntime();
+      const fake = deadlineFake();
       let cleaned = 0;
       const deferring: IPlugin = {
         name: 'deferring',
@@ -750,7 +798,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
       void app.stop().then(() => {
         stopped = true;
       });
-      await advance(fake, 25);
+      await fake.run(25);
       // Still in the drain: the request's cleanups wait for the source.
       expect(stopped).toBe(false);
       if (released) {
@@ -759,16 +807,18 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
         await flush();
         expect(cleaned).toBe(1);
         // The drain's next poll (every 50 ms) sees the request gone.
-        await advance(fake, 50);
+        await fake.run(50);
         expect(stopped).toBe(true);
         return;
       }
-      await advance(fake, 50);
-      await advance(fake, 900);
-      // Still held 25 ms before the 1 000 ms bound (CodeRabbit).
+      await fake.run(50);
+      await fake.run(900);
+      // Still held 25 ms before the 1 000 ms bound, on a clock whose timers
+      // fire at their absolute deadlines (CodeRabbit).
       expect(stopped).toBe(false);
-      await advance(fake, 50);
-      // The drain bound ends the wait; the cleanups stay with the source.
+      await fake.run(25);
+      // The drain bound ends the wait exactly at 1 000 ms; the cleanups stay
+      // with the source.
       expect(stopped).toBe(true);
       expect(cleaned).toBe(0);
     },
@@ -777,7 +827,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
   it.each([false, true])(
     'holds stop() while a plain streamed route source cancel() is pending, until it settles or the drain bound (released: %s)',
     async (released) => {
-      const fake = createFakeRuntime();
+      const fake = deadlineFake();
       let cleaned = 0;
       const source = heldCancel();
       const app = createApplication({ plugins: [fakeRuntime(fake)] });
@@ -799,7 +849,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
       void app.stop().then(() => {
         stopped = true;
       });
-      await advance(fake, 25);
+      await fake.run(25);
       expect(stopped).toBe(false);
       if (released) {
         source.release();
@@ -807,14 +857,14 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
         await flush();
         expect(cleaned).toBe(1);
         // The drain's next poll (every 50 ms) sees the request gone.
-        await advance(fake, 50);
+        await fake.run(50);
         expect(stopped).toBe(true);
         return;
       }
-      await advance(fake, 50);
-      await advance(fake, 900);
+      await fake.run(50);
+      await fake.run(900);
       expect(stopped).toBe(false);
-      await advance(fake, 50);
+      await fake.run(25);
       expect(stopped).toBe(true);
       expect(cleaned).toBe(0);
     },
