@@ -23,6 +23,8 @@ export const CLEANUP_STALL_WARN_MS = 30_000;
  * @internal
  */
 export interface StallWatch {
+  /** False once the owner has stopped: then no timer is set at all. */
+  open(): boolean;
   /** Called once, with how long the abort has waited. */
   warn(waitedMs: number): void;
   /** Receives the function that clears the pending timer. */
@@ -162,8 +164,8 @@ export function wrapDeferredStream(
     // never settles keeps the resources, as a handler that never settles
     // does (security audit P15: a bounded wait let a limit be bypassed).
     const cancelled = cancelSource(signal?.reason);
-    // Started after the cancel, so a runtime whose timer throws cannot stop
-    // the source being cancelled; such a runtime only loses the warning.
+    // Started after the cancel, so a runtime whose setTimeout throws cannot
+    // stop the source being cancelled; such a runtime only loses the warning.
     let stopWatching = (): void => {};
     try {
       stopWatching = watchStall(registry, stall);
@@ -218,7 +220,7 @@ export function wrapDeferredStream(
  * releases anything: it only reports. Returns the function that stops it.
  */
 function watchStall(registry: IServiceRegistry, stall: StallWatch | undefined): () => void {
-  if (stall === undefined) return () => {};
+  if (stall === undefined || !stall.open()) return () => {};
   const runtime = registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
   const started = runtime.hrtime();
   let pending = true;
@@ -234,7 +236,12 @@ function watchStall(registry: IServiceRegistry, stall: StallWatch | undefined): 
     stall.untrack(clear);
     stall.warn(runtime.hrtime() - started);
   }, CLEANUP_STALL_WARN_MS);
-  runtime.unrefTimer?.(handle);
+  // Tracked before anything else can throw, so settle and stop() can clear it.
   stall.track(clear);
+  try {
+    runtime.unrefTimer?.(handle);
+  } catch {
+    // The timer still works; it only keeps the process alive until it fires.
+  }
   return clear;
 }

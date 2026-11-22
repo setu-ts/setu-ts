@@ -162,6 +162,7 @@ describe('wrapDeferredStream and the request signal', () => {
       warned,
       tracked,
       watch: {
+        open: () => true,
         warn: (waitedMs) => void warned.push(waitedMs),
         track: (clear) => void tracked.add(clear),
         untrack: (clear) => void tracked.delete(clear),
@@ -263,6 +264,74 @@ describe('wrapDeferredStream and the request signal', () => {
     client.abort();
     await settle();
     expect(unrefed).toHaveLength(1);
+  });
+
+  it.each(['setTimeout', 'unrefTimer'] as const)(
+    'still cancels, cleans up and leaves no timer or warning when the runtime %s throws',
+    async (broken) => {
+      const fake = createFakeRuntime();
+      const setTimer = fake.runtime.setTimeout.bind(fake.runtime);
+      const clearTimer = fake.runtime.clearTimeout.bind(fake.runtime);
+      let pending = 0;
+      const runtime = Object.assign(fake.runtime, {
+        setTimeout: (fn: () => void, ms: number) => {
+          if (broken === 'setTimeout') throw new Error('timer broke');
+          pending++;
+          return setTimer(fn, ms);
+        },
+        clearTimeout: (handle: unknown) => {
+          pending--;
+          clearTimer(handle);
+        },
+        unrefTimer: () => {
+          if (broken === 'unrefTimer') throw new Error('unref broke');
+        },
+      });
+      const registry = new ServiceRegistry();
+      registry.register(CAPABILITIES.RUNTIME, runtime);
+      const stall = stallWatch();
+      let cancelled = 0;
+      let cleaned = 0;
+      const source = new ReadableStream<Uint8Array>({ cancel: () => void cancelled++ });
+      const client = new AbortController();
+      wrapDeferredStream(
+        source,
+        [() => void cleaned++],
+        registry,
+        () => {},
+        client.signal,
+        undefined,
+        stall.watch,
+      );
+      client.abort();
+      await settle();
+      expect(cancelled).toBe(1);
+      expect(cleaned).toBe(1);
+      expect(pending).toBe(0);
+      expect(stall.tracked.size).toBe(0);
+      expect(stall.warned).toEqual([]);
+    },
+  );
+
+  it('sets no stall timer once the watch is closed (after stop())', async () => {
+    const fake = createFakeRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+    const timers = vi.spyOn(fake.runtime, 'setTimeout');
+    const stall = stallWatch();
+    const client = new AbortController();
+    wrapDeferredStream(
+      heldCancel().stream,
+      [() => {}],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      { ...stall.watch, open: () => false },
+    );
+    client.abort();
+    await settle();
+    expect(timers).not.toHaveBeenCalled();
   });
 
   it('sets no stall timer without a stall watch', async () => {

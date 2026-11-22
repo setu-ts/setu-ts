@@ -354,7 +354,7 @@ class Application implements IKernelApplication {
   readonly #rpcStreams = new WeakSet<IRequestContext>();
   /** Clears each pending stream-cancel stall timer; `stop()` runs them all. */
   readonly #stallTimers = new Set<() => void>();
-  /** Set once `stop()` has cleared the stall timers: an abort after it starts none. */
+  /** Set once `stop()` has cleared the stall timers: an abort after it sets no timer. */
   #stallTimersClosed = false;
   /**
    * The kernel diagnostics collector — `undefined` unless the application was
@@ -2202,6 +2202,7 @@ class Application implements IKernelApplication {
   #stallWatch(ctx: IRequestContext): StallWatch | undefined {
     if (!this.#registry.has(CAPABILITIES.LOGGER)) return undefined;
     return {
+      open: () => !this.#stallTimersClosed,
       warn: (waitedMs) => {
         this.#logSafely(
           'warn',
@@ -2210,9 +2211,7 @@ class Application implements IKernelApplication {
         );
       },
       track: (clear) => {
-        // An abort after stop() has nothing left to report.
-        if (this.#stallTimersClosed) clear();
-        else this.#stallTimers.add(clear);
+        this.#stallTimers.add(clear);
       },
       untrack: (clear) => {
         this.#stallTimers.delete(clear);

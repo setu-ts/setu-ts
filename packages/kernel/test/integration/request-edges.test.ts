@@ -598,8 +598,9 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     await advance(fake, 1_000);
   });
 
-  it('starts no stall timer for an abort that comes after stop()', async () => {
+  it('sets no stall timer for an abort that comes after stop()', async () => {
     const fake = createFakeRuntime();
+    const timers = vi.spyOn(fake.runtime, 'setTimeout');
     const calls: LogCall[] = [];
     const app = createApplication({ plugins: [fakeRuntime(fake), recordingLogger(calls)] });
     app.router.get('/stuck', (ctx) => {
@@ -622,6 +623,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     client.abort();
     await flush();
     await advance(fake, 30_000);
+    expect(timers.mock.calls.some((call) => call[1] === 30_000)).toBe(false);
     expect(withMessage(calls, STALL)).toHaveLength(0);
   });
 
