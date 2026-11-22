@@ -168,6 +168,26 @@ describe('project write lock', () => {
     expect(fs.writes).toEqual([]);
   });
 
+  it.each([
+    new Error('denied'),
+    Object.assign(new Error('permission denied'), { code: 'EACCES' }),
+    'denied',
+  ])('reports a lock directory failure after the parent exists (%s)', async (cause) => {
+    const fs = createFakeFs();
+    const reporting = {
+      ...fs,
+      mkdir: (path: string, options?: { recursive?: boolean }) =>
+        path === lock ? Promise.reject(cause) : fs.mkdir(path, options),
+    };
+    await expect(
+      withProjectLock(reporting, '/work', undefined, 'add', () =>
+        Promise.reject(new Error('must not enter')),
+      ),
+    ).rejects.toThrow(`Cannot acquire ${lock}:`);
+    expect(fs.mkdirs).toEqual(['/work/.setu-ts']);
+    expect(fs.writes).toEqual([]);
+  });
+
   it.each([new Error('owner write denied'), 'owner write denied'])(
     'releases when owner publication fails (%s)',
     async (cause) => {
