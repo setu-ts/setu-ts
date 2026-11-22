@@ -73,8 +73,10 @@ function ownerIsAlive(isAlive: ((pid: number) => boolean) | undefined, pid: numb
  * @param isAlive - Host probe used only to choose the refusal message
  * @param command - The command name recorded as the owner (`add`, `generate`, `sync`)
  * @param fn - Command callback, invoked only after owner publication
+ * @param report - Receives a release failure when the callback itself failed
  * @returns The callback result
- * @throws {ProjectLockError} If ownership cannot be acquired or released
+ * @throws {ProjectLockError} If ownership cannot be acquired, or released after a successful callback
+ * @throws The callback's own error, which a release failure never replaces
  */
 export async function withProjectLock<T>(
   fs: IProjectLockFileSystem,
@@ -82,11 +84,19 @@ export async function withProjectLock<T>(
   isAlive: ((pid: number) => boolean) | undefined,
   command: string,
   fn: () => Promise<T>,
+  report?: (message: string) => void,
 ): Promise<T> {
   const parent = joinPath(lockRoot, '.setu-ts');
   const lock = joinPath(parent, 'write.lock');
   try {
     await fs.mkdir(parent, { recursive: true });
+  } catch (cause) {
+    // A file where `.setu-ts` belongs is not a held lock; name the real failure.
+    throw new ProjectLockError(
+      `Cannot acquire ${escapeName(lock)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
+  }
+  try {
     await fs.mkdir(lock);
   } catch (cause) {
     if (!(cause instanceof Error && 'code' in cause && cause.code === 'EEXIST')) {
@@ -105,6 +115,7 @@ export async function withProjectLock<T>(
       `Another setu command${details} is changing this project; run this again when it finishes.\nIf no setu command is running, delete ${escapeName(lock)} and run this again.`,
     );
   }
+  let result: T;
   try {
     try {
       await fs.writeFile(
@@ -116,10 +127,19 @@ export async function withProjectLock<T>(
         `Failed to write ${escapeName(lock)}/owner.json: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
       );
     }
-    return await fn();
-  } finally {
-    await releaseProjectLock(fs, lock);
+    result = await fn();
+  } catch (failure) {
+    // The command's own failure wins; a release failure is still reported beside it.
+    try {
+      await releaseProjectLock(fs, lock);
+    } catch (release) {
+      report?.((release as Error).message);
+    }
+    throw failure;
   }
+  // A lock left behind blocks the next command, so failing to release fails this one.
+  await releaseProjectLock(fs, lock);
+  return result;
 }
 
 /** Removes the command's own lock and names any filesystem failure. */
@@ -160,7 +180,7 @@ export async function runWithProjectLock(
       project.kind === 'workspace-root'
         ? dir
         : ((await workspaceMemberOf(deps.fs, dir))?.root ?? dir);
-    return await withProjectLock(deps.fs, root, deps.isProcessAlive, command, fn);
+    return await withProjectLock(deps.fs, root, deps.isProcessAlive, command, fn, deps.error);
   } catch (cause) {
     if (!(cause instanceof ProjectLockError)) throw cause;
     deps.error(cause.message);

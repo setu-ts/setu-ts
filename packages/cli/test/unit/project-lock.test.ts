@@ -197,6 +197,49 @@ describe('project write lock', () => {
     },
   );
 
+  it.each([new Error('callback failed'), new InterruptedError()])(
+    'keeps the callback error when release also fails, and reports the release (%s)',
+    async (error) => {
+      const fs = createFakeFs();
+      const reported: string[] = [];
+      await expect(
+        withProjectLock(
+          { ...fs, rm: () => Promise.reject(new Error('release denied')) },
+          '/work',
+          undefined,
+          'add',
+          () => Promise.reject(error),
+          (message) => reported.push(message),
+        ),
+      ).rejects.toBe(error);
+      expect(reported).toEqual([`Cannot release ${lock}: release denied`]);
+    },
+  );
+
+  it('keeps the callback error when release fails and nothing receives the report', async () => {
+    const fs = createFakeFs();
+    const error = new Error('callback failed');
+    await expect(
+      withProjectLock(
+        { ...fs, rm: () => Promise.reject(new Error('release denied')) },
+        '/work',
+        undefined,
+        'add',
+        () => Promise.reject(error),
+      ),
+    ).rejects.toBe(error);
+  });
+
+  it('names a file where the lock parent belongs instead of reporting a held lock', async () => {
+    const fs = createFakeFs({ '/work/.setu-ts': 'not a directory' });
+    await expect(
+      withProjectLock(fs, '/work', undefined, 'add', () =>
+        Promise.reject(new Error('must not enter')),
+      ),
+    ).rejects.toThrow(`Cannot acquire ${lock}: EEXIST: /work/.setu-ts`);
+    expect(fs.writes).toEqual([]);
+  });
+
   it('shares the workspace root across member writers and propagates non-lock callback errors', async () => {
     const fs = createFakeFs();
     const err = createRecorder();
