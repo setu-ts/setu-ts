@@ -9,8 +9,9 @@ import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
 import { assertStorageKey } from '../../src/services/storage-key.ts';
 import { StorageService } from '../../src/services/storage-service.ts';
-import { MemoryProvider } from '../../src/providers/memory-provider.ts';
+import type { StorageProvider } from '../../src/interfaces/index.ts';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
+import { PROVIDERS } from '../fixtures/provider-fakes.ts';
 
 const BAD = ['../other/secret.txt', 'a/../../b', './a', 'a/.', '..'];
 const GOOD = ['a.txt', 'docs/a b/ñ#1?.txt', '.hidden', 'a..b', '/leading', 'a//b'];
@@ -40,25 +41,62 @@ describe('assertStorageKey', () => {
   }
 });
 
-describe('StorageService refuses a traversing key on every operation', () => {
-  const ops: readonly (readonly [string, (s: StorageService, k: string) => Promise<unknown>])[] = [
-    ['put', (s, k) => s.put(k, new Uint8Array([1]))],
-    ['get', (s, k) => s.get(k)],
-    ['delete', (s, k) => s.delete(k)],
-    ['exists', (s, k) => s.exists(k)],
-    ['getSignedUrl', (s, k) => s.getSignedUrl(k, { expiresIn: 60 })],
-    ['getStream', (s, k) => s.getStream(k)],
-  ];
-  for (const [name, run] of ops) {
-    it(name, async () => {
-      const service = new StorageService(new MemoryProvider(() => 0));
-      await expect(run(service, '../x')).rejects.toThrow(/path segment/);
+type Op = readonly [string, (s: StorageProvider | StorageService, k: string) => Promise<unknown>];
+
+const OPS: readonly Op[] = [
+  ['put', (s, k) => s.put(k, new Uint8Array([1]))],
+  ['get', (s, k) => s.get(k)],
+  ['delete', (s, k) => s.delete(k)],
+  ['exists', (s, k) => s.exists(k)],
+  ['getSignedUrl', (s, k) => s.getSignedUrl(k, { expiresIn: 60 })],
+  ['getStream', (s, k) => s.getStream(k)],
+];
+
+/** Wraps a provider so every call after connect() is counted. */
+function counted(provider: StorageProvider): { provider: StorageProvider; calls: string[] } {
+  const calls: string[] = [];
+  const proxy = new Proxy(provider, {
+    get(target, prop, receiver) {
+      const value: unknown = Reflect.get(target, prop, receiver);
+      if (typeof value !== 'function') return value;
+      // Called on the target, so a provider's private fields resolve.
+      return (...args: unknown[]) => {
+        if (prop !== 'connect') calls.push(String(prop));
+        return (value as (...a: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { provider: proxy, calls };
+}
+
+describe('every provider, through StorageService, refuses a traversing key on every operation', () => {
+  for (const [name, factory] of PROVIDERS) {
+    for (const [op, run] of OPS) {
+      it(`${name}: ${op} answers 400 and the provider is never called`, async () => {
+        const { provider, calls } = counted(factory());
+        await provider.connect();
+        const service = new StorageService(provider);
+        for (const key of BAD) {
+          const error = await run(service, key).catch((e: unknown) => e);
+          expect(httpStatusHintOf(error)?.status).toBe(400);
+        }
+        expect(calls).toEqual([]);
+      });
+    }
+    // Negative control: the same wiring passes an ordinary key to the backend.
+    it(`${name}: an ordinary key reaches the provider and reads back`, async () => {
+      const { provider, calls } = counted(factory());
+      await provider.connect();
+      const service = new StorageService(provider);
+      await service.put('dir/a..b.txt', new Uint8Array([1]));
+      expect(await service.exists('dir/a..b.txt')).toBe(true);
+      expect(calls).toEqual(['put', 'exists']);
     });
   }
 });
 
 describe('the Azure provider used directly refuses one too', () => {
-  it('before any call reaches the client', async () => {
+  it('on every operation, before any call reaches the client', async () => {
     let calls = 0;
     const provider = new AzureBlobProvider(
       {
@@ -73,13 +111,11 @@ describe('the Azure provider used directly refuses one too', () => {
       () => 0,
     );
     await provider.connect();
-    for (const run of [
-      () => provider.get('../b/secret.txt'),
-      () => provider.getSignedUrl('../b/secret.txt', { expiresIn: 60 }),
-      () => provider.put('../b/x', new Uint8Array([1])),
-    ]) {
-      const error = await run().catch((e: unknown) => e);
-      expect(httpStatusHintOf(error)?.status).toBe(400);
+    for (const [, run] of OPS) {
+      for (const key of BAD) {
+        const error = await run(provider, key).catch((e: unknown) => e);
+        expect(httpStatusHintOf(error)?.status).toBe(400);
+      }
     }
     expect(calls).toBe(0);
   });
