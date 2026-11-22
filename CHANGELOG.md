@@ -44,7 +44,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`@setu-ts/session-plugin` (M143a; V13-135, V13-136, V13-137).** On the store strategy a
+- **`@setu-ts/session-plugin` (M143a, #609; V13-135, V13-136, V13-137).** On the store strategy a
   `destroy()` or `regenerate()` stays in force whatever request on the session was already in
   flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every
   commit to a restored session checks it after its write and deletes its own write when present,
@@ -54,17 +54,17 @@ All notable changes to this project are documented here. The format follows
   `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.
   `SessionService.commit` takes an optional `SessionCommitPolicy` and returns a
   `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
-- **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a; V13-111, V13-112, V13-20).** A
-  signed-in visitor's response, a response setting the session cookie and one carrying a CSRF token
-  answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as each is known;
-  an anonymous response that read the session varies on `Cookie`. An explicit shared-cacheable
-  directive set by the handler is kept, with one bounded warning per route, unless the response sets
-  the session cookie; one set by a middleware outside the session middleware before it runs is
-  replaced by `private, no-store` for a signed-in visitor; on a `public` response a refresh-only
-  commit and a new visitor's CSRF-token-only session are not committed, so a form on a page marked
-  `public` fails CSRF. A missing asset starts no session. The React Router bridge sets a route's
-  `Cache-Control` instead of appending it.
-- **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
+- **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
+  V13-20).** A signed-in visitor's response, a response setting the session cookie and one carrying
+  a CSRF token answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as
+  each is known; an anonymous response that read the session varies on `Cookie`. An explicit
+  shared-cacheable directive set by the handler is kept, with one bounded warning per route, unless
+  the response sets the session cookie; one set by a middleware outside the session middleware
+  before it runs is replaced by `private, no-store` for a signed-in visitor; on a `public` response
+  a refresh-only commit and a new visitor's CSRF-token-only session are not committed, so a form on
+  a page marked `public` fails CSRF. A missing asset starts no session. The React Router bridge sets
+  a route's `Cache-Control` instead of appending it.
+- **`@setu-ts/cache-plugin` (M143a, #609; V13-111).** `cacheMiddleware` stores no response marked
   `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
   from a `public` entry that does not vary on `Cookie`/`Authorization`, storing only such a
   response. A response varying on either is stored and served only for requests carrying no cookie
@@ -72,12 +72,12 @@ All notable changes to this project are documented here. The format follows
   `Authorization` never joins or leads a coalesced flight, and a response captured after the session
   plugin's first application write (`PER_VISITOR_RESPONSE_STATE_KEY`, new in `@setu-ts/common`) is
   never stored. New option `credentialCookies`.
-- **`@setu-ts/http-security-plugin` (M143a; V13-34).** Security headers run at priority 10 and CORS
-  at 125, so the request-size 400 and 413 carry them.
-- **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a; V13-60).** Swagger UI's Try-it-out sends
-  the form-CSRF token on same-origin unsafe calls, from a new `GET <docs>/csrf-token` route read
-  through `ICsrfTokenAccess` (`CSRF_TOKEN_ACCESS_STATE_KEY`, new in `@setu-ts/common`). The docs
-  page, spec and assets commit no session.
+- **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
+  CORS at 125, so the request-size 400 and 413 carry them.
+- **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out
+  sends the form-CSRF token on same-origin unsafe calls, from a new `GET <docs>/csrf-token` route
+  read through `ICsrfTokenAccess` (`CSRF_TOKEN_ACCESS_STATE_KEY`, new in `@setu-ts/common`). The
+  docs page, spec and assets commit no session.
 
 ## [0.13.0] — 2026-11-17
 

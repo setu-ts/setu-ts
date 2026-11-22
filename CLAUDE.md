@@ -865,7 +865,7 @@ here.
   - `react-router-plugin` + `common` — sessions and shared caches: revocation markers and a commit
     fence, `storeCommit`, per-visitor `Cache-Control`, `cacheMiddleware` credentialed rule, security
     headers at 10 and CORS at 125, Swagger UI Try-it-out CSRF token; V13-111, V13-112, V13-135,
-    V13-136, V13-137, V13-20, V13-34, V13-60) — complete (PR pending).
+    V13-136, V13-137, V13-20, V13-34, V13-60) — complete (PR #609).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
