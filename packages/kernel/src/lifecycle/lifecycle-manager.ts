@@ -160,6 +160,8 @@ export class LifecycleManager implements ILifecycleApi {
    */
   async runRegister(): Promise<void> {
     while (this.#registerCursor < this.#register.length) {
+      // A cancelled start runs no further startup hook: its close hooks have run.
+      if (this.#lateClose !== undefined) return;
       const fn = this.#register[this.#registerCursor]!;
       this.#registerCursor++;
       await this.#runObserved('register-hook', this.#registerCursor, fn);
@@ -170,6 +172,7 @@ export class LifecycleManager implements ILifecycleApi {
   async runInit(): Promise<void> {
     let ordinal = 0;
     for (const fn of this.#init) {
+      if (this.#lateClose !== undefined) return;
       ordinal++;
       await this.#runObserved('init', ordinal, fn);
     }
@@ -179,6 +182,7 @@ export class LifecycleManager implements ILifecycleApi {
   async runBootstrap(): Promise<void> {
     let ordinal = 0;
     for (const fn of this.#bootstrap) {
+      if (this.#lateClose !== undefined) return;
       ordinal++;
       await this.#runObserved('bootstrap', ordinal, fn);
     }

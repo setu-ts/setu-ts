@@ -53,14 +53,14 @@ describe('request context abort watcher', () => {
     expect(handle.takeDeferred()).toHaveLength(2);
   });
 
-  it('reports in a microtask for a signal that was already aborted', async () => {
+  it('reports at once for a signal that was already aborted, before a settle can disarm it', () => {
     const client = new AbortController();
     client.abort();
     const { handle, aborts } = contextWith(client.signal);
     let cleaned = 0;
     handle.ctx.defer?.(() => void cleaned++);
-    expect(aborts).toHaveLength(0);
-    await Promise.resolve();
+    // A synchronous settle in the same turn disarms the watch.
+    handle.disarmAbort();
     expect(aborts).toHaveLength(1);
     expect(cleaned).toBe(0);
     expect(handle.takeDeferred()).toHaveLength(1);
@@ -79,7 +79,7 @@ describe('request context abort watcher', () => {
     expect(aborts).toHaveLength(0);
   });
 
-  it('ignores an abort once disarmed, and an already-aborted signal disarmed before its microtask', async () => {
+  it('ignores an abort once disarmed, while an already-aborted signal is reported before any disarm', async () => {
     const client = new AbortController();
     const { handle, aborts } = contextWith(client.signal);
     let cleaned = 0;
@@ -97,7 +97,8 @@ describe('request context abort watcher', () => {
     await Promise.resolve();
     expect(cleaned).toBe(0);
     expect(aborts).toHaveLength(0);
-    expect(pre.aborts).toHaveLength(0);
+    // Reported when the watch attached, before the disarm (CodeRabbit).
+    expect(pre.aborts).toHaveLength(1);
   });
 
   it('watches nothing for a request without a signal', () => {

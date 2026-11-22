@@ -380,19 +380,125 @@ describe('wrapDeferredStream and the request signal', () => {
     expect(aborts).toBe(0);
   });
 
-  it('attaches nothing when there is no cleanup to run', async () => {
+  it('cancels a body with no cleanup on abort, completes it, and reports nothing', async () => {
     let aborts = 0;
+    let cancelled = 0;
+    let completed = 0;
     const client = new AbortController();
     wrapDeferredStream(
-      endless(() => {}),
+      endless(() => void cancelled++),
       [],
-      new ServiceRegistry(),
-      () => {},
+      withRuntime().registry,
+      () => void completed++,
       client.signal,
       () => void aborts++,
     );
     client.abort();
-    await Promise.resolve();
+    await settle();
+    expect(cancelled).toBe(1);
+    expect(completed).toBe(1);
     expect(aborts).toBe(0);
+  });
+
+  it('joins a source cancel() that aborts the request signal itself (CodeRabbit)', async () => {
+    const order: string[] = [];
+    const client = new AbortController();
+    let finishCancel!: () => void;
+    const source = new ReadableStream<Uint8Array>({
+      cancel() {
+        order.push('source cancel');
+        // The source aborts the request synchronously, re-entering the wrapper.
+        client.abort();
+        return new Promise<void>((resolve) => {
+          finishCancel = () => {
+            order.push('source cancel settled');
+            resolve();
+          };
+        });
+      },
+    });
+    const wrapped = wrapDeferredStream(
+      source,
+      [() => void order.push('cleanup')],
+      withRuntime().registry,
+      () => {},
+      client.signal,
+    );
+    const consumerCancel = wrapped.cancel('consumer left');
+    await settle();
+    expect(order).toEqual(['source cancel']);
+    finishCancel();
+    await consumerCancel;
+    await settle();
+    expect(order).toEqual(['source cancel', 'source cancel settled', 'cleanup']);
+  });
+
+  it('waits for the source cancel() when a consumer cancel ends a pending read (CodeRabbit)', async () => {
+    const order: string[] = [];
+    let finishCancel!: () => void;
+    const source = new ReadableStream<Uint8Array>(
+      {
+        pull: () => new Promise<void>(() => {}),
+        cancel() {
+          order.push('source cancel');
+          return new Promise<void>((resolve) => {
+            finishCancel = () => {
+              order.push('source cancel settled');
+              resolve();
+            };
+          });
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const client = new AbortController();
+    const wrapped = wrapDeferredStream(
+      source,
+      [() => void order.push('cleanup')],
+      withRuntime().registry,
+      () => {},
+      client.signal,
+    );
+    const reader = wrapped.getReader();
+    const reading = reader.read();
+    await settle();
+    const consumerCancel = reader.cancel('consumer left');
+    await settle();
+    expect(order).toEqual(['source cancel']);
+    finishCancel();
+    await consumerCancel;
+    await reading;
+    await settle();
+    expect(order).toEqual(['source cancel', 'source cancel settled', 'cleanup']);
+  });
+
+  it('still runs the cleanups when the runtime clearTimeout throws (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    const runtime = Object.assign(fake.runtime, {
+      clearTimeout: () => {
+        throw new Error('clear broke');
+      },
+    });
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, runtime);
+    const stall = stallWatch();
+    let cleaned = 0;
+    const source = heldCancel();
+    const client = new AbortController();
+    wrapDeferredStream(
+      source.stream,
+      [() => void cleaned++],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      stall.watch,
+    );
+    client.abort();
+    await settle();
+    source.release();
+    await settle();
+    expect(cleaned).toBe(1);
+    expect(stall.tracked.size).toBe(0);
   });
 });

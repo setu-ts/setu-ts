@@ -149,6 +149,20 @@ describe('an error the application handles itself (code-review L1)', () => {
   });
 });
 
+describe('a throw an application capture callback handles (CodeRabbit)', () => {
+  it('Node and Bun skip it when hasUncaughtExceptionCaptureCallback() is true', () => {
+    for (const create of [createNodeFatalErrorObserver, createBunFatalErrorObserver]) {
+      const proc = Object.assign(new FakeProcess(), {
+        hasUncaughtExceptionCaptureCallback: () => true,
+      });
+      const seen = recorder();
+      create(proc)(seen.handler);
+      proc.emit('uncaughtExceptionMonitor', new Error('captured'), 'uncaughtException');
+      expect(seen.seen).toEqual([]);
+    }
+  });
+});
+
 describe('one observer per process (code-review M1)', () => {
   it('lets two Bun runtimes over one process still crash on a rejection', () => {
     const proc = new FakeProcess();

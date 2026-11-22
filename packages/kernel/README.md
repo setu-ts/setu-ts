@@ -42,7 +42,8 @@ internal.
   while the application runs logs one `fatal` line, `Process failed`, and the process still ends as
   it would have.
 - `stop()` during `start()` cancels the start: `ctx.signal` aborts, `start()` rejects with
-  `StartCancelledError`, the close hooks run and the application never listens.
+  `StartCancelledError`, the close hooks run and no later startup step runs (a `listen()` already
+  pending is closed when it resolves).
 - Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank.
 - A request that called `ctx.defer` and whose signal aborts before its response is logged as
   `Request aborted before completion` at once; its `ctx.defer` cleanups wait for the handler to

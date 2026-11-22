@@ -268,6 +268,8 @@ it('keeps a request scope alive under a running handler whose client left, and d
     await served;
     expect(events).toEqual(['handler started', 'handler resumed (open=true)', 'scope disposed']);
   } finally {
+    // A failed assertion above must not leave the handler holding stop().
+    release();
     await app.stop();
   }
 });

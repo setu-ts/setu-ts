@@ -7,7 +7,13 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IGrpcService, IPlugin, IPluginContext, RpcReply } from '@setu-ts/common';
+import type {
+  IGrpcService,
+  IHttpAdapter,
+  IPlugin,
+  IPluginContext,
+  RpcReply,
+} from '@setu-ts/common';
 
 import { createApplication } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -289,33 +295,198 @@ describe('resources a running handler holds when its client leaves (security aud
       },
     };
     const app = createApplication({ plugins: [runtimePlugin(), limiter] });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     app.router.get('/work', async (ctx) => {
       active++;
       maxActive = Math.max(maxActive, active);
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      await gate;
       active--;
       return ctx.response.text('done');
     });
     await app.start();
+    const served: Promise<Response>[] = [];
     try {
-      const served: Promise<unknown>[] = [];
-      for (let i = 0; i < 12; i++) {
+      // Two handlers admitted and held on the gate; their clients leave.
+      for (let i = 0; i < LIMIT; i++) {
         const client = new AbortController();
-        served.push(
-          Promise.resolve(
-            app.dispatch!(new Request('http://localhost/work', { signal: client.signal })),
-          ),
-        );
+        served.push(app.dispatch!(new Request('http://localhost/work', { signal: client.signal })));
         await flush();
         client.abort();
         await flush();
       }
-      await Promise.all(served);
+      // The slots are still held by running handlers: the next request is refused.
+      const refused = await app.dispatch!(new Request('http://localhost/work'));
+      expect(refused.status).toBe(503);
       expect(maxActive).toBeLessThanOrEqual(LIMIT);
-      expect(running).toBe(0);
     } finally {
+      release();
+      await Promise.all(served);
+      expect(running).toBe(0);
       await app.stop();
     }
+  });
+});
+
+describe('abort handling on the remaining settle paths (CodeRabbit)', () => {
+  it('cancels an early streamed response source when its client leaves, handler still running', async () => {
+    const app = createApplication({ plugins: [runtimePlugin()] });
+    let cancelled = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const early: IPlugin = {
+      name: 'early',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.middleware.add((c, next) => {
+          void next();
+          return c.response.stream(manualStream(() => void cancelled++).stream);
+        });
+      },
+    };
+    app.register(early);
+    app.router.get('/work', async (ctx) => {
+      await gate;
+      return ctx.response.text('late');
+    });
+    await app.start();
+    const client = new AbortController();
+    await app.dispatch!(new Request('http://localhost/work', { signal: client.signal }));
+    client.abort();
+    await flush();
+    expect(cancelled).toBe(1);
+    release();
+    await flush();
+    await app.stop();
+  });
+
+  it('reports an already-aborted request whose synchronous handler settles in the same turn', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    app.router.get('/quick', (ctx) => {
+      ctx.defer?.(() => {});
+      return ctx.response.text('ok');
+    });
+    await app.start();
+    const client = new AbortController();
+    client.abort();
+    await app.dispatch!(new Request('http://localhost/quick', { signal: client.signal }));
+    await flush();
+    expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(1);
+    await app.stop();
+  });
+
+  it('reports a client that leaves while a buffered response waits for its asynchronous cleanup', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    let finishCleanup!: () => void;
+    app.router.get('/slow-cleanup', (ctx) => {
+      ctx.defer?.(
+        () =>
+          new Promise<void>((resolve) => {
+            finishCleanup = resolve;
+          }),
+      );
+      return ctx.response.text('ok');
+    });
+    await app.start();
+    const client = new AbortController();
+    const served = app.dispatch!(
+      new Request('http://localhost/slow-cleanup', { signal: client.signal }),
+    );
+    await flush();
+    client.abort();
+    await flush();
+    expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(1);
+    finishCleanup();
+    await served;
+    await app.stop();
+  });
+
+  it('logs the status the client received when an early stream fails after the handler changed it', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let failSource!: () => void;
+    const early: IPlugin = {
+      name: 'early-202',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.middleware.add((c, next) => {
+          void next();
+          return c.response.status(202).stream(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                failSource = () => controller.error(new Error('source failed'));
+              },
+            }),
+          );
+        });
+      },
+    };
+    app.register(early);
+    app.router.get('/accepted', async (ctx) => {
+      await gate;
+      return ctx.response.status(500).text('late');
+    });
+    await app.start();
+    const response = await app.dispatch!(new Request('http://localhost/accepted'));
+    expect(response.status).toBe(202);
+    const reading = response
+      .body!.getReader()
+      .read()
+      .catch(() => undefined);
+    release();
+    await flush();
+    failSource();
+    await reading;
+    await flush();
+    expect(withMessage(calls, 'Response stream failed')[0]?.metadata).toMatchObject({
+      status: 202,
+    });
+    await app.stop();
+  });
+
+  it('hands app.fetch() a HEAD answer with no body, cancelling a discarded stream', async () => {
+    let cancelled = 0;
+    const adapter: IPlugin = {
+      name: 'stream-adapter',
+      version: '1.0.0',
+      provides: [CAPABILITIES.HTTP_ADAPTER],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.HTTP_ADAPTER, {
+          setHandler: () => {},
+          listen: () => Promise.resolve({}),
+          close: () => Promise.resolve(),
+          fetch: () =>
+            Promise.resolve(
+              new Response(manualStream(() => void cancelled++).stream, {
+                status: 200,
+                headers: { 'content-length': '5', 'x-kept': 'yes' },
+              }),
+            ),
+        } as unknown as IHttpAdapter);
+      },
+    };
+    const app = createApplication({ plugins: [runtimePlugin(), adapter] });
+    await app.start();
+    const head = await app.fetch(new Request('http://localhost/doc', { method: 'HEAD' }));
+    await flush();
+    expect(head.status).toBe(200);
+    expect(head.headers.get('x-kept')).toBe('yes');
+    expect(head.body).toBeNull();
+    expect(cancelled).toBe(1);
+    const get = await app.fetch(new Request('http://localhost/doc'));
+    expect(get.body).not.toBeNull();
+    await get.body!.cancel();
+    await app.stop();
   });
 });
 

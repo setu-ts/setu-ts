@@ -32,6 +32,12 @@ if (extra === 'own-listener') {
   });
 }
 
+if (extra === 'capture-callback') {
+  process.setUncaughtExceptionCaptureCallback(() => {
+    process.stdout.write('{"captured":true}\n');
+  });
+}
+
 if (extra === 'own-exception-listener') {
   process.on('uncaughtException', () => {
     process.stdout.write('{"caught":true}\n');

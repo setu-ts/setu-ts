@@ -290,7 +290,10 @@ async function serveHttp2(
         closeSessions();
         return closeServer(callback);
       }) as typeof server.close;
-      (server as unknown as NodeServer).drain = closeSessions;
+      (server as unknown as NodeServer).drain = tlsDrain(
+        closeSessions,
+        server as unknown as NodeServer,
+      );
       function ready(): void {
         server.removeListener('error', failed);
         resolve(server);
@@ -322,6 +325,24 @@ async function serveHttp2(
 }
 
 /**
+ * The drain for the TLS HTTP/2 listener: GOAWAY to every HTTP/2 session, and
+ * idle HTTP/1.1 connections (`allowHTTP1`) closed too, since those never
+ * enter `trackHttp2Sessions` and `beginDrain` skips its own fallback when a
+ * listener has `drain`.
+ *
+ * @param closeSessions - Sends GOAWAY to the tracked HTTP/2 sessions
+ * @param server - The secure server
+ * @returns The listener's `drain`
+ * @internal - Not exported from package index
+ */
+export function tlsDrain(closeSessions: () => void, server: NodeServer): () => void {
+  return () => {
+    closeSessions();
+    server.closeIdleConnections?.();
+  };
+}
+
+/**
  * Wraps a streaming body so the trailers are queued on the Node response
  * after its last chunk and before node-server ends the stream (M139b §3.3).
  * A rejecting trailers promise errors the stream, which resets it rather than
@@ -330,12 +351,15 @@ async function serveHttp2(
  * @param body - The response body
  * @param trailers - The trailers, resolving once the body ends
  * @param addTrailers - The Node response's `addTrailers`
+ * @param onTrailersFailed - Reports a rejecting trailers promise, which no
+ *   kernel guard sees (a body failure is reported by the kernel, not here)
  * @returns The wrapping stream
  */
 export function streamWithTrailers(
   body: ReadableStream<Uint8Array>,
   trailers: Promise<Headers>,
   addTrailers: (headers: Readonly<Record<string, string>>) => void,
+  onTrailersFailed?: (error: unknown) => void,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
@@ -346,7 +370,18 @@ export function streamWithTrailers(
         return;
       }
       const fields: Record<string, string> = {};
-      (await trailers).forEach((value, name) => {
+      let resolved: Headers;
+      try {
+        resolved = await trailers;
+      } catch (error) {
+        try {
+          onTrailersFailed?.(error);
+        } catch {
+          // Reporting must not replace the failure that resets the stream.
+        }
+        throw error;
+      }
+      resolved.forEach((value, name) => {
         fields[name] = value;
       });
       if (Object.keys(fields).length > 0) addTrailers(fields);
@@ -753,7 +788,17 @@ export class NodeHttpServerHandle {
       frameworkRequest.responseTrailers === true &&
       outgoing?.addTrailers !== undefined
     ) {
-      body = streamWithTrailers(body, snapshot.trailers, outgoing.addTrailers.bind(outgoing));
+      body = streamWithTrailers(
+        body,
+        snapshot.trailers,
+        outgoing.addTrailers.bind(outgoing),
+        (error) =>
+          this.#reportError?.({
+            level: 'error',
+            msg: 'Response trailers failed',
+            ...serializeError(error),
+          }),
+      );
     }
     if (outgoing?.destroy !== undefined) {
       body = destroyOnSourceError(body, outgoing.destroy.bind(outgoing));

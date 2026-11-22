@@ -78,3 +78,11 @@ describe('a rejection when the application has its own uncaughtException listene
     expect(status).toBe(0);
   });
 });
+
+describe('a throw the application captures with setUncaughtExceptionCaptureCallback', () => {
+  it('is not reported on Node, and the process lives', () => {
+    const { status, lines } = run(runtimes[0]!, 'throw', 'capture-callback');
+    expect(lines).toEqual([{ captured: true }, { alive: true }]);
+    expect(status).toBe(0);
+  });
+});

@@ -262,7 +262,11 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
             const metadata = Object.fromEntries(
               Object.entries(record).filter(([key]) => key !== 'msg' && key !== 'level'),
             );
-            ctx.services.get<ILogger>(CAPABILITIES.LOGGER).error(String(record['msg']), metadata);
+            const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
+            // A statement (a ceiling the runtime cannot honour, no GOAWAY) is a
+            // warning; anything else the adapter reports is a fault.
+            if (record['level'] === 'warn') logger.warn(String(record['msg']), metadata);
+            else logger.error(String(record['msg']), metadata);
             return;
           }
           services.reportError?.(record);

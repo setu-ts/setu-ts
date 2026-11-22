@@ -8,7 +8,8 @@
  * Thrown by `start()` when `stop()` was called before the start finished.
  *
  * The close hooks of every plugin that registered have run by the time it is
- * thrown, and the application never listens afterwards. An entry point can
+ * thrown, and no later startup step runs: a `listen()` already pending may
+ * still bind, and the kernel closes that handle as soon as it resolves. An entry point can
  * tell a cancelled start (the process is being stopped on purpose) from a
  * start that failed with `instanceof`.
  *

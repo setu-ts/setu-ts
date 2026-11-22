@@ -605,7 +605,9 @@ class Application implements IKernelApplication {
     // Never an unhandled rejection: every awaited step races it, and a start
     // that finishes first leaves it pending forever.
     this.#startCancelled.catch(() => undefined);
-    const starting = this.#start(options);
+    // Tracked before any plugin code runs: a plugin that calls `stop()`
+    // synchronously from `register()` must find a start to cancel.
+    const starting = Promise.resolve().then(() => this.#start(options));
     this.#startPromise = starting;
     await starting;
   }
@@ -1160,7 +1162,18 @@ class Application implements IKernelApplication {
       );
     }
     const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
-    return await adapter.fetch(request);
+    const response = await adapter.fetch(request);
+    // A `HEAD` answer carries the `GET`'s headers and no body (RFC 9110 §9.3.2),
+    // as `dispatch()` and `inject()` give it; a native server strips it on the
+    // wire, but the `Response` handed back here is the caller's to read. A
+    // discarded stream is cancelled so its source and cleanups are released.
+    if (request.method !== 'HEAD' || response.body === null) return response;
+    void response.body.cancel().catch(() => {});
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
 
   /** Runs a web request through the pipeline, preserving streams and cancellation. */
@@ -2084,11 +2097,11 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
-    // The response is being handed back: an abort from here on is not a
-    // client that left before it (a streamed body watches the signal itself).
-    handle.disarmAbort();
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
+      // The early response is handed back now: an abort from here on is not a
+      // client that left before it.
+      handle.disarmAbort();
       // Keep the request in the shutdown drain, and leave defer open for work
       // registered by selector or handler work after this early response has been sent.
       const finish = async (): Promise<void> => {
@@ -2107,8 +2120,17 @@ class Application implements IKernelApplication {
         const complete = (): void => {
           void this.#drainTracked(handle, pendingHandler).then(finish);
         };
+        // The signal lets a client that leaves cancel the source even on a
+        // runtime that never cancels the body; the cleanups still wait for the
+        // running handler.
         response.stream(
-          wrapDeferredStream(this.#guardStream(ctx, streamed), [], this.#registry, complete),
+          wrapDeferredStream(
+            this.#guardStream(ctx, streamed),
+            [],
+            this.#registry,
+            complete,
+            ctx.request.signal,
+          ),
           response.streamOptions,
         );
       }
@@ -2116,6 +2138,8 @@ class Application implements IKernelApplication {
     }
     const streamed = response.streamingBody;
     if (streamed !== undefined) {
+      // A streamed body watches the signal itself from here on.
+      handle.disarmAbort();
       // Every streamed body leaves through here (adapters and dispatch alike), so
       // this is the one place an empty-chunk source can be stopped from starving
       // the event loop.
@@ -2130,6 +2154,7 @@ class Application implements IKernelApplication {
       handle.takeDeferred() ??
       (streamed !== undefined && this.#rpcStreams.has(ctx) ? [] : undefined);
     if (cleanups === undefined) {
+      handle.disarmAbort();
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
       return response;
@@ -2138,11 +2163,16 @@ class Application implements IKernelApplication {
     if (body === undefined) {
       const pending = runDeferred(cleanups, this.#registry);
       if (pending === undefined) {
+        handle.disarmAbort();
         this.#inFlight--;
         this.#completeRequest(ctx, outcome);
         return response;
       }
+      // The buffered response waits for its asynchronous cleanup: a client
+      // that leaves meanwhile has not received it, so the abort report stays
+      // armed until the hand-back.
       return pending.then(() => {
+        handle.disarmAbort();
         this.#inFlight--;
         this.#completeRequest(ctx, outcome);
         return response;
@@ -2179,6 +2209,9 @@ class Application implements IKernelApplication {
    * @returns The guarded body
    */
   #guardStream(ctx: IRequestContext, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+    // The status sent with this stream: a handler still running may change the
+    // builder's status after an early response, which the client never sees.
+    const status = ctx.response.snapshot().status;
     return guardEmptyChunks(
       body,
       this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
@@ -2187,7 +2220,7 @@ class Application implements IKernelApplication {
           requestId: ctx.id,
           method: ctx.request.method,
           path: ctx.request.path,
-          status: ctx.response.snapshot().status,
+          status,
           error: describeError(error),
         });
       },

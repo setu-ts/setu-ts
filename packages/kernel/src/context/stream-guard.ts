@@ -58,7 +58,11 @@ export function guardEmptyChunks(
           try {
             chunk = await reader.read();
           } catch (error) {
-            onError?.(error);
+            try {
+              onError?.(error);
+            } catch {
+              // A broken reporter must not replace the source's error.
+            }
             throw error;
           }
           if (chunk.done) {

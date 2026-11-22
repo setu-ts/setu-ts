@@ -97,8 +97,9 @@ export function runDeferred(
  * signal is given and there is cleanup to run, when that signal aborts first
  * (a client that left on a runtime that never cancels the body, such as
  * workerd). On abort the source is cancelled first and the cleanups run once
- * its `cancel()` settles, with no time limit; a consumer's cancel waits for
- * the same `cancel()`.
+ * its `cancel()` settles, with no time limit; a consumer's cancel, and a read
+ * that it ends, wait for the same `cancel()`. A signal always gets a
+ * listener, so a body with no cleanup is still cancelled on abort.
  *
  * @param body - Source streaming body
  *
@@ -142,7 +143,18 @@ export function wrapDeferredStream(
   // so a second call cannot resolve at once on the closed stream while the
   // first still waits for the source.
   let cancelling: Promise<void> | undefined;
-  const cancelSource = (reason: unknown): Promise<void> => (cancelling ??= reader.cancel(reason));
+  const cancelSource = (reason: unknown): Promise<void> => {
+    if (cancelling !== undefined) return cancelling;
+    // Recorded before the source's cancel() runs: a cancel() that aborts the
+    // request signal synchronously re-enters here and must join this cancel,
+    // not start a second one that resolves at once on the closed stream.
+    let settle!: { resolve: () => void; reject: (error: unknown) => void };
+    cancelling = new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    reader.cancel(reason).then(settle.resolve, settle.reject);
+    return cancelling;
+  };
   // Set while an abort waits for the source's cancel(); the stream's own end,
   // error or cancel joins it instead of running the cleanups early.
   let aborting: Promise<void> | undefined;
@@ -155,7 +167,9 @@ export function wrapDeferredStream(
   };
   // `once()` removes this listener, so it never runs after completion.
   function aborted(): void {
-    onAbort?.();
+    // Reported only where there is cleanup to wait for; a body with none is
+    // still cancelled, so the source and the drain are released.
+    if (cleanups.length > 0) onAbort?.();
     // Cancel first and wait for the source's own cancel(), with no time
     // limit: a source whose cancel() waits for work still running (in pull,
     // or a pump it started) keeps the request's resources until it settles,
@@ -180,9 +194,9 @@ export function wrapDeferredStream(
         return finish();
       });
   }
-  // A listener only when there is work it could run early: an abort with no
-  // cleanup changes nothing the stream's own cancel would not.
-  if (signal !== undefined && cleanups.length > 0) {
+  // Every wrapped body with a signal listens: on a runtime that never cancels
+  // the body (workerd), the signal is the only notice the client left.
+  if (signal !== undefined) {
     if (signal.aborted) aborted();
     else signal.addEventListener('abort', aborted, { once: true });
   }
@@ -192,6 +206,9 @@ export function wrapDeferredStream(
         try {
           const chunk = await reader.read();
           if (chunk.done) {
+            // A consumer's cancel ends a pending read before the source's own
+            // cancel() settles: wait for it, so cleanups never run under it.
+            if (cancelling !== undefined) await cancelling.catch(() => {});
             await once();
             controller.close();
           } else {
@@ -227,8 +244,12 @@ function watchStall(registry: IServiceRegistry, stall: StallWatch | undefined): 
   const clear = (): void => {
     if (!pending) return;
     pending = false;
-    runtime.clearTimeout(handle);
     stall.untrack(clear);
+    try {
+      runtime.clearTimeout(handle);
+    } catch {
+      // Best effort: `pending` already silences a late callback.
+    }
   };
   const handle = runtime.setTimeout(() => {
     if (!pending) return;

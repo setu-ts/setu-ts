@@ -242,14 +242,16 @@ class RequestContext implements IRequestContext {
     const signal = this.request.signal;
     if (signal === undefined) return;
     const aborted = (): void => {
-      if (this.#completed || this.#abortWatch === undefined) return;
+      if (this.#abortWatch === undefined) return;
       this.disarmAbort();
       this.#abortReported = true;
       this.#onAbort?.(this);
     };
     this.#abortWatch = { signal, aborted };
+    // Already aborted: reported now, before a synchronous settle in the same
+    // turn could disarm the watch.
     if (signal.aborted) {
-      queueMicrotask(aborted);
+      aborted();
       return;
     }
     signal.addEventListener('abort', aborted, { once: true });
@@ -276,9 +278,13 @@ class RequestContext implements IRequestContext {
     return this.#abortReported;
   }
 
-  /** Internal completion handoff; no list is allocated for an unused request. */
+  /**
+   * Internal completion handoff; no list is allocated for an unused request.
+   * Takes the cleanups only: the abort report stays armed until the kernel
+   * hands the response back (`disarmAbort`), which a buffered response's
+   * asynchronous cleanup can delay.
+   */
   takeDeferred(): DeferredCleanup[] | undefined {
-    this.disarmAbort();
     this.#completed = true;
     const cleanups = this.#deferred;
     this.#deferred = undefined;

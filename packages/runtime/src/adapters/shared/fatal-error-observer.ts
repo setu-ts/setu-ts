@@ -15,6 +15,21 @@ export interface ProcessEventHost {
   on(event: string, listener: (...args: unknown[]) => void): unknown;
   off(event: string, listener: (...args: unknown[]) => void): unknown;
   listenerCount(event: string): number;
+  /** Node's `process.setUncaughtExceptionCaptureCallback` is set: it handles a throw. */
+  hasUncaughtExceptionCaptureCallback?(): boolean;
+}
+
+/**
+ * Whether the application handles a thrown error itself, so the process
+ * survives it: its own `uncaughtException` listener, or a capture callback
+ * (`process.setUncaughtExceptionCaptureCallback`), which Node runs after the
+ * monitor without any listener.
+ */
+function handlesThrows(proc: ProcessEventHost): boolean {
+  return (
+    proc.listenerCount('uncaughtException') > 0 ||
+    proc.hasUncaughtExceptionCaptureCallback?.() === true
+  );
 }
 
 /** The global event surface Deno's observer needs. */
@@ -119,7 +134,7 @@ function nodeObserver(proc: ProcessEventHost): Subscribe {
     const monitor = (error: unknown, origin: unknown): void => {
       // The monitor also fires when the application's own `uncaughtException`
       // listener is about to handle the error, and the process survives that.
-      if (proc.listenerCount('uncaughtException') > 0) return;
+      if (handlesThrows(proc)) return;
       notify(error, origin === 'unhandledRejection' ? 'unhandledRejection' : 'uncaughtException');
     };
     proc.on('uncaughtExceptionMonitor', monitor as (...args: unknown[]) => void);
@@ -165,7 +180,7 @@ function bunObserver(proc: ProcessEventHost, raise: (reason: unknown) => void): 
   return handlerSet((notify) => {
     const monitor = (error: unknown): void => {
       // The application's own `uncaughtException` listener keeps it alive.
-      if (proc.listenerCount('uncaughtException') > 0) return;
+      if (handlesThrows(proc)) return;
       notify(error, 'uncaughtException');
     };
     const rejection = (reason: unknown): void => {

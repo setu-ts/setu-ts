@@ -425,10 +425,58 @@ describe('a stop during start cancels the start (V13-43)', () => {
     await flush();
     // The failed start is now running its close hooks.
     const stopping = app.stop();
+    // stop() waits for the failing start's close hooks.
+    expect(await settled(stopping)).toBe(false);
     closing.resolve();
     await expect(starting).rejects.toThrow('init failed');
     await stopping;
     expect(withMessage(calls, 'Startup cancelled')).toHaveLength(0);
+  });
+
+  it('cancels a start that a plugin stops synchronously from register() (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    let stopping: Promise<void> | undefined;
+    const app = createApplication({
+      plugins: [
+        runtimeWith(fake, (ctx) => {
+          stopping = ctx.app.stop();
+        }),
+      ],
+    });
+    await expect(app.start({ port: 4211 })).rejects.toBeInstanceOf(StartCancelledError);
+    await stopping;
+    expect(fake.adapter.listening).toBe(false);
+  });
+
+  it('runs no further startup hook once the start is cancelled (CodeRabbit)', async () => {
+    const fake = createFakeRuntime();
+    const first = deferred();
+    const ran: string[] = [];
+    const app = createApplication({
+      plugins: [
+        runtimeWith(fake, (ctx) => {
+          ctx.lifecycle.onInit(async () => {
+            ran.push('init 1');
+            await first.promise;
+          });
+          ctx.lifecycle.onInit(() => {
+            ran.push('init 2');
+          });
+          ctx.lifecycle.onBootstrap(() => {
+            ran.push('bootstrap');
+          });
+        }),
+      ],
+    });
+    const starting = app.start({ port: 4212 });
+    starting.catch(() => undefined);
+    await flush();
+    const stopping = app.stop();
+    await expect(starting).rejects.toBeInstanceOf(StartCancelledError);
+    await stopping;
+    first.resolve();
+    await flush();
+    expect(ran).toEqual(['init 1']);
   });
 
   it('cancels a start that stop() reaches in the same turn', async () => {

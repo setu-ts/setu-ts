@@ -87,9 +87,13 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
   let stdout = '';
   let stderr = '';
 
-  /** The JSON lines the child printed. */
+  /**
+   * The JSON lines the child printed, complete lines only: a chunk can end
+   * part-way through a line, which waits for the next chunk.
+   */
   function records(): Record<string, unknown>[] {
     return stdout
+      .slice(0, stdout.lastIndexOf('\n') + 1)
       .split('\n')
       .filter((entry) => entry.startsWith('{'))
       .map((entry) => JSON.parse(entry) as Record<string, unknown>);

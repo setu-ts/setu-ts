@@ -21,6 +21,7 @@ import {
   NodeHttpAdapter,
   NodeHttpServerHandle,
   streamWithTrailers,
+  tlsDrain,
 } from '../../src/adapters/node/node-http-adapter.ts';
 import type { NodeServeHost } from '../../src/adapters/node/node-http-adapter.ts';
 import { DenoHttpAdapter } from '../../src/adapters/deno/deno-http-adapter.ts';
@@ -122,6 +123,28 @@ describe('streamWithTrailers', () => {
       () => undefined,
     );
     await expect(new Response(stream).text()).rejects.toThrow('call failed');
+  });
+
+  it('reports a rejecting trailers promise once, and keeps its error when the reporter throws (CodeRabbit)', async () => {
+    const failure = new Error('call failed');
+    const reported: unknown[] = [];
+    const stream = streamWithTrailers(
+      new Response('a').body!,
+      Promise.reject(failure),
+      () => undefined,
+      (error) => void reported.push(error),
+    );
+    await expect(new Response(stream).text()).rejects.toBe(failure);
+    expect(reported).toEqual([failure]);
+    const broken = streamWithTrailers(
+      new Response('a').body!,
+      Promise.reject(failure),
+      () => undefined,
+      () => {
+        throw new Error('reporter broke');
+      },
+    );
+    await expect(new Response(broken).text()).rejects.toBe(failure);
   });
 
   it('cancels the source when the client cancels', async () => {
@@ -387,5 +410,21 @@ describe('RuntimePlugin http2', () => {
     }
     expect(thrown).toBeInstanceOf(TypeError);
     expect(String(thrown)).not.toContain('"k"');
+  });
+});
+
+describe('tlsDrain (CodeRabbit)', () => {
+  it('sends GOAWAY and also closes idle HTTP/1.1 connections on the TLS listener', () => {
+    const calls: string[] = [];
+    const drain = tlsDrain(() => calls.push('goaway'), {
+      close: () => {},
+      closeIdleConnections: () => calls.push('idle closed'),
+    } as never);
+    drain();
+    expect(calls).toEqual(['goaway', 'idle closed']);
+    // A server without closeIdleConnections still gets the GOAWAY.
+    expect(() =>
+      tlsDrain(() => calls.push('goaway'), { close: () => {} } as never)(),
+    ).not.toThrow();
   });
 });
