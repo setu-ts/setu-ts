@@ -85,7 +85,7 @@ describe('setu workspace broker', () => {
         'apps/orders/setu.config.ts',
         ws.read('apps/orders/setu.config.ts').replace(/runtimeOptions\(\)/g, '{}'),
       );
-      const before = ws.fs.writes.length;
+      const before = ws.fs.projectWrites.length;
       const result = await ws.run(['workspace', 'broker', 'nats']);
       expect(result.code).toBe(1);
       expect(result.err).toContain(
@@ -93,7 +93,7 @@ describe('setu workspace broker', () => {
           ? 'runtime: runtimeOptions(),'
           : 'RuntimePlugin({ ...runtimeOptions(), <its existing options> }),',
       );
-      expect(ws.fs.writes).toHaveLength(before);
+      expect(ws.fs.projectWrites).toHaveLength(before);
     },
   );
   it('rewrites every CLI-owned file and merges the clients the broker needs', async () => {
@@ -154,11 +154,11 @@ describe('setu workspace broker', () => {
   // A no-op on each field the change compares.
   it('changes nothing when the broker, endpoint and client are already recorded', async () => {
     const ws = await workspace({ broker: 'redis' });
-    const before = ws.fs.writes.length;
+    const before = ws.fs.projectWrites.length;
     const result = await ws.run(['workspace', 'broker', 'redis']);
     expect(result.code).toBe(0);
     expect(result.out).toContain('already uses the redis broker; nothing changed');
-    expect(ws.fs.writes.length).toBe(before);
+    expect(ws.fs.projectWrites.length).toBe(before);
     // A different endpoint or client IS a change.
     expect(
       (await ws.run(['workspace', 'broker', 'redis', '--broker-url', 'redis://shared:6379'])).code,
@@ -232,12 +232,12 @@ describe('setu workspace broker', () => {
 
   it('prints the plan and writes nothing under --dry-run', async () => {
     const ws = await workspace();
-    const before = ws.fs.writes.length;
+    const before = ws.fs.projectWrites.length;
     const result = await ws.run(['workspace', 'broker', 'redis', '--dry-run']);
     expect(result.code).toBe(0);
     expect(result.out).toContain(`would write ${ROOT}/apps/orders/src/transport/index.ts`);
     expect(result.out).toContain(`would write ${ROOT}/setu.workspace.json`);
-    expect(ws.fs.writes.length).toBe(before);
+    expect(ws.fs.projectWrites.length).toBe(before);
   });
 
   for (const [label, args, expected] of [
@@ -523,7 +523,7 @@ describe('refusing a member that does not read the module', () => {
         'apps/svc/setu.config.ts',
         config.replace('messagingOptions(config)', '{}').replace('messagingOptions()', ''),
       );
-      const before = ws.fs.writes.length;
+      const before = ws.fs.projectWrites.length;
       const result = await ws.run(['workspace', 'broker', 'redis']);
       expect(result.code).toBe(1);
       expect(result.err).toContain(
@@ -531,7 +531,7 @@ describe('refusing a member that does not read the module', () => {
       );
       expect(result.err).toContain(line);
       expect(result.err).toContain('Nothing was written.');
-      expect(ws.fs.writes.length).toBe(before);
+      expect(ws.fs.projectWrites.length).toBe(before);
       expect(JSON.parse(ws.read('setu.workspace.json')).broker).toBe('memory');
     });
   }
@@ -550,11 +550,11 @@ describe('refusing a member that does not read the module', () => {
     // that past the template literal, and an automatic edit must not rely on it.
     const config = ws.read('apps/orders/setu.config.ts');
     await ws.write('apps/orders/setu.config.ts', `${config}\nconst label = \`orders\`;\n`);
-    const before = ws.fs.writes.length;
+    const before = ws.fs.projectWrites.length;
     const result = await ws.run(['workspace', 'broker', 'redis']);
     expect(result.code).toBe(1);
     expect(result.err).toContain('Nothing was written.');
-    expect(ws.fs.writes.length).toBe(before);
+    expect(ws.fs.projectWrites.length).toBe(before);
   });
 
   it('refuses a member manifest that is not plain JSON, writing nothing', async () => {
@@ -777,10 +777,10 @@ describe('every entry point renders the same module', () => {
   ]) {
     it(`refuses setu add grpc ${extra.join(' ')} in a member, writing nothing`, async () => {
       const ws = await workspace();
-      const before = ws.fs.writes.length;
+      const before = ws.fs.projectWrites.length;
       const result = await ws.run(['add', 'grpc', ...extra], `${ROOT}/apps/orders`);
       expect(result.code).toBe(2);
-      expect(ws.fs.writes.length).toBe(before);
+      expect(ws.fs.projectWrites.length).toBe(before);
       expect(JSON.parse(ws.read('setu.workspace.json')).members[0].rpc).toBeUndefined();
     });
   }

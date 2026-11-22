@@ -77,6 +77,17 @@ All notable changes to this project are documented here. The format follows
   that count 5xx request lines no longer count those requests. In a Deno application that logs
   requests, Deno now prints its one-time legacy-abort notice; `--unstable-no-legacy-abort` removes
   it.
+- **BREAKING — `@setu-ts/cli` (M143b; V13-140, #610).** `setu new --env-file <path>` and
+  `setu generate app --env-file <path>` are renamed `--dotenv <path>`, with the same grammar. Node
+  reads `--env-file` anywhere on its command line, even after the script name, so under Node the old
+  flag never reached `setu`: Node tried to load the file and exited 9. `--env-file` is now refused
+  by name (exit 2) on Bun and Deno too.
+- **`@setu-ts/cli`, `@setu-ts/create` (M143b; V13-166, #610).** `setu` and `npm create @setu-ts`
+  refuse to start below Node 22.9.0 (exit 1, naming the supported range), the lowest version on
+  which the CLI and a generated project both work. Between that floor and the supported range they
+  warn and continue. The check is the new `@setu-ts/cli/node-version` subpath (`nodeFloorRefusal`,
+  `isNodeBelowFloor`, `isSupportedNode`, `HARD_FLOOR_NODE`, `SUPPORTED_NODE`), which both
+  executables load before anything else.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery
@@ -100,6 +111,20 @@ All notable changes to this project are documented here. The format follows
   WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
   has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
   descriptor, and a status outside 200–599 is answered as 500.
+- **`@setu-ts/cli` (M143b; V13-36, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161,
+  V13-168, #610).** A built-in option given with no value (`--template` at the end, `--template=`)
+  is refused by name with exit 2, where it silently meant the default. `setu new` refuses a target
+  that is a file or a non-empty directory (a `.git` directory is allowed) before writing, and offers
+  to delete only a directory an interrupted run left. `setu add`, `setu generate` and `setu sync`
+  hold a project lock, `.setu-ts/write.lock`, so a second command in the same project or workspace
+  is refused rather than interleaving its writes; a lock left by a process that is gone is named
+  with how to clear it. `setu add telemetry` records the four OpenTelemetry peers on Workers too,
+  and the microservice template lists them, so a Workers project's tests pass and a Bigtable project
+  installs; `setu add database --type bigtable` restores any missing peer when telemetry-plugin is
+  present. `setu add view` builds the CSS before `test` and `test:e2e`. A Pub/Sub project's `.env`
+  sets `PUBSUB_EMULATOR_HOST`, `setu add` names it as the emulator's address, and the generated
+  `test` scripts load the dotenv the way `start` does. A new npm or Bun workspace's root `test`
+  passes while it has no members, through a generated `scripts/test.mjs`.
 
 ## [0.13.0] — 2026-11-17
 

@@ -6,6 +6,9 @@ Scaffolds a new Setu-TS project with `npm create`:
 npm create @setu-ts my-app
 ```
 
+It requires Node 22.9.0 or newer and supports the same Node range as `setu`
+(`^22.23.4 || ^24.22.1 || >=26.12.1`).
+
 It runs `setu new` from [`@setu-ts/cli`](https://www.npmjs.com/package/@setu-ts/cli) with the
 arguments you pass, so every `setu new` flag works here. npm needs `--` before flags meant for the
 scaffolder:

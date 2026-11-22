@@ -63,6 +63,7 @@ function projectEnv(project: string, overlay?: RegistryOverlay): NodeJS.ProcessE
  * @param command - The executable
  * @param args - Its arguments
  * @param overlay - The registry to install from, when the command installs
+ * @param env - Child overrides; undefined removes an inherited variable
  * @returns The exit code and output
  */
 export function runIn(
@@ -70,12 +71,16 @@ export function runIn(
   command: string,
   args: readonly string[],
   overlay?: RegistryOverlay,
-  env: Readonly<Record<string, string>> = {},
+  env: Readonly<Record<string, string | undefined>> = {},
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd: project,
-      env: { ...projectEnv(project, overlay), ...env },
+      env: Object.fromEntries(
+        Object.entries({ ...projectEnv(project, overlay), ...env }).filter(
+          ([, value]) => value !== undefined,
+        ),
+      ),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';

@@ -220,7 +220,10 @@ describe('the process boundary of packages/cli/src', () => {
   it('never ends the process itself; the executable sets the exit code', async () => {
     const bin = await nodeFs.readFile(new URL('../../src/bin.ts', import.meta.url), 'utf8');
     expect(bin.startsWith('#!/usr/bin/env node\n')).toBe(true);
-    expect(stripComments(bin)).toContain('process.exitCode = await runMain(');
+    expect(stripComments(bin)).toContain(
+      'process.exitCode = refusal === undefined ? await start() : refuse(refusal);',
+    );
+    expect(stripComments(bin)).toContain('return await runMain(');
     expect(stripComments(bin)).not.toContain('process.exit(');
   });
 });

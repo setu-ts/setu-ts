@@ -42,6 +42,28 @@ function apply(existing: Map<string, string>, result: ReturnType<typeof plan>) {
 }
 
 describe('add view planner', () => {
+  it.each(['node', 'bun', 'deno'] as const)(
+    'V13-141 prefixes existing tests with CSS on %s and preserves absent or owned scripts',
+    (runtime) => {
+      const file = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const key = runtime === 'deno' ? 'tasks' : 'scripts';
+      const call =
+        runtime === 'deno' ? 'deno task css' : `${runtime === 'bun' ? 'bun' : 'npm'} run css`;
+      for (const value of ['runner test', `${call} && runner test`, 7, undefined]) {
+        const existing = fresh(runtime);
+        const manifest = JSON.parse(existing.get(file)!);
+        manifest[key] = { ...manifest[key], test: value, 'test:e2e': value };
+        existing.set(file, JSON.stringify(manifest));
+        const result = plan(existing, runtime);
+        const actual = JSON.parse(apply(existing, result).get(file)!)[key];
+        for (const name of ['test', 'test:e2e']) {
+          expect(actual[name]).toBe(value === 'runner test' ? `${call} && runner test` : value);
+          if (value === 7 || value === `${call} && runner test`)
+            expect(result.notes.join('\n')).toContain(`${file} ${name}`);
+        }
+      }
+    },
+  );
   it('V12-26 plugin-only configures JSX without adding view or CSS artifacts', () => {
     const result = planViewSetup({
       runtime: 'node',

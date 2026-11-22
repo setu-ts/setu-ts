@@ -9,7 +9,7 @@ coverage
 main.dev.ts
 apps/*/main.dev.ts
 # Dotenv files whose names are .env or .env.*, except .env.example, which is
-# kept for the image. A custom --env-file name such as local.env is listed
+# kept for the image. A custom --dotenv name such as local.env is listed
 # after them from the project or workspace record, so it is never copied.
 **/.env
 **/.env.*

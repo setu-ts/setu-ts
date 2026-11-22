@@ -21,6 +21,7 @@ import { rootManifestSettings } from '../templates/root-settings.ts';
 import { LIBS_GLOB, BUNFIG_FILE, BUN_WORKSPACE_CONFIG } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { workspaceDevRunner } from './dev-runner.ts';
+import { workspaceTestRunner } from './test-runner.ts';
 import type { BrokerSpec } from './transport.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 import { maskUrlUserinfo } from '@setu-ts/common';
@@ -207,7 +208,9 @@ export function workspaceRootFiles(
               workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
               scripts: {
                 dev: profile.runAll,
-                ...(profile.rootTestTask ? { test: profile.testAll } : {}),
+                ...(profile.rootTestTask
+                  ? { test: `${profile.runtime === 'bun' ? 'bun' : 'node'} scripts/test.mjs` }
+                  : {}),
                 build: cliCommand(profile.runtime, 'workspace build'),
                 deploy: cliCommand(profile.runtime, 'workspace deploy'),
               },
@@ -293,6 +296,7 @@ ${wrapProse('Full-stack Bun members also run `bun run build`, and full-stack Den
   return [
     rootManifest,
     workspaceDevRunner(profile),
+    ...(profile.manifestKind === 'npm' ? [workspaceTestRunner(profile)] : []),
     {
       path: WORKSPACE_MANIFEST,
       contents: renderWorkspaceManifest({
@@ -314,13 +318,13 @@ ${wrapProse('Full-stack Bun members also run `bun run build`, and full-stack Den
       path: '.gitignore',
       contents:
         profile.manifestKind === 'deno'
-          ? 'node_modules/\ncoverage/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\nk8s/secrets/\n'
+          ? 'node_modules/\ncoverage/\n.setu-ts/write.lock/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\nk8s/secrets/\n'
           : // Both locations: Bun installs into each MEMBER's node_modules as well as
             // the root, measured — an ignore listing only the root would commit them.
             // `.react-router/` is unanchored, so it covers a full-stack member's
             // typegen directory as well as the root's. The dotenv rules are
             // unanchored too, so they cover each member's own `.env`.
-            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n' +
+            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n.setu-ts/write.lock/\n' +
             'apps/*/dist/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n' +
             // Operator values for `setu workspace deploy`; each file is named `.env`, so the rule
             // above already covers it in an older root (M122).

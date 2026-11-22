@@ -111,7 +111,7 @@ describe('scaffold logger choice', () => {
       ).toBe(2);
       expect(h.err.text()).toContain('--logger');
       expect(h.err.text()).toContain(
-        value === undefined ? 'needs a value' : `Unknown --logger "${value}"`,
+        value === undefined ? 'Option --logger needs a value' : `Unknown --logger "${value}"`,
       );
       expect(h.fs.writes).toEqual([]);
     });

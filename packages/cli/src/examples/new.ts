@@ -24,6 +24,7 @@ import {
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.ts';
 import { runAgentsCommand } from '../commands/agents.ts';
+import { newTargetRefusal } from '../utils/new-target.ts';
 
 /** How long one example file may take to download, body included, before the run gives up. */
 export const FETCH_TIMEOUT_MS = 30_000;
@@ -81,7 +82,7 @@ const CONFLICTS = [
   'devtool',
   'devtool-port',
   'logger',
-  'env-file',
+  'dotenv',
   'transport',
   'transport-url',
   'broker-url',
@@ -140,10 +141,31 @@ export async function runExampleNew(
     return EXIT_USAGE;
   }
   const root = joinPath(resolveDir(deps.cwd, stringFlag(args.flags, 'dir')), names.kebab);
+  try {
+    const refusal = await newTargetRefusal(deps.fs, root);
+    if (refusal.length > 0) {
+      for (const message of refusal)
+        deps.error(`${args.flags['dry-run'] === true ? 'WOULD REFUSE: ' : ''}${message}`);
+      return EXIT_ERROR;
+    }
+  } catch (cause) {
+    deps.error(
+      `Cannot inspect ${escapeName(root)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
+    return EXIT_ERROR;
+  }
   const paths = examplePaths(example);
   const placeholders = paths.map((path) => ({ path: joinPath(root, path), contents: '' }));
-  if (args.flags['dry-run'] === true) return reportDryRunPlan(deps, placeholders);
-  const existing = await findExisting(deps.fs, placeholders);
+  let existing: readonly string[];
+  try {
+    if (args.flags['dry-run'] === true) return await reportDryRunPlan(deps, placeholders);
+    existing = await findExisting(deps.fs, placeholders);
+  } catch (cause) {
+    deps.error(
+      `Cannot inspect ${escapeName(root)}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+    );
+    return EXIT_ERROR;
+  }
   if (existing.length > 0) {
     deps.error('Refusing to overwrite existing files:');
     for (const path of existing) deps.error(`  ${escapeName(path)}`);
