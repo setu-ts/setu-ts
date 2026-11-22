@@ -70,7 +70,7 @@ All notable changes to this project are documented here. The format follows
   draining. A rejecting response-trailers promise on Node is reported as `Response trailers failed`.
   Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain) are logged at `warn`, faults at
   `error`. `onFatalError` does not report a throw an application captures with
-  `process.setUncaughtExceptionCaptureCallback`.
+  `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
 - **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
   accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
   for a request whose client left before the response (the logger-plugin half of V13-110), so alerts
