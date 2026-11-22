@@ -53,8 +53,8 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 
 - `store: 'memory'`, `'cache'` or an `ISessionStore` enables server-side payload storage.
 - `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
-  sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
-- `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.
-- Unless the handler sets Cache-Control (kept; public is not if it sets the cookie), signed-in,
-  cookie-setting and token-reading responses get private, no-store. On a public page a new visitor's
-  form fails CSRF.
+  sign-in or MFA promotion. Other data, tenant binding included, stays. `destroy` logs out.
+- `rolling` renews expiry; `tenantBinding` defaults to true and refuses tenant mismatches (403).
+- Signed-in, cookie-setting and token-reading responses get private, no-store at the first write or
+  token read; a handler Cache-Control set later stays unless shareable with the cookie set. New
+  visitors' public-page forms fail CSRF.
