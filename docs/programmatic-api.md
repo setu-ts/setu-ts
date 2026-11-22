@@ -510,6 +510,7 @@ interface IRuntimeServices {
   hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
+  unrefTimer?(handle: TimerHandle): void;
   setInterval(fn: () => void, ms: number): TimerHandle;
   clearInterval(handle: TimerHandle): void;
   readonly env: Readonly<Record<string, string | undefined>>;

@@ -14,10 +14,12 @@ All notable changes to this project are documented here. The format follows
   the error without changing how the process ends (Node, Deno and Bun; absent on Workers).
   `app.stop()` logs `Server stopping`, `Shutdown drain finished` (with `remaining` and `timedOut`)
   and `Server stopped`. `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000).
-  `RuntimeSignal` adds `'SIGHUP'`. `IHttpAdapter.beginDrain` lets the Node adapter (which also
-  serves Bun's HTTP/2) send HTTP/2 `GOAWAY` when the drain begins. `IPluginContext.signal` aborts
-  when `stop()` is called during `start()`, which now rejects with `StartCancelledError` (new,
-  `@setu-ts/kernel`). `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
+  `RuntimeSignal` adds `'SIGHUP'`. `IRuntimeServices.unrefTimer` (optional) lets the process exit
+  with a timer pending: Node and Bun `unref()`, Deno `Deno.unrefTimer`, nothing on Workers.
+  `IHttpAdapter.beginDrain` lets the Node adapter (which also serves Bun's HTTP/2) send HTTP/2
+  `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
+  `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
+  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
   `@setu-ts/worker-pool-plugin` does not read it yet (V13-131's worker-pool half, M143r). V13-11,
   V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
@@ -49,11 +51,14 @@ All notable changes to this project are documented here. The format follows
   settles, with no time limit, so a `cancel()` that never settles keeps the request's resources. It
   cannot see a source's `pull` or a pump it started: a source that does work of its own must make
   `cancel()` wait for it, and a source with no `cancel()` gets no wait, so a limit released through
-  `defer` does not cover work in its `pull`. A failed response stream is logged once,
-  `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or gRPC-Web
-  reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()` cancels the
-  start: its close hooks run, a close hook registered later runs at once, and the application never
-  listens (V13-43).
+  `defer` does not cover work in its `pull`. With a logger registered, a wait still pending after 30
+  s logs one `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `{ requestId, method, path, waitedMs }`, and releases nothing. A failed response stream is
+  logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
+  gRPC-Web reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()`
+  cancels the start: its close hooks run, a close hook registered later runs at once, and the
+  application never listens (V13-43).
 - **`@setu-ts/runtime` (M143i).** Node answers a refused WebSocket upgrade with the framework's
   response (status, reason phrase, headers, body), as Bun and Deno do; `rejectRawUpgrade` takes its
   reason phrases from a status table (V13-53). Bun keeps a quiet response stream open past its 10 s

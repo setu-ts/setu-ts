@@ -342,8 +342,13 @@ not for its `pull` or any pump it started, which no reader can see; a source tha
 own (in `pull`, or a pump it started) must make its `cancel()` wait for that work, and a source with
 no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`.
 `stop()` is not held by such a request beyond the drain bound; its cleanups run if and when the
-`cancel()` settles. A streamed body whose source fails is logged once as `Response stream failed`
-(`{ requestId, method, path, status, error }`), and the error still aborts the response.
+`cancel()` settles. When a logger is registered, a cleanup still waiting after 30 s logs one `warn`
+line, `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+with `{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime,
+is unref'd (`IRuntimeServices.unrefTimer`), fires at most once, and is cleared when `cancel()`
+settles or at `stop()`; with no logger, no timer is set. A streamed body whose source fails is
+logged once as `Response stream failed` (`{ requestId, method, path, status, error }`), and the
+error still aborts the response.
 
 ### Route Introspection
 
@@ -877,6 +882,7 @@ interface IRuntimeServices {
   hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
+  unrefTimer?(handle: TimerHandle): void; // since 0.14.0; Node/Bun unref(), Deno.unrefTimer, no-op on Workers
   setInterval(fn: () => void, ms: number): TimerHandle;
   clearInterval(handle: TimerHandle): void;
 
@@ -14119,19 +14125,20 @@ response is handed back (awaiting any that return a promise), and when a streami
 or is cancelled. Since 0.14.0 a streamed body's cleanups also run, once, when the request's own
 signal aborts first, after the body's `cancel()` settles, with no time limit (the kernel cannot see
 a source's `pull`, so a source that does work of its own must make `cancel()` wait for it; a
-`cancel()` that never settles keeps the request's resources; a source with no `cancel()` gets no
-wait, so a limit released through `defer` does not cover work in its `pull`) (on Workers the signal
-needs the `enable_request_signal` compatibility flag before the 2026-11-17 compatibility date); an
-abort never runs cleanups under a running handler. An early middleware response returns immediately,
-but its cleanup and shutdown-drain accounting wait for the running handler; late handler cleanup
-registrations join that same cleanup list. A handler still running when `stop()`'s drain bound
-expires keeps its cleanup until it settles, which is then after `stop()` returned and the close
-hooks ran. On failure, cleanup follows the error response construction. Each asynchronous cleanup is
-bounded at 5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later outcome is
-ignored. A cleanup's throw or rejection is reported at `warn` through the logger capability when one
-is registered, and never changes the response; a `defer` after completion runs at once. The member
-is optional, so no implementor breaks: the kernel's context implements it, `createTestContext` does
-not. A request that never calls it stays on the synchronous path.
+`cancel()` that never settles keeps the request's resources, reported by one `warn` line after 30 s
+when a logger is registered; a source with no `cancel()` gets no wait, so a limit released through
+`defer` does not cover work in its `pull`) (on Workers the signal needs the `enable_request_signal`
+compatibility flag before the 2026-11-17 compatibility date); an abort never runs cleanups under a
+running handler. An early middleware response returns immediately, but its cleanup and
+shutdown-drain accounting wait for the running handler; late handler cleanup registrations join that
+same cleanup list. A handler still running when `stop()`'s drain bound expires keeps its cleanup
+until it settles, which is then after `stop()` returned and the close hooks ran. On failure, cleanup
+follows the error response construction. Each asynchronous cleanup is bounded at 5000 ms: on expiry
+the kernel reports it and moves on, and the cleanup's later outcome is ignored. A cleanup's throw or
+rejection is reported at `warn` through the logger capability when one is registered, and never
+changes the response; a `defer` after completion runs at once. The member is optional, so no
+implementor breaks: the kernel's context implements it, `createTestContext` does not. A request that
+never calls it stays on the synchronous path.
 
 **`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
 value this request holds under `key`, compared by object identity, and on the first call for that

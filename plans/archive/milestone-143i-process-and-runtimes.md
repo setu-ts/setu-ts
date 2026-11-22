@@ -344,16 +344,40 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   Looked up 2026-11-22, evidence partial. Nothing found releases request resources under a running
   handler; the decision rests mainly on the audit's measurement.
 
-- **Streamed body on abort (2026-11-22, the coordinating session's calls under the decision above,
-  reported to the maintainer, who may overrule them).** `wrapDeferredStream` cancels the body first,
-  waits for `reader.cancel()` with no time limit, then runs the cleanups once; the abort and a
-  consumer's cancel share one `reader.cancel()` (code review: a second call resolved at once on the
-  closed stream and ran the cleanups under the first). The plain reading ("wait for an in-flight
-  read") cannot be built: measured on Node 24, Bun 1.4.5 and Deno 2.9.6, a source with the default
-  high-water mark is inside `pull` with no read pending, and `reader.cancel()` resolves when the
-  source's `cancel()` settles, not its `pull`. So the source's `cancel()` is its one hook: a source
-  that does work of its own (in `pull`, or a pump it started from `start`) must make `cancel()` wait
-  for it.
+- **Streamed body on abort (maintainer decision, 2026-11-22: CONFIRMED).** `wrapDeferredStream`
+  cancels the body first, waits for `reader.cancel()` with no time limit, then runs the cleanups
+  once; the abort and a consumer's cancel share one `reader.cancel()` (code review: a second call
+  resolved at once on the closed stream and ran the cleanups under the first). The plain reading
+  ("wait for an in-flight read") cannot be built: measured on Node 24, Bun 1.4.5 and Deno 2.9.6, a
+  source with the default high-water mark is inside `pull` with no read pending, and
+  `reader.cancel()` resolves when the source's `cancel()` settles, not its `pull`. So the source's
+  `cancel()` is its one hook: a source that does work of its own (in `pull`, or a pump it started
+  from `start`) must make `cancel()` wait for it.
+  - **The maintainer's reasons.** P15's measurement (the 5 s bound let a cap of 2 reach 8 with
+    sources that never settle and 6 with merely slow ones); consistency with the rule that a handler
+    that never settles keeps its resources; and what others do, looked up 2026-11-22 (mostly
+    secondary sources):
+
+    | Framework or standard | When a consumer cancels a stream                                                                                 |
+    | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+    | WHATWG Streams        | `reader.cancel()` resolves only after the source's `cancel()` settles; its tests assert it                       |
+    | ASP.NET Core          | disposes the request scope when the response completes; keeps iterating an `IAsyncEnumerable` after a disconnect |
+    | Reactor               | runs cleanup from `doOnCancel` / `doFinally` on the cancel signal                                                |
+
+    None found bounds the wait.
+
+  - **Stall warning (required by the decision).** With a logger registered, a cleanup still waiting
+    on a source's `cancel()` after 30 s (`CLEANUP_STALL_WARN_MS`, a fixed internal constant) logs
+    one `warn` line,
+    `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+    with `{ requestId, method, path, waitedMs }` only, so an operator can see why a route stops
+    admitting. It never releases anything. The timer comes from `IRuntimeServices` (`setTimeout`,
+    unref'd through the new optional `unrefTimer`: Node and Bun `unref()`, Deno `Deno.unrefTimer`,
+    nothing on Workers), fires at most once, is cleared when `cancel()` settles and at `stop()` (the
+    application keeps the pending clears in a set), and is never set without a logger. Tests:
+    `deferred-abort.test.ts` (once after the bound, none when `cancel()` settles first, unref
+    requested, no timer without a watch), `request-edges.test.ts` (only the four fields, no timer
+    without a logger, cleared at `stop()`), `runtime-edges.test.ts` (`unrefTimer` per runtime).
   - **Why no bound (option A, chosen).** The audit's P15 (a limit of K = 2 released through `defer`,
     10 clients/s for 18 s, each leaving after 300 ms) measured the first form, which ran the
     cleanups 5000 ms after the abort: with a `cancel()` that never settles, or a `pull` pending

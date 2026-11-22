@@ -46,7 +46,11 @@ cutting a release renames that heading to the version and is a rename, not a rec
   then, a custom `ReadableStream` source whose `cancel()` never settles keeps its request's
   resources (a request scope, a concurrency slot) until it does: make `cancel()` settle, and make it
   wait for any work the source still has running in `pull` or a pump it started. A source with no
-  `cancel()` gets no wait, so that work is not covered by a limit released through `defer`.
+  `cancel()` gets no wait, so that work is not covered by a limit released through `defer`. New in
+  0.14.0: with a logger registered, a cleanup still waiting 30 s after the client left logs one
+  `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `requestId`, `method`, `path` and `waitedMs`, which names the route that stops admitting.
 - **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
