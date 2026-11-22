@@ -139,7 +139,7 @@ describe('interrupted scaffolding on the real filesystem', () => {
 
   it('identifies a pre-existing partial scaffold as interruption debris', async () => {
     await fixture(async (root, fs) => {
-      // Debris a killed run leaves: one file the scaffold writes, whole, and one cut short.
+      // Debris a killed run leaves: files the scaffold writes, each whole.
       // Scaffolded under the same name elsewhere, so the bytes are the ones `app` gets.
       await nodeFs.mkdir(`${root}/elsewhere`);
       expect(await cli(`${root}/elsewhere`, fs).run(['new', 'app', '--template', 'rest'])).toBe(0);
@@ -147,7 +147,7 @@ describe('interrupted scaffolding on the real filesystem', () => {
       const main = await nodeFs.readFile(`${root}/elsewhere/app/main.ts`, 'utf8');
       await nodeFs.mkdir(`${root}/app`, { recursive: true });
       await nodeFs.writeFile(`${root}/app/package.json`, manifest);
-      await nodeFs.writeFile(`${root}/app/main.ts`, main.slice(0, 20));
+      await nodeFs.writeFile(`${root}/app/main.ts`, main);
       const retry = cli(root, fs);
 
       expect(await retry.run(['new', 'app', '--template', 'rest'])).toBe(1);

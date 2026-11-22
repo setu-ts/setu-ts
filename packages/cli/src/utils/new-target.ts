@@ -10,8 +10,6 @@ export interface PlannedFile {
   readonly path: string;
   /** The text the run writes there. */
   readonly contents: string;
-  /** True for a file holding a generated secret, which differs on every run. */
-  readonly secret?: boolean;
 }
 
 /**
@@ -64,18 +62,17 @@ export async function newTargetRefusal(
 }
 
 /**
- * Whether everything under `root` is this run's own output: each file holds the
- * bytes the run would write at that path (or, cut short, their start; only whole files are evidence), and each directory is one a planned
- * path needs. A path match alone is not ownership (a user's `main.ts` sits at a
- * planned path too), so content decides. A secret file differs on every run and
- * counts by path only; at least one non-secret file must match, so a user's own
- * `.env` alone never earns the hint.
+ * Whether everything under `root` is this run's own output: every file holds
+ * exactly the bytes the run would write at that path, and every directory is one
+ * a planned path needs. A path match alone is not ownership (a user's `main.ts`
+ * sits at a planned path too), and neither is a prefix (a one-line `.gitignore`)
+ * or a file with a per-run secret, so any of those withholds the hint.
  *
  * @param fs - The target filesystem
  * @param root - The resolved project directory
  * @param entries - The top-level entries of `root`, `.git` excluded
  * @param resolve - Resolves the files this run plans to write, as written
- * @returns True when nothing under `root` is outside the plan
+ * @returns True when there is at least one file and all of it is the plan's
  */
 async function onlyPlannedFiles(
   fs: IFileSystem,
@@ -110,13 +107,8 @@ async function onlyPlannedFiles(
         continue;
       }
       const file = files.get(path);
-      if (file === undefined) return false;
-      if (file.secret === true) continue;
-      // The run's bytes, or (a fallback write cut short) their start. Only a whole
-      // match is evidence: a user's one-line `.gitignore` is a prefix too.
-      const text = (await readExistingText(fs, full)) ?? '';
-      if (!file.contents.startsWith(text)) return false;
-      if (text === file.contents) matched++;
+      if (file === undefined || (await readExistingText(fs, full)) !== file.contents) return false;
+      matched++;
     }
   } catch {
     // An entry that cannot be inspected is not shown to be this run's own output.

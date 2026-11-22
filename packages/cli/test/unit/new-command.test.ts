@@ -194,11 +194,9 @@ describe('new target validation', () => {
     async (dry) => {
       const h = harness();
       expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
-      // An interrupted run: some files written, the rest not. The secret file holds a
-      // different secret on the next run and still counts as this run's own; the rest
-      // match the formatted bytes the run writes.
-      const kept = ['/work/app/main.ts', '/work/app/package.json', '/work/app/.env'];
-      expect(h.fs.has('/work/app/.env')).toBe(true);
+      // An interrupted run: some files written, the rest not, each holding the
+      // formatted bytes the run writes.
+      const kept = ['/work/app/main.ts', '/work/app/package.json'];
       for (const path of h.fs.writes) if (!kept.includes(path)) await h.fs.rm(path);
       const writes = h.fs.writes.length;
       const err = createRecorder();
@@ -242,6 +240,26 @@ describe('new target validation', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it('V13-168 withholds the delete hint for a matching file beside a user-owned .env', async () => {
+    const h = harness();
+    expect(await h.run(['app', '--template', 'full-stack'])).toBe(0);
+    for (const path of h.fs.writes) if (path !== '/work/app/main.ts') await h.fs.rm(path);
+    await h.fs.writeFile('/work/app/.env', new TextEncoder().encode('SESSION_SECRET=mine\n'));
+    const err = createRecorder();
+    expect(
+      await runNewCommand(parseArgs(['app', '--template', 'full-stack']), {
+        secret: () => 'a'.repeat(64),
+        fs: h.fs,
+        cwd: '/work',
+        log: () => {},
+        error: err.sink,
+      }),
+    ).toBe(1);
+    expect(err.lines).toHaveLength(1);
+    expect(err.lines[0]).toContain('/work/app already exists and is not empty');
+    expect(h.fs.read('/work/app/.env')).toBe('SESSION_SECRET=mine\n');
+  });
+
   it('V13-168 withholds the delete hint when an entry cannot be inspected', async () => {
     const fs = createFakeFs({ '/work/app/src/main.ts': 'partial run' });
     const err = createRecorder();
@@ -267,7 +285,7 @@ describe('new target validation', () => {
 
   it.each([
     ['the whole planned file', 'export const main = 1;\n', true],
-    ['a truncated planned file alone', 'export const', false],
+    ['a truncated planned file', 'export const', false],
     ['an empty planned file alone', '', false],
     ['bytes that are not the planned start', 'export let', false],
   ])('V13-168 judges %s by the planned bytes', async (_, text, hinted) => {

@@ -831,11 +831,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
       // The bytes a run writes are formatted, so ownership is judged against those.
       () =>
         formatForTarget(
-          plan.files.map((file) => ({
-            path: file.path,
-            contents: file.contents,
-            ...(file.secret === true ? { secret: true } : {}),
-          })),
+          plan.files.map((file) => ({ path: file.path, contents: file.contents })),
           runtime,
           undefined,
           () => {},
