@@ -63,9 +63,10 @@ On the store strategy a sign-out or regeneration now writes a marker entry, `rev
 `superseded:<id>`, beside the session rows, expiring one second after `maxAge`; an `ISessionStore`
 of your own sees those ids, and a `superseded` marker written by a committed regeneration carries
 `"next": "<new id>"`. A commit that finds its session revoked while it ran is refused and sends no
-cookie, and so is a commit whose request loaded the session `maxAge` or more ago (a regeneration
-refused that way still revokes the old id). Use Redis with `noeviction` (or a dedicated instance)
-for sessions; cache-plugin's memory cache evicts at `maxSize` and is for development only.
+cookie, and so is a commit whose request loaded the session `maxAge` or more ago (a regeneration or
+a `clear()` sign-out refused that way still revokes the old id). Use Redis with `noeviction` (or a
+dedicated instance) for sessions; cache-plugin's memory cache evicts at `maxSize` and is for
+development only.
 
 Store commits now default to `storeCommit: 'changes'`: a commit writes this request's changes onto
 the current row, and a commit whose row is gone is refused. Set `storeCommit: 'snapshot'` to keep

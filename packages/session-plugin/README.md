@@ -71,15 +71,15 @@ regeneration writes `superseded:<old id>` (`revoked:<old id>` when it is a logou
 restored session writes its row and then reads the markers, and deletes its own write when one is
 present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
 cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
-tab) is refused too, so it cannot carry the old session's data to a fresh id. A `superseded` marker
-names the new id, and a sign-out of the old id also revokes the id it names: a sign-out that lands
-after a regeneration's marker check therefore still ends the regenerated session. Markers are
-written only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they
-expire one second after `maxAge` (for stores that round a TTL down), and a commit whose request
-loaded the session `maxAge` or more ago is refused, since no marker could still fence it (a
-regeneration refused that way still revokes the old id). A marker names one successor: when two
-requests regenerate the same id at once (a double-submitted sign-in), a sign-out racing both ends
-only the session the later one moved to.
+tab) is refused too, so it cannot carry the old session's data to a fresh id. A committed
+regeneration's `superseded` marker names the new id, and a sign-out of the old id also revokes the
+id it names: a sign-out that lands after a regeneration's marker check therefore still ends the
+regenerated session. Markers are written only for an id that had a row, so anonymous `POST /logout`
+traffic writes nothing; they expire one second after `maxAge` (for stores that round a TTL down),
+and a commit whose request loaded the session `maxAge` or more ago is refused, since no marker could
+still fence it (a regeneration or a `clear()` sign-out refused that way still revokes the old id). A
+marker names one successor: when two requests regenerate the same id at once (a double-submitted
+sign-in), a sign-out racing both ends only the session the later one moved to.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
