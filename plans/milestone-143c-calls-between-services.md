@@ -220,13 +220,14 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   - **Logging.** A failed provider read (cold or background) goes to a `ConnectionErrorReporter` PER
     NAME, built like the probe's (`service-discovery-plugin.ts:83-86`) with source
     `service-discovery-plugin: <kind> resolve '<serviceName>'`, created on the name's first failure
-    kept across cold and warm failures (repeats at `debug`, recovery at `info`), bounded at 256
-    names by least-recent use, and dropped by `close()`. One shared reporter cannot warn once per
-    run: it deduplicates by the last rendered message only (`connection-errors.ts:136-152`), so two
-    failing names alternate and each repeat warns again. The plugin passes the service a factory
-    `(serviceName) => ConnectionErrorReporter`. The probe's reporter is unchanged; for the DNS arm
-    the probe re-reports the last lookup's error (§3.5), so one DNS fault can produce one line from
-    each reporter, which is accepted and stated in the README. Verified behaviour of that reporter
+    kept while its failure run is open, across cold and warm failures (repeats at `debug`, recovery
+    at `info`), dropped at recovery, bounded at 256 concurrently failing names, and dropped by
+    `close()`. One shared reporter cannot warn once per run: it deduplicates by the last rendered
+    message only (`connection-errors.ts:136-152`), so two failing names alternate and each repeat
+    warns again. The plugin passes the service a factory `(serviceName) => ConnectionErrorReporter`.
+    The probe's reporter is unchanged; for the DNS arm the probe re-reports the last lookup's error
+    (§3.5), so one DNS fault can produce one line from each reporter, which is accepted and stated
+    in the README. Verified behaviour of that reporter
     (`packages/common/src/health/connection-errors.ts:15-17`, `:133-163`): the first error of a run,
     or an error whose rendered text differs from the previous one, at `warn`; an identical repeat at
     `debug` with a count; the first success after errors at `info`. The read is reported with
@@ -287,12 +288,12 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     read path or the watch path, and (b) arms one timer per held name at
     `emptySince + emptyAnswerGraceMs` that starts a background read, whose empty answer replaces the
     list and reaches watchers. The timer is cleared on a non-empty answer, on replacement and on
-    `close()`. A read that was in flight when a newer watch delivery arrived is neither stored nor
-    broadcast, so a watcher never gets an older list after a newer one. Each listener runs in its
-    own try/catch outside the read's failure handling; a throwing listener is logged at `warn` once
-    per name and never marks the name failed. A listener may get the current list on subscribing and
-    may get repeats. So `resolve()` and `watch()` callers always agree (code and docs review,
-    2026-11-23).
+    `close()`. A read that was in flight when a newer watch delivery arrived is not stored or
+    broadcast, and a failure of it does not mark the name failed, so a watcher never gets an older
+    list after a newer one. Each listener runs in its own try/catch outside the read's failure
+    handling; a throwing listener is logged at `warn` once per name and never marks the name failed.
+    A listener may get the current list on subscribing and may get repeats. So `resolve()` and
+    `watch()` callers always agree (code and docs review, 2026-11-23).
   - **With §3.1's background refresh:** the empty answers arrive through background refreshes (and
     watch deliveries), never through a waiting caller, so callers keep the old list without delay
     throughout the grace. Because the next refresh starts only when a call arrives after
@@ -492,12 +493,14 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
      (row 1b) for a client-side fault raised before the request leaves, matched by a DENY-LIST of
      the exact shapes connect and Node build: connect's serialization `Internal`
      (`protocol/serialization.js:105`, `:137`), its `writeMaxBytes` `ResourceExhausted`
-     (`limit-io.js:59`), and Node's header-validation errors for an invalid caller header (codes
-     probed on Node 24 and listed in the code). Counting them would let bad inputs eject healthy
-     replicas. A default of "no evidence, no report" was tried in review and rejected because it
-     also swallowed bad server responses (`unsupported content type`, a missing output message, a
-     NO_ERROR close before the response, connection and PING timeouts). This refines OD10, which did
-     not consider faults raised before the call left the client (code review, 2026-11-23);
+     (`limit-io.js:59`), and Node's refusals of a request header reachable through a WHATWG
+     `Headers` (probed on Node 24: `ERR_HTTP2_INVALID_CONNECTION_HEADERS`, `ERR_INVALID_CHAR`); a
+     name or value `Headers` itself rejects fails the call before any pick (codes probed on Node 24
+     and listed in the code). Counting them would let bad inputs eject healthy replicas. A default
+     of "no evidence, no report" was tried in review and rejected because it also swallowed bad
+     server responses (`unsupported content type`, a missing output message, a NO_ERROR close before
+     the response, connection and PING timeouts). This refines OD10, which did not consider faults
+     raised before the call left the client (code review, 2026-11-23);
   2. a refused stream (`isRefusedStream`): `failure` (unchanged);
   3. server-fault codes, wire or not: `Unavailable`, `Unimplemented`, `Internal`, `Unknown`,
      `DataLoss`, `DeadlineExceeded`: `failure`;
