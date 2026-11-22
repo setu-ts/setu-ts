@@ -483,7 +483,6 @@ describe('a stop during start cancels the start (V13-43)', () => {
       const events: string[] = [];
       const stops: Promise<void>[] = [];
       const closed: unknown[] = [];
-      let app!: ReturnType<typeof createApplication>;
       const adapter = {
         setHandler: () => {},
         listen: () => {
@@ -496,7 +495,7 @@ describe('a stop during start cancels the start (V13-43)', () => {
         },
         fetch: () => Promise.resolve(new Response(null)),
       } as unknown as IHttpAdapter;
-      app = createApplication({
+      const app = createApplication({
         plugins: [
           runtimeWith(
             fake,
@@ -523,8 +522,7 @@ describe('a stop during start cancels the start (V13-43)', () => {
       const fake = createFakeRuntime();
       const events: string[] = [];
       const stops: Promise<void>[] = [];
-      let app!: ReturnType<typeof createApplication>;
-      app = createApplication({
+      const app = createApplication({
         plugins: [
           runtimeWith(fake, () => stopAfter(app, depth, events, stops)),
           { name: 'second', version: '1.0.0', register: () => void events.push('second register') },
@@ -546,7 +544,6 @@ describe('a stop during start cancels the start (V13-43)', () => {
       const events: string[] = [];
       const stops: Promise<void>[] = [];
       const closed: unknown[] = [];
-      let app!: ReturnType<typeof createApplication>;
       const adapter = {
         setHandler: () => {},
         listen: () => {
@@ -560,7 +557,7 @@ describe('a stop during start cancels the start (V13-43)', () => {
         },
         fetch: () => Promise.resolve(new Response(null)),
       } as unknown as IHttpAdapter;
-      app = createApplication({
+      const app = createApplication({
         plugins: [runtimeWith(fake, undefined, adapter), recordingLogger(calls)],
       });
       const ended = await outcome(app.start({ port: 4215 }));
