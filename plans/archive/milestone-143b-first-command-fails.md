@@ -164,8 +164,8 @@ run. No other `docs/` file is touched.
 - **Decision:** `add view` prefixes its CSS call to `test` and `test:e2e` as well as `build` and
   `start:dev`, with the existing rules for an existing script (one already containing
   `run css`/`task css` is noted and kept; a non-string value is noted), except that an absent `test`
-  or `test:e2e` stays absent rather than being set to the CSS call alone. Deno uses `deno task css`,
-  Bun `bun run css`, npm `npm run css`.
+  or `test:e2e` stays absent rather than being set to the CSS call alone. Deno runs its `css` task,
+  Bun and npm their `css` script.
 - **Why:** `/health` is 503 while `build/assets` is missing, and `build/` is gitignored, so every
   fresh clone fails its own `npm test`.
 - **Test home:** unit in `test/unit/add-view.test.ts`; scaffold gate — rest Node and Deno:
