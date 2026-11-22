@@ -865,7 +865,7 @@ here.
   what differs between runtimes: fatal-error, stop and drain log lines, `drainTimeoutMs`, `SIGHUP`,
   GOAWAY at drain start, `StartCancelledError`, implicit `HEAD`, abort-time `defer`, refused-upgrade
   and stream-failure parity; 13 V13 rows and the V13-110 logger half; ships in `0.14.0`) — complete
-  (PR pending).
+  (PR #611).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
