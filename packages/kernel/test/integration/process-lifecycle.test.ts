@@ -448,24 +448,127 @@ describe('a stop during start cancels the start (V13-43)', () => {
     expect(fake.adapter.listening).toBe(false);
   });
 
-  it.each([1, 2, 3, 4, 5, 6])(
-    'cancels, and never listens, when stop() lands %i microtask(s) after a bootstrap hook settles (code review)',
+  /** Schedules `stop()` `depth` microtasks from now, recording when it was called. */
+  function stopAfter(
+    app: { stop(): Promise<void> },
+    depth: number,
+    events: string[],
+    stops: Promise<void>[],
+  ): void {
+    let chain = Promise.resolve();
+    for (let i = 0; i < depth; i++) chain = chain.then(() => undefined);
+    void chain.then(() => {
+      events.push('stop');
+      stops.push(app.stop());
+    });
+  }
+
+  const DEPTHS = [1, 2, 3, 4, 5, 6, 7, 8];
+
+  /** Settles a start, returning how it ended. */
+  async function outcome(starting: Promise<void>): Promise<'resolved' | 'cancelled'> {
+    try {
+      await starting;
+      return 'resolved';
+    } catch (error) {
+      expect(error).toBeInstanceOf(StartCancelledError);
+      return 'cancelled';
+    }
+  }
+
+  it.each(DEPTHS)(
+    'starts no step after stop(), and leaves no bind open, for a stop %i microtask(s) after a bootstrap hook (code review)',
     async (depth) => {
       const fake = createFakeRuntime();
-      const app = createApplication({
+      const events: string[] = [];
+      const stops: Promise<void>[] = [];
+      const closed: unknown[] = [];
+      let app!: ReturnType<typeof createApplication>;
+      const adapter = {
+        setHandler: () => {},
+        listen: () => {
+          events.push('listen');
+          return Promise.resolve('handle');
+        },
+        close: (h: unknown) => {
+          closed.push(h);
+          return Promise.resolve();
+        },
+        fetch: () => Promise.resolve(new Response(null)),
+      } as unknown as IHttpAdapter;
+      app = createApplication({
         plugins: [
-          runtimeWith(fake, (ctx) => {
-            ctx.lifecycle.onBootstrap(() => {
-              let chain = Promise.resolve();
-              for (let i = 0; i < depth; i++) chain = chain.then(() => undefined);
-              void chain.then(() => app.stop());
-            });
-          }),
+          runtimeWith(
+            fake,
+            (ctx) => ctx.lifecycle.onBootstrap(() => stopAfter(app, depth, events, stops)),
+            adapter,
+          ),
         ],
       });
-      await expect(app.start({ port: 4213 })).rejects.toBeInstanceOf(StartCancelledError);
+      await outcome(app.start({ port: 4213 }));
+      await Promise.all(stops);
       await flush();
-      expect(fake.adapter.listening).toBe(false);
+      // listen, if it ran at all, began before stop() was called ...
+      if (events.includes('listen')) {
+        expect(events.indexOf('listen')).toBeLessThan(events.indexOf('stop'));
+        // ... and whatever was bound is closed, by the cancellation or the shutdown.
+        expect(closed).toEqual(['handle']);
+      }
+    },
+  );
+
+  it.each(DEPTHS)(
+    "never starts the next plugin's register() after a stop %i microtask(s) after one (code review)",
+    async (depth) => {
+      const fake = createFakeRuntime();
+      const events: string[] = [];
+      const stops: Promise<void>[] = [];
+      let app!: ReturnType<typeof createApplication>;
+      app = createApplication({
+        plugins: [
+          runtimeWith(fake, () => stopAfter(app, depth, events, stops)),
+          { name: 'second', version: '1.0.0', register: () => void events.push('second register') },
+        ],
+      });
+      await outcome(app.start({ port: 4214 }));
+      await Promise.all(stops);
+      if (events.includes('second register')) {
+        expect(events.indexOf('second register')).toBeLessThan(events.indexOf('stop'));
+      }
+    },
+  );
+
+  it.each(DEPTHS)(
+    'closes the bind exactly once for a stop %i microtask(s) after listen resolves, cancelled or shut down (code review)',
+    async (depth) => {
+      const fake = createFakeRuntime();
+      const calls: LogCall[] = [];
+      const events: string[] = [];
+      const stops: Promise<void>[] = [];
+      const closed: unknown[] = [];
+      let app!: ReturnType<typeof createApplication>;
+      const adapter = {
+        setHandler: () => {},
+        listen: () => {
+          const bound = Promise.resolve('handle');
+          void bound.then(() => stopAfter(app, depth, events, stops));
+          return bound;
+        },
+        close: (h: unknown) => {
+          closed.push(h);
+          return Promise.resolve();
+        },
+        fetch: () => Promise.resolve(new Response(null)),
+      } as unknown as IHttpAdapter;
+      app = createApplication({
+        plugins: [runtimeWith(fake, undefined, adapter), recordingLogger(calls)],
+      });
+      const ended = await outcome(app.start({ port: 4215 }));
+      await Promise.all(stops);
+      await flush();
+      expect(closed).toEqual(['handle']);
+      // A start that resolved was not cancelled; one that was cancelled rejected.
+      expect(withMessage(calls, 'Startup cancelled').length > 0).toBe(ended === 'cancelled');
     },
   );
 

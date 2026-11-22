@@ -350,6 +350,8 @@ class Application implements IKernelApplication {
   #unsubscribeFatal: (() => void) | undefined;
   /** The drain bound `start()` accepted, read by `stop()`. */
   #drainTimeoutMs = DEFAULT_DRAIN_TIMEOUT_MS;
+  /** Set once startup passed its last cancellation check; a stop then shuts down normally. */
+  #startCommitted = false;
   /** Requests whose streamed RPC reply holds the shutdown drain until it ends. */
   readonly #rpcStreams = new WeakSet<IRequestContext>();
   /** Clears each pending stream-cancel stall timer; `stop()` runs them all. */
@@ -599,6 +601,7 @@ class Application implements IKernelApplication {
     // corrected and retried; later failures are refused above.
     this.#started = true;
     this.#cancelled = false;
+    this.#startCommitted = false;
     this.#startCancelled = new Promise<never>((_resolve, reject) => {
       this.#cancelStart = () => reject(new StartCancelledError());
     });
@@ -668,8 +671,10 @@ class Application implements IKernelApplication {
   /**
    * Throws the start's cancellation when `stop()` has already been called.
    * Synchronous, and called at each point where startup resumes after an
-   * await and would otherwise run further steps (environment checks,
-   * compile, seal, `setHandler`, `listen`), so no yield opens a gap.
+   * await and would otherwise run further steps (the next plugin's
+   * `register`, environment checks, compile, seal, `setHandler`, `listen`),
+   * so no yield opens a gap. A bind that resolved before a late cancel is
+   * closed after the `listen` await.
    *
    * @throws {StartCancelledError} When the start was cancelled
    */
@@ -920,6 +925,8 @@ class Application implements IKernelApplication {
           optionalDependencies: plugin.optionalDependencies ?? [],
           consumes: plugin.consumes ?? [],
         });
+        // The next plugin's register() is a startup step too.
+        this.#continueStart();
         const registerOperation = collector?.beginOperation();
         try {
           await this.#raceStart(Promise.resolve(plugin.register(ctx)));
@@ -1029,11 +1036,23 @@ class Application implements IKernelApplication {
         }
         throw error;
       }
+      if (this.#cancelled) {
+        // A stop() that landed after the bind resolved: release the port and
+        // report the cancellation, as for a bind that resolved after it.
+        const handle = this.#serverHandle;
+        this.#serverHandle = null;
+        await adapter.close(handle).catch(() => undefined);
+        throw new StartCancelledError();
+      }
       if (listenOperation !== undefined) {
         collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
       }
       this.#announceListening(options.port, options.hostname);
     }
+    // Past the last cancellation check: a stop() from here on waits for the
+    // start to settle and shuts down normally rather than reporting a
+    // cancellation that can no longer take effect.
+    this.#startCommitted = true;
   }
 
   stop(): Promise<void> {
@@ -1051,6 +1070,13 @@ class Application implements IKernelApplication {
           () => undefined,
           () => undefined,
         );
+      }
+      if (this.#startCommitted) {
+        this.#stopPromise ??= this.#startPromise.then(
+          () => this.#doStop(),
+          () => undefined,
+        );
+        return this.#stopPromise;
       }
       if (this.#stopPromise === null) {
         const starting = this.#startPromise;

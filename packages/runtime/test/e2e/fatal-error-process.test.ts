@@ -85,4 +85,16 @@ describe('a throw the application captures with setUncaughtExceptionCaptureCallb
     expect(lines).toEqual([{ captured: true }, { alive: true }]);
     expect(status).toBe(0);
   });
+
+  it('covers a rejection on Node too, which Node hands to the capture callback', () => {
+    const { status, lines } = run(runtimes[0]!, 'reject', 'capture-callback');
+    expect(lines).toEqual([{ captured: true }, { alive: true }]);
+    expect(status).toBe(0);
+  });
+
+  it.skipIf(!installed('bun'))('is not reported on Bun for a throw, and the process lives', () => {
+    const { status, lines } = run(runtimes[1]!, 'throw', 'capture-callback');
+    expect(lines).toEqual([{ captured: true }, { alive: true }]);
+    expect(status).toBe(0);
+  });
 });
