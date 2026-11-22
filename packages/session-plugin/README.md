@@ -490,7 +490,9 @@ A page that touches no session, for a visitor with no session data, is not marke
 cacheable. The tenant-mismatch `403` is answered `private, no-store`.
 
 **An application that caches a page deliberately** sets its own `Cache-Control` (a React Router
-route's `headers` export, or `ctx.response.header(...)`); the plugin keeps it, except that no
+route's `headers` export, or `ctx.response.header(...)`) after the handler's first session write or
+CSRF token read, since either one writes `private, no-store` over an earlier directive that is not
+shared-cacheable (`private, max-age=3600` included). The plugin then keeps it, except that no
 directive can make a session cookie safe to share:
 
 - a commit that writes application data, regenerates or destroys turns a shared-cacheable directive
