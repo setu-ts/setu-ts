@@ -9,8 +9,9 @@
  *
  * Sites are found with the TypeScript compiler, not by text: every
  * `new ReadableStream`, `Readable.toWeb(…)` and `ReadableStream.from(…)`
- * (constructions), and every `….response.stream(…)` / `response.stream(…)`
- * call (hand-offs), in each package's `src`. Text inside a string — the
+ * (constructions), and every call of a `stream` method declared on
+ * `IResponse` or the kernel's `ResponseBuilder`, whatever the receiver is
+ * called (hand-offs, resolved by the type checker), in each package's `src`. Text inside a string — the
  * CLI's templates — is not code and is not counted. The tables are the
  * enumeration: the test fails when a site is added, moved or removed without
  * a row, or when the code a row's classification rests on changes. A row's
@@ -19,19 +20,25 @@
  *
  * @module
  */
-import { readdir, readFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 /** How a stream source relates to the cancel contract. */
 type Kind =
-  /** Pushes from `start` (or enqueues once); it does no work of its own after that. */
+  /**
+   * Pushes from `start` (or enqueues once) and does no work of its own after
+   * that; writes driven from outside the source (an SSE connection's writes,
+   * a GraphQL event pump) are the writer's, not the source's.
+   */
   | 'push'
   /** Does work of its own and `cancel()` waits for it. */
   | 'cancel-awaits-work'
   /** Forwards `cancel()` to the stream it wraps and returns its promise. */
   | 'forwards-cancel'
-  /** `cancel()` does not wait for the source's own work; that work uses only the stream's own source. */
+  /** `cancel()` does not wait for the source's own work (in `pull`, or a pump it started). */
   | 'cancel-does-not-await'
   /** The kernel's own wrapper: the reader that applies the rule. */
   | 'kernel-wrapper'
@@ -63,11 +70,15 @@ interface Row {
 
 const CONSTRUCTIONS: readonly Row[] = [
   {
+    // A replay pump started in `start` reads the run store until closed;
+    // `cancel()` only sets the flag, so a store read can outlive the cleanups.
     file: 'packages/agent-runs-plugin/src/log/respond.ts',
     count: 1,
     cancelSettles: 'always',
-    kind: 'push',
-    evidence: /new ReadableStream<Uint8Array>\(\{\s*start\(controller\)/,
+    kind: 'cancel-does-not-await',
+    evidence: /void \(async \(\) => \{[\s\S]*cancel\(\) \{\s*abort\(\);\s*\}/,
+    handOver:
+      'Data lane (agent-runs-plugin, M143q/M143h): make cancel() wait for the replay pump, which reads the run store',
   },
   {
     file: 'packages/graphql-plugin/src/transports/sse/graphql-sse-handler.ts',
@@ -214,8 +225,10 @@ const HAND_OFFS: readonly Row[] = [
     evidence: /return response\.stream\(controller\.readable\);/,
   },
   {
+    // Three settle-path wraps, and the RPC reply hand-off (#sendRpcResponse),
+    // whose body the settle path then wraps.
     file: 'packages/kernel/src/application/application.ts',
-    count: 3,
+    count: 4,
     cancelSettles: 'as-its-source',
     kind: 'kernel-wrapper',
     evidence: /wrapDeferredStream\(/,
@@ -256,11 +269,17 @@ const HAND_OFFS: readonly Row[] = [
 ];
 
 /** Every `.ts` file under a directory. */
-async function sources(directory: string): Promise<string[]> {
+function sources(directory: string): string[] {
   const found: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries) {
     const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory()) found.push(...(await sources(path)));
+    if (entry.isDirectory()) found.push(...sources(path));
     else if (entry.isFile() && path.endsWith('.ts') && !path.endsWith('.d.ts')) found.push(path);
   }
   return found;
@@ -272,9 +291,29 @@ function named(node: ts.Expression, name: string): boolean {
   return ts.isPropertyAccessExpression(node) && node.name.text === name;
 }
 
-/** Counts the construction and hand-off sites in one file's code. */
-function sites(path: string, text: string): { constructions: number; handOffs: number } {
-  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+/** The types whose `stream` method hands a body to the response. */
+const RESPONSE_TYPES = new Set(['IResponse', 'ResponseBuilder']);
+
+/** Whether a `….stream(…)` call resolves to a `stream` declared on a response type. */
+function isResponseStream(checker: ts.TypeChecker, call: ts.CallExpression): boolean {
+  if (!ts.isPropertyAccessExpression(call.expression)) return false;
+  if (call.expression.name.text !== 'stream') return false;
+  const symbol = checker.getSymbolAtLocation(call.expression.name);
+  return (symbol?.declarations ?? []).some((declaration) => {
+    const owner = declaration.parent;
+    return (
+      (ts.isInterfaceDeclaration(owner) || ts.isClassDeclaration(owner)) &&
+      owner.name !== undefined &&
+      RESPONSE_TYPES.has(owner.name.text)
+    );
+  });
+}
+
+/** Counts the construction and hand-off sites in one file of a program. */
+function sites(
+  checker: ts.TypeChecker,
+  file: ts.SourceFile,
+): { constructions: number; handOffs: number } {
   let constructions = 0;
   let handOffs = 0;
   const visit = (node: ts.Node): void => {
@@ -283,7 +322,7 @@ function sites(path: string, text: string): { constructions: number; handOffs: n
       const { expression: target, name } = node.expression;
       if (name.text === 'toWeb' && named(target, 'Readable')) constructions++;
       if (name.text === 'from' && named(target, 'ReadableStream')) constructions++;
-      if (name.text === 'stream' && named(target, 'response')) handOffs++;
+      if (isResponseStream(checker, node)) handOffs++;
     }
     ts.forEachChild(node, visit);
   };
@@ -291,26 +330,34 @@ function sites(path: string, text: string): { constructions: number; handOffs: n
   return { constructions, handOffs };
 }
 
+/** A program over the given files, with the repository's type-check options. */
+function programOf(files: readonly string[]): ts.Program {
+  const config = ts.getParsedCommandLineOfConfigFile(
+    'tsconfig.check.json',
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: () => {},
+    },
+  );
+  return ts.createProgram([...files], { ...config?.options, noEmit: true });
+}
+
 /** Each package `src` file with sites, per shape. */
-async function inventory(): Promise<{
-  constructions: Record<string, number>;
-  handOffs: Record<string, number>;
-}> {
+function inventory(): { constructions: Record<string, number>; handOffs: Record<string, number> } {
+  const files = readdirSync('packages', { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry) => sources(`packages/${entry.name}/src`));
+  const program = programOf(files);
+  const checker = program.getTypeChecker();
   const constructions: Record<string, number> = {};
   const handOffs: Record<string, number> = {};
-  for (const pkg of await readdir('packages', { withFileTypes: true })) {
-    if (!pkg.isDirectory()) continue;
-    let files: string[];
-    try {
-      files = await sources(`packages/${pkg.name}/src`);
-    } catch {
-      continue;
-    }
-    for (const path of files) {
-      const found = sites(path, await readFile(path, 'utf8'));
-      if (found.constructions > 0) constructions[path] = found.constructions;
-      if (found.handOffs > 0) handOffs[path] = found.handOffs;
-    }
+  for (const path of files) {
+    const file = program.getSourceFile(path);
+    if (file === undefined) continue;
+    const found = sites(checker, file);
+    if (found.constructions > 0) constructions[path] = found.constructions;
+    if (found.handOffs > 0) handOffs[path] = found.handOffs;
   }
   return { constructions, handOffs };
 }
@@ -321,17 +368,40 @@ function tally(rows: readonly Row[]): Record<string, number> {
 }
 
 describe('response stream sources and the cancel contract', () => {
-  it('classifies every web stream a package builds', async () => {
-    expect((await inventory()).constructions).toEqual(tally(CONSTRUCTIONS));
+  // One type-checked program over every package's src (about 3 s).
+  const found = inventory();
+
+  it('classifies every web stream a package builds', () => {
+    expect(found.constructions).toEqual(tally(CONSTRUCTIONS));
   });
 
-  it('classifies every body a package hands to response.stream()', async () => {
-    expect((await inventory()).handOffs).toEqual(tally(HAND_OFFS));
+  it('classifies every body a package hands to a response stream() method', () => {
+    expect(found.handOffs).toEqual(tally(HAND_OFFS));
   });
 
-  it('counts code only, never text inside a string', () => {
-    const text = 'const t = `ctx.response.stream(new ReadableStream({}))`;\nnew ReadableStream();';
-    expect(sites('x.ts', text)).toEqual({ constructions: 1, handOffs: 0 });
+  it('finds a hand-off through any receiver name and never text inside a string', () => {
+    const path = 'packages/kernel/test/fixtures/stream-sites.virtual.ts';
+    const text = [
+      "import type { IResponse } from '@setu-ts/common';",
+      'export function send(reply: IResponse, body: ReadableStream<Uint8Array>): void {',
+      '  const r = reply;',
+      '  r.stream(body);',
+      '  const t = `reply.stream(new ReadableStream({}))`;',
+      '  void t;',
+      '  void new ReadableStream();',
+      '}',
+    ].join('\n');
+    const host = ts.createCompilerHost({});
+    const original = host.getSourceFile.bind(host);
+    host.getSourceFile = (name, version, ...rest) =>
+      name.endsWith('stream-sites.virtual.ts')
+        ? ts.createSourceFile(name, text, version, true)
+        : original(name, version, ...rest);
+    const options = programOf([]).getCompilerOptions();
+    const program = ts.createProgram([path], options, host);
+    const file = program.getSourceFile(path);
+    expect(file).toBeDefined();
+    expect(sites(program.getTypeChecker(), file!)).toEqual({ constructions: 1, handOffs: 1 });
   });
 
   it.each([...CONSTRUCTIONS, ...HAND_OFFS])('$file is $kind', async (row) => {

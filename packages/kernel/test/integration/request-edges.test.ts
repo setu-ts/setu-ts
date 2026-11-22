@@ -399,6 +399,27 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     return done;
   }
 
+  /** A one-chunk source whose cancel() settles only when released (never, unless told). */
+  function heldCancel(): { stream: ReadableStream<Uint8Array>; release: () => void } {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event'));
+      },
+      cancel: () => held,
+    });
+    return { stream, release };
+  }
+
+  /** Ticks the fake clock by `ms` and lets callbacks run. */
+  async function advance(fake: ReturnType<typeof createFakeRuntime>, ms: number): Promise<void> {
+    fake.tick(ms);
+    await flush();
+  }
+
   it('keeps stop() waiting until a streamed RPC reply ends', async () => {
     const fake = createFakeRuntime();
     const body = manualStream();
@@ -417,73 +438,105 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
     expect(await stopsWithin(fake, stopping)).toBe(true);
   });
 
-  it('lets stop() finish at the drain bound while a source cancel() never settles, keeping its cleanups', async () => {
-    const fake = createFakeRuntime();
-    let cleaned = 0;
-    const deferring: IPlugin = {
-      name: 'deferring',
-      version: '1.0.0',
-      register(ctx: IPluginContext) {
-        ctx.middleware.add((c, next) => {
-          c.defer?.(() => {
-            cleaned++;
+  it.each([false, true])(
+    'holds stop() until the drain bound while a streamed RPC reply source cancel() is pending (released: %s)',
+    async (released) => {
+      const fake = createFakeRuntime();
+      let cleaned = 0;
+      const deferring: IPlugin = {
+        name: 'deferring',
+        version: '1.0.0',
+        register(ctx: IPluginContext) {
+          ctx.middleware.add((c, next) => {
+            c.defer?.(() => {
+              cleaned++;
+            });
+            return next();
           });
-          return next();
-        });
-      },
-    };
-    const stuck = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(encoder.encode('message'));
-      },
-      cancel: () => new Promise<void>(() => {}),
-    });
-    const app = createApplication({
-      plugins: [fakeRuntime(fake), grpcReplying(stuck), deferring],
-    });
-    await app.start({ drainTimeoutMs: 50 });
-    const client = new AbortController();
-    const response = await app.dispatch!(
-      new Request('http://localhost/pkg.Svc/Watch', { method: 'POST', signal: client.signal }),
-    );
-    const reader = response.body!.getReader();
-    await reader.read();
-    client.abort();
-    await flush();
-    // The drain bound ends the wait; the cleanups stay with the source.
-    expect(await stopsWithin(fake, app.stop())).toBe(true);
-    expect(cleaned).toBe(0);
-  });
-
-  it('lets stop() finish at the drain bound for a plain streamed route whose source cancel() never settles', async () => {
-    const fake = createFakeRuntime();
-    let cleaned = 0;
-    const app = createApplication({ plugins: [fakeRuntime(fake)] });
-    app.router.get('/stuck', (ctx) => {
-      ctx.defer?.(() => {
-        cleaned++;
+        },
+      };
+      const source = heldCancel();
+      const app = createApplication({
+        plugins: [fakeRuntime(fake), grpcReplying(source.stream), deferring],
       });
-      return ctx.response.stream(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(encoder.encode('event'));
-          },
-          cancel: () => new Promise<void>(() => {}),
-        }),
+      await app.start({ drainTimeoutMs: 1_000 });
+      const client = new AbortController();
+      const response = await app.dispatch!(
+        new Request('http://localhost/pkg.Svc/Watch', { method: 'POST', signal: client.signal }),
       );
-    });
-    await app.start({ drainTimeoutMs: 50 });
-    const client = new AbortController();
-    const response = await app.dispatch!(
-      new Request('http://localhost/stuck', { signal: client.signal }),
-    );
-    await response.body!.getReader().read();
-    client.abort();
-    await flush();
-    const stopping = app.stop();
-    expect(await stopsWithin(fake, stopping)).toBe(true);
-    expect(cleaned).toBe(0);
-  });
+      await response.body!.getReader().read();
+      client.abort();
+      await flush();
+      let stopped = false;
+      void app.stop().then(() => {
+        stopped = true;
+      });
+      await advance(fake, 25);
+      // Still in the drain: the request's cleanups wait for the source.
+      expect(stopped).toBe(false);
+      if (released) {
+        source.release();
+        await flush();
+        await flush();
+        expect(cleaned).toBe(1);
+        // The drain's next poll (every 50 ms) sees the request gone.
+        await advance(fake, 50);
+        expect(stopped).toBe(true);
+        return;
+      }
+      await advance(fake, 50);
+      expect(stopped).toBe(false);
+      await advance(fake, 1_000);
+      // The drain bound ends the wait; the cleanups stay with the source.
+      expect(stopped).toBe(true);
+      expect(cleaned).toBe(0);
+    },
+  );
+
+  it.each([false, true])(
+    'holds stop() until the drain bound while a plain streamed route source cancel() is pending (released: %s)',
+    async (released) => {
+      const fake = createFakeRuntime();
+      let cleaned = 0;
+      const source = heldCancel();
+      const app = createApplication({ plugins: [fakeRuntime(fake)] });
+      app.router.get('/stuck', (ctx) => {
+        ctx.defer?.(() => {
+          cleaned++;
+        });
+        return ctx.response.stream(source.stream);
+      });
+      await app.start({ drainTimeoutMs: 1_000 });
+      const client = new AbortController();
+      const response = await app.dispatch!(
+        new Request('http://localhost/stuck', { signal: client.signal }),
+      );
+      await response.body!.getReader().read();
+      client.abort();
+      await flush();
+      let stopped = false;
+      void app.stop().then(() => {
+        stopped = true;
+      });
+      await advance(fake, 25);
+      expect(stopped).toBe(false);
+      if (released) {
+        source.release();
+        await flush();
+        await flush();
+        expect(cleaned).toBe(1);
+        // The drain's next poll (every 50 ms) sees the request gone.
+        await advance(fake, 50);
+        expect(stopped).toBe(true);
+        return;
+      }
+      await advance(fake, 50);
+      expect(stopped).toBe(false);
+      await advance(fake, 1_000);
+      expect(stopped).toBe(true);
+      expect(cleaned).toBe(0);
+    },
+  );
 
   it('does not hold the drain for a plain streamed route', async () => {
     const fake = createFakeRuntime();
