@@ -1,4 +1,4 @@
-# @setu-ts/service-discovery-plugin — locate and select service instances
+# @setu-ts/service-discovery-plugin — locate service instances
 
 **Add it:** `setu add service-discovery` adds it and prints the registration for `setu.config.ts`.
 It provides `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
@@ -39,18 +39,21 @@ export function registerBillingRoutes(router: IRouterApi): void {
 
 - `resolveUrl` and `pick` return `null` for an empty pool. `resolve` lists all known instances,
   including ejected ones; `pick` filters ejected instances, falling back to the full pool if needed.
-- Selection defaults to round-robin. A per-call `strategy` overrides the configured default.
-- Resolved lists are cached for 30000 ms by default; `cacheTtlMs: 0` disables cache reuse.
-  Concurrent cold reads of one service share a backend read.
+- Selection defaults to round-robin; per-call `strategy` overrides it.
+- Warm reads use cache; `cacheTtlMs` starts background refresh (30000 ms; `0` every call). Cold
+  reads coalesce with `resolveTimeoutMs` (2000 ms; `0` unbounded).
+- Failed refreshes retry after 1, 2, 4, 8, 16, then 30 s. `staleForMs` reports age; warm names stay
+  ready.
+- Reads/watches hold warm lists on empty answers for `emptyAnswerGraceMs` (30000 ms; `0` immediate).
+  DNS absent names resolve `[]`; other lookup failures are unhealthy.
+- Consul ids default to `<serviceName>-<address>-<port>`, stable across restarts.
 - Ejection depends on application `report(instance, outcome)` calls. By default five failures within
   30000 ms eject for 30000 ms, subject to a 50% pool cap; success clears the state.
-- A watch delivers the full list and refreshes the cache on change. Stop it using the returned
-  unsubscribe function.
+- Stop watches with the returned unsubscribe.
 
 ## Other options
 
 - `provider` also selects `'consul'`, `'kubernetes'`, `'dns'` or `'custom'` with `discovery`.
 - `strategy` also accepts `'random'` and `'weighted-random'`; `ejection: false` disables ejection.
-- `selfRegistration` is Consul-only; other providers reject it with
-  `SelfRegistrationNotSupportedError`. DNS requires the runtime DNS surface.
-- A failed self-deregistration warns with `describeError`: one line, URL userinfo masked.
+- DNS requires runtime DNS; unsupported self-registration is refused.
+- Failed deregistration warns with URL userinfo masked.

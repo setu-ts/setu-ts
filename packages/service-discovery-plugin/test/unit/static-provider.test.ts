@@ -113,3 +113,15 @@ describe('StaticProvider', () => {
     expect(seen).toEqual([]);
   });
 });
+
+it('accepts a resolve signal without changing the in-memory answer', async () => {
+  const provider = new StaticProvider(
+    { billing: [{ host: 'localhost', port: 80 }] },
+    createFakeRuntime(),
+  );
+  const abort = new AbortController();
+  abort.abort();
+  expect(await provider.resolve('billing', abort.signal)).toEqual(
+    await provider.resolve('billing'),
+  );
+});

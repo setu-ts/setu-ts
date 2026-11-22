@@ -25,9 +25,14 @@ import type { UniversalServerResponseLike } from '../interfaces/connect-runtime.
  * handler's `finally`, and rejects the trailers.
  *
  * @param universal - The universal handler's response
+ * @param abort - The response-streaming procedure's controller, aborted before
+ *   `return()` on cancel
  * @returns The reply, always streamed
  */
-export function nativeGrpcReply(universal: UniversalServerResponseLike): RpcReply {
+export function nativeGrpcReply(
+  universal: UniversalServerResponseLike,
+  abort?: AbortController,
+): RpcReply {
   let resolveTrailers!: (trailers: Headers) => void;
   let rejectTrailers!: (reason: unknown) => void;
   const trailers = new Promise<Headers>((resolve, reject) => {
@@ -55,6 +60,7 @@ export function nativeGrpcReply(universal: UniversalServerResponseLike): RpcRepl
       controller.close();
     },
     async cancel(reason) {
+      abort?.abort(reason);
       rejectTrailers(reason);
       await iterator?.return?.();
     },

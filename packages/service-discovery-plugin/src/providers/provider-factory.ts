@@ -138,6 +138,7 @@ export function createProvider(
         domainTemplate: options.domainTemplate ?? DEFAULT_DOMAIN_TEMPLATE,
         ...(options.secure !== undefined ? { secure: options.secure } : {}),
         watchIntervalMs: resolved.watchIntervalMs,
+        resolveTimeoutMs: resolved.resolveTimeoutMs,
       };
       return new DnsProvider(
         runtime.dns,

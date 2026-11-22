@@ -19,6 +19,37 @@ import { createFakeHttp, type FakeHttp } from '../fixtures/fakes.ts';
 
 const SELF = { serviceName: 'orders', id: 'orders-1', address: '10.0.0.7', port: 3000 };
 
+it('replaces a crashed process registration across two application starts on one agent', async () => {
+  const entries = new Map<string, unknown>();
+  const http = {
+    ...createFakeHttp(),
+    request: (_url: string, init?: RequestInit) => {
+      if (init?.body !== undefined) {
+        const body = JSON.parse(String(init.body)) as { ID: string };
+        entries.set(body.ID, body);
+      }
+      // Retain the entry to model a previous process that died before deregistering.
+      return Promise.resolve({ ok: true, status: 200, headers: new Headers(), text: '' });
+    },
+  };
+  for (let n = 0; n < 2; n++) {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ServiceDiscoveryPlugin({
+          provider: 'consul',
+          address: 'http://consul.test',
+          http,
+          selfRegistration: { serviceName: 'orders', address: '10.0.0.7', port: 3000 },
+        }),
+      ],
+    });
+    await app.start();
+    await app.stop();
+  }
+  expect([...entries.keys()]).toEqual(['orders-10.0.0.7-3000']);
+});
+
 function appWith(http: FakeHttp, extra: { drainDelayMs?: number } = {}) {
   return createApplication({
     plugins: [

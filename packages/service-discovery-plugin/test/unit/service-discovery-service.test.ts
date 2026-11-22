@@ -6,12 +6,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { describeError, httpStatusHintOf } from '@setu-ts/common';
+import { createConnectionErrorReporter, describeError, httpStatusHintOf } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { ServiceDiscoveryService } from '../../src/services/service-discovery-service.ts';
 import { createProvider } from '../../src/providers/provider-factory.ts';
 import { resolveOptions, type ServiceDiscoveryPluginOptions } from '../../src/options.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
+import { RecordingLogger } from '../../../common/test/fixtures/redis-connection-errors.ts';
 import {
   createFakeProvider,
   createFakeRuntime,
@@ -20,8 +21,226 @@ import {
   instance,
 } from '../fixtures/fakes.ts';
 
+async function flush(): Promise<void> {
+  for (let n = 0; n < 30; n++) await Promise.resolve();
+}
+
 const a = instance({ id: 'a', host: '10.0.0.1' });
 const b = instance({ id: 'b', host: '10.0.0.2' });
+
+describe('background discovery refresh', () => {
+  it('hands a cold in-flight read over to a warm watch entry without a second backend read', async () => {
+    const runtime = createFakeRuntime();
+    const watched = createFakeProvider();
+    let finish!: (list: readonly (typeof a)[]) => void;
+    let calls = 0;
+    const provider = {
+      ...watched,
+      resolve: () => {
+        calls++;
+        return new Promise<readonly (typeof a)[]>((resolve) => {
+          finish = resolve;
+        });
+      },
+    };
+    const service = new ServiceDiscoveryService(
+      provider,
+      runtime,
+      resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+    );
+    const cold = service.resolve('billing');
+    await flush();
+    await service.watch('billing', () => {});
+    watched.emit('billing', [a]);
+    let warm: unknown;
+    void service.resolve('billing').then((list) => {
+      warm = list;
+    });
+    await flush();
+    expect(warm).toEqual([a]);
+    expect(calls).toBe(1);
+    finish([b]);
+    expect(await cold).toEqual([b]);
+    service.close();
+  });
+  it('serves warm names immediately, coalesces refreshes, bounds hung reads, and ignores late writes after close', async () => {
+    const runtime = createFakeRuntime();
+    let finish!: (list: readonly (typeof a)[]) => void;
+    let calls = 0;
+    const provider = {
+      ...createFakeProvider(),
+      resolve: () => {
+        calls++;
+        return calls === 1
+          ? Promise.resolve([a])
+          : new Promise<readonly (typeof a)[]>((resolve) => {
+              finish = resolve;
+            });
+      },
+    };
+    const service = new ServiceDiscoveryService(
+      provider,
+      runtime,
+      resolveOptions({
+        provider: 'custom',
+        discovery: provider,
+        cacheTtlMs: 0,
+        resolveTimeoutMs: 50,
+      }),
+    );
+    await service.resolve('billing');
+    let answered = 0;
+    for (let n = 0; n < 10; n++)
+      void service.resolve('billing').then((list) => {
+        expect(list).toEqual([a]);
+        answered++;
+      });
+    await flush();
+    expect(answered).toBe(10);
+    expect(calls).toBe(2);
+    runtime.advance(50);
+    runtime.runTimeouts();
+    await flush();
+    expect(service.degraded).toBe(true);
+    expect(service.staleForMs).toBe(50);
+    await service.resolve('billing');
+    expect(calls).toBe(2);
+    runtime.advance(1000);
+    await service.resolve('billing');
+    await flush();
+    expect(calls).toBe(3);
+    service.close();
+    finish([b]);
+    await flush();
+    expect(service.cachedServices).toBe(0);
+    expect(service.degraded).toBe(false);
+    await expect(service.resolve('billing')).rejects.toThrow('closed');
+  });
+
+  it('bounds a cold read with a named branded 503, and allows the next cold attempt', async () => {
+    const runtime = createFakeRuntime();
+    const provider = { ...createFakeProvider(), resolve: () => new Promise<never>(() => {}) };
+    const service = new ServiceDiscoveryService(
+      provider,
+      runtime,
+      resolveOptions({ provider: 'custom', discovery: provider, resolveTimeoutMs: 50 }),
+    );
+    for (let n = 0; n < 2; n++) {
+      let error: unknown;
+      void service.resolve('billing').catch((thrown: unknown) => {
+        error = thrown;
+      });
+      await flush();
+      expect(error).toBeUndefined();
+      runtime.runTimeouts();
+      await flush();
+      expect((error as Error).message).toContain(
+        "fake discovery did not answer the read for 'billing' within 50 ms",
+      );
+      expect(httpStatusHintOf(error)?.status).toBe(503);
+    }
+    service.close();
+  });
+
+  it('tracks failures and reporter recovery separately for two names, with retry spacing and success reset', async () => {
+    const { service: unused, provider, runtime } = setup();
+    unused.close();
+    const logger = new RecordingLogger();
+    const service = new ServiceDiscoveryService(
+      provider,
+      runtime,
+      resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+      undefined,
+      (name) => createConnectionErrorReporter({ source: name, logger: () => logger }),
+    );
+    await service.resolve('billing');
+    await service.resolve('orders');
+    provider.failWith(new Error('down'));
+    for (const delay of [1000, 2000, 4000, 8000, 16000, 30000, 30000]) {
+      const before = provider.resolveCalls;
+      for (const name of ['billing', 'orders']) await service.resolve(name);
+      await flush();
+      expect(provider.resolveCalls).toBe(before + 2);
+      expect(service.degraded).toBe(true);
+      runtime.advance(delay - 1);
+      for (const name of ['billing', 'orders']) await service.resolve(name);
+      await flush();
+      expect(provider.resolveCalls).toBe(before + 2);
+      runtime.advance(1);
+    }
+    for (const name of ['billing', 'orders'])
+      expect(logger.forSource(name).map((e) => e.level)).toEqual([
+        'warn',
+        'debug',
+        'debug',
+        'debug',
+        'debug',
+        'debug',
+        'debug',
+      ]);
+    expect(service.staleForMs).toBeGreaterThan(0);
+    provider.failWith(null);
+    await service.resolve('billing');
+    await flush();
+    expect(service.degraded).toBe(true);
+    await service.resolve('orders');
+    await flush();
+    expect(service.degraded).toBe(false);
+    expect(service.staleForMs).toBe(0);
+    expect(logger.forSource('billing').at(-1)?.level).toBe('info');
+    provider.failWith(new Error('down again'));
+    await service.resolve('billing');
+    await flush();
+    runtime.advance(1000);
+    const before = provider.resolveCalls;
+    await service.resolve('billing');
+    await flush();
+    expect(provider.resolveCalls).toBe(before + 1);
+    service.close();
+  });
+
+  it('drops late failures and late watch registrations after close', async () => {
+    const runtime = createFakeRuntime();
+    let reject!: (error: Error) => void;
+    let deliver!: (list: readonly (typeof a)[]) => void;
+    let ready!: (unsubscribe: () => void) => void;
+    let stopped = false;
+    const provider = {
+      kind: 'fake',
+      resolve: () =>
+        new Promise<never>((_, fail) => {
+          reject = fail;
+        }),
+      watch: (_name: string, listener: typeof deliver) => {
+        deliver = listener;
+        return new Promise<() => void>((resolve) => {
+          ready = resolve;
+        });
+      },
+    };
+    const service = new ServiceDiscoveryService(
+      provider,
+      runtime,
+      resolveOptions({ provider: 'custom', discovery: provider }),
+    );
+    const reading = service.resolve('billing').catch(() => {});
+    const watching = service.watch('billing', () => {
+      throw new Error('late watch');
+    });
+    await flush();
+    service.close();
+    deliver([a]);
+    ready(() => {
+      stopped = true;
+    });
+    reject(new Error('late'));
+    await reading;
+    await watching;
+    expect(stopped).toBe(true);
+    expect(service.cachedServices).toBe(0);
+    expect(service.degraded).toBe(false);
+  });
+});
 
 function setup(
   options: Partial<ServiceDiscoveryPluginOptions> = {},
@@ -62,7 +281,9 @@ describe('ServiceDiscoveryService — cache', () => {
     await service.resolve('billing');
     await service.resolve('billing');
     await service.resolve('billing');
-    expect(provider.resolveCalls).toBe(3);
+    await flush();
+    await service.resolve('billing');
+    expect(provider.resolveCalls).toBeGreaterThanOrEqual(2);
   });
 
   it('coalesces concurrent reads of a cold service into one provider call', async () => {
@@ -100,6 +321,7 @@ describe('ServiceDiscoveryService — cache', () => {
     const result = await service.resolve('billing');
 
     expect(result.map((i) => i.id)).toEqual(['a', 'b']);
+    await flush();
     expect(service.degraded).toBe(true);
   });
 
@@ -109,11 +331,13 @@ describe('ServiceDiscoveryService — cache', () => {
     provider.failWith(new Error('down'));
     runtime.advance(1_001);
     await service.resolve('billing');
+    await flush();
     expect(service.degraded).toBe(true);
 
     provider.failWith(null);
     runtime.advance(1_001);
     await service.resolve('billing');
+    await flush();
     expect(service.degraded).toBe(false);
   });
 
@@ -309,7 +533,7 @@ describe('ServiceDiscoveryService — M70c everResolved', () => {
     await expect(service.resolve('billing')).rejects.toThrow(DiscoveryUnavailableError);
     // A failure must not flip everResolved: there was no prior success.
     expect(service.everResolved).toBe(false);
-    expect(service.degraded).toBe(false);
+    expect(service.degraded).toBe(true);
   });
 
   it('is set by a watch push (a delivered list is a successful read)', async () => {
@@ -328,6 +552,7 @@ describe('ServiceDiscoveryService — M70c everResolved', () => {
     provider.failWith(new Error('down'));
     runtime.advance(1_001);
     await service.resolve('billing'); // serves stale, sets degraded
+    await flush();
     expect(service.degraded).toBe(true);
     expect(service.everResolved).toBe(true);
   });

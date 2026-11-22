@@ -325,9 +325,9 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 - **Decision:** `selfId` defaults to `` `${serviceName}-${address}-${port}` `` when
   `registration.id` is absent. The memo per registration object stays. The `SelfRegistration.id`
   JSDoc, README and PUBLIC_API say: unique within the agent, and the same across restarts so a
-  restarted process replaces its own entry. `deregisterSelf` puts the id in the URL path through
-  `encodeURIComponent` (today it is interpolated raw, `consul-provider.ts:253`), because an IPv6
-  address (`fe80::1%eth0`) in the default id would otherwise break the path.
+  restarted process replaces its own entry. `deregisterSelf` already puts the id in the URL path
+  through `encodeURIComponent` (`consul-provider.ts:252`); a test pins it, because an IPv6 address
+  (`fe80::1%eth0`) in the default id would otherwise break the path.
 - **Why:** Consul itself defaults `ID` to the service name (one per agent); Spring Cloud Consul
   builds it from the application name and an instance id or the port, and Micronaut from the name
   and port, both stable across restarts (Q4, Q12). Micronaut's guide warns that name plus port

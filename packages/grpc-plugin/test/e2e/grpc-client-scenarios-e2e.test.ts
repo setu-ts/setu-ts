@@ -10,6 +10,8 @@
  * @module
  */
 import { connect, createServer } from 'node:net';
+import { createServer as http1Server } from 'node:http';
+import { createServer as http2Server } from 'node:http2';
 import type { Socket } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { create, createFileRegistry, fromBinary } from '@bufbuild/protobuf';
@@ -86,6 +88,92 @@ function services(): {
   };
 }
 const SVC = services();
+
+describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on %s', (protocol) => {
+  for (const fault of [
+    'dead-port',
+    'http1',
+    'http2-missing',
+    'accept-close',
+    'handler-error',
+    'deadline',
+    'json404',
+  ] as const) {
+    it(`ejects ${fault} after one call and the next five succeed`, async () => {
+      const badPort = await unusedPort();
+      if (fault === 'http1' || fault === 'http2-missing' || fault === 'accept-close') {
+        const server =
+          fault === 'http1'
+            ? http1Server((_req, res) => {
+                res.writeHead(404);
+                res.end();
+              })
+            : fault === 'http2-missing'
+              ? http2Server()
+              : createServer((socket) => socket.destroy());
+        if (fault === 'http2-missing')
+          (server as ReturnType<typeof http2Server>).on('stream', (stream) => {
+            stream.respond({ ':status': 404 });
+            stream.end();
+          });
+        await new Promise<void>((resolve) => server.listen(badPort, '127.0.0.1', resolve));
+        closers.push(
+          () =>
+            new Promise<void>((resolve, reject) =>
+              server.close((error) => (error ? reject(error) : resolve())),
+            ),
+        );
+      } else if (fault !== 'dead-port') {
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin({ http2: true }),
+            ...(fault === 'json404'
+              ? []
+              : [
+                  GrpcPlugin({
+                    basePath: '/grpc',
+                    services: [
+                      {
+                        definition: SVC.echo,
+                        implementation: {
+                          echo: async (_request: unknown, context: { signal: AbortSignal }) => {
+                            if (fault === 'handler-error') throw new Error('broken replica');
+                            await new Promise<void>((resolve) => {
+                              if (context.signal.aborted) resolve();
+                              else
+                                context.signal.addEventListener('abort', () => resolve(), {
+                                  once: true,
+                                });
+                            });
+                            return { response: 'too late' };
+                          },
+                        },
+                      },
+                    ],
+                  }),
+                ]),
+          ],
+        });
+        await app.start({ port: badPort, hostname: '127.0.0.1' });
+        apps.push(app);
+      }
+      const live = await startServer(fresh());
+      const caller = await startCaller(
+        [
+          { id: 'bad', port: badPort },
+          { id: 'live', port: live.port },
+        ],
+        { clients: { billing: { basePath: '/grpc', protocol, timeoutMs: 500 } } },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      await failure(billing.echo({ message: 'first' }));
+      const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      expect((await discovery.pick('billing'))?.id).toBe('live');
+      for (let n = 0; n < 5; n++)
+        expect((await billing.echo({ message: 'ok' })).response).toBe('echo: ok');
+    });
+  }
+});
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 

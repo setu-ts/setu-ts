@@ -244,6 +244,9 @@ export function createFakeConnectRuntime(
       return new FakeUnavailableError(message);
     },
 
+    isWireError(error: unknown): boolean {
+      return error instanceof Error && 'isWireError' in error && error.isWireError === true;
+    },
     isUnavailable(error: unknown): boolean {
       return error instanceof FakeUnavailableError;
     },

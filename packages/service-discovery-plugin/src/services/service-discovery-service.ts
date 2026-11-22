@@ -2,7 +2,7 @@
  * `ServiceDiscoveryService` — the {@linkcode IServiceDiscovery} implementation
  * registered under `CAPABILITIES.SERVICE_DISCOVERY`.
  *
- * Owns the read-through cache, the in-flight coalescing, the balancer, and the
+ * Owns the background-refreshed cache, the in-flight coalescing, the balancer, and the
  * ejection filter, so a provider only answers "who is running this service".
  *
  * @module
@@ -12,6 +12,7 @@ import {
   describeError,
   resolveProbeTiming,
   withHttpStatusHint,
+  withDeadline,
 } from '@setu-ts/common';
 import type {
   ConnectionErrorReporter,
@@ -25,6 +26,7 @@ import type {
 import type { DiscoveryProvider } from '../interfaces/index.ts';
 import type { ResolvedDiscoveryOptions } from '../options.ts';
 import { createLoadBalancer, type LoadBalancer } from '../balancer/load-balancer.ts';
+import { RefreshBackoff } from './refresh-backoff.ts';
 import { EjectionTracker } from './ejection-tracker.ts';
 import { instanceUrl } from '../url/instance-url.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
@@ -36,6 +38,8 @@ const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} }
 interface CacheEntry {
   instances: readonly ServiceInstance[];
   stampMs: number;
+  failed: boolean;
+  emptySince?: number;
 }
 
 /**
@@ -54,10 +58,14 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #cache = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<readonly ServiceInstance[]>>();
   readonly #watches = new Set<Unsubscribe>();
-  #degraded = false;
+  readonly #backoff: RefreshBackoff;
+  readonly #resolveReporters = new Map<string, ConnectionErrorReporter>();
+  readonly #resolveReporter: (name: string) => ConnectionErrorReporter;
+  readonly #failedNames = new Set<string>();
+  #closed = false;
   /**
    * M70c: set on the first successful provider read. Distinct from
-   * `#degraded` (which requires a prior success to fall back to), this is what
+   * per-name failure state, this is what
    * lets the indicator report `down` for a provider that has never once
    * reached its backend — the X10-3 case.
    */
@@ -69,13 +77,17 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param options - Options after defaults
    * @param reporter - Receives each probe failure's reason and each recovery
    *   (M139f X10-3); the plugin passes a logging reporter
+   * @param resolveReporter - Builds an independent reporter for each failing name
    */
   constructor(
     provider: DiscoveryProvider,
     runtime: IRuntimeServices,
     options: ResolvedDiscoveryOptions,
     reporter: ConnectionErrorReporter = SILENT_REPORTER,
+    resolveReporter: (name: string) => ConnectionErrorReporter = () => SILENT_REPORTER,
   ) {
+    this.#backoff = new RefreshBackoff(() => runtime.hrtime());
+    this.#resolveReporter = resolveReporter;
     this.#provider = provider;
     this.#runtime = runtime;
     this.#options = options;
@@ -113,9 +125,21 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     return this.#provider.kind;
   }
 
-  /** Whether the last refresh failed and a stale snapshot is being served. */
+  /** Whether any name last failed or holds an empty answer during its grace. */
   get degraded(): boolean {
-    return this.#degraded;
+    return (
+      this.#failedNames.size > 0 ||
+      [...this.#cache.values()].some((entry) => entry.emptySince !== undefined)
+    );
+  }
+
+  /** Age of the oldest list whose last refresh failed, or zero. */
+  get staleForMs(): number {
+    let age = 0;
+    for (const entry of this.#cache.values()) {
+      if (entry.failed) age = Math.max(age, this.#runtime.hrtime() - entry.stampMs);
+    }
+    return age;
   }
 
   /**
@@ -154,29 +178,29 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+    if (this.#closed) throw new DiscoveryUnavailableError('Service discovery is closed.');
     const cached = this.#cache.get(serviceName);
-    if (
-      cached !== undefined &&
-      this.#options.cacheTtlMs > 0 &&
-      this.#runtime.hrtime() - cached.stampMs < this.#options.cacheTtlMs
-    ) {
+    if (cached !== undefined) {
+      if (
+        this.#runtime.hrtime() - cached.stampMs >= this.#options.cacheTtlMs &&
+        !this.#inFlight.has(serviceName) &&
+        this.#backoff.ready(serviceName)
+      ) {
+        void this.#startRead(serviceName).catch(() => {
+          /* Failure is recorded by #read. */
+        });
+      }
       return cached.instances;
     }
+    return await (this.#inFlight.get(serviceName) ?? this.#startRead(serviceName));
+  }
 
-    // Coalesced per name: a burst of concurrent picks for one cold service
-    // issues ONE backend read, not one per caller.
-    const existing = this.#inFlight.get(serviceName);
-    if (existing !== undefined) {
-      return await existing;
-    }
-
-    const read = this.#read(serviceName, cached);
+  #startRead(serviceName: string): Promise<readonly ServiceInstance[]> {
+    const read = this.#read(serviceName).finally(() => {
+      if (this.#inFlight.get(serviceName) === read) this.#inFlight.delete(serviceName);
+    });
     this.#inFlight.set(serviceName, read);
-    try {
-      return await read;
-    } finally {
-      this.#inFlight.delete(serviceName);
-    }
+    return read;
   }
 
   async pick(serviceName: string, options?: PickOptions): Promise<ServiceInstance | null> {
@@ -210,25 +234,30 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     listener: (instances: readonly ServiceInstance[]) => void,
   ): Promise<Unsubscribe> {
     const unsubscribe = await this.#provider.watch(serviceName, (instances) => {
-      // A change makes the cached entry wrong immediately, so the TTL is a
-      // safety net for unwatched services rather than the freshness mechanism
-      // for watched ones.
-      this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
-      this.#degraded = false;
-      this.#everResolved = true;
-      listener(instances);
+      if (this.#closed) return;
+      listener(this.#accept(serviceName, instances));
     });
 
     const wrapped = (): void => {
       this.#watches.delete(wrapped);
       unsubscribe();
     };
+    if (this.#closed) {
+      unsubscribe();
+      return () => {};
+    }
     this.#watches.add(wrapped);
     return wrapped;
   }
 
-  /** Stops every active watch and drops ejection state. */
+  /** Stops watches and clears cache, refresh, retry, reporter and ejection state. */
   close(): void {
+    this.#closed = true;
+    this.#cache.clear();
+    this.#inFlight.clear();
+    this.#backoff.clear();
+    this.#resolveReporters.clear();
+    this.#failedNames.clear();
     for (const unsubscribe of [...this.#watches]) {
       unsubscribe();
     }
@@ -236,24 +265,58 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#ejection?.clear();
   }
 
-  /** Reads the backend, falling back to a stale entry when one exists. */
-  async #read(
-    serviceName: string,
-    stale: CacheEntry | undefined,
-  ): Promise<readonly ServiceInstance[]> {
+  /** Store every successful read and watch delivery through the same empty rule. */
+  #accept(serviceName: string, instances: readonly ServiceInstance[]): readonly ServiceInstance[] {
+    const old = this.#cache.get(serviceName);
+    const now = this.#runtime.hrtime();
+    const emptySince = old?.emptySince ?? now;
+    const held =
+      instances.length === 0 &&
+      old !== undefined &&
+      old.instances.length > 0 &&
+      now - emptySince < this.#options.emptyAnswerGraceMs;
+    const accepted = held ? old.instances : instances;
+    this.#cache.set(serviceName, {
+      instances: accepted,
+      stampMs: now,
+      failed: false,
+      ...(held ? { emptySince } : {}),
+    });
+    this.#failedNames.delete(serviceName);
+    this.#backoff.reset(serviceName);
+    this.#resolveReporters.get(serviceName)?.recovered();
+    this.#everResolved = true;
+    return accepted;
+  }
+
+  async #read(serviceName: string): Promise<readonly ServiceInstance[]> {
     try {
-      const instances = await this.#provider.resolve(serviceName);
-      this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
-      this.#degraded = false;
-      this.#everResolved = true;
-      return instances;
+      const ms = this.#options.resolveTimeoutMs;
+      const instances = await withDeadline(
+        (signal) => this.#provider.resolve(serviceName, signal),
+        {
+          timeoutMs: ms,
+          timing: resolveProbeTiming(this.#runtime),
+          onTimeout: () =>
+            new Error(
+              `${this.#provider.kind} discovery did not answer the read for '${serviceName}' within ${ms} ms`,
+            ),
+        },
+      );
+      return this.#closed ? instances : this.#accept(serviceName, instances);
     } catch (error) {
-      if (stale !== undefined) {
-        // Serving a slightly old address list beats serving none: the
-        // instances in it are overwhelmingly still up, and the alternative is
-        // failing every call while the backend is unreachable.
-        this.#degraded = true;
-        return stale.instances;
+      if (!this.#closed) {
+        const reporter =
+          this.#resolveReporters.get(serviceName) ?? this.#resolveReporter(serviceName);
+        this.#resolveReporters.set(serviceName, reporter);
+        reporter.report(error);
+        this.#failedNames.add(serviceName);
+        const stale = this.#cache.get(serviceName);
+        if (stale !== undefined) {
+          stale.failed = true;
+          this.#backoff.failed(serviceName);
+          return stale.instances;
+        }
       }
       // A provider's own DiscoveryUnavailableError is a configuration fault (a
       // multi-port Kubernetes service with no portName), not an outage: it

@@ -66,7 +66,7 @@ export interface ConnectCoreModuleLike {
     metadata?: undefined,
     outgoingDetails?: undefined,
     cause?: unknown,
-  ) => Error & { readonly code: number };
+  ) => Error & { readonly code: number; readonly isWireError?: boolean };
   /** The `Code` enum; only `Unavailable` is read. */
   Code: { readonly Unavailable: number };
 }
@@ -164,6 +164,9 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
         undefined,
         cause,
       );
+    },
+    isWireError(error: unknown): boolean {
+      return error instanceof connect.ConnectError && error.isWireError === true;
     },
     isUnavailable(error: unknown): boolean {
       return error instanceof connect.ConnectError && error.code === connect.Code.Unavailable;

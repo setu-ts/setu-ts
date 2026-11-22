@@ -37,3 +37,24 @@ describe('KubernetesProvider health (M70c)', () => {
     await expect(provider.isHealthy()).rejects.toBe(tls);
   });
 });
+
+it('bounds a hung kubernetes probe even when the HTTP seam ignores abort', async () => {
+  const runtime = createFakeRuntime();
+  let signal: AbortSignal | null | undefined;
+  const http = {
+    ...createFakeHttp(),
+    request: (_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<never>(() => {});
+    },
+  };
+  const provider = new KubernetesProvider(OPTIONS, http, runtime);
+  const outcome = provider.isHealthy();
+  for (let n = 0; n < 10; n++) await Promise.resolve();
+  expect(signal?.aborted).toBe(false);
+  runtime.runTimeouts();
+  await expect(outcome).rejects.toThrow(
+    'The Kubernetes API server did not answer the reachability probe within 2000 ms',
+  );
+  expect(signal?.aborted).toBe(true);
+});

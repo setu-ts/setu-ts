@@ -7,12 +7,12 @@
  *
  * @module
  */
+import { withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type {
   IDnsResolver,
   IRuntimeServices,
   ServiceInstance,
   SrvRecord,
-  TimerHandle,
   Unsubscribe,
 } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
@@ -25,6 +25,8 @@ interface DnsProviderCommon {
   readonly secure?: boolean;
   /** Milliseconds between watch polls. */
   readonly watchIntervalMs: number;
+  /** Bound for a watch tick; default 2000, zero unbounded. */
+  readonly resolveTimeoutMs?: number;
 }
 
 /**
@@ -104,7 +106,46 @@ export class DnsProvider implements DiscoveryProvider {
     return this.#options.domainTemplate.replaceAll('{service}', serviceName);
   }
 
-  async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  #lastFailure: { error: unknown } | undefined;
+
+  /** Reachability from the last lookup; absent names are successful answers. */
+  isHealthy(): Promise<boolean> {
+    return this.#lastFailure === undefined
+      ? Promise.resolve(true)
+      : Promise.reject(this.#lastFailure.error);
+  }
+
+  async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    let onAbort: (() => void) | undefined;
+    try {
+      signal?.throwIfAborted();
+      const lookup = this.#lookup(serviceName);
+      const instances =
+        signal === undefined
+          ? await lookup
+          : await Promise.race([
+              lookup,
+              new Promise<never>((_, reject) => {
+                onAbort = () => reject(signal.reason);
+                signal.addEventListener('abort', onAbort, { once: true });
+                if (signal.aborted) onAbort();
+              }),
+            ]);
+      this.#lastFailure = undefined;
+      return instances;
+    } catch (error) {
+      if (!signal?.aborted && isNameAbsent(error)) {
+        this.#lastFailure = undefined;
+        return [];
+      }
+      this.#lastFailure = { error };
+      throw error;
+    } finally {
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  async #lookup(serviceName: string): Promise<readonly ServiceInstance[]> {
     const domain = this.domainFor(serviceName);
     const secure = this.#options.secure ?? false;
 
@@ -148,41 +189,63 @@ export class DnsProvider implements DiscoveryProvider {
   ): Promise<Unsubscribe> {
     let last = '';
     let stopped = false;
-    let handle: TimerHandle | null = null;
-
+    let inFlight = false;
+    let active: AbortController | undefined;
     const tick = async (): Promise<void> => {
+      if (stopped || inFlight) return;
+      inFlight = true;
+      const local = new AbortController();
+      active = local;
+      const ms = this.#options.resolveTimeoutMs ?? 2000;
       try {
-        const instances = await this.resolve(serviceName);
+        const instances = await withDeadline(
+          (signal) => this.resolve(serviceName, AbortSignal.any([signal, local.signal])),
+          {
+            timeoutMs: ms,
+            timing: resolveProbeTiming(this.#runtime),
+            onTimeout: () =>
+              new Error(
+                `dns discovery did not answer the read for '${serviceName}' within ${ms} ms`,
+              ),
+          },
+        );
         const fingerprint = JSON.stringify(instances);
         if (!stopped && fingerprint !== last) {
           last = fingerprint;
           listener(instances);
         }
       } catch {
-        // A failed lookup is a transient DNS condition, not a change: keeping
-        // the last fingerprint means recovery fires the listener again.
+        // The lookup records its outcome for the health indicator; keep the last list.
+      } finally {
+        inFlight = false;
       }
     };
-
-    const schedule = (): void => {
-      // Guarded: unsubscribing before the first lookup resolves would
-      // otherwise arm an interval after the clear, leaking a timer nothing
-      // holds a handle to.
-      if (stopped) {
-        return;
-      }
-      handle = this.#runtime.setInterval(() => {
-        void tick();
-      }, this.#options.watchIntervalMs);
-    };
-
-    void tick().then(schedule);
-
+    const handle = this.#runtime.setInterval(() => {
+      void tick();
+    }, this.#options.watchIntervalMs);
+    void tick();
     return Promise.resolve(() => {
       stopped = true;
-      if (handle !== null) {
-        this.#runtime.clearInterval(handle);
-      }
+      this.#runtime.clearInterval(handle);
+      active?.abort();
     });
   }
+}
+
+/**
+ * Whether DNS says the name or record type is absent, through at most five causes.
+ * @param error - DNS rejection, possibly wrapped by the runtime
+ * @returns Whether the name is absent
+ * @internal
+ */
+export function isNameAbsent(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth <= 5; depth++) {
+    if (current === null || typeof current !== 'object') return false;
+    const record = current as { code?: unknown; name?: unknown; cause?: unknown };
+    if (record.code === 'ENOTFOUND' || record.code === 'ENODATA' || record.name === 'NotFound')
+      return true;
+    current = record.cause;
+  }
+  return false;
 }

@@ -25,3 +25,22 @@ describe('ConsulProvider health (M70c)', () => {
     expect(await provider.isHealthy()).toBe(false);
   });
 });
+
+it('bounds a hung consul probe even when the HTTP seam ignores abort', async () => {
+  const runtime = createFakeRuntime();
+  let signal: AbortSignal | null | undefined;
+  const http = {
+    ...createFakeHttp(),
+    request: (_url: string, init?: RequestInit) => {
+      signal = init?.signal;
+      return new Promise<never>(() => {});
+    },
+  };
+  const provider = new ConsulProvider(OPTIONS, http, runtime);
+  const outcome = provider.isHealthy();
+  for (let n = 0; n < 10; n++) await Promise.resolve();
+  expect(signal?.aborted).toBe(false);
+  runtime.runTimeouts();
+  expect(await outcome).toBe(false);
+  expect(signal?.aborted).toBe(true);
+});

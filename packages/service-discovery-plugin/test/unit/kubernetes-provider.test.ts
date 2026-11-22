@@ -413,3 +413,10 @@ describe('KubernetesProvider token characters (M139f audit M1)', () => {
     );
   });
 });
+
+it('forwards the resolve signal to the API request', async () => {
+  const { provider, http } = setup({ token: 'tok' });
+  const controller = new AbortController();
+  await provider.resolve('billing', controller.signal);
+  expect(http.calls[0].init?.signal).toBe(controller.signal);
+});

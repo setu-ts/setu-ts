@@ -225,7 +225,7 @@ describe('ConsulProvider — self registration', () => {
     await provider.deregisterSelf(anonymous);
 
     const id = JSON.parse(String(http.calls[0].init?.body)).ID as string;
-    expect(id).toBe('orders-uuid-0');
+    expect(id).toBe('orders-10.0.0.7-3000');
     // Deregistering must target the id that was actually registered — a fresh
     // uuid here would leave the instance advertised forever.
     expect(http.calls[1].url).toBe(`http://consul:8500/v1/agent/service/deregister/${id}`);
@@ -287,4 +287,16 @@ describe('ConsulProvider — ACL token characters (M139f re-audit N1)', () => {
     await provider.resolve('billing');
     expect(new Headers(http.calls[0]?.init?.headers).get('X-Consul-Token')).toBe('acl-0123-ok');
   });
+});
+
+it('forwards the read signal and encodes an IPv6 stable registration id', async () => {
+  const { provider, http } = setup();
+  const controller = new AbortController();
+  await provider.resolve('billing', controller.signal);
+  expect(http.calls[0].init?.signal).toBe(controller.signal);
+  const registration = { serviceName: 'orders', address: 'fe80::1%eth0', port: 3000 };
+  await provider.registerSelf(registration);
+  await provider.deregisterSelf(registration);
+  expect(JSON.parse(String(http.calls[1].init?.body)).ID).toBe('orders-fe80::1%eth0-3000');
+  expect(http.calls[2].url).toContain('/deregister/orders-fe80%3A%3A1%25eth0-3000');
 });

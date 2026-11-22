@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { findTrailerError } from '@connectrpc/connect/protocol-grpc';
 /**
  * Unit tests for the Connect runtime loader: the pure `adaptConnectModule`
  * adapter and the per-specifier failure branches of `loadConnectModule`, driven
@@ -23,6 +26,18 @@ import {
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 import { fakeFile, fakeService } from '../fixtures/fake-connect-runtime.ts';
 import type { FileRegistryLike } from '../../src/interfaces/connect-runtime.ts';
+
+it('reads the real wire flag on trailer and JSON errors, never on HTTP-status or transport errors', async () => {
+  const runtime = await loadConnectModule();
+  const fallback = new ConnectError('HTTP 503', Code.Unavailable);
+  const json = errorFromJson({}, new Headers(), fallback);
+  const trailer = findTrailerError(new Headers({ 'grpc-status': '5', 'grpc-message': 'absent' }));
+  expect(runtime.isWireError(json)).toBe(true);
+  expect(runtime.isWireError(trailer)).toBe(true);
+  expect(runtime.isWireError(fallback)).toBe(false);
+  expect(runtime.isWireError(new Error('reset'))).toBe(false);
+  expect(runtime.isWireError(Object.assign(new Error(), { isWireError: true }))).toBe(false);
+});
 
 /** Records every call the adapter makes into the fake modules. */
 interface Calls {

@@ -110,17 +110,26 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   every error naming the target would carry them. So does a URL target with a query or fragment,
   which Connect never sends; an error about a URL target names only its origin. A `clients` key is a
   target and is checked the same way at `GrpcPlugin()`. After each call the client reports to
-  discovery — `failure` for `Unavailable` (a refused, reset or closed connection), `success`
-  otherwise — so an instance that refuses connections is ejected.
-- **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
-  application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
-  streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
-  keep a session; the least recently used is forgotten first, never closed by the client — a call
-  may still be on it. connect-node closes a session once it has had no stream for 60 s (its default
-  is 15 minutes), so an evicted session closes 60 s after its last stream ends, and the
-  application's stop closes whatever is left. A stream the application drops without cancelling it
-  stays open until its deadline (or, with Connect's `timeoutMs: 0`, until the application stops).
-  Each reply message is bounded by the plugin's `readMaxBytes`, as each request is.
+  discovery: an instance fails when it did not answer, or answered with a server-fault code
+  (`Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded`), wire or
+  not. Peer `Canceled` fails; caller cancellation reports nothing. Wire application/caller codes
+  (`InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
+  `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed; every other error
+  fails. Streaming reports success when response headers arrive; later iteration errors report
+  nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
+  discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
+- **Connections.** A Service address that balances connections pins every call to one pod. Discover
+  pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
+  pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every
+  call to it and closed with the application. Each session may buffer 64 MB (Node's
+  `maxSessionMemory`; its default of 10 MB reset streams once sixteen 1 MB replies were in flight on
+  one connection). At most 64 instance origins keep a session; the least recently used is forgotten
+  first, never closed by the client — a call may still be on it. connect-node closes a session once
+  it has had no stream for 60 s (its default is 15 minutes), so an evicted session closes 60 s after
+  its last stream ends, and the application's stop closes whatever is left. A stream the application
+  drops without cancelling it stays open until its deadline (or, with Connect's `timeoutMs: 0`,
+  until the application stops). Each reply message is bounded by the plugin's `readMaxBytes`, as
+  each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`
@@ -135,7 +144,8 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`.
   Only the refusal itself is resent — Node's stream error, connect-node's own reading of the reset
   code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one whose
-  message names `REFUSED_STREAM`: that server ran its handler.
+  message names `REFUSED_STREAM`: that server ran its handler. A drain 503 is **not resent**; it
+  reports failure under the outcome rule above. The server's own post-`close()` 503 is unmarked.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.
@@ -353,3 +363,6 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+A cancelled response stream aborts the handler's `ctx.signal` before awaiting its iterator cleanup,
+with no bound. A handler that ignores the signal still holds the stream until it yields.

@@ -2,13 +2,79 @@ import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
-import type { HealthReport } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { HealthReport, IServiceDiscovery } from '@setu-ts/common';
 import { ServiceDiscoveryPlugin } from '../../src/index.ts';
 import { createFakeHttp, createFakeRuntime } from '../fixtures/fakes.ts';
 import {
   loggerPlugin,
   RecordingLogger,
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
+
+it('serves warm calls immediately under a hung Consul read and keeps readiness up with the stale age', async () => {
+  const runtime = createFakeRuntime();
+  let hung = false;
+  const logger = new RecordingLogger();
+  const http = {
+    ...createFakeHttp(),
+    request: () =>
+      hung
+        ? new Promise<never>(() => {})
+        : Promise.resolve({
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            text: JSON.stringify([{ Service: { ID: 'a', Address: '10.0.0.1', Port: 80 } }]),
+          }),
+  };
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin({ platform: 'node', adapters: { node: () => runtime } }),
+      loggerPlugin(logger),
+      HealthPlugin({ details: true }),
+      ServiceDiscoveryPlugin({
+        provider: 'consul',
+        address: 'http://consul.test',
+        http,
+        cacheTtlMs: 100,
+        resolveTimeoutMs: 50,
+      }),
+    ],
+  });
+  await app.start();
+  try {
+    const discovery = app.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+    await discovery.resolve('billing');
+    hung = true;
+    runtime.advance(101);
+    let answered = false;
+    void discovery.resolve('billing').then((list) => {
+      answered = list.length === 1;
+    });
+    for (let n = 0; n < 30; n++) await Promise.resolve();
+    expect(answered).toBe(true);
+    runtime.runTimeouts();
+    for (let n = 0; n < 30; n++) await Promise.resolve();
+    runtime.advance(50);
+    const pending = app.inject({ method: 'GET', url: '/ready' });
+    for (let n = 0; n < 100; n++) await Promise.resolve();
+    // Fire only the provider deadline; the health reporting bound is later.
+    const deadline = runtime.timeouts.findLast((timer) => !timer.cleared && timer.ms === 2000);
+    expect(deadline).toBeDefined();
+    deadline!.cleared = true;
+    deadline!.fn();
+    const response = await pending;
+    expect(response.statusCode).toBe(200);
+    const check = response.json<HealthReport>().checks['service-discovery'];
+    expect(check).toMatchObject({ status: 'up', data: { degraded: true, reachable: false } });
+    expect((check!.data as { staleForMs: number }).staleForMs).toBe(151);
+    expect(logger.forSource("service-discovery-plugin: consul resolve 'billing'")[0]?.level).toBe(
+      'warn',
+    );
+  } finally {
+    await app.stop();
+  }
+});
 
 it('Kubernetes discovery keeps /ready 200 when its real provider probe succeeds', async () => {
   const app = createApplication({

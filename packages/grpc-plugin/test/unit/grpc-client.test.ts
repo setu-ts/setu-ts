@@ -16,7 +16,6 @@ import {
   CLIENT_MAX_SESSION_MEMORY_MB,
   GrpcClients,
   instanceOrigin,
-  isRefusedStream,
   MAX_CLIENT_ORIGINS,
   MAX_CLIENTS_PER_DEFINITION,
   targetBase,
@@ -24,6 +23,7 @@ import {
   WORKERS_REFUSAL,
 } from '../../src/client/grpc-client.ts';
 import type { GrpcClientDeps } from '../../src/client/grpc-client.ts';
+import { isRefusedStream } from '../../src/client/call-outcome.ts';
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
 import {
   CONNECT_NODE_SPECIFIER,
@@ -462,7 +462,10 @@ describe('GrpcClients', () => {
     ]);
     fail = new FakeUnavailableError('refused');
     await expect(call(client)).rejects.toBe(fail);
-    fail = new Error('InvalidArgument from the server');
+    fail = Object.assign(new Error('InvalidArgument from the server'), {
+      code: 3,
+      isWireError: true,
+    });
     await expect(callStream(client)).rejects.toBe(fail);
     expect(discovery.reports).toEqual([
       ['a', 'success'],
@@ -1049,4 +1052,57 @@ describe('review fixes (M139b)', () => {
       expect(noDeadline.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([none, none]);
     }
   });
+});
+
+it('reports unary deadline failure, omits caller abort, and reports streaming success only at headers', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080)]);
+  let error: unknown = Object.assign(new Error('deadline'), { code: 4 });
+  const node = fakeNode(() => Promise.reject(error));
+  const { clients: clientSet } = clients({ discovery: () => discovery }, node);
+  const client = clientSet.client(BILLING, 'billing');
+  await expect(call(client)).rejects.toBe(error);
+  expect(discovery.reports).toEqual([['a', 'failure']]);
+  discovery.reports.length = 0;
+  const abort = new AbortController();
+  abort.abort();
+  const transport = (client as { transport: ClientTransportLike }).transport;
+  error = Object.assign(new Error('canceled'), { code: 1 });
+  await expect(transport.unary({}, abort.signal, undefined, undefined, {})).rejects.toBe(error);
+  expect(discovery.reports).toEqual([]);
+  clientSet.close();
+  const streaming = clients(
+    { discovery: () => discovery },
+    fakeNode(() =>
+      Promise.resolve({
+        message: {
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('late deadline')),
+          }),
+        },
+      }),
+    ),
+  );
+  const result = (await callStream(streaming.clients.client(BILLING, 'billing'))) as {
+    message: AsyncIterable<unknown>;
+  };
+  await expect(result.message[Symbol.asyncIterator]().next()).rejects.toThrow('late deadline');
+  expect(discovery.reports).toEqual([['a', 'success']]);
+  streaming.clients.close();
+});
+
+it('does not resend an unmarked drain 503', async () => {
+  let calls = 0;
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  const error = new FakeUnavailableError('HTTP 503');
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      return Promise.reject(error);
+    }),
+  );
+  await expect(call(clientSet.client(BILLING, 'billing'))).rejects.toBe(error);
+  expect(calls).toBe(1);
+  expect(discovery.reports).toEqual([['a', 'failure']]);
+  clientSet.close();
 });

@@ -145,15 +145,22 @@ export function dispatchRpc(
 
   const entry = dispatchMap.get(call.path);
   if (entry !== undefined) {
-    const universal = universalRequest(call, transport?.signal);
+    const abort = entry.streamsResponse ? new AbortController() : undefined;
+    const signal =
+      abort === undefined
+        ? transport?.signal
+        : transport?.signal === undefined
+          ? abort.signal
+          : AbortSignal.any([transport.signal, abort.signal]);
+    const universal = universalRequest(call, signal);
     if (isNativeGrpcContentType(call.headers.get('content-type'))) {
       return transport?.trailers === true
-        ? entry.handle(universal).then(nativeGrpcReply)
+        ? entry.handle(universal).then((response) => nativeGrpcReply(response, abort))
         : Promise.resolve(trailersOnlyUnimplementedReply());
     }
     return entry
       .handle(universal)
-      .then((response) => replyFromUniversal(response, entry.streamsResponse));
+      .then((response) => replyFromUniversal(response, entry.streamsResponse, abort));
   }
 
   if (basePath === '') {

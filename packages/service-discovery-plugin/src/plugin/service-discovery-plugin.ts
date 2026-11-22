@@ -84,7 +84,17 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         source: `service-discovery-plugin: ${provider.kind}`,
         logger: () => ctx.logger,
       });
-      const service = new ServiceDiscoveryService(provider, ctx.runtime, resolved, reporter);
+      const service = new ServiceDiscoveryService(
+        provider,
+        ctx.runtime,
+        resolved,
+        reporter,
+        (serviceName) =>
+          createConnectionErrorReporter({
+            source: `service-discovery-plugin: ${provider.kind} resolve '${serviceName}'`,
+            logger: () => ctx.logger,
+          }),
+      );
       ctx.services.register<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY, service);
 
       if (registration !== undefined) {
@@ -125,6 +135,7 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
             watchedServices: service.watchedServices,
             ejectedInstances: service.ejectedInstances,
             degraded,
+            staleForMs: service.staleForMs,
             reachable,
             everResolved,
           },

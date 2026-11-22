@@ -22,6 +22,7 @@ import type {
 import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
+import { callOutcome, isRefusedStream } from './call-outcome.ts';
 
 /** Every option, resolved. */
 type ResolvedClientOptions = Required<GrpcClientOptions>;
@@ -190,62 +191,6 @@ export function instanceOrigin(instance: ServiceInstance): string {
   const scheme = instance.secure === true ? 'https' : 'http';
   const host = instance.host.includes(':') ? `[${instance.host}]` : instance.host;
   return `${scheme}://${host}:${instance.port}`;
-}
-
-/** connect-node's message for a `REFUSED_STREAM` reset code (`connectErrorFromH2ResetCode`). */
-const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREAM (0x7)';
-
-/**
- * Whether a call failed because the server refused its HTTP/2 stream
- * (`REFUSED_STREAM`, RFC 9113 §8.7): the server did not process it, which a
- * server that has sent `GOAWAY` while shutting down does to a stream already on
- * the wire. connect-node maps the reset code to `Unavailable` when it reads it,
- * but reports the stream-error event Node raises for the same refusal as
- * `Internal`; the cause chain names it either way. A stream that could not be
- * opened because the session had already received `GOAWAY`
- * (`ERR_HTTP2_GOAWAY_SESSION`) is the same case: the request never left.
- *
- * @param error - The call's error
- * @returns `true` when some error in the cause chain is that refusal
- */
-export function isRefusedStream(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
-    const { message, code, cause } = current as {
-      message?: unknown;
-      code?: unknown;
-      cause?: unknown;
-    };
-    if (typeof message === 'string') {
-      // Node's stream error for the refusal, and connect-node's reading of the
-      // reset code: exactly these two, so a server's own error message that
-      // happens to name the code is never taken for a refusal and retried.
-      if (code === 'ERR_HTTP2_STREAM_ERROR' && message.includes('NGHTTP2_REFUSED_STREAM')) {
-        return true;
-      }
-      // The stream was never opened: the session had already received GOAWAY
-      // (seen on Bun, whose node:http2 races the session manager's reconnect).
-      if (code === 'ERR_HTTP2_GOAWAY_SESSION') return true;
-      if (isLocalResetRefusal(current)) return true;
-    }
-    current = cause;
-  }
-  return false;
-}
-
-/**
- * connect-node's own reading of a `REFUSED_STREAM` reset code: exactly its
- * message, and no response metadata. A server's error that merely names the
- * code always arrives with the response headers, so it never matches (a server
- * that rethrows a downstream refusal ran its handler, and is not resent).
- */
-function isLocalResetRefusal(error: object): boolean {
-  const { rawMessage, metadata } = error as { rawMessage?: unknown; metadata?: unknown };
-  return (
-    rawMessage === CONNECT_NODE_REFUSED &&
-    metadata instanceof Headers &&
-    metadata.keys().next().done === true
-  );
 }
 
 /** A refused stream, carrying the `Unavailable` error the caller will see. */
@@ -429,6 +374,7 @@ export class GrpcClients {
           (transport, timeout) =>
             transport.unary(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
+          signal,
         );
       },
       stream: (method, signal, timeoutMs, header, input, contextValues) => {
@@ -441,6 +387,7 @@ export class GrpcClients {
           (transport, timeout) =>
             transport.stream(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
+          signal,
         );
       },
     };
@@ -457,11 +404,18 @@ export class GrpcClients {
     unary: boolean,
     run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
     timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<unknown> {
     const now = this.#deps.clock ?? (() => performance.now());
     const started = now();
     try {
-      return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
+      return await this.#attempt(
+        target,
+        base,
+        options,
+        (transport) => run(transport, timeoutMs),
+        signal,
+      );
     } catch (error) {
       if (!(error instanceof RefusedStream)) throw error;
       // The retry gets what is left of the call's deadline — the call's own, or
@@ -471,8 +425,12 @@ export class GrpcClients {
       const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
       const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
       if (!unary || (remaining !== undefined && remaining <= 0)) throw error.error;
-      return this.#attempt(target, base, options, (transport) =>
-        run(transport, remaining ?? timeoutMs),
+      return this.#attempt(
+        target,
+        base,
+        options,
+        (transport) => run(transport, remaining ?? timeoutMs),
+        signal,
       ).catch((again: unknown) => {
         throw again instanceof RefusedStream ? again.error : again;
       });
@@ -484,6 +442,7 @@ export class GrpcClients {
     base: string | undefined,
     options: ResolvedClientOptions,
     run: (transport: ClientTransportLike) => Promise<unknown>,
+    signal: AbortSignal | undefined,
   ): Promise<unknown> {
     const { runtime } = this.#deps;
     if (this.#closed) throw runtime.unavailable('the gRPC client is closed');
@@ -513,9 +472,10 @@ export class GrpcClients {
       this.#report(discovery, instance, 'success');
       return result;
     } catch (error) {
-      if (isRefusedStream(error)) {
+      const outcome = callOutcome(error, signal, runtime.isWireError);
+      if (outcome !== undefined) this.#report(discovery, instance, outcome);
+      if (!signal?.aborted && isRefusedStream(error)) {
         // The server never processed it: the instance's fault, and safe to send again.
-        this.#report(discovery, instance, 'failure');
         throw new RefusedStream(
           runtime.isUnavailable(error)
             ? (error as Error)
@@ -527,7 +487,6 @@ export class GrpcClients {
               ),
         );
       }
-      this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
       throw error;
     }
   }

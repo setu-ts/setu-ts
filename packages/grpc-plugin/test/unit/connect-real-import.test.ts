@@ -34,6 +34,15 @@ async function connectAvailable(): Promise<boolean> {
 
 const available = await connectAvailable();
 
+it.skipIf(!available)('adapts the wire flag on real Connect errors', async () => {
+  const { ConnectError, Code } = await import('@connectrpc/connect');
+  const runtime = await loadConnectModule();
+  const error = new ConnectError('missing', Code.NotFound);
+  expect(runtime.isWireError(error)).toBe(false);
+  error.isWireError = true;
+  expect(runtime.isWireError(error)).toBe(true);
+});
+
 /** A real health router, its handlers keyed as the plugin keys them. */
 async function healthMap(
   implementation: Record<string, unknown>,

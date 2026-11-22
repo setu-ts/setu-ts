@@ -15,6 +15,62 @@ import { ServiceDiscoveryPlugin } from '../../../src/index.ts';
 import type { DiscoveryProvider } from '../../../src/index.ts';
 import { createFakeRuntime, instance } from '../../fixtures/fakes.ts';
 
+it('reports DNS failures and abandoned reads down, and warm failures up with a growing stale age', async () => {
+  for (const hung of [false, true]) {
+    for (const warm of [false, true]) {
+      let fail = !warm;
+      const error = new Error('resolver unreachable');
+      const runtime = createFakeRuntime({
+        dns: {
+          resolveHost: () =>
+            fail
+              ? hung
+                ? new Promise<never>(() => {})
+                : Promise.reject(error)
+              : Promise.resolve(['10.0.0.1']),
+          resolveSrv: () => Promise.resolve([]),
+        },
+      });
+      let check!: () => Promise<HealthCheckResult>;
+      let service!: { resolve(name: string): Promise<unknown> };
+      const ctx = {
+        runtime,
+        services: {
+          register: (_name: string, value: typeof service) => {
+            service = value;
+          },
+        },
+        health: {
+          register: (_name: string, fn: typeof check) => {
+            check = fn;
+          },
+        },
+        lifecycle: { onClose() {} },
+      } as never;
+      ServiceDiscoveryPlugin({
+        provider: 'dns',
+        mode: 'a',
+        port: 80,
+        cacheTtlMs: 0,
+        resolveTimeoutMs: 50,
+      }).register(ctx);
+      if (warm) await service.resolve('billing');
+      fail = true;
+      const call = service.resolve('billing').catch(() => {});
+      for (let n = 0; n < 30; n++) await Promise.resolve();
+      runtime.advance(50);
+      runtime.runTimeouts();
+      await call;
+      for (let n = 0; n < 30; n++) await Promise.resolve();
+      const result = await check();
+      expect(result).toMatchObject({
+        status: warm ? 'up' : 'down',
+        data: { reachable: false, degraded: true, staleForMs: warm ? 50 : 0 },
+      });
+    }
+  }
+});
+
 /** A provider whose answers and reachability the test controls. */
 function makeProvider() {
   let reachable = true;

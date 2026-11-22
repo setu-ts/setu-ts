@@ -1,3 +1,4 @@
+import { ServiceDiscoveryPlugin } from '../../src/plugin/service-discovery-plugin.ts';
 /**
  * Unit tests for option resolution.
  *
@@ -116,3 +117,27 @@ describe('resolveOptions', () => {
     expect(resolved.waitSeconds).toBe(30);
   });
 });
+
+it('defaults the read bound and empty grace, and accepts zero', () => {
+  expect(resolveOptions({ provider: 'static', services: {} })).toMatchObject({
+    resolveTimeoutMs: 2000,
+    emptyAnswerGraceMs: 30000,
+  });
+  expect(
+    resolveOptions({
+      provider: 'static',
+      services: {},
+      resolveTimeoutMs: 0,
+      emptyAnswerGraceMs: 0,
+    }),
+  ).toMatchObject({ resolveTimeoutMs: 0, emptyAnswerGraceMs: 0 });
+});
+for (const field of ['resolveTimeoutMs', 'emptyAnswerGraceMs'] as const) {
+  for (const value of [-1, NaN, Infinity, 2147483648]) {
+    it(`refuses ${field}=${value} both at the resolver and plugin`, () => {
+      const options = { provider: 'static' as const, services: {}, [field]: value };
+      expect(() => resolveOptions(options)).toThrow(field);
+      expect(() => ServiceDiscoveryPlugin(options)).toThrow(field);
+    });
+  }
+}

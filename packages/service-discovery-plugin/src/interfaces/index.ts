@@ -22,10 +22,11 @@ export interface DiscoveryProvider {
    * Reads the current instance list for a service.
    *
    * @param serviceName - Logical service name
+   * @param signal - Aborted when the read bound fires
    * @returns Every instance the backend reports, possibly empty
    * @throws {Error} If the backend cannot be read
    */
-  resolve(serviceName: string): Promise<readonly ServiceInstance[]>;
+  resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]>;
 
   /**
    * Subscribes to instance-list changes.
@@ -62,7 +63,8 @@ export interface DiscoveryProvider {
    * M70c: reports whether the discovery backend is reachable right now, for the
    * plugin's health indicator.
    *
-   * Optional: a provider with no meaningful liveness check omits it, and the
+   * DNS reports its last lookup outcome, including an abandoned lookup.
+   * Optional: a custom provider with no meaningful liveness check omits it, and the
    * indicator then relies on the service's `everResolved` state. This answers a
    * fact (reachability), not a policy: the indicator owns the `up`/`degraded`/
    * `down` mapping.
@@ -107,7 +109,7 @@ export interface SelfRegistrationCheck {
 export interface SelfRegistration {
   /** Logical service name other applications resolve. */
   readonly serviceName: string;
-  /** Instance id, unique within the service. Defaults to `<name>-<uuid>`. */
+  /** Instance id, unique within the agent and stable across restarts. Defaults to `<serviceName>-<address>-<port>`. */
   readonly id?: string;
   /** Address other applications should reach this instance on. */
   readonly address: string;

@@ -9,6 +9,7 @@
  * @module
  */
 import type { LoadBalanceStrategy } from '@setu-ts/common';
+import { deadlineRangeError } from '@setu-ts/common';
 import type {
   DiscoveryProvider,
   EjectionOptions,
@@ -21,13 +22,16 @@ import type {
 /** Options every arm shares. */
 interface CommonDiscoveryOptions {
   /**
-   * Milliseconds a resolved instance list is served from cache.
+   * Age in milliseconds at which a call starts a background refresh.
    *
-   * `0` disables caching so every `resolve` hits the backend. A watched
-   * service invalidates its own entry on every change, so this is a safety net
-   * rather than the primary freshness mechanism.
+   * Warm names always return the cached list. `0` refreshes on every call,
+   * coalesced while a refresh runs. Failed refreshes keep the last good list.
    */
   readonly cacheTtlMs?: number;
+  /** Read bound in milliseconds; default 2000, `0` unbounded. @since 0.14.0 */
+  readonly resolveTimeoutMs?: number;
+  /** Hold a warm list on empty answers for this long; default 30000, `0` immediate. @since 0.14.0 */
+  readonly emptyAnswerGraceMs?: number;
   /** Default selection strategy; `PickOptions.strategy` overrides it per call. */
   readonly strategy?: LoadBalanceStrategy;
   /** Outlier-ejection tuning, or `false` to disable ejection entirely. */
@@ -199,8 +203,12 @@ const DEFAULT_EJECTION: Required<EjectionOptions> = {
  * @since 0.2.0
  */
 export interface ResolvedDiscoveryOptions {
-  /** Cache TTL in milliseconds; `0` disables caching. */
+  /** Age that starts a background refresh; `0` refreshes on every call. */
   readonly cacheTtlMs: number;
+  /** Provider read bound; `0` unbounded. */
+  readonly resolveTimeoutMs: number;
+  /** Empty-answer grace; `0` replaces at once. */
+  readonly emptyAnswerGraceMs: number;
   /** Default selection strategy. */
   readonly strategy: LoadBalanceStrategy;
   /** Ejection tuning, or `false` when disabled. */
@@ -229,6 +237,15 @@ export interface ResolvedDiscoveryOptions {
  * @since 0.2.0
  */
 export function resolveOptions(options: ServiceDiscoveryPluginOptions): ResolvedDiscoveryOptions {
+  const resolveTimeoutMs = options.resolveTimeoutMs ?? 2000;
+  const emptyAnswerGraceMs = options.emptyAnswerGraceMs ?? 30_000;
+  for (const [name, value] of [
+    ['resolveTimeoutMs', resolveTimeoutMs],
+    ['emptyAnswerGraceMs', emptyAnswerGraceMs],
+  ] as const) {
+    const refusal = deadlineRangeError(name, value);
+    if (refusal !== null) throw refusal;
+  }
   const watchIntervalMs =
     'watchIntervalMs' in options && options.watchIntervalMs !== undefined
       ? options.watchIntervalMs
@@ -243,6 +260,8 @@ export function resolveOptions(options: ServiceDiscoveryPluginOptions): Resolved
     options.ejection === false ? false : { ...DEFAULT_EJECTION, ...(options.ejection ?? {}) };
 
   const base = {
+    resolveTimeoutMs,
+    emptyAnswerGraceMs,
     cacheTtlMs: options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000,
     strategy: options.strategy ?? ('round-robin' as const),
     ejection,

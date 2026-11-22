@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp } from '../interfaces/index.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
@@ -193,9 +194,10 @@ export class KubernetesProvider implements DiscoveryProvider {
     return instances;
   }
 
-  async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
     const response = await this.#http.request(this.listUrl(serviceName), {
       headers: { Authorization: await this.authHeader() },
+      ...(signal !== undefined ? { signal } : {}),
     });
     if (!response.ok) {
       throw new Error(
@@ -219,23 +221,28 @@ export class KubernetesProvider implements DiscoveryProvider {
    * @throws {Error} The fetch rejection, the abort, or a non-2xx status
    */
   async isHealthy(): Promise<boolean> {
-    const controller = new AbortController();
-    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
-    try {
-      const url =
-        `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
-        `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
-      const response = await this.#http.request(url, {
-        headers: { Authorization: await this.authHeader() },
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
-      }
-      return true;
-    } finally {
-      this.#runtime.clearTimeout(timer);
-    }
+    return await withDeadline(
+      async (signal) => {
+        const url =
+          `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
+          `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
+        const response = await this.#http.request(url, {
+          headers: { Authorization: await this.authHeader() },
+          signal,
+        });
+        if (!response.ok)
+          throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
+        return true;
+      },
+      {
+        timeoutMs: 2000,
+        timing: resolveProbeTiming(this.#runtime),
+        onTimeout: () =>
+          new Error(
+            'The Kubernetes API server did not answer the reachability probe within 2000 ms',
+          ),
+      },
+    );
   }
 
   watch(

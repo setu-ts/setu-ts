@@ -13204,8 +13204,8 @@ app.router.post('/users', {
 ## Service Discovery (`@setu-ts/service-discovery-plugin`)
 
 Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
-and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
-`degraded` semantics remain unchanged.
+and Consul providers therefore report reachable and allow `/ready` to return 200. Warm lists are
+served from cache and refreshed in the background.
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an
@@ -13305,29 +13305,31 @@ token from.
 
 ### Options
 
-| Option             | Arms               | Default                      | Behavior                                                             |
-| ------------------ | ------------------ | ---------------------------- | -------------------------------------------------------------------- |
-| `provider`         | all                | —                            | Discriminant; always explicit                                        |
-| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching so every `resolve` hits the backend             |
-| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`             |
-| `ejection`         | all                | see below                    | `false` disables outlier ejection entirely                           |
-| `selfRegistration` | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms         |
-| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread          |
-| `services`         | static             | —                            | Unknown name resolves to `[]`, never a throw                         |
-| `address`          | consul             | —                            | Agent base URL                                                       |
-| `token`            | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset  |
-| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                       |
-| `waitSeconds`      | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600 |
-| `namespace`        | kubernetes         | —                            | Required                                                             |
-| `apiServer`        | kubernetes         | in-cluster env               | Absent both, `register()` throws                                     |
-| `token`            | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo      |
-| `portName`         | kubernetes         | —                            | Unset with one port uses it; unset with several throws               |
-| `mode`             | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records |
-| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                   |
-| `port`             | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port             |
-| `secure`           | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme      |
-| `http`             | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                             |
-| `discovery`        | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied          |
+| Option               | Arms               | Default                      | Behavior                                                                 |
+| -------------------- | ------------------ | ---------------------------- | ------------------------------------------------------------------------ |
+| `provider`           | all                | —                            | Discriminant; always explicit                                            |
+| `cacheTtlMs`         | all                | `30_000`                     | Age that starts background refresh; `0` refreshes every warm call        |
+| `resolveTimeoutMs`   | all                | `2000`                       | Read bound (DNS watch too); `0` unbounded; finite 0–2147483647           |
+| `emptyAnswerGraceMs` | all                | `30_000`                     | Hold nonempty lists on empty answers; `0` immediate; finite 0–2147483647 |
+| `strategy`           | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`                 |
+| `ejection`           | all                | see below                    | `false` disables outlier ejection entirely                               |
+| `selfRegistration`   | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms             |
+| `watchIntervalMs`    | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread              |
+| `services`           | static             | —                            | Unknown name resolves to `[]`, never a throw                             |
+| `address`            | consul             | —                            | Agent base URL                                                           |
+| `token`              | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset      |
+| `datacenter`         | consul             | —                            | Sent as `?dc=`                                                           |
+| `waitSeconds`        | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600     |
+| `namespace`          | kubernetes         | —                            | Required                                                                 |
+| `apiServer`          | kubernetes         | in-cluster env               | Absent both, `register()` throws                                         |
+| `token`              | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo          |
+| `portName`           | kubernetes         | —                            | Unset with one port uses it; unset with several throws                   |
+| `mode`               | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records     |
+| `domainTemplate`     | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                       |
+| `port`               | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port                 |
+| `secure`             | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme          |
+| `http`               | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                                 |
+| `discovery`          | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied              |
 
 ### Outlier ejection
 
@@ -13358,6 +13360,9 @@ before the socket binds, so the instance is advertised a moment before it can se
 harmless only because Consul marks a newly registered service critical until its first check passes
 and every read here sends `passing=true`.
 
+The Consul default id is `<serviceName>-<address>-<port>`, unique within the agent and stable across
+restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
+
 ### Exports
 
 | Export                              | Kind      | Purpose                                                                  |
@@ -13387,16 +13392,28 @@ and every read here sends `passing=true`.
 
 ### Notes
 
-- Registers a `service-discovery` health indicator reporting `provider`, `cachedServices`,
-  `watchedServices`, `ejectedInstances`, and `degraded`. It reads the cache's own observed state and
-  never issues a backend call, so a health scrape does not become load against Consul. `'degraded'`
-  means a refresh failed and a stale snapshot is being served; `'down'` is unreachable by
-  construction, because with nothing cached the caller already received a
-  `DiscoveryUnavailableError`.
-- `onClose` unsubscribes every active watch and clears ejection state.
-- The cache is read-through on the **monotonic** clock, with per-service in-flight coalescing (a
-  burst of concurrent `pick()`s for one cold service issues one backend read) and stale-on-failure.
-  A watch event invalidates that name's entry immediately.
+- Registers a `service-discovery` indicator: `provider`, `cachedServices`, `watchedServices`,
+  `ejectedInstances`, `degraded`, `reachable`, `everResolved`, `staleForMs`. Consul and Kubernetes
+  issue reachability probes cached 5 s and bounded at 2 s. DNS uses its last lookup outcome,
+  including a bounded-out lookup; before a lookup or after an absent-name answer it is reachable.
+  `down` means never resolved and unreachable; otherwise `up`, so a warm cache at any age stays
+  ready.
+- `degraded` is true if any name's last read failed or its empty answer is held. `staleForMs` is the
+  age of the oldest list whose last refresh failed, zero when none is failing. Empty grace does not
+  raise the age. Both read and watch paths hold nonempty lists for `emptyAnswerGraceMs`; the watch
+  listener receives the held list. Cold empty answers are stored at once.
+- Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
+  await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
+  16, then 30 s; success resets spacing. Per-name reporters warn on first/changed error, debug on
+  repeats, info on recovery, with URL userinfo masked. DNS can also log its probe failure.
+- DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
+  other failures reject. Use a trusted host resolver. The runtime currently retains only the first
+  failed address family, so an absent A record can conceal a timed-out AAAA lookup.
+- `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
+  Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
+  bounded, never overlap, and arm the interval before the first lookup.
+- `onClose` stops watches and clears cache, in-flight, retry, reporter and ejection state. Late
+  refreshes do not write state.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
   strategy and the same ejection filter.
 - Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
@@ -16308,6 +16325,22 @@ grpc.addService(AnotherDefinition, anotherImpl);
 
 > `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
 > port; publishing them would commit the package to a shape that tracks Connect's own API.
+
+### Client outcomes and cancellation
+
+A failed call reports instance failure for no answer, a refused stream, peer `Canceled`, or server
+faults `Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded` (wire
+or not). Wire `InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
+`FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted` report success. Caller abort
+reports nothing; everything else fails. Streaming reports success at headers; later iteration errors
+report nothing. Tight caller deadlines can eject healthy instances under discovery's ejection
+limits. Only refused unary streams are resent once within the remaining deadline; a drain 503 is not
+resent. The plugin's own post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode
+`'a'` or Kubernetes) to balance calls: one Service address pins the session to one pod.
+
+Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
+cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals
+are unchanged.
 
 ### Notes
 

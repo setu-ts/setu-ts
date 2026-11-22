@@ -17,6 +17,44 @@ import type { DispatchEntry } from '../../src/transports/rpc-dispatcher.ts';
 import type { UniversalServerRequestLike } from '../../src/interfaces/connect-runtime.ts';
 import { callFromRequest, responseFromReply } from '../../src/transports/rpc-call.ts';
 
+it('combines cancellation only for response-streaming procedures, forwarding transport abort', async () => {
+  for (const streaming of [false, true]) {
+    for (const hasTransport of [false, true]) {
+      const transport = new AbortController();
+      let signal: AbortSignal | undefined;
+      const map = new Map<string, DispatchEntry>([
+        [
+          '/svc/Call',
+          {
+            streamsRequest: false,
+            streamsResponse: streaming,
+            handle: (request) => {
+              signal = request.signal;
+              return Promise.resolve({ status: 200, body: chunks('ok') });
+            },
+          },
+        ],
+      ]);
+      const reply = await dispatchReply(
+        new Request('http://local/svc/Call'),
+        map,
+        '',
+        hasTransport ? { trailers: false, signal: transport.signal } : undefined,
+      );
+      if (streaming) {
+        expect(signal).toBeInstanceOf(AbortSignal);
+        expect(signal).not.toBe(transport.signal);
+        if (hasTransport) {
+          transport.abort();
+          expect(signal?.aborted).toBe(true);
+        }
+        await (reply!.body as ReadableStream<Uint8Array>).cancel();
+        expect(signal?.aborted).toBe(true);
+      } else expect(signal).toBe(hasTransport ? transport.signal : undefined);
+    }
+  }
+});
+
 async function* chunks(text: string): AsyncIterable<Uint8Array> {
   yield new TextEncoder().encode(text);
 }

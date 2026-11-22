@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/service-discovery-plugin`.** `resolveTimeoutMs` (2000 ms, `0` unbounded) and
+  `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and `staleForMs`.
+
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -26,6 +29,16 @@ All notable changes to this project are documented here. The format follows
   through pages.
 
 ### Changed
+
+- **`@setu-ts/service-discovery-plugin`.** Warm names answer from cache with background refresh;
+  `cacheTtlMs: 0` refreshes every warm call. Empty answers hold a warm list during the grace on read
+  and watch paths. DNS absent names resolve `[]`, and health reflects the last lookup outcome.
+  Consul ids default to `<serviceName>-<address>-<port>` across restarts. Kubernetes probe timeouts
+  name the API server and bound.
+- **`@setu-ts/grpc-plugin`.** Instance outcomes count no answer, peer cancel and server-fault codes
+  as failures; wire application errors succeed and caller cancellation reports nothing. Streaming
+  success remains at headers. Cancelling a response stream aborts its handler signal before awaiting
+  cleanup without a bound. Document per-pod discovery for balancing; drain 503s are not resent.
 
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
