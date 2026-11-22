@@ -28,7 +28,10 @@ cutting a release renames that heading to the version and is a rename, not a rec
   wait. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
   for it and stops normally.
 - **gRPC streams hold the drain.** A streamed RPC reply in flight at `stop()` now finishes before
-  the server closes, up to the drain bound. Other streams (SSE) are released as before.
+  the server closes, up to the drain bound, as a streamed body whose request registered `ctx.defer`
+  cleanups already did. Other streams (SSE) are released as before, but every streamed body is now
+  cancelled when its client leaves, and a Deno application that streams responses prints Deno's
+  legacy-abort notice (`--unstable-no-legacy-abort` removes it).
 - **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
   `Process failed` (fatal), `Response stream failed`, `Response trailers failed` (Node),
   `Request aborted before completion` and `Startup cancelled` come through the registered logger.

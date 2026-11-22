@@ -1084,11 +1084,13 @@ class Application implements IKernelApplication {
       }
       if (this.#stopPromise === null) {
         const starting = this.#startPromise;
-        this.#cancelRunningStart();
+        // Published before the cancellation logs, so a logger that calls
+        // stop() from `Startup cancelled` shares it instead of cancelling again.
         this.#stopPromise = starting.then(
           () => this.#doStop(),
           () => undefined,
         );
+        this.#cancelRunningStart();
       }
       return this.#stopPromise;
     }

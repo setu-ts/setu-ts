@@ -35,8 +35,8 @@ internal.
 ## Stopping, crashes and HEAD (since 0.14.0)
 
 - `app.start({ port, drainTimeoutMs })` sets how long `stop()` waits for in-flight requests (default
-  10 000 ms). A streamed gRPC, Connect or gRPC-Web reply holds the drain until it ends; other
-  streams do not.
+  10 000 ms). A streamed gRPC, Connect or gRPC-Web reply, and a streamed body whose request
+  registered `ctx.defer` cleanups, hold the drain until they end; other streams (SSE) do not.
 - With a logger registered, `stop()` logs `Server stopping`, `Shutdown drain finished` (with
   `remaining` and `timedOut`) and `Server stopped`; an uncaught exception or unhandled rejection
   while the application runs logs one `fatal` line, `Process failed`, and the process still ends as

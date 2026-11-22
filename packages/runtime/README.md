@@ -144,6 +144,10 @@ RuntimePlugin({
 }); // TLS, ALPN h2 or HTTP/1.1
 ```
 
+A streamed body that fails on an HTTP/2 stream resets that stream with `INTERNAL_ERROR`, so the
+client sees a failure rather than a clean end of a truncated response; on HTTP/1.1 the connection is
+destroyed.
+
 With `http2: true`, each new connection is classified by its first bytes: the HTTP/2 client preface
 goes to an HTTP/2 server, anything else to HTTP/1.1 at the first byte that differs, the way
 `Deno.serve` and Go's `http.Server` with unencrypted HTTP/2 behave. Browsers, plain `fetch`, health

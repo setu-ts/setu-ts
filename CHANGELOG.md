@@ -56,22 +56,25 @@ All notable changes to this project are documented here. The format follows
   `Request cleanup still waiting for the response stream to stop; its resources are still held`,
   with `{ requestId, method, path, waitedMs }`, and releases nothing. A failed response stream is
   logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
-  gRPC-Web reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()`
-  cancels the start: its close hooks run, a close hook registered later runs at once, no later
-  startup step runs, and a `listen()` already pending is closed when it resolves; a `stop()` after
-  startup's last step waits for `start()` and stops normally (V13-43).
+  gRPC-Web reply holds the shutdown drain until it ends (V13-23), as a streamed body whose request
+  registered `ctx.defer` cleanups already did. Every streamed body is cancelled when its client
+  leaves, with or without `ctx.defer` (new on Workers, where the body is not cancelled for you). A
+  `stop()` during `start()` cancels the start: its close hooks run, a close hook registered later
+  runs at once, no later startup step runs, and a `listen()` already pending is closed when it
+  resolves; a `stop()` after startup's last step waits for `start()` and stops normally (V13-43).
 - **`@setu-ts/runtime` (M143i, #611).** Node answers a refused WebSocket upgrade with the
   framework's response (status, reason phrase, headers, body), as Bun and Deno do;
   `rejectRawUpgrade` takes its reason phrases from a status table (V13-53). Bun keeps a quiet
   response stream open past its 10 s idle timeout (V13-42). Bun and Deno report once, at the first
   handshake whose limit is unlimited or above their ceiling (Bun 16 MiB, Deno 64 MiB), that the
   runtime cannot honour it (V13-41). A failed response stream is cut off without the runtime
-  printing it on Node, Bun and Deno, and Node no longer writes `Error: <message>` into the body
-  (V13-256). A Deno server configured for HTTP/2 states at listen that it sends no `GOAWAY` when
-  draining. A rejecting response-trailers promise on Node is reported as `Response trailers failed`.
-  Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain) are logged at `warn`, faults at
-  `error`. `onFatalError` does not report a throw an application captures with
-  `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
+  printing it on Node, Bun and Deno (an HTTP/2 stream on Node is reset with `INTERNAL_ERROR`, not
+  `NO_ERROR`, so the client sees a failure rather than a clean end), and Node no longer writes
+  `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2 states at listen
+  that it sends no `GOAWAY` when draining. A rejecting response-trailers promise on Node is reported
+  as `Response trailers failed`. Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain)
+  are logged at `warn`, faults at `error`. `onFatalError` does not report a throw an application
+  captures with `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
 - **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
   accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
   for a request whose client left before the response (the logger-plugin half of V13-110), so alerts

@@ -633,6 +633,45 @@ describe('a stop during start cancels the start (V13-43)', () => {
     expect(lines.filter((line) => line === 'Server stopping')).toHaveLength(1);
   });
 
+  it('cancels once when a logger calls stop() from the cancellation line (code review)', async () => {
+    const fake = createFakeRuntime();
+    const warnings: string[] = [];
+    const nested: Promise<void>[] = [];
+    const first = deferred();
+    const logger = {
+      level: 'info',
+      fatal: () => {},
+      error: () => {},
+      warn: (message: string) => {
+        warnings.push(message);
+        if (message === 'Startup cancelled') nested.push(app.stop());
+      },
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      child: () => logger,
+    };
+    const loggerPlugin: IPlugin = {
+      name: 'stopping-logger',
+      version: '1.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.LOGGER, logger as never);
+      },
+    };
+    const app = createApplication({
+      plugins: [runtimeWith(fake, (ctx) => ctx.lifecycle.onInit(() => first.promise)), loggerPlugin],
+    });
+    const starting = app.start({ port: 4219 });
+    starting.catch(() => undefined);
+    await flush();
+    const stopping = app.stop();
+    await expect(starting).rejects.toBeInstanceOf(StartCancelledError);
+    await stopping;
+    expect(warnings.filter((line) => line === 'Startup cancelled')).toHaveLength(1);
+    expect(nested).toEqual([stopping]);
+  });
+
   it('never waits past a 1 ms drain bound for a poll (CodeRabbit)', async () => {
     const fake = createFakeRuntime();
     const app = createApplication({ plugins: [runtimeWith(fake)] });
