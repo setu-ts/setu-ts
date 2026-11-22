@@ -45,8 +45,9 @@ const isCookieHeld = holdsOnlyReservedKeys;
 /**
  * The two revocation marker kinds. `revoked` is written for a sign-out (`destroy()`, or a commit
  * that moves a stored session back into the cookie) and for a commit that reached its fence past
- * every marker; `superseded` for the old id of a `regenerate()`. A marker lives under its own id, `<kind>:<session id>`, so a racing commit to the
- * session id cannot overwrite it. Session ids are UUIDs and never contain `:`.
+ * every marker; `superseded` for the old id of a `regenerate()`. A marker lives under its own id,
+ * `<kind>:<session id>`, so a racing commit to the session id cannot overwrite it. Session ids are
+ * UUIDs and never contain `:`.
  */
 type MarkerKind = 'revoked' | 'superseded';
 
@@ -626,9 +627,10 @@ export class SessionService implements ISessionService {
       await this.#store!.destroy(written);
     } else if (stale) {
       // The row is this session's own, shared by every request on it, and no marker can now say
-      // whether it was signed out: end it under a `revoked` marker, which every concurrent commit
-      // and regeneration refuses, so a signed-out row this write put back cannot move to a new id.
-      // Its successor chain is not followed: this request signed nobody out.
+      // whether it was signed out: end it under a `revoked` marker, which every commit and
+      // regeneration that checks its markers afterwards refuses, so a signed-out row this write put
+      // back cannot move to a new id from then on (a regeneration that committed during the stall
+      // keeps its id). Its successor chain is not followed: this request signed nobody out.
       await this.#revoke(source, 'revoked', undefined, undefined, false);
     }
     return marked || stale;

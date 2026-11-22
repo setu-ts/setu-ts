@@ -942,11 +942,12 @@ one in-flight token fetch.
 
 **Decision — a commit that reaches its fence past every marker (maintainer, 2026-11-22).** No marker
 can tell such a commit whether its session was signed out. It ends the session under a `revoked`
-marker, without following successor links (option a), so a concurrent plain commit and a
-regeneration in another tab are both refused and a row the stalled write may have put back cannot
-move to a new id. Option (b), a `superseded` marker that lets a racing regeneration succeed and
-documents the race as accepted, was declined; this branch had flipped between the two twice, so the
-comparison below is the recorded reason (looked up 2026-11-22):
+marker, without following successor links (option a), so every later commit and regeneration that
+checks its markers is refused (one that committed during the stall keeps its new id) and a row the
+stalled write may have put back cannot move to a new id. Option (b), a `superseded` marker that lets
+a racing regeneration succeed and documents the race as accepted, was declined; this branch had
+flipped between the two twice, so the comparison below is the recorded reason (looked up
+2026-11-22):
 
 | Framework                         | Late write after a logout                                                                                   | Fits |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---- |

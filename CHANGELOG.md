@@ -53,10 +53,11 @@ All notable changes to this project are documented here. The format follows
   loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), a
   regeneration or `clear()` sign-out refused that way still revokes the old id, and a commit that
   reaches its marker check that late ends its session (deleting its row under a `revoked` marker,
-  which every concurrent commit and regeneration refuses, without following its successor links; a
-  stalled regeneration deletes only its new row). `restoreRevocationCheck: true` also checks the
-  markers on every store-held restore. Store commits write this request's changes onto the current
-  row (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload write), so a
+  which every commit and regeneration that checks its markers afterwards refuses (one that committed
+  during the stall keeps its new id), without following its successor links; a stalled regeneration
+  deletes only its new row). `restoreRevocationCheck: true` also checks the markers on every
+  store-held restore. Store commits write this request's changes onto the current row
+  (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload write), so a
   concurrent request's keys survive. `SessionService.commit` takes an optional `SessionCommitPolicy`
   and returns a `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
 - **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
