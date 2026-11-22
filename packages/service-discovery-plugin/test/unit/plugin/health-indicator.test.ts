@@ -226,3 +226,38 @@ describe('ServiceDiscoveryPlugin — health indicator (M70c)', () => {
     expect(data.everResolved).toBe(true);
   });
 });
+
+it('keeps a warm name outage at warn after cold names spend the shared warning budget', async () => {
+  let down = false;
+  const provider = {
+    ...makeProvider().provider,
+    resolve: (name: string) =>
+      down || name.startsWith('cold-')
+        ? Promise.reject(new Error(`no ${name}`))
+        : Promise.resolve([instance({ id: name })]),
+  };
+  const logger = new RecordingLogger();
+  let discovery!: { resolve(name: string): Promise<unknown> };
+  const ctx = {
+    runtime: createFakeRuntime(),
+    logger,
+    services: {
+      register: (_name: string, value: typeof discovery) => {
+        discovery = value;
+      },
+    },
+    health: { register() {} },
+    lifecycle: { onClose() {} },
+  } as never;
+  ServiceDiscoveryPlugin({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }).register(ctx);
+  await discovery.resolve('payments');
+  for (let n = 0; n < 30; n++) await discovery.resolve(`cold-${n}`).catch(() => {});
+  const coldWarns = logger.entries.filter((entry) => entry.level === 'warn').length;
+  expect(coldWarns).toBe(21); // 20 plus the one notice; the rest went to debug.
+  down = true;
+  await discovery.resolve('payments'); // Background refresh of a warm name fails.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const last = logger.entries.at(-1);
+  expect(last?.level).toBe('warn');
+  expect(last?.message).toContain("resolve 'payments'");
+});

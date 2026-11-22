@@ -1,6 +1,7 @@
 /**
- * A logger wrapper that caps how many `warn` lines the per-name resolve
- * reporters write together. Internal — not exported from the package barrel.
+ * A logger wrapper that caps how many `warn` lines the resolve reporters of
+ * names with no non-empty list (cold or empty-only) write together; a name
+ * that has a non-empty list is not budgeted. Internal — not exported from the package barrel.
  *
  * Each failing name opens its own reporter, which warns once per failure run.
  * Names an application resolves are its own choice, but nothing stops one from
@@ -12,7 +13,7 @@
  */
 import type { ConnectionErrorLogger } from '@setu-ts/common';
 
-/** `warn` lines allowed per window across every resolve reporter. */
+/** `warn` lines allowed per window across the budgeted resolve reporters. */
 export const RESOLVE_WARN_BUDGET = 20;
 
 /** The budget window, in milliseconds. */

@@ -163,9 +163,9 @@ delivered list nor marks the name failed or starts retry spacing; its failure is
 opens a failure run that the next success closes.
 
 Discovery names should be chosen by the application, never taken from a request. As a backstop, the
-per-name resolve warnings of names that have never resolved share a budget of 20 (a name with a
-cached list always warns) `warn` lines a minute; past it, further ones log at `debug` and one `warn`
-says so.
+resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a budget
+of 20 `warn` lines a minute; past it, further ones log at `debug` and one `warn` says so. A name
+with a non-empty list always warns.
 
 ## Self-registration (Consul only)
 

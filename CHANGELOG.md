@@ -67,9 +67,9 @@ All notable changes to this project are documented here. The format follows
   reconnect).
 - **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
   empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
-  watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The per-name
-  resolve warnings of names that have never resolved share a budget of 20 `warn` lines a minute;
-  past it they log at `debug`, with one notice.
+  watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The resolve
+  warnings of names with no non-empty list (never resolved, or only ever empty) share a budget of 20
+  `warn` lines a minute; past it they log at `debug`, with one notice.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
   on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
   failures leave no cached failure state. A name keeps its reporter while its failure run is open

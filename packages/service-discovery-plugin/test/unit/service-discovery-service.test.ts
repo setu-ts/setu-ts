@@ -1014,5 +1014,13 @@ it('tells the reporter factory whether a failing name is warm', async () => {
     ['never', false],
     ['known', true],
   ]);
+  // A name that only ever answered empty is not warm: its warnings stay budgeted.
+  provider.failWith(null);
+  provider.setInstances([]);
+  await service.resolve('absent');
+  provider.failWith(new Error('down'));
+  await service.resolve('absent');
+  await flush();
+  expect(seen.at(-1)).toEqual(['absent', false]);
   service.close();
 });

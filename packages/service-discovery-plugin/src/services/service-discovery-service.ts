@@ -105,7 +105,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param reporter - Receives each probe failure's reason and each recovery
    *   (M139f X10-3); the plugin passes a logging reporter
    * @param resolveReporter - Builds an independent reporter for each failing name;
-   *   `warm` says whether the name already has a cached list
+   *   `warm` says whether the name already has a non-empty cached list
    * @param onListenerError - Receives one listener error per name until every failing listener has succeeded or unsubscribed, or the watch stopped
    */
   constructor(
@@ -420,10 +420,11 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   #resolveReporterFor(name: string): ConnectionErrorReporter {
-    // `warm`: the name has a list in hand, so a failure is an outage of a
-    // service already in use (the plugin never caps those warnings).
-    const reporter =
-      this.#resolveReporters.get(name) ?? this.#resolveReporter(name, this.#cache.has(name));
+    // `warm`: the name has a non-empty list in hand, so a failure is an outage
+    // of a service already in use (the plugin never caps those warnings). An
+    // empty-only name (an absent name, possibly from a request) is not warm.
+    const warm = (this.#cache.get(name)?.instances.length ?? 0) > 0;
+    const reporter = this.#resolveReporters.get(name) ?? this.#resolveReporter(name, warm);
     this.#resolveReporters.delete(name);
     this.#resolveReporters.set(name, reporter);
     if (this.#resolveReporters.size > 256)

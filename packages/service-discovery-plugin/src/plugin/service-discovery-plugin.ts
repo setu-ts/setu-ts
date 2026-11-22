@@ -85,8 +85,8 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         source: `service-discovery-plugin: ${provider.kind}`,
         logger: () => ctx.logger,
       });
-      // One shared budget caps the warn lines of names that never resolved
-      // (possibly taken from requests); a warm name's outage always warns.
+      // One shared budget caps the warn lines of names with no non-empty list
+      // (possibly taken from requests); a name with a list always warns.
       const resolveLogger = createWarnBudget(
         () => ctx.logger,
         () => ctx.runtime.hrtime(),
