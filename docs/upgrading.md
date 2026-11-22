@@ -35,12 +35,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
   `connectionString` is no longer accepted (use the SAS connection-string form).
 - **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
 - **Uploads.** A disallowed MIME type answers `415` instead of `400`. `createUploadMiddleware`
-  throws `RangeError` for `maxSize` or `maxFiles` below 1 or fractional, an empty `fieldname`, or a
-  non-array `allowedMimeTypes`.
+  throws `RangeError` for a `maxSize` or `maxFiles` that is not a whole number of at least 1, a
+  `fieldname` that is not a non-empty string, or an `allowedMimeTypes` that is not an array of
+  strings.
 - **Storage keys.** A key with a `.` or `..` path segment is refused with a `400`. An empty key, or
   one that is not a string (a `String` object included), is refused the same way.
 - **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
-  `timeout`, not `timeoutSeconds`. `initTimeoutSeconds: 0` is refused.
+  `timeout`, not `timeoutSeconds`. `initTimeoutSeconds` must be a finite number in `(0, 2147483]`,
+  so `0` is refused.
 - **Slack.** A notification's `subject` is now part of the posted text.
 - **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`.
 

@@ -47,28 +47,29 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`; V13-232,
   V13-233, V13-234, V13-235, V13-217, V13-245, V13-248, V13-4, V13-193, V13-257).** LaunchDarkly
   receives `waitForInitialization({ timeout })` (it was passed `timeoutSeconds`, which the SDK does
-  not read, so an unreachable LaunchDarkly held startup forever); `initTimeoutSeconds` must be above
-  `0`. Azure storage reads `connectionString` through `fromConnectionString`, signs SAS URLs with
-  the SDK's `generateSasUrl` (an encoded name, the client's own host) and keeps an injected
-  `BlobServiceClient` as given. GCS signed URLs expire in epoch milliseconds (they were always in
-  1970), the GCS arm turns the SDK's own retry off (a retried `502`/`503` download ended the process
-  on 7.x and 8.x), and `getStream` waits for the first chunk, so an absent object is `null`. An
-  outage on a storage or secrets arm rejects with a `503`/`504` (`BackendUnavailableError`,
-  `BackendOutcomeUnknownError`, `SecretProviderUnavailableError`); other failures name the provider.
-  An SES or SendGrid send that does not settle in time is a `504`, a refused connection a `503`;
-  `SesSdkModule.GetAccountCommand` is optional (a module without it gets no readiness probe).
-  `exists`/`delete` reject on an outage instead of answering "not there", on every provider, `local`
-  included. `delete()` of an absent key is `false` on every provider; S3 and B2 check with a `HEAD`
-  first (a credential without `s3:ListBucket` gets a 403 there, so the delete goes on and answers
-  `true`). A missing object is `StorageObjectNotFoundError` (`404`). `b2` with no `region`,
-  `endpoint` or injected `client` refuses to start. `createUploadMiddleware` answers a disallowed
-  type `415`. It refuses, when built, options its upload brand cannot describe (a `RangeError`
-  naming the rule). A key with a `.` or `..` path segment is refused with a `400` by every
-  `StorageService` call and by the S3, B2, GCS and Azure providers used directly (on Azure such a
-  key could reach another container). An empty key, or one that is not a string (a `String` object
-  included), is refused the same way. Local `get` rejects a permission or I/O failure instead of
-  answering `404`. Copied backend error text has its control characters replaced. An SMTP
-  `contentId` attachment is sent inline. Slack posts the subject in bold before the body.
+  not read, so an unreachable LaunchDarkly held startup forever); `initTimeoutSeconds` must be a
+  finite number in `(0, 2147483]`. Azure storage reads `connectionString` through
+  `fromConnectionString`, signs SAS URLs with the SDK's `generateSasUrl` (an encoded name, the
+  client's own host) and keeps an injected `BlobServiceClient` as given. GCS signed URLs expire in
+  epoch milliseconds (they were always in 1970), the GCS arm turns the SDK's own retry off (a
+  retried `502`/`503` download ended the process on 7.x and 8.x), and `getStream` waits for the
+  first chunk, so an absent object is `null`. An outage on a storage or secrets arm rejects with a
+  `503`/`504` (`BackendUnavailableError`, `BackendOutcomeUnknownError`,
+  `SecretProviderUnavailableError`); other failures name the provider. An SES or SendGrid send that
+  does not settle in time is a `504`, a refused connection a `503`; `SesSdkModule.GetAccountCommand`
+  is optional (a module without it gets no readiness probe). `exists`/`delete` reject on an outage
+  instead of answering "not there", on every provider, `local` included. `delete()` of an absent key
+  is `false` on every provider; S3 and B2 check with a `HEAD` first (a credential without
+  `s3:ListBucket` gets a 403 there, so the delete goes on and answers `true`). A missing object is
+  `StorageObjectNotFoundError` (`404`). `b2` with no `region`, `endpoint` or injected `client`
+  refuses to start. `createUploadMiddleware` answers a disallowed type `415`. It refuses, when
+  built, options its upload brand cannot describe (a `RangeError` naming the rule). A key with a `.`
+  or `..` path segment is refused with a `400` by every `StorageService` call and by the S3, B2, GCS
+  and Azure providers used directly (on Azure such a key could reach another container). An empty
+  key, or one that is not a string (a `String` object included), is refused the same way. Local
+  `get` rejects a permission or I/O failure instead of answering `404`. Copied backend error text
+  has its control characters replaced. An SMTP `contentId` attachment is sent inline. Slack posts
+  the subject in bold before the body.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery

@@ -66,7 +66,8 @@ const OPS: readonly Op[] = [
   ['delete', (s, k) => s.delete(k)],
   ['exists', (s, k) => s.exists(k)],
   ['getSignedUrl', (s, k) => s.getSignedUrl(k, { expiresIn: 60 })],
-  ['getStream', (s, k) => s.getStream(k)],
+  // Optional on StorageProvider; every provider under test implements it.
+  ['getStream', (s, k) => s.getStream?.(k) ?? Promise.reject(new Error('no getStream'))],
 ];
 
 /** Wraps a provider so every call after connect() is counted. */
