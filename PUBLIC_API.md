@@ -340,22 +340,24 @@ the kernel logs `Request aborted before completion` at once (for a request that 
 its cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
 released under a running handler, and a handler that never settles keeps what it holds. Every
 streamed body is cancelled when the request's signal aborts, with or without cleanups, so a client
-that leaves reaches the source's `cancel()` even on a runtime that never cancels the body. That
-releases the drain once the cancel settles; a request with `ctx.defer` cleanups whose source's
-`cancel()` never settles keeps its drain slot until `stop()` reaches its drain bound. A streamed
-body's cleanups run once on that abort: the kernel cancels the body first and runs them once its
-`cancel()` settles, with no time limit, so a `cancel()` that never settles keeps the request's
-resources. It waits for the source's `cancel()`, not for its `pull` or any pump it started, which no
-reader can see; a source that does work of its own (in `pull`, or a pump it started) must make its
-`cancel()` wait for that work, and a source with no `cancel()` gets no wait, so a limit released
-through `defer` does not cover work in its `pull`. `stop()` is not held by such a request beyond the
-drain bound; its cleanups run if and when the `cancel()` settles. When a logger is registered, a
-cleanup still waiting after 30 s logs one `warn` line,
+that leaves reaches the source's `cancel()` even on a runtime that never cancels the body. A request
+with `ctx.defer` cleanups leaves the drain only after that cancel has settled and its cleanups have
+run (for an early middleware response, after its handler has settled too); one whose source's
+`cancel()` never settles stays in flight, and at the drain bound `stop()` stops waiting for it
+without releasing it. A streamed body's cleanups run once on that abort: the kernel cancels the body
+first and runs them once its `cancel()` settles, with no time limit, so a `cancel()` that never
+settles keeps the request's resources. It waits for the source's `cancel()`, not for its `pull` or
+any pump it started, which no reader can see; a source that does work of its own (in `pull`, or a
+pump it started) must make its `cancel()` wait for that work, and a source with no `cancel()` gets
+no wait, so a limit released through `defer` does not cover work in its `pull`. `stop()` is not held
+by such a request beyond the drain bound; its cleanups run if and when the `cancel()` settles. When
+a logger is registered, a cleanup still waiting after 30 s logs one `warn` line,
 `Request cleanup still waiting for the response stream to stop; its resources are still held`, with
-`{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime, is
-unref'd where the runtime provides `IRuntimeServices.unrefTimer` (on a runtime without it the timer
-stays referenced and can delay process exit by up to 30 s), fires at most once, and is cleared when
-`cancel()` settles or at `stop()`; with no logger, no timer is set. A streamed body whose source
+`{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime,
+fires at most once, and is cleared when `cancel()` settles or at `stop()`; with no logger, no timer
+is set. The kernel tries to unref it through `IRuntimeServices.unrefTimer` (a no-op on Workers;
+without that hook, whether the timer stays referenced depends on the runtime), and a timer that
+stays referenced can delay process exit until it fires or is cleared. A streamed body whose source
 fails is logged once as `Response stream failed` (`{ requestId, method, path, status, error }`), and
 the error still aborts the response.
 
