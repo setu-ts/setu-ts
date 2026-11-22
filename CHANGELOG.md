@@ -50,12 +50,13 @@ All notable changes to this project are documented here. The format follows
   commit to a restored session checks it after its write and deletes its own write when present,
   sending no cookie. A regeneration whose source was signed out meanwhile is refused, and a sign-out
   that lands after a regeneration's check also ends the regenerated session. A commit whose request
-  loaded the session longer ago than a marker lives (`maxAge`) is refused.
-  `restoreRevocationCheck: true` also checks the markers on every store-held restore. Store commits
-  write this request's changes onto the current row (`storeCommit: 'changes'`, the new default;
-  `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.
-  `SessionService.commit` takes an optional `SessionCommitPolicy` and returns a
-  `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
+  loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), and
+  a regeneration refused that way still revokes the old id. `restoreRevocationCheck: true` also
+  checks the markers on every store-held restore. Store commits write this request's changes onto
+  the current row (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload
+  write), so a concurrent request's keys survive. `SessionService.commit` takes an optional
+  `SessionCommitPolicy` and returns a `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`),
+  both exported.
 - **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
   V13-20).** A signed-in visitor's response, a response setting the session cookie and one carrying
   a CSRF token answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as
@@ -76,7 +77,7 @@ All notable changes to this project are documented here. The format follows
   application write, a CSRF token read and a read of a restored session holding application data) is
   never stored. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
   arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
-  uses too.
+  uses too; a value with an unclosed quote is never stored.
 - **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
   CORS at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out

@@ -60,10 +60,12 @@ before it. Move such a middleware below 10 (or 125) if it must run first.
 ### Sessions: revocation markers and `storeCommit` (`@setu-ts/session-plugin`)
 
 On the store strategy a sign-out or regeneration now writes a marker entry, `revoked:<id>` or
-`superseded:<id>`, beside the session rows, expiring after `maxAge`; an `ISessionStore` of your own
-sees those ids. A commit that finds its session revoked while it ran is refused and sends no cookie.
-Use Redis with `noeviction` (or a dedicated instance) for sessions; cache-plugin's memory cache
-evicts at `maxSize` and is for development only.
+`superseded:<id>`, beside the session rows, expiring one second after `maxAge`; an `ISessionStore`
+of your own sees those ids, and a `superseded` marker written by a committed regeneration carries
+`"next": "<new id>"`. A commit that finds its session revoked while it ran is refused and sends no
+cookie, and so is a commit whose request loaded the session `maxAge` or more ago (a regeneration
+refused that way still revokes the old id). Use Redis with `noeviction` (or a dedicated instance)
+for sessions; cache-plugin's memory cache evicts at `maxSize` and is for development only.
 
 Store commits now default to `storeCommit: 'changes'`: a commit writes this request's changes onto
 the current row, and a commit whose row is gone is refused. Set `storeCommit: 'snapshot'` to keep
@@ -88,17 +90,17 @@ tenant binding is no longer committed on a `404` that is not a page navigation.
 
 ### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
 
-`cacheMiddleware` no longer stores a response marked `private` or `no-store`, nor one for a request
-whose session was written (an application key set, deleted or cleared, or a `regenerate()` or
-`destroy()`), that read a CSRF token, or that read a restored session holding application data, even
-when the handler marks it `public`, and a request carrying `Authorization` or any cookie is served
-only an entry stored with `Cache-Control: public` that does not vary on `Cookie` or `Authorization`.
-A response varying on either is stored and served only for requests carrying no cookie and no
-`Authorization`, and a `Vary: *` response is never stored. An application whose visitors all carry
-an unrelated cookie (analytics, consent) gets nothing cached until it marks responses `public` or
-names its session cookie: `cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request
-carrying any cookie or `Authorization` no longer shares a handler run with concurrent misses for the
-same key.
+`cacheMiddleware` no longer stores a response marked `private` or `no-store` (or with a malformed
+`Cache-Control`), nor one for a request whose session was written (an application key set, deleted
+or cleared, or a `regenerate()` or `destroy()`), that read a CSRF token, or that read a restored
+session holding application data, even when the handler marks it `public`, and a request carrying
+`Authorization` or any cookie is served only an entry stored with `Cache-Control: public` that does
+not vary on `Cookie` or `Authorization`. A response varying on either is stored and served only for
+requests carrying no cookie and no `Authorization`, and a `Vary: *` response is never stored. An
+application whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached
+until it marks responses `public` or names its session cookie:
+`cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
+`Authorization` no longer shares a handler run with concurrent misses for the same key.
 
 ### Docs routes start no session (`@setu-ts/openapi-plugin`)
 

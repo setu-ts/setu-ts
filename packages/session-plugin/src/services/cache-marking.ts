@@ -82,9 +82,10 @@ export function isSharedStorable(cacheControl: string | null): boolean {
   if (cacheControl === null) {
     return false;
   }
-  // A malformed value (an unclosed quote) counts as storable, so the plugin's own marking applies.
-  const names = cacheControlDirectives(cacheControl) ?? [];
-  return !names.includes('private') && !names.includes('no-store');
+  const names = cacheControlDirectives(cacheControl);
+  // A malformed value (an unclosed quote) is no shared-cacheable directive; the application
+  // directive reads it as absent, so the plugin's own marking applies.
+  return names !== undefined && !names.includes('private') && !names.includes('no-store');
 }
 
 /**
@@ -219,7 +220,12 @@ export class RequestCacheMarking {
   /** The application's own directive, or `null` when it set none (or left the plugin's). */
   #applicationDirective(): string | null {
     const value = this.#ctx.response.snapshot().headers.get('cache-control');
-    return value === null || value === PRIVATE_DIRECTIVE ? null : value;
+    // A malformed value is no directive the application can rely on: the plugin marks the response.
+    return value === null ||
+      value === PRIVATE_DIRECTIVE ||
+      cacheControlDirectives(value) === undefined
+      ? null
+      : value;
   }
 
   /**

@@ -319,8 +319,13 @@ export class SessionService implements ISessionService {
     // A marker lives at least `maxAgeMs` from its sign-out, which came after this request loaded the
     // session. A commit later than that could no longer see one, so it is refused outright.
     if (source !== null && now - (this.#loadedAt.get(session) ?? now) >= this.#config.maxAgeMs) {
-      // A regeneration is still a revocation of the old id (an auth-session stamp relies on it).
-      await this.revokeSuperseded(session);
+      // A regeneration is still a revocation of the old id (an auth-session stamp relies on it),
+      // and so is a sign-out that cleared every application key.
+      if (session.wasRegenerated) {
+        await this.revokeSuperseded(session);
+      } else if (isCookieHeld(session.snapshot().data)) {
+        await this.#revoke(source, 'revoked');
+      }
       return this.#refused(ctx);
     }
 

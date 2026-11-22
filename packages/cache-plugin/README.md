@@ -103,8 +103,8 @@ read-through calls; the capability is typed as `ICacheStore`, so narrow it with
 
 `cacheMiddleware` stores nothing that belongs to one visitor:
 
-- A response is not stored when its `Cache-Control` holds `private` or `no-store`, or when it sets a
-  cookie (as before), whatever the request.
+- A response is not stored when its `Cache-Control` holds `private` or `no-store` or is malformed
+  (an unclosed quoted-string), or when it sets a cookie (as before), whatever the request.
 - A request carrying `Authorization`, or a credential cookie, is **credentialed**. It is served a
   `HIT` only from an entry stored with `Cache-Control: public` whose `Vary` names neither `Cookie`
   nor `Authorization`, never shares an origin run with another request, and its own response is

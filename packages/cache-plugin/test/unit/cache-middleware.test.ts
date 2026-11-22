@@ -760,6 +760,7 @@ describe('cacheMiddleware — per-visitor responses', () => {
     ['private', withCacheControl('private, max-age=60')],
     ['no-store', withCacheControl('no-store')],
     ['private with a field list', withCacheControl('private="set-cookie", max-age=60')],
+    ['with a malformed (unclosed-quote) value', withCacheControl('public, max-age=60, x="a')],
   ] as const)('never stores a response marked %s', async (_name, handler) => {
     const { app, calls } = await appWith(handler);
     try {
@@ -818,6 +819,7 @@ describe('cacheMiddleware — per-visitor responses', () => {
     ['a quoted argument holding "public"', 'max-age=60, example="one,public,two"', 'MISS'],
     ['an escaped quote before "public"', 'example="a\\",public", max-age=60', 'MISS'],
     ['a real public directive', 'max-age=60, example="one,two", public', 'HIT'],
+    ['an unclosed quote', 'public, max-age=60, x="a', 'MISS'],
   ] as const)(
     'reads Cache-Control directives outside quotes: %s',
     async (_name, cacheControl, second) => {

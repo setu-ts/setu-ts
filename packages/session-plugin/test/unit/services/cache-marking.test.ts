@@ -158,6 +158,13 @@ describe('signals and the after-handler decision', () => {
     expect(anonymous.ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY)).toBeUndefined();
   });
 
+  it('a malformed directive is no application directive: the plugin marks the response', () => {
+    const malformed = 'public, max-age=300, x="a';
+    expect(isSharedStorable(malformed)).toBe(false);
+    const r = run({ session: SIGNED_IN(), directive: malformed, read: true });
+    expect([r.cacheControl, r.vary]).toEqual(['private, no-store', 'Cookie']);
+  });
+
   it('a quoted Cache-Control argument naming private does not make public non-storable', () => {
     expect(isSharedStorable('public, example="a,private"')).toBe(true);
     expect(isSharedStorable('public, private="set-cookie"')).toBe(false);

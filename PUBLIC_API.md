@@ -5506,7 +5506,10 @@ package README's "What `SameSite` does not separate".
   checks them after its write and deletes its own write when one is present (a `'refused'` outcome,
   no `Set-Cookie`, one `debug` line with no id). It holds on a linearizable store that does not
   evict live keys. `restoreRevocationCheck` closes the one-round-trip window for a request that
-  starts during a racing commit.
+  starts during a racing commit. Markers expire one second after `maxAge`, and a commit whose
+  request loaded the session `maxAge` or more ago is refused (a regeneration refused that way still
+  revokes the old id). A `superseded` marker names the new id, and a sign-out of the old id also
+  revokes it; when two requests regenerate one id at once, only the later successor is named.
 - **Cache marking (0.14.0).** The middleware writes `Cache-Control: private, no-store` and
   `Vary: Cookie` on a response for a restored session holding application data (before the handler),
   at the first application write, and at a `getCsrfToken` read; an anonymous response that read the

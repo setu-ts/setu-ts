@@ -141,6 +141,31 @@ describe('revocation markers', () => {
     expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded' });
   });
 
+  it('a clear() sign-out refused for outliving every marker still revokes the row', async () => {
+    const store = new ScriptedStore();
+    const { service, clock, config } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.clear();
+    clock.advance(config.maxAgeMs);
+    expect(await service.commit(c.ctx, s)).toBe('refused');
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
+  });
+
+  it('an ordinary write refused for outliving every marker revokes nothing', async () => {
+    const store = new ScriptedStore();
+    const { service, clock, config } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.set('cart', 1);
+    clock.advance(config.maxAgeMs);
+    expect(await service.commit(c.ctx, s)).toBe('refused');
+    expect(store.rows.has(`revoked:${id}`)).toBe(false);
+  });
+
   it('a regeneration records its new id on the superseded marker', async () => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);

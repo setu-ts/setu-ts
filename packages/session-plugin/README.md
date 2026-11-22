@@ -76,9 +76,10 @@ names the new id, and a sign-out of the old id also revokes the id it names: a s
 after a regeneration's marker check therefore still ends the regenerated session. Markers are
 written only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they
 expire one second after `maxAge` (for stores that round a TTL down), and a commit whose request
-loaded the session `maxAge` or more ago is refused, since no marker could still fence it. A marker
-names one successor: when two requests regenerate the same id at once (a double-submitted sign-in),
-a sign-out racing both ends only the session the later one moved to.
+loaded the session `maxAge` or more ago is refused, since no marker could still fence it (a
+regeneration refused that way still revokes the old id). A marker names one successor: when two
+requests regenerate the same id at once (a double-submitted sign-in), a sign-out racing both ends
+only the session the later one moved to.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
@@ -100,8 +101,9 @@ before it) and must not evict a live key:
 
 An evicted or not-yet-visible marker reverts that one revocation to an unfenced delete. Your own
 store sees ids of the form `revoked:<uuid>` and `superseded:<uuid>` beside session ids, holding the
-payload `{ "__setu_marker": "revoked" }` (a `superseded` marker also carries `"next": "<new id>"`).
-The cookie strategy has no row to revoke; `signIn.sessionStamp` (below) is its answer.
+payload `{ "__setu_marker": "revoked" }` (a `superseded` marker written by a committed regeneration
+also carries `"next": "<new id>"`). The cookie strategy has no row to revoke; `signIn.sessionStamp`
+(below) is its answer.
 
 ### Concurrent requests
 
