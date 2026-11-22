@@ -115,6 +115,29 @@ describe('generated code and guidance', () => {
     }
   });
 
+  it.each([
+    ['redis', 'Redis at REDIS_URL'],
+    ['rabbitmq', 'RabbitMQ at RABBITMQ_URL'],
+    ['nats', 'NATS at NATS_URL'],
+    ['kafka', 'Kafka at KAFKA_BROKERS'],
+    ['pubsub', 'the Pub/Sub emulator at PUBSUB_EMULATOR_HOST (project PUBSUB_PROJECT_ID)'],
+    ['service-bus', 'the Service Bus emulator at SERVICE_BUS_CONNECTION_STRING'],
+  ])('names the setting that holds the %s address', async (broker, target) => {
+    const h = harness();
+    expect(await h.run(['new', 'api', '--template', 'rest'])).toBe(0);
+    expect(await h.run(['add', 'messaging', '--broker', broker], '/work/api'), h.err.text()).toBe(
+      0,
+    );
+    expect(h.out.text()).toContain(
+      `  The app and generated tests now connect to ${target} during startup.\n`,
+    );
+  });
+
+  it('covers every broker with a connection in the address table', () => {
+    const named = BROKERS.filter((name) => brokerSpec(name)?.connection !== undefined);
+    expect(named).toEqual(['redis', 'rabbitmq', 'nats', 'kafka', 'pubsub', 'service-bus']);
+  });
+
   it('names every real Redis provider and its offline replacement', async () => {
     for (const [pkg, factory, flag] of [
       ['cache', CachePlugin, '--store'],

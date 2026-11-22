@@ -127,6 +127,7 @@ import {
   type BrokerName,
   type BrokerSpec,
   type ComposeBacking,
+  type TransportConnection,
 } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES, TELEMETRY_PEERS } from '../templates/client-dependencies.ts';
@@ -1877,6 +1878,19 @@ const BROKER_LABELS: Readonly<Record<BrokerName, string>> = {
   'service-bus': 'the Service Bus emulator',
 };
 
+/**
+ * Where the app reaches a broker: its connection setting, or the emulator host
+ * when the SDK has one, since the connection setting is then the project id.
+ *
+ * @param connection - The broker's connection settings
+ * @returns The `at …` phrase naming the setting that holds the address
+ */
+function connectionTarget({ variable, emulator }: TransportConnection): string {
+  return emulator === undefined
+    ? `at ${variable}`
+    : `at ${emulator.variable} (project ${variable})`;
+}
+
 /** One `setu add` option that selects one of several values. */
 interface AddChoice {
   /** The flag, without dashes. */
@@ -3019,7 +3033,7 @@ async function addOne(
     if (configWired && searchDirs.length === 1) {
       const label = BROKER_LABELS[selected.name];
       deps.log(
-        `  The app and generated tests now connect to ${label} at ${variable} during startup.`,
+        `  The app and generated tests now connect to ${label} ${connectionTarget(selected.connection)} during startup.`,
       );
       const services = selected.compose?.dependsOn ?? [];
       if (services.length > 0) {
