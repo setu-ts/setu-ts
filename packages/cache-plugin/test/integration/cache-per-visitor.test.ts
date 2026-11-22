@@ -30,6 +30,7 @@ async function buildApp(priority: number) {
     cart: 0,
     publicForm: 0,
     publicMe: 0,
+    anonPublic: 0,
   };
   const app = createApplication({
     plugins: [
@@ -88,6 +89,13 @@ async function buildApp(priority: number) {
             const user = String(getSession(c).get('userId') ?? 'guest');
             c.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Accept' });
             return c.response.text(`me ${user}`);
+          });
+          // An anonymous page that read the session, whose handler replaces `Vary` and sets `public`.
+          ctx.router.get('/anon-public', (c) => {
+            calls.anonPublic += 1;
+            const user = String(getSession(c).get('userId') ?? 'guest');
+            c.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Accept' });
+            return c.response.text(`anon ${user}`);
           });
           ctx.router.get('/write', (c) => {
             calls.write += 1;
@@ -169,6 +177,22 @@ describe.each([
       expect((await app.inject(get('/public-me', { cookie: alice }))).body).toBe('me user-alice');
       expect((await app.inject(get('/public-me', { cookie: bob }))).body).toBe('me user-bob');
       expect([calls.publicForm, calls.publicMe]).toEqual([2, 2]);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('stores a session-reading page whose handler drops Vary only for visitors without cookies', async () => {
+    const { app, calls } = await buildApp(priority);
+    try {
+      expect((await app.inject(get('/anon-public'))).body).toBe('anon guest');
+      const hit = await app.inject(get('/anon-public'));
+      expect(hit.headers.get('x-cache')).toBe('HIT');
+      expect(hit.headers.get('vary')?.toLowerCase()).toContain('cookie');
+      const alice = cookieOf((await app.inject(get('/signin', { 'x-user': 'alice' }))).headers);
+      const own = await app.inject(get('/anon-public', { cookie: alice }));
+      expect([own.body, own.headers.get('x-cache')]).toEqual(['anon user-alice', 'MISS']);
+      expect(calls.anonPublic).toBe(2);
     } finally {
       await app.stop();
     }

@@ -9,7 +9,10 @@ import type {
   IServiceRegistry,
   ITenant,
 } from '@setu-ts/common';
-import { PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
+import {
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
@@ -835,6 +838,73 @@ describe('cacheMiddleware — per-visitor responses', () => {
       }
     },
   );
+
+  // A response flagged as depending on cookies is stored as varying on Cookie, whatever its headers.
+  const cookieDependent: Handler = (ctx) => {
+    ctx.state.set(COOKIE_DEPENDENT_RESPONSE_STATE_KEY, true);
+    return ctx.response
+      .setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Accept' })
+      .text(ctx.request.headers.get('cookie') ?? 'no cookie');
+  };
+
+  it('stores a cookie-dependent response with Vary: Cookie, never for a request with a cookie', async () => {
+    const { app, calls } = await appWith(cookieDependent);
+    try {
+      const first = await app.inject(get());
+      expect(first.headers.get('vary')).toBe('Accept');
+      const hit = await app.inject(get());
+      expect([hit.headers.get('x-cache'), hit.headers.get('vary')]).toEqual([
+        'HIT',
+        'Accept, Cookie',
+      ]);
+      const withCookie = await app.inject(get({ cookie: 'setu_session=a' }));
+      expect([withCookie.body, withCookie.headers.get('x-cache')]).toEqual([
+        'setu_session=a',
+        'MISS',
+      ]);
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a cookie-dependent response is not stored for a cookie credentialCookies does not name', async () => {
+    const { app, calls } = await appWith(cookieDependent, { credentialCookies: ['setu_session'] });
+    try {
+      await app.inject(get({ cookie: 'theme=dark' }));
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('coalesced joiners replay the cookie-dependent payload with its Vary: Cookie', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return cookieDependent(ctx);
+    });
+    try {
+      const leader = app.inject(get());
+      const joiner = app.inject(get());
+      for (let i = 0; i < 1_000 && calls() < 1; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      release();
+      const [, j] = await Promise.all([leader, joiner]);
+      expect([j.headers.get('x-cache'), j.headers.get('vary')]).toEqual([
+        'COALESCED',
+        'Accept, Cookie',
+      ]);
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
 
   // RFC 9111 §4.1: a stored `Vary: *` response can never be reused.
   it('never stores a Vary: * response', async () => {

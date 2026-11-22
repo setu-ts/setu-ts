@@ -27,6 +27,7 @@ import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/
 import {
   cacheControlDirectives,
   CAPABILITIES,
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
   parseCookie,
   PER_VISITOR_RESPONSE_STATE_KEY,
 } from '@setu-ts/common';
@@ -167,19 +168,25 @@ async function captureOrigin(
 ): Promise<CacheOriginOutcome> {
   await next();
   const snapshot = ctx.response.snapshot();
+  // A response a component flagged as depending on cookies is judged and stored as varying on
+  // `Cookie`, whatever its own `Vary` says; the live response is not changed.
+  const headers =
+    ctx.state.get(COOKIE_DEPENDENT_RESPONSE_STATE_KEY) === true
+      ? withVaryCookie(snapshot.headers)
+      : snapshot.headers;
   if (
     snapshot.streaming ||
     !cacheableStatuses.includes(snapshot.status) ||
-    hasSetCookie(snapshot.headers) ||
+    hasSetCookie(headers) ||
     ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY) === true ||
-    isPrivate(snapshot.headers.get('cache-control')) ||
-    varyFields(snapshot.headers.get('vary')).includes('*') ||
-    (withCookies && !servableWithCookies(snapshot.headers, credentialed))
+    isPrivate(headers.get('cache-control')) ||
+    varyFields(headers.get('vary')).includes('*') ||
+    (withCookies && !servableWithCookies(headers, credentialed))
   ) {
     return { replayable: false };
   }
 
-  const payload = encodePayload(snapshot);
+  const payload = encodePayload({ ...snapshot, headers });
   await store.set<CachedResponsePayload>(key, payload, ttlSeconds);
   return { replayable: true, payload };
 }
@@ -257,6 +264,15 @@ function isPrivate(cacheControl: string | null): boolean {
  */
 function carriesCookie(headers: Headers): boolean {
   return (headers.get('cookie') ?? '').trim() !== '';
+}
+
+/** A copy of `headers` whose `Vary` names `Cookie`, added once. */
+function withVaryCookie(headers: Headers): Headers {
+  const copy = new Headers(headers);
+  if (!varyFields(copy.get('vary')).includes('cookie')) {
+    copy.append('vary', 'Cookie');
+  }
+  return copy;
 }
 
 /** The lowercased field names of a `Vary` value. */

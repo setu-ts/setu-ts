@@ -769,6 +769,7 @@ export type {
 export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';
 export { CSRF_TOKEN_ACCESS_STATE_KEY } from './services/csrf-token-access.ts';
 export { PER_VISITOR_RESPONSE_STATE_KEY } from './services/per-visitor-response.ts';
+export { COOKIE_DEPENDENT_RESPONSE_STATE_KEY } from './services/cookie-dependent-response.ts';
 export type { ICsrfTokenAccess } from './services/csrf-token-access.ts';
 export type {
   ISession,

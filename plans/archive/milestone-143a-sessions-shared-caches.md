@@ -181,7 +181,8 @@ own read sees the marker. It uses only `read`/`write`/`destroy`, with one implem
   call, so anonymous `POST /logout` traffic writes nothing (the M113e rule at
   `session-service.ts:264-268` holds). If the marker write throws, the row delete is still attempted
   and then the error propagates (no weaker than today's plain delete); if the delete throws after
-  the marker, the marker stands and still fences every commit and restore. Marker TTL is `maxAgeMs`.
+  the marker, the marker stands and still fences every commit and restore. Marker TTL is
+  `maxAgeMs + 1000` (one second of margin for stores that round a TTL down).
 - **Why:** a separate id cannot be overwritten by the racing commit, which is what made option D
   useless; two kinds let a regenerating commit tell "my source was logged out" from "my source was
   superseded by me" (§3.2).
@@ -1016,6 +1017,36 @@ _Gap 2: a sign-out that outlives `maxAge` misses a regenerated session._ Confirm
   at 0, a regeneration at 1, rolling commits at 2 and 3, the sign-out resumes at 4) ends Y; X→Y→Z, a
   sign-out that loaded X ends Z; the cap; N rolling commits inside one `maxAge` add no link writes;
   `rolling: false` writes what it did; a negative control for each.
+
+**Design review of the two gaps (fresh agent, 2026-11-23), folded in.**
+
+- Gap 2, blocking: links pointing an ancestor straight at the new id let a sign-out of that ancestor
+  revoke only the new id, between the regeneration's link write and its row write, after which the
+  row lands and the fence (which read only `revoked:<source>`) passes. Fixed: a regenerating fence
+  also reads `revoked:<new id>`, one more parallel read per regeneration. The sign-out reads a link
+  only after it was written, so its `revoked:<new id>` precedes the fence's read or its delete
+  follows the row write.
+- Gap 2, blocking: in `'snapshot'` mode a request that loaded the session just before `exp` can
+  commit until `exp + maxAge`. Fixed: with `rolling`, links live `3 × maxAge + 1 s` and a commit
+  renews them when less than `2 × maxAge + 1 s` remains. Invariant: each ancestor link outlives the
+  last commit any request that loaded the session can make.
+- Renewal order: decided before the row write; the ancestor links are written first, then the single
+  row write carrying the new `linkExp`, then the fence. A failed link write leaves `linkExp`
+  unrenewed; a renewal never writes after its fence.
+- `'changes'` mode strips `__setu_lineage` from the re-read row before `applyChangesTo`, decides
+  cookie-held on the stripped data, and adds the lineage back only into the stored row; the same in
+  every path that writes a row. A regeneration with no stored source (a new session, a cookie-held
+  one, the promotion through `rotateId`) records no ancestors and writes no links.
+- `__setu_lineage` is refused by `set` and `delete`, and a lineage read at restore is used only when
+  `ancestors` holds at most 8 strings that are not marker ids and `linkExp` is finite.
+- Gap 1: the cookie-dependent check runs after the existing refusals (per-visitor flag, `private`,
+  `Vary: *`); a coalesced leader stores and shares the augmented payload. §0.2 X6 (Workers Cache
+  API) reads this key too.
+- The `Vary` sweep also lists `react-router-plugin`'s bridge (appends) and two replays that replace
+  (`idempotency-plugin/src/core/record.ts:274`,
+  `cloudflare-plugin/src/cache-api/cache-api-middleware.ts:332`); none defeats the key-based fix.
+- §3.1's "marker TTL is `maxAgeMs`" is corrected below: markers live `maxAgeMs + 1000`.
+- The 8-ancestor cap is put to the maintainer.
 
 ## 11. Plan review (2026-11-22)
 

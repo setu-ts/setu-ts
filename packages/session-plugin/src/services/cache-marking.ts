@@ -22,6 +22,7 @@ import type { ILogger, IRequestContext, IResponse, ISession } from '@setu-ts/com
 import {
   cacheControlDirectives,
   CAPABILITIES,
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
   PER_VISITOR_RESPONSE_STATE_KEY,
 } from '@setu-ts/common';
 
@@ -209,6 +210,9 @@ export class RequestCacheMarking {
     // this middleware does not store the anonymous variant without `Vary: Cookie`.
     this.#session.onFirstRead(() => {
       appendVaryCookie(this.#ctx.response);
+      // The handler may replace that `Vary` before a cache inside this middleware captures; the
+      // flag carries the dependence on cookies whatever the headers then say.
+      this.#ctx.state.set(COOKIE_DEPENDENT_RESPONSE_STATE_KEY, true);
       // A read of a restored session holding application data personalises the page whatever the handler then does
       // to its headers, so an in-process cache never stores it.
       if (this.#restoredApplicationData) {

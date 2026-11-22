@@ -3,7 +3,11 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ILogger, IRequestContext } from '@setu-ts/common';
-import { CAPABILITIES, PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
 
 import {
   appendVaryCookie,
@@ -136,6 +140,15 @@ describe('signals and the after-handler decision', () => {
     expect(t.response.headers.get('cache-control')).toBe(PUBLIC);
     expect(t.response.headers.get('vary')).toBe('Cookie');
     expect(lines[0]![1]).toEqual({ method: 'GET', route: '/', signal: 'csrf-token' });
+  });
+
+  it('the first application read flags the response cookie-dependent, anonymous or not', () => {
+    const t = makeContext();
+    const guest = fresh();
+    new RequestCacheMarking(t.ctx, guest, new PublicDirectiveWarnings()).begin();
+    expect(t.ctx.state.get(COOKIE_DEPENDENT_RESPONSE_STATE_KEY)).toBeUndefined();
+    guest.get('userId');
+    expect(t.ctx.state.get(COOKIE_DEPENDENT_RESPONSE_STATE_KEY)).toBe(true);
   });
 
   it('a CSRF token read flags the response per-visitor, even under an explicit public', () => {
