@@ -259,15 +259,19 @@ logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (inter
 status table and an empty one for a status the table does not name.
 
 On Deno, `request.signal` aborts after every successful response (Deno's legacy behaviour), and the
-first read of it prints Deno's own one-time notice. Outside gRPC and Connect calls (which pass it to
-the call), the kernel reads it only for a request that calls `ctx.defer`, and stops watching once
-the response is handed back; the request logger reads it only for a 5xx response. On Node and Bun,
-an error the application handles itself is not reported by `onFatalError`: an `unhandledRejection`
-listener handles a rejection, an `uncaughtException` listener a throw (on Node a rejection too; Bun
-never hands it one, so that rejection still ends the process and is reported). Deno cannot tell, and
-reports it. On Bun the observer assumes the default `--unhandled-rejections` mode; under `warn` or
-`none` it reports the first rejection as fatal and observes no later one. The ceiling and Deno's
-drain statements go through the adapter's `reportError` channel.
+first read of it prints Deno's own notice once per process ("Deno.serve: request.signal aborts on
+successful responses (legacy behavior)…"). Running Deno with `--unstable-no-legacy-abort` removes
+the notice and that post-response abort; the signal still aborts when a client disconnects before
+the response (measured on Deno 2.9.6). Outside gRPC and Connect calls (which pass it to the call),
+the kernel reads it only for a request that calls `ctx.defer`, and stops watching once the response
+is handed back; the request logger reads it on every request it logs, so a Deno application that
+logs requests prints the notice. On Node and Bun, an error the application handles itself is not
+reported by `onFatalError`: an `unhandledRejection` listener handles a rejection, an
+`uncaughtException` listener a throw (on Node a rejection too; Bun never hands it one, so that
+rejection still ends the process and is reported). Deno cannot tell, and reports it. On Bun the
+observer assumes the default `--unhandled-rejections` mode; under `warn` or `none` it reports the
+first rejection as fatal and observes no later one. The ceiling and Deno's drain statements go
+through the adapter's `reportError` channel.
 
 ## Exports
 

@@ -101,15 +101,17 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
       // On a throw, errorHandler serves only after this finally has unwound.
       // Its pure rule predicts that response while the snapshot is still 200.
       // An accepted upgrade is answered 101 on the wire after this middleware
-      // returns; a client that left received nothing, so its line must not
-      // read as a 5xx (499 is the access-log code for "client closed request").
-      // `ctx.request.signal`, not `ctx.signal`: the getter allocates a
-      // controller for a request whose adapter supplied none. Read only for a
-      // 5xx — the status a client that left gets from a render that failed —
-      // because on Deno the first read prints the runtime's legacy-abort notice.
+      // returns. This line is written before the adapter sends anything, so a
+      // signal already aborted here is a client that left before the response:
+      // it received nothing, whatever the handler produced, and is logged 499
+      // (the access-log code for "client closed request"). A stream cut off
+      // after this line keeps its real status. `ctx.request.signal`, not
+      // `ctx.signal`: the getter allocates a controller for a request whose
+      // adapter supplied none. On Deno the first read prints the runtime's
+      // legacy-abort notice once per process (`--unstable-no-legacy-abort`).
       const upgraded = upgradeIntentOf(ctx.request) !== undefined;
       const served = errorStatus ?? readStatus(ctx);
-      const aborted = !upgraded && served >= 500 && ctx.request.signal?.aborted === true;
+      const aborted = !upgraded && ctx.request.signal?.aborted === true;
       const status = upgraded ? SWITCHING_PROTOCOLS : aborted ? CLIENT_CLOSED_REQUEST : served;
       requestLogger.info('request completed', {
         method: ctx.request.method,

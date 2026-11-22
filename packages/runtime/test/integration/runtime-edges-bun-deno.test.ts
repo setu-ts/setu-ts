@@ -101,8 +101,23 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
     await until(() => records().some((record) => record['marker'] === 'cleanup'));
     const markers = records()
       .map((record) => record['marker'])
-      .filter((marker) => marker !== undefined);
+      .filter((marker) => marker !== undefined && marker !== 'logged');
     expect(markers).toEqual(['chunk 1', 'chunk 2', 'chunk 3', 'cleanup']);
+  });
+
+  it('never reads a completed request as aborted, nor reports it aborted after the response', async () => {
+    // Deno's legacy request.signal aborts once a response has been sent; the
+    // request log line and the kernel's watcher must both be done by then.
+    await (await fetch(`http://127.0.0.1:${port}/full`)).text();
+    await (await fetch(`http://127.0.0.1:${port}/doc`)).text();
+    await until(() => records().filter((record) => record['marker'] === 'logged').length >= 3);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const logged = records().filter((record) => record['marker'] === 'logged');
+    expect(logged.length).toBeGreaterThanOrEqual(3);
+    expect(logged.every((record) => record['aborted'] === false)).toBe(true);
+    expect(
+      records().filter((record) => record['msg'] === 'Request aborted before completion'),
+    ).toEqual([]);
   });
 
   it.runIf(runtime.name === 'bun')(

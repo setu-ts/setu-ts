@@ -44,7 +44,22 @@ const loggerPlugin: IPlugin = {
   },
 };
 
-const app = createApplication({ plugins: [RuntimePlugin(), loggerPlugin] });
+/**
+ * Records, after the pipeline, the read the request logger makes to decide
+ * 499: whether the request's own signal has aborted when the line is written.
+ */
+const abortProbe: IPlugin = {
+  name: 'abort-probe',
+  version: '1.0.0',
+  register(ctx) {
+    ctx.middleware.add(async (c, next) => {
+      await next();
+      emit({ marker: 'logged', path: c.request.path, aborted: c.request.signal?.aborted === true });
+    });
+  },
+};
+
+const app = createApplication({ plugins: [RuntimePlugin(), loggerPlugin, abortProbe] });
 app.router.get('/doc', (ctx) => {
   return ctx.response.json({ hello: 'world' });
 });

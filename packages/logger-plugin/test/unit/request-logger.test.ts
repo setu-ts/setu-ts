@@ -350,22 +350,51 @@ describe('createRequestLoggerMiddleware', () => {
     expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
   });
 
-  it('does not read the signal for a response below 500 (code-review M2)', async () => {
+  it('logs 499 and aborted for a client that left before a 200 was sent (maintainer decision)', async () => {
     const middleware = createRequestLoggerMiddleware();
-    let reads = 0;
+    const client = new AbortController();
+    const { ctx } = createFakeContext(logger, {
+      request: { ...createFakeRequest('GET', '/slow'), signal: client.signal },
+    });
+    await middleware(ctx, async () => {
+      client.abort();
+      ctx.response.status(200).send(new TextEncoder().encode('ok'));
+    });
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
+  });
+
+  it('logs 499 and aborted for a client that left before a thrown error was answered', async () => {
+    const middleware = createRequestLoggerMiddleware();
+    const client = new AbortController();
+    const { ctx } = createFakeContext(logger, {
+      request: { ...createFakeRequest('GET', '/slow'), signal: client.signal },
+    });
+    await expect(
+      middleware(ctx, async () => {
+        client.abort();
+        throw new Error('render failed');
+      }),
+    ).rejects.toThrow('render failed');
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed!.metadata).toMatchObject({ status: 499, aborted: true });
+  });
+
+  it('keeps 101 for an accepted upgrade even when the signal has aborted', async () => {
+    const middleware = createRequestLoggerMiddleware();
     const client = new AbortController();
     client.abort();
-    const request = Object.defineProperty(createFakeRequest('GET', '/page'), 'signal', {
-      get() {
-        reads++;
-        return client.signal;
-      },
+    const { ctx } = createFakeContext(logger, {
+      request: { ...createFakeRequest('GET', '/ws'), signal: client.signal },
     });
-    const { ctx } = createFakeContext(logger, { request });
-    await middleware(ctx, async () => {});
+    await middleware(ctx, async () => {
+      setUpgradeIntent(ctx.request, {
+        sink: { onOpen: () => {}, onMessage: () => {}, onClose: () => {}, onError: () => {} },
+      });
+    });
     const completed = logger.entries.find((e) => e.message === 'request completed');
-    expect(completed!.metadata.status).toBe(200);
-    expect(reads).toBe(0);
+    expect(completed!.metadata.status).toBe(101);
+    expect(completed!.metadata).not.toHaveProperty('aborted');
   });
 
   it('keeps the served status while the request signal is live', async () => {
