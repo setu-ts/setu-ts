@@ -1051,8 +1051,8 @@ _Gap 2: a sign-out that outlives `maxAge` misses a regenerated session._ Confirm
 
 **Gap 2 withdrawn (maintainer, 2026-11-23).** After the design review the maintainer dropped the gap
 2 fix; the successor link stays as it shipped at `e351b5c26`, and the limit is documented in the
-session-plugin README ("One limit"): it applies only with `rolling: true` on the store strategy and
-needs one sign-out request that runs longer than `maxAge`, whose own cookie is still cleared.
+session-plugin README ("Another limit"): it applies only with `rolling: true` on the store strategy
+and needs one sign-out request that runs longer than `maxAge`, whose own cookie is still cleared.
 Reasons: no compared framework links an old session id to its replacement (Django `cycle_key`, Rails
 `reset_session` and Spring Session `changeSessionId` keep no link; express-session not confirmed);
 the fix would add a hidden field every custom `ISessionStore` must preserve, and more logic to

@@ -85,15 +85,15 @@ its session was signed out, so it ends the session (deleting its row under a `re
 every commit and regeneration that checks its markers afterwards refuses (one that committed during
 the stall keeps its new id), without following its successor links; a stalled regeneration deletes
 only its new row). A failed regeneration's cleanup never touches the link. A link names one
-successor, which gives a second limit: when two regenerations of one id both commit (a
-double-submitted sign-in, say), the later link replaces the earlier, and a sign-out that loaded the
-old id ends only the session the surviving link names. The other regenerated session stays valid
-until its row expires (under `rolling`, its own commits keep extending it). Both regenerations
-answered the same browser, which keeps whichever cookie reached it last; the sign-out's cleared
-cookie wins only if its response arrives after both. An application that must end every session of a
-user for certain sets `signIn.sessionStamp` (below).
+successor, which gives one limit: when two regenerations of one id both commit (a double-submitted
+sign-in, say), the later link replaces the earlier, and a sign-out that loaded the old id ends only
+the session the surviving link names. The other regenerated session stays valid until its row
+expires (under `rolling`, its own commits keep extending it). Both regenerations answered the same
+browser, which keeps whichever cookie reached it last; the sign-out's cleared cookie wins only if
+its response arrives after both. An application that must end every session of a user for certain
+sets `signIn.sessionStamp` (below).
 
-**One limit.** A link lives one second past `maxAge` from the regeneration and is never renewed.
+**Another limit.** A link lives one second past `maxAge` from the regeneration and is never renewed.
 Without `rolling` that is always enough: a regeneration keeps the session's expiry and only
 `rolling` moves it, so the regenerated session expires before its link. With `rolling: true`,
 rolling commits can keep the regenerated session alive past its link, so a single sign-out request
@@ -128,7 +128,7 @@ An evicted or not-yet-visible marker reverts that one revocation to an unfenced 
 store sees ids of the form `revoked:<uuid>`, `superseded:<uuid>` and `successor:<uuid>` beside
 session ids, holding the payload `{ "__setu_marker": "revoked" }` (or `"superseded"`), or
 `{ "__setu_marker": "successor", "next": "<new id>" }` for a link. The cookie strategy has no row to
-revoke; `signIn.sessionStamp` (below) is its answer.
+revoke; `signIn.sessionStamp` (above) is its answer.
 
 ### Concurrent requests
 
