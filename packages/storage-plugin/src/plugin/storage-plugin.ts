@@ -102,7 +102,7 @@ export function createProvider(
     case 'b2': {
       // Backblaze B2: first-class S3-compatible preset.
       // Backblaze regions are named like `us-west-004`; there is no default
-      // that is a real Backblaze host, so one of the two must be given.
+      // that is a real Backblaze host, so one of the two (or an injected client) must be given.
       const b2Opts = config.options;
       if (
         b2Opts.region === undefined &&
