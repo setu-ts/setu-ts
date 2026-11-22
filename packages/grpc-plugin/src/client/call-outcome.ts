@@ -66,6 +66,18 @@ const ANSWER_CODES: ReadonlySet<number> = new Set([
 ]);
 
 /**
+ * Node's `node:http2` codes for a request header the caller supplied that it
+ * refuses before anything is sent, probed on Node 24: a connection-specific
+ * header (`connection`, `te` other than `trailers`), an invalid header name, and
+ * a single-value header given several values.
+ */
+const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
+  'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
+  'ERR_INVALID_HTTP_TOKEN',
+  'ERR_HTTP2_HEADER_SINGLE_VALUE',
+]);
+
+/**
  * Reports only faults attributable to the selected instance.
  * @param error - The rejected call
  * @param signal - The caller's signal
@@ -82,29 +94,45 @@ export function callOutcome(
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   const wire = isWireError(error);
-  if (
-    !wire &&
-    code !== GRPC_CODE.DeadlineExceeded &&
-    code !== GRPC_CODE.Canceled &&
-    !hasInstanceEvidence(error)
-  )
-    return undefined;
+  if (!wire && isPreSendFault(error, code)) return undefined;
   if (typeof code === 'number' && SERVER_FAULT_CODES.has(code)) return 'failure';
   if (code === GRPC_CODE.Canceled) return 'failure';
   if (typeof code === 'number' && wire && ANSWER_CODES.has(code)) return 'success';
   return 'failure';
 }
 
-/** Response headers or a system-error cause distinguish transport faults from local encoding faults. */
-function hasInstanceEvidence(error: unknown): boolean {
+/** Connect constructs these errors before it sends the request. */
+function isPreSendFault(error: unknown, code: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
-  const { metadata } = error as { metadata?: unknown };
-  if (metadata instanceof Headers && !metadata.keys().next().done) return true;
+  if (hasInvalidRequestHeaderCause(error)) return true;
+  const record = error as { metadata?: unknown; rawMessage?: unknown; cause?: unknown };
+  if (
+    record.metadata !== undefined &&
+    (!(record.metadata instanceof Headers) || !record.metadata.keys().next().done)
+  )
+    return false;
+  const message = record.rawMessage;
+  if (typeof message !== 'string') return false;
+  if (code === GRPC_CODE.ResourceExhausted)
+    return /^message size [0-9]+ is larger than configured writeMaxBytes [0-9]+(?:\.[0-9]+)?$/.test(
+      message,
+    );
+  if (code !== GRPC_CODE.Internal) return false;
+  if (message.startsWith('serialize binary: ')) return true;
+  // JSON serialization uses ConnectError.from(error, Internal), retaining the
+  // original plain error as cause and its exact message. Node faults carry code.
+  return (
+    record.cause instanceof Error && !('code' in record.cause) && message === record.cause.message
+  );
+}
+
+/** Whether the cause chain (at most five objects) holds a refused caller header. */
+function hasInvalidRequestHeaderCause(error: object): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
-    const record = current as { code?: unknown; cause?: unknown };
-    if (typeof record.code === 'string') return true;
-    current = record.cause;
+    const { code, cause } = current as { code?: unknown; cause?: unknown };
+    if (typeof code === 'string' && INVALID_REQUEST_HEADER_CODES.has(code)) return true;
+    current = cause;
   }
   return false;
 }

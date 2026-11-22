@@ -13365,30 +13365,30 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
 
 ### Exports
 
-| Export                              | Kind      | Purpose                                                                  |
-| ----------------------------------- | --------- | ------------------------------------------------------------------------ |
-| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                       |
-| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                           |
-| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                       |
-| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                       |
-| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                                   |
-| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`)       |
-| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                       |
-| `StaticServiceDefinition`           | interface | One entry of a static service list                                       |
-| `EjectionOptions`                   | interface | Ejection tuning                                                          |
-| `SelfRegistration`                  | interface | What this instance advertises                                            |
-| `SelfRegistrationCheck`             | interface | The mandatory health check                                               |
-| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                                |
-| `StaticProvider`                    | class     | The `'static'` provider                                                  |
-| `ConsulProvider`                    | class     | The `'consul'` provider                                                  |
-| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                              |
-| `DnsProvider`                       | class     | The `'dns'` provider                                                     |
-| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                          |
-| `DiscoveryHttpResponse`             | interface | Buffered response shape                                                  |
-| `DiscoveryHttpStream`               | interface | Streaming response shape                                                 |
-| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                            |
-| `DiscoveryUnavailableError`         | class     | Cold backend failure (branded 503), missing DNS resolver, k8s multi-port |
-| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                        |
+| Export                              | Kind      | Purpose                                                                                                  |
+| ----------------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                                                       |
+| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                                                           |
+| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                                                       |
+| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                                                       |
+| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                                                                   |
+| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`)                                       |
+| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                                                       |
+| `StaticServiceDefinition`           | interface | One entry of a static service list                                                                       |
+| `EjectionOptions`                   | interface | Ejection tuning                                                                                          |
+| `SelfRegistration`                  | interface | What this instance advertises                                                                            |
+| `SelfRegistrationCheck`             | interface | The mandatory health check                                                                               |
+| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                                                                |
+| `StaticProvider`                    | class     | The `'static'` provider                                                                                  |
+| `ConsulProvider`                    | class     | The `'consul'` provider                                                                                  |
+| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                                                              |
+| `DnsProvider`                       | class     | The `'dns'` provider; constructor throws `RangeError` for `resolveTimeoutMs` outside finite 0–2147483647 |
+| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                                                          |
+| `DiscoveryHttpResponse`             | interface | Buffered response shape                                                                                  |
+| `DiscoveryHttpStream`               | interface | Streaming response shape                                                                                 |
+| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                                                            |
+| `DiscoveryUnavailableError`         | class     | Cold backend failure (branded 503), missing DNS resolver, k8s multi-port                                 |
+| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                                                        |
 
 ### Notes
 
@@ -13405,13 +13405,19 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   coalesced, retry-spaced background read at the grace deadline. If still empty, replacement reaches
   every watcher without another backend event. Changes from reads also notify watchers once;
   unchanged watch deliveries still notify. Nonempty answers, replacement and close clear the timer.
-  Cold empty answers are stored at once. Watched names still refresh in the background once
-  `cacheTtlMs` old.
+  Cold empty answers are stored at once. A read of a watched name still starts a background refresh
+  once its list is `cacheTtlMs` old. Subscribers to one name share one provider watch; a later
+  subscriber receives the cached list at once. A listener may receive the current list on
+  subscription and the same list more than once. The provider watch stops when the last subscriber
+  unsubscribes. Each listener failure is isolated from discovery and other subscribers; a masked
+  warning names the service and error without instance data, once per name until the failing
+  listeners succeed again.
 - Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
   await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
-  16, then 30 s; success resets spacing. Cold failures discard failure state/reporters; reporters
-  persist only for cached names. Per-name reporters warn on first/changed error, debug on repeats,
-  info on recovery, with URL userinfo masked. DNS can also log its probe failure.
+  16, then 30 s; success resets spacing. Cold failures are not spaced and leave no cached failure
+  state. Reporters persist across cold failures and recovery, bounded to the 256 most recently used
+  names with least-recently-used eviction. Per-name reporters warn on first/changed error, debug on
+  identical repeats, info on recovery, with URL userinfo masked. DNS can also log its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
   other failures reject. Use a trusted host resolver. The runtime currently retains only the first
   failed address family, so an absent A record can conceal a timed-out AAAA lookup.
@@ -16341,14 +16347,16 @@ A failed call reports instance failure for no answer, a refused stream, peer `Ca
 faults `Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded` (wire
 or not). Wire `InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
 `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted` report success. Caller abort
-reports nothing. Non-wire errors require instance evidence: at least one response header, a string
-system-error `code` within five cause-chain objects, a refused stream, DeadlineExceeded, or peer
-Canceled. Otherwise they report nothing, including local serialization and writeMaxBytes errors;
-other attributable errors fail. Streaming reports success at headers; later iteration errors report
-nothing. Tight caller deadlines can eject healthy instances under discovery's ejection limits. Only
-refused unary streams are resent once within the remaining deadline; a drain 503 is not resent. The
-plugin's own post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode `'a'` or
-Kubernetes) to balance calls: one Service address pins the session to one pod.
+reports nothing. Calls are reported failed when they did not answer or answered with a server-fault
+code; a few client-side faults raised before the request leaves (serialization, `writeMaxBytes`,
+invalid request headers) report nothing. These non-wire exclusions require no response metadata:
+Connect's binary serialization prefix or JSON serialization cause/message with `Internal`, its exact
+write-size refusal with `ResourceExhausted`, or a known Node request-header validation code. All
+other errors fail. Streaming reports success at headers; later iteration errors report nothing.
+Tight caller deadlines can eject healthy instances under discovery's ejection limits. Only refused
+unary streams are resent once within the remaining deadline; a drain 503 is not resent. The plugin's
+own post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode `'a'` or Kubernetes)
+to balance calls: one Service address pins the session to one pod.
 
 Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals

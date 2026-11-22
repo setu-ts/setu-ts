@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { DescMethodUnary } from '@bufbuild/protobuf';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import { dispatchRpc, type DispatchEntry } from '../../src/transports/rpc-dispatcher.ts';
@@ -50,6 +51,7 @@ it.skipIf(!available)(
     );
     const method = createFileRegistry(set).getService('example.EchoService')!.method['echo']!;
     const serializers = createClientMethodSerializers(method, true);
+    const jsonSerializers = createClientMethodSerializers(method, false);
     const runtime = await loadConnectModule();
     const input = {
       get $typeName(): string {
@@ -62,6 +64,11 @@ it.skipIf(!available)(
     } catch (error) {
       errors.push(error);
     }
+    try {
+      jsonSerializers.serialize(input);
+    } catch (error) {
+      errors.push(error);
+    }
     const limited = limitSerialization(
       { serialize: () => new Uint8Array(10), parse: () => ({}) },
       { writeMaxBytes: 1, readMaxBytes: 100 },
@@ -71,13 +78,78 @@ it.skipIf(!available)(
     } catch (error) {
       errors.push(error);
     }
-    expect(errors).toHaveLength(2);
+    expect(errors).toHaveLength(3);
     for (const [index, error] of errors.entries()) {
       if (!(error instanceof ConnectError)) throw new Error('Expected a real ConnectError');
-      expect(error.code).toBe([Code.Internal, Code.ResourceExhausted][index]);
+      expect(error.code).toBe([Code.Internal, Code.Internal, Code.ResourceExhausted][index]);
       expect(runtime.isWireError(error)).toBe(false);
       expect([...error.metadata]).toEqual([]);
       expect(callOutcome(error, undefined, runtime.isWireError)).toBeUndefined();
+    }
+  },
+);
+
+it.skipIf(!available)(
+  'reports errors constructed by real Connect while validating bad unary responses',
+  async () => {
+    const { createTransport } = await import('@connectrpc/connect/protocol-grpc');
+    const { createFileRegistry, fromBinary, create, toBinary } = await import('@bufbuild/protobuf');
+    const { FileDescriptorSetSchema } = await import('@bufbuild/protobuf/wkt');
+    const { ECHO_DESCRIPTOR_BASE64 } = await import('../fixtures/echo-descriptors.ts');
+    const set = fromBinary(
+      FileDescriptorSetSchema,
+      Uint8Array.from(atob(ECHO_DESCRIPTOR_BASE64), (char) => char.charCodeAt(0)),
+    );
+    const method = createFileRegistry(set).getService('example.EchoService')!.method['echo']!;
+    if (method.methodKind !== 'unary') throw new Error('Expected unary fixture');
+    const bytes = toBinary(
+      method.output,
+      create(method.output, { response: 'unexpected message' }),
+    );
+    const envelope = new Uint8Array(bytes.length + 5);
+    new DataView(envelope.buffer).setUint32(1, bytes.length);
+    envelope.set(bytes, 5);
+    const runtime = await loadConnectModule();
+    for (const kind of ['unsupported', 'missing', 'received-with-error'] as const) {
+      const header = new Headers({
+        'content-type': kind === 'unsupported' ? 'text/plain' : 'application/grpc+proto',
+      });
+      if (kind === 'received-with-error') header.set('grpc-status', '13');
+      const transport = createTransport({
+        baseUrl: 'http://peer.test',
+        useBinaryFormat: true,
+        interceptors: [],
+        acceptCompression: [],
+        sendCompression: null,
+        compressMinBytes: 1024,
+        readMaxBytes: 1024,
+        writeMaxBytes: 1024,
+        httpClient: () =>
+          Promise.resolve({
+            status: 200,
+            header,
+            trailer: new Headers({ 'grpc-status': '0' }),
+            body: {
+              async *[Symbol.asyncIterator]() {
+                if (kind === 'received-with-error') yield envelope;
+              },
+            },
+          }),
+      });
+      const error = await transport
+        .unary(method as DescMethodUnary, undefined, undefined, undefined, { message: 'request' })
+        .catch((error: unknown) => error);
+      const { ConnectError } = await import('@connectrpc/connect');
+      if (!(error instanceof ConnectError)) throw new Error('Expected real protocol error');
+      expect(error.rawMessage).toContain(
+        kind === 'unsupported'
+          ? 'unsupported content type'
+          : kind === 'missing'
+            ? 'missing output message'
+            : 'received output message',
+      );
+      expect([...error.metadata]).toEqual([]);
+      expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
     }
   },
 );

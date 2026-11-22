@@ -26,7 +26,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
-import { isRefusedStream } from '../../src/client/call-outcome.ts';
+import { callOutcome } from '../../src/client/call-outcome.ts';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
@@ -96,26 +96,36 @@ describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on 
     'http1',
     'http2-missing',
     'accept-close',
+    'no-error-close',
     'handler-error',
     'deadline',
     'json404',
   ] as const) {
     it(`ejects ${fault} after one call and the next five succeed`, async () => {
       const badPort = await unusedPort();
-      if (fault === 'http1' || fault === 'http2-missing' || fault === 'accept-close') {
+      if (
+        fault === 'http1' ||
+        fault === 'http2-missing' ||
+        fault === 'accept-close' ||
+        fault === 'no-error-close'
+      ) {
         const server =
           fault === 'http1'
             ? http1Server((_req, res) => {
                 res.writeHead(404);
                 res.end();
               })
-            : fault === 'http2-missing'
+            : fault === 'http2-missing' || fault === 'no-error-close'
               ? http2Server()
               : createServer((socket) => socket.destroy());
         if (fault === 'http2-missing')
           (server as ReturnType<typeof http2Server>).on('stream', (stream) => {
             stream.respond({ ':status': 404 });
             stream.end();
+          });
+        if (fault === 'no-error-close')
+          (server as ReturnType<typeof http2Server>).on('stream', (stream) => {
+            stream.close(0);
           });
         await new Promise<void>((resolve) => server.listen(badPort, '127.0.0.1', resolve));
         closers.push(
@@ -175,15 +185,12 @@ describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on 
         causes.push({ code: record.code, name: record.name });
         current = record.cause;
       }
-      const attributable =
-        error.isWireError ||
-        !error.metadata.keys().next().done ||
-        causes.some((cause) => typeof cause.code === 'string') ||
-        isRefusedStream(error) ||
-        error.code === Code.DeadlineExceeded ||
-        error.code === Code.Canceled;
       expect(
-        attributable,
+        callOutcome(
+          error,
+          undefined,
+          (value) => value instanceof ConnectError && value.isWireError,
+        ),
         JSON.stringify({
           fault,
           protocol,
@@ -192,7 +199,7 @@ describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on 
           metadata: [...error.metadata],
           causes,
         }),
-      ).toBe(true);
+      ).toBe('failure');
       const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
       expect((await discovery.pick('billing'))?.id).toBe('live');
       for (let n = 0; n < 5; n++)

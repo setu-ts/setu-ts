@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/service-discovery-plugin`.** `resolveTimeoutMs` (2000 ms, `0` unbounded) and
   `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and `staleForMs`.
+  Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range `resolveTimeoutMs`
+  (0–2147483647) with `RangeError`.
 
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
@@ -47,14 +49,17 @@ All notable changes to this project are documented here. The format follows
   `<serviceName>-<address>-<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
   an existing identity; `address` must be the instance's own address, never a shared hostname.
 - **BREAKING — `@setu-ts/grpc-plugin`.** Instance outcomes now distinguish wire application answers,
-  server faults and evidenced transport faults. Caller aborts and local serialization/write-limit
-  faults report nothing. No option restores the old outcome mapping; `ejection: false` on discovery
-  disables automatic ejection if the changed classifications are unsuitable, without restoring old
-  reports. A response-stream cancel now aborts the handler's signal before awaiting cleanup without
-  a bound.
+  server faults and unclassified transport faults. Caller aborts and pre-send
+  serialization/write-limit/header-validation faults report nothing. No option restores the old
+  outcome mapping; `ejection: false` on discovery disables automatic ejection if the changed
+  classifications are unsuitable, without restoring old reports. A response-stream cancel now aborts
+  the handler's signal before awaiting cleanup without a bound.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
   on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
-  failures discard their failure state/reporters. Kubernetes probe timeouts name the API and bound.
+  failures leave no cached failure state; reporters retain the 256 most recently used names so
+  repeated cold failures log at debug and recovery at info. Watch listener errors are isolated and
+  warn once per failing run; an older read cannot overwrite a newer watch delivery. Kubernetes probe
+  timeouts name the API and bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.

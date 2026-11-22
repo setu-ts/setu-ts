@@ -35,16 +35,15 @@ own entry. Explicit ids still win. Once after upgrading, list `/v1/agent/service
 uuid entries left by crashed processes, and deregister each via
 `PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot remove those old ids.
 
-The gRPC client reports no answer, peer cancellation and server-fault codes as instance failures,
-including `Internal` and `DeadlineExceeded`, wire or not. Wire application/caller errors succeed;
-caller abort and client-side serialization/write-limit errors report nothing. A non-wire error is
-attributable to the instance only with response headers, a system-error cause, a refused stream, a
-deadline, or peer cancellation. Tight deadlines can therefore eject healthy instances; size
-deadlines for normal latency. Streaming still reports success at response headers only. A drain 503
-is not resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a
-single Service address pins a connection to one pod. Cancelling a response stream aborts the
-handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it to exit
-promptly.
+The gRPC client reports calls failed when they did not answer or answered with a server-fault code;
+a few client-side faults raised before the request leaves (serialization, `writeMaxBytes`, invalid
+request headers) report nothing. Caller abort reports nothing; wire application/caller errors
+succeed. Server-fault codes include `Internal` and `DeadlineExceeded`, wire or not. Tight deadlines
+can therefore eject healthy instances; size deadlines for normal latency. Streaming still reports
+success at response headers only. A drain 503 is not resent. Discover individual pods (headless DNS
+mode `'a'` or Kubernetes) to spread calls; a single Service address pins a connection to one pod.
+Cancelling a response stream aborts the handler's `ctx.signal` before awaiting cleanup without a
+bound; handlers must observe it to exit promptly.
 
 ### Module pages (`@setu-ts/cli`)
 

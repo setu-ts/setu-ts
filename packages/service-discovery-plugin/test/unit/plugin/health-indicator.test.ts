@@ -14,6 +14,44 @@ import type { HealthCheckResult, ServiceInstance } from '@setu-ts/common';
 import { ServiceDiscoveryPlugin } from '../../../src/index.ts';
 import type { DiscoveryProvider } from '../../../src/index.ts';
 import { createFakeRuntime, instance } from '../../fixtures/fakes.ts';
+import { RecordingLogger } from '../../../../common/test/fixtures/redis-connection-errors.ts';
+
+it('logs isolated listener failures once with the service name and masked error, without instance data', async () => {
+  const provider = {
+    ...makeProvider().provider,
+    resolve: () => Promise.resolve([instance({ id: 'private-instance', host: 'private-host' })]),
+  };
+  const logger = new RecordingLogger();
+  let discovery!: {
+    watch(name: string, listener: () => void): Promise<() => void>;
+    resolve(name: string): Promise<unknown>;
+  };
+  const ctx = {
+    runtime: createFakeRuntime(),
+    logger,
+    services: {
+      register: (_name: string, value: typeof discovery) => {
+        discovery = value;
+      },
+    },
+    health: { register() {} },
+    lifecycle: { onClose() {} },
+  } as never;
+  ServiceDiscoveryPlugin({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }).register(ctx);
+  await discovery.watch('billing', () => {
+    throw new Error('listener failed http://user:password@host/path');
+  });
+  await discovery.resolve('billing');
+  await discovery.watch('billing', () => {});
+  expect(logger.entries).toHaveLength(1);
+  expect(logger.entries[0]?.level).toBe('warn');
+  expect(logger.entries[0]?.metadata?.['serviceName']).toBe('billing');
+  const rendered = JSON.stringify(logger.entries);
+  expect(rendered).toContain('listener failed');
+  expect(rendered).not.toContain('password');
+  expect(rendered).not.toContain('private-instance');
+  expect(rendered).not.toContain('private-host');
+});
 
 it('reports DNS failures and abandoned reads down, and warm failures up with a growing stale age', async () => {
   for (const hung of [false, true]) {

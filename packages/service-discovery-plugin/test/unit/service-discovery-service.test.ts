@@ -59,8 +59,11 @@ describe('background discovery refresh', () => {
     await flush();
     expect(warm).toEqual([a]);
     expect(calls).toBe(1);
+    // The read started before the watch delivery, so its older answer is
+    // dropped: the cold caller gets the newer watched list, and so does the cache.
     finish([b]);
-    expect(await cold).toEqual([b]);
+    expect(await cold).toEqual([a]);
+    expect(await service.resolve('billing')).toEqual([a]);
     service.close();
   });
   it('serves warm names immediately, coalesces refreshes, bounds hung reads, and ignores late writes after close', async () => {
@@ -656,7 +659,7 @@ describe('ServiceDiscoveryService — M139f X10-3 probe reasons and the cold-res
   });
 });
 
-it('drops cold failure state and reporters while retaining one reporter for a warm failure run', async () => {
+it('retains cold reporters without degraded state and retains one reporter for a warm failure run', async () => {
   const provider = createFakeProvider([a]);
   const runtime = createFakeRuntime();
   let created = 0;
@@ -676,8 +679,8 @@ it('drops cold failure state and reporters while retaining one reporter for a wa
     await expect(service.resolve(name)).rejects.toThrow();
     expect(service.degraded).toBe(false);
   }
-  expect(created).toBe(3);
-  expect(logger.forSource('forgotten').map((entry) => entry.level)).toEqual(['warn', 'warn']);
+  expect(created).toBe(2);
+  expect(logger.forSource('forgotten').map((entry) => entry.level)).toEqual(['warn', 'debug']);
   provider.failWith(null);
   await service.resolve('billing');
   provider.failWith(new Error('down'));
@@ -686,8 +689,104 @@ it('drops cold failure state and reporters while retaining one reporter for a wa
   runtime.advance(1000);
   await service.resolve('billing');
   await flush();
-  expect(created).toBe(4);
+  expect(created).toBe(3);
   expect(logger.forSource('billing').map((entry) => entry.level)).toEqual(['warn', 'debug']);
   expect(service.degraded).toBe(true);
+  service.close();
+});
+
+it('deduplicates cold failures, reports recovery and evicts the least recently used of 256 reporters', async () => {
+  const provider = createFakeProvider([a]);
+  const logger = new RecordingLogger();
+  const created: string[] = [];
+  const service = new ServiceDiscoveryService(
+    provider,
+    createFakeRuntime(),
+    resolveOptions({ provider: 'custom', discovery: provider }),
+    undefined,
+    (name) => {
+      created.push(name);
+      return createConnectionErrorReporter({ source: name, logger: () => logger });
+    },
+  );
+  provider.failWith(new Error('down'));
+  for (let n = 0; n < 3; n++) await expect(service.resolve('recover')).rejects.toThrow();
+  expect(logger.forSource('recover').map((entry) => entry.level)).toEqual([
+    'warn',
+    'debug',
+    'debug',
+  ]);
+  provider.failWith(null);
+  await service.resolve('recover');
+  expect(logger.forSource('recover').at(-1)?.level).toBe('info');
+  expect(service.degraded).toBe(false);
+  service.close();
+  const bounded = new ServiceDiscoveryService(
+    provider,
+    createFakeRuntime(),
+    resolveOptions({ provider: 'custom', discovery: provider }),
+    undefined,
+    (name) => {
+      created.push(name);
+      return createConnectionErrorReporter({ source: name, logger: () => logger });
+    },
+  );
+  provider.failWith(new Error('down'));
+  for (let n = 0; n < 256; n++) await expect(bounded.resolve(`name-${n}`)).rejects.toThrow();
+  await expect(bounded.resolve('name-0')).rejects.toThrow(); // Refresh its recency.
+  await expect(bounded.resolve('name-256')).rejects.toThrow();
+  await expect(bounded.resolve('name-1')).rejects.toThrow();
+  await expect(bounded.resolve('name-0')).rejects.toThrow();
+  expect(created.filter((name) => name === 'name-1')).toHaveLength(2);
+  expect(created.filter((name) => name === 'name-0')).toHaveLength(1);
+  expect(bounded.degraded).toBe(false);
+  bounded.close();
+});
+
+it('does not overwrite a newer watch delivery with an older in-flight refresh, but records success', async () => {
+  const runtime = createFakeRuntime();
+  const watched = createFakeProvider([a]);
+  let finish!: (list: readonly (typeof a)[]) => void;
+  let fail = false;
+  const provider = {
+    ...watched,
+    resolve: () =>
+      fail
+        ? Promise.reject(new Error('down'))
+        : new Promise<readonly (typeof a)[]>((resolve) => {
+            finish = resolve;
+          }),
+  };
+  const logger = new RecordingLogger();
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0, resolveTimeoutMs: 0 }),
+    undefined,
+    (name) => createConnectionErrorReporter({ source: name, logger: () => logger }),
+  );
+  const seen: string[][] = [];
+  await service.watch('billing', (list) => seen.push(list.map((i) => i.id)));
+  watched.emit('billing', [a]);
+  fail = true;
+  await service.resolve('billing');
+  await flush();
+  expect(service.degraded).toBe(true);
+  runtime.advance(1000);
+  fail = false;
+  await service.resolve('billing');
+  await flush();
+  watched.emit('billing', [b]);
+  seen.length = 0;
+  finish([a]);
+  await flush();
+  expect(seen).toEqual([]);
+  // A fresh resolve starts the next read but still returns the newer cache.
+  expect(await service.resolve('billing')).toEqual([b]);
+  expect(service.degraded).toBe(false);
+  expect(service.staleForMs).toBe(0);
+  expect(logger.forSource('billing').map((entry) => entry.level)).toEqual(['warn', 'info']);
+  finish([b]);
+  await flush();
   service.close();
 });

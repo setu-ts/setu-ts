@@ -1,6 +1,6 @@
 # @setu-ts/service-discovery-plugin
 
-**Add:** `setu add service-discovery`; register the printed plugin in `setu.config.ts`. It provides
+**Add:** `setu add service-discovery`; register in `setu.config.ts`. Provides
 `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
 
 ## Configure a static service pool
@@ -16,7 +16,7 @@ export const discovery = ServiceDiscoveryPlugin({
 });
 ```
 
-## Resolve an upstream URL from a route
+## Resolve a URL
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -35,25 +35,23 @@ export function registerBillingRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
 - `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
   return `null` for an empty pool. Default strategy: round-robin.
-- Warm reads use cache; `cacheTtlMs` starts background refresh (30000 ms; `0` every call). Cold
-  reads share `resolveTimeoutMs` (2000 ms; `0` unbounded).
-- Failures retry after 1, 2, 4, 8, 16, then 30 s. `staleForMs` reports age; warm names stay ready.
+- Warm reads use cache; a read (watched too) starts background refresh once `cacheTtlMs` old (30000
+  ms; `0` every call). Cold reads share `resolveTimeoutMs` (2000 ms; `0` unbounded).
+- Failed warm refreshes retry after 1, 2, 4, 8, 16, then 30 s; cold failures are not spaced.
 - `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
-  at expiry; an empty result reaches all watchers without another backend event. Reads notify
-  changes once. Nonempty answers, replacement and close clear the timer; watches still refresh by
-  TTL.
-- `degraded` covers warm failures and held empty answers. Cold failures discard state/reporters.
-  Every provider's health result uses a 5 s cache; DNS uses the last lookup outcome.
+  at expiry; empty results reach watchers without another event. Nonempty answers/close clear it.
+- Subscribers share one provider watch per name; later subscribers get cache at once. Subscription
+  may deliver the current list; lists may repeat. Last unsubscribe stops the provider watch.
+- `degraded`: warm failures/held empties. `staleForMs`: failed-list age. All providers cache health
+  for 5 s; DNS uses its last lookup outcome. DNS absent names resolve `[]`; other errors reject.
+- Reporters retain 256 names by recency: warn first/changed, debug repeats, info recovery, even
+  cold.
 - Consul ids default to `<serviceName>-<address>-<port>`; use the instance's own address.
-- Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears the state.
-- Unsubscribe stops watches. DNS absent names resolve `[]`; other errors reject.
+- Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears state.
 
-## Other options
-
-- Providers: static, consul, kubernetes, dns, or custom with `discovery`.
-- Strategies: random/weighted-random; `ejection: false` disables ejection.
-- DNS requires runtime DNS; unsupported self-registration is refused.
+Providers: static/consul/kubernetes/dns/custom. Strategies: random/weighted-random.
+`ejection: false` disables ejection. DNS requires runtime DNS.

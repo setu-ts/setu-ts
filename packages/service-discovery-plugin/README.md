@@ -149,8 +149,14 @@ The listener receives the **full** list. Each delivery updates the cache through
 reads: an empty change to a nonempty list is held for `emptyAnswerGraceMs`. One timer then starts a
 coalesced background read at the grace deadline; an empty answer replaces the list and is delivered
 to every watcher, even if the backend never repeats the empty change. Read-path list changes also
-reach watchers, once per change. Watched names still refresh in the background once `cacheTtlMs`
-old.
+reach watchers, once per change. A read of a watched name still starts a background refresh once its
+list is `cacheTtlMs` old.
+
+Subscribers to one name share one provider watch. A later subscriber receives the cached list at
+once; a listener may receive the current list on subscription and the same list more than once. The
+provider watch stops when the last subscriber unsubscribes. A throwing listener does not block other
+listeners or mark discovery degraded. Its error logs once per name until the failing listeners
+succeed again, with the service name and masked error, without instance data.
 
 ## Self-registration (Consul only)
 
@@ -275,8 +281,10 @@ family, so an absent A answer can conceal a timed-out AAAA lookup. DNS record TT
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked.
-Reporters are independent per cached name; a cold failure logs and discards its reporter. A DNS
-failure may also produce a probe reporter line.
+Reporters persist across cold failures, so repeated failures log at debug and the first success logs
+recovery at info. The 256 most recently used names retain independent reporters; the least recently
+used is evicted when another name fails. Cold failures are not retry-spaced and do not mark
+discovery degraded. A DNS failure may also produce a probe reporter line.
 
 ## Health indicator
 
@@ -285,7 +293,7 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `everResolved` — `false` until the first successful provider read, so a backend that was never
   reached is `down`, not `up` (the X10-3 fix).
 - `degraded` — a warm name's last read failed, or an empty answer is held during its grace. Cold
-  failures reject and warn, then leave no cached failure state or retained reporter.
+  failures reject and log, then leave no cached failure state.
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST). DNS uses the last lookup outcome: an absent name is success; any
   other failure, including a lookup abandoned at its bound, is unreachable. Before a lookup DNS

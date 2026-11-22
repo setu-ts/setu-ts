@@ -94,6 +94,11 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
             source: `service-discovery-plugin: ${provider.kind} resolve '${serviceName}'`,
             logger: () => ctx.logger,
           }),
+        (serviceName, error) =>
+          ctx.logger?.warn(`service-discovery-plugin: watch listener for '${serviceName}' failed`, {
+            serviceName,
+            error: describeError(error),
+          }),
       );
       ctx.services.register<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY, service);
 
