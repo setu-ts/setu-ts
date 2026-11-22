@@ -23,6 +23,7 @@ import {
 } from './fault.ts';
 import { createBoundedNodeStream, looksLikeNodeReadable } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
+import { storageKeyRefusal } from '../services/storage-key.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
 
@@ -447,6 +448,10 @@ export class S3Provider implements StorageProvider {
    * @param options - Object attributes to record with the bytes
    */
   async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) throw refusal;
+
     await this.#call('put', (client) =>
       options === undefined ? client.put(path, data) : client.put(path, data, options),
     );
@@ -459,19 +464,28 @@ export class S3Provider implements StorageProvider {
    * @returns The object bytes, or `null`
    */
   get(path: string): Promise<Uint8Array | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call('get', (client, signal) => client.get(path, signal));
   }
 
   /**
    * Deletes an object from S3. S3's `DeleteObject` answers alike whether or
-   * not the key existed, so the adapted client checks with `HEAD` first and
-   * resolves `false` for an absent key, the answer every provider gives; an
-   * outage or a refused credential rejects.
+   * not the key existed, so this method checks with `HEAD` first and resolves
+   * `false` for an absent key, the answer every provider gives. A `403` on that
+   * check (a credential without `s3:ListBucket`) leaves presence unknown, so
+   * the delete goes ahead and resolves `true`; any other failure rejects.
    *
    * @param path - Object key
    * @returns `true` if an object was deleted
    */
   async delete(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) throw refusal;
+
     // Presence is a read of its own: its timeout is a 503 (nothing was sent).
     // A 403 there means the credential may not see absent keys (HeadObject
     // without `s3:ListBucket`), so presence is unknown and the delete goes on.
@@ -494,6 +508,10 @@ export class S3Provider implements StorageProvider {
    * @returns `true` if present
    */
   exists(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call('exists', (client) => client.head(path));
   }
 
@@ -505,6 +523,10 @@ export class S3Provider implements StorageProvider {
    * @returns The presigned URL
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call('getSignedUrl', (client) => client.getSignedUrl(path, options.expiresIn));
   }
 
@@ -516,6 +538,10 @@ export class S3Provider implements StorageProvider {
    * @returns A `ReadableStream`, or `null` if absent
    */
   getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call('getStream', (client, signal) => client.getStream(path, signal));
   }
 }

@@ -602,5 +602,10 @@ describe('SendGrid reason cannot forge a log line', () => {
     expect(
       await sendGridReason(new Response(JSON.stringify({ errors: [{ message: 'bad\r\nkey' }] }))),
     ).toBe('bad  key');
+    expect(
+      await sendGridReason(
+        new Response(JSON.stringify({ errors: [{ message: 'a\u0085b\u009bc\u2028d\u2029e' }] })),
+      ),
+    ).toBe('a b c d e');
   });
 });

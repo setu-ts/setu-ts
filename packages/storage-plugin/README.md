@@ -120,8 +120,8 @@ optional only on the memory arm, which is the default.
 | `'azure'`  | `AzureBlobProviderOptions`    | `containerName`                      |
 
 `'b2'` has no default region: Backblaze regions are named like `us-west-004`, and with only `bucket`
-set the plugin refuses to start, naming both options. With `region` the endpoint is
-`https://s3.<region>.backblazeb2.com`.
+set (and no injected `client`) the plugin refuses to start, naming both options. With `region` the
+endpoint is `https://s3.<region>.backblazeb2.com`.
 
 The cloud arms share one bound and take an endpoint:
 
@@ -206,8 +206,9 @@ An outage is an error, never "not there". On every cloud arm:
   so presence is unknown and the delete goes ahead and resolves `true`. Any other failure rejects.
   Every provider gives the same `delete()` answer, except S3/B2 under such a credential. An S3/B2
   `delete` is two requests, each under its own `requestTimeoutMs`.
-- A key with a `.` or `..` path segment is refused with a `400` on every provider: on Azure the SDK
-  resolves `..` in the blob URL, so such a key could reach another container.
+- A key with a `.` or `..` path segment is refused with a `400` by every `StorageService` call, and
+  by the S3, B2, GCS and Azure providers used directly: on Azure the SDK resolves `..` in the blob
+  URL, so such a key could reach another container.
 - `local` `get` resolves `null` (`404`) only for an absent file; a permission or I/O failure
   rejects.
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/

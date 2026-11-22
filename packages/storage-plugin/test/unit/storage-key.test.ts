@@ -95,8 +95,37 @@ describe('every provider, through StorageService, refuses a traversing key on ev
   }
 });
 
-describe('the Azure provider used directly refuses one too', () => {
-  it('on every operation, before any call reaches the client', async () => {
+const DIRECT = PROVIDERS.filter(
+  ([name]) => name === 's3 / b2' || name === 'gcs' || name === 'azure',
+);
+
+describe('the cloud providers used directly refuse one too', () => {
+  for (const [name, factory] of DIRECT) {
+    it(`${name}: every operation answers 400`, async () => {
+      const provider = factory();
+      await provider.connect();
+      for (const [, run] of OPS) {
+        for (const key of BAD) {
+          const error = await run(provider, key).catch((e: unknown) => e);
+          expect(httpStatusHintOf(error)?.status).toBe(400);
+        }
+      }
+    });
+
+    it(`${name}: a non-string key rejects rather than throwing synchronously`, async () => {
+      const provider = factory();
+      await provider.connect();
+      for (const [, run] of OPS) {
+        let pending: Promise<unknown> | undefined;
+        expect(() => {
+          pending = run(provider, undefined as unknown as string);
+        }).not.toThrow();
+        await pending?.catch(() => undefined);
+      }
+    });
+  }
+
+  it('azure: no call reaches the client', async () => {
     let calls = 0;
     const provider = new AzureBlobProvider(
       {

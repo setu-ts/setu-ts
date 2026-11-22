@@ -124,5 +124,8 @@ describe('resolveSecretsDeadline / runSecretsCall (V13-216)', () => {
 describe('a backend message cannot forge a log line', () => {
   it('control characters in the cause message are replaced', () => {
     expect(toSecretsError(new Error('no\nway'), 'X', 'get').message).toBe('X get failed: no way');
+    expect(toSecretsError(new Error('a\u0085b\u009bc\u2028d\u2029e'), 'X', 'get').message).toBe(
+      'X get failed: a b c d e',
+    );
   });
 });

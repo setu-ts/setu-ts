@@ -17,6 +17,7 @@ import {
 import { hasMethods } from './shape.ts';
 import type { StorageDeadline, StorageOperation } from './fault.ts';
 import { answeredBelow500, resolveRequestTimeout, runBounded, toStorageError } from './fault.ts';
+import { storageKeyRefusal } from '../services/storage-key.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
 
@@ -440,6 +441,10 @@ export class GcsProvider implements StorageProvider {
    * @param options - Object attributes to record with the bytes
    */
   put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
     // always passed (empty when the caller supplied nothing) so this package
     // has ONE call shape rather than two that can drift.
@@ -474,6 +479,10 @@ export class GcsProvider implements StorageProvider {
    * @returns The object bytes, or `null`
    */
   get(path: string): Promise<Uint8Array | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call<Uint8Array | null>(
       'get',
       async () => {
@@ -494,6 +503,10 @@ export class GcsProvider implements StorageProvider {
    * @returns `true` if deleted
    */
   delete(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call(
       'delete',
       async () => {
@@ -512,6 +525,10 @@ export class GcsProvider implements StorageProvider {
    * @returns `true` if present
    */
   exists(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     return this.#call(
       'exists',
       async () => {
@@ -532,6 +549,10 @@ export class GcsProvider implements StorageProvider {
    *   it with `now`, or register it through `StoragePlugin`
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     if (this.#client === null) {
       return Promise.reject(new Error('GcsProvider is not connected. Call connect() first.'));
     }
@@ -568,6 +589,10 @@ export class GcsProvider implements StorageProvider {
    */
   // eslint-disable-next-line require-await -- the not-connected refusal and the shape refusal must REJECT, not throw synchronously
   async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) throw refusal;
+
     this.#assertConnected();
     let readable: unknown;
     try {

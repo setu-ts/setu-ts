@@ -5,8 +5,9 @@
  * segment would let it name something outside that: the Azure SDK resolves
  * `..` in the blob URL before it sends or signs, so `../other/secret.txt`
  * read, wrote and signed a URL for a blob in another container. The local
- * provider has always contained such keys; this check refuses them on every
- * provider. Internal — not exported from the package barrel.
+ * provider has always contained such keys; `StorageService` refuses them for
+ * every provider, and the S3, B2, GCS and Azure providers used directly do
+ * too. Internal — not exported from the package barrel.
  *
  * @module
  */
@@ -20,8 +21,13 @@ import { withHttpStatusHint } from '@setu-ts/common';
  * @param path - The object key
  * @returns An `Error` with a `400` status hint, or `undefined`
  */
-export function storageKeyRefusal(path: string): Error | undefined {
-  if (!path.split('/').some((segment) => segment === '.' || segment === '..')) {
+export function storageKeyRefusal(path: unknown): Error | undefined {
+  // A non-string key is left to the provider's own asynchronous call: a check
+  // that threw here would throw synchronously from a provider method.
+  if (
+    typeof path !== 'string' ||
+    !path.split('/').some((segment) => segment === '.' || segment === '..')
+  ) {
     return undefined;
   }
   return withHttpStatusHint(new Error("storage-plugin: a key has a '.' or '..' path segment"), {

@@ -9280,7 +9280,7 @@ body; the brand itself changes no behaviour. Options it cannot describe are refu
 middleware is built (`RangeError` naming the rule: a non-empty `fieldname`, whole-number `maxSize`
 and `maxFiles` of at least 1, `allowedMimeTypes` an array of strings). Since 0.14.0 every
 `StorageService` call refuses a key with a `.` or `..` path segment with a `400` hint (fixed
-detail); the Azure provider, used directly, refuses one too.
+detail); the S3, B2, GCS and Azure providers, used directly, refuse one too.
 
 Since M94b the middleware parses through the request's `formData` accessor (or the same shared
 `parseFormBody` when the request omits it), and a part carrying NO `filename` under the field name
@@ -9332,7 +9332,7 @@ The plugin ships five named providers plus a first-class B2 preset that reuses S
 | `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`, `requestTimeoutMs?`                | Lazy `@aws-sdk/client-s3` + presigner | R2 and MinIO via `endpoint`. Real presigned GET URLs.                                                       |
 | `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`, `endpoint?`, `endpointAuth?`, `requestTimeoutMs?`                             | Lazy `@google-cloud/storage` (`^7`)   | Signed URLs via `file.getSignedUrl` (epoch-ms expiry). The SDK's own retry is off.                          |
 | `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?`, `endpoint?`, `requestTimeoutMs?` | Lazy `@azure/storage-blob`            | `connectionString` via `fromConnectionString`. SAS via the SDK's `generateSasUrl`; requires an account key. |
-| B2 preset              | `'b2'`     | `bucket`, `region` or `endpoint`, `accessKeyId`, `secretAccessKey`, `requestTimeoutMs?`               | Same as S3 (reuses `S3Provider`)      | Endpoint `https://s3.<region>.backblazeb2.com`. Neither `region` nor `endpoint` refuses at startup.         |
+| B2 preset              | `'b2'`     | `bucket`, `region` or `endpoint`, `accessKeyId`, `secretAccessKey`, `requestTimeoutMs?`               | Same as S3 (reuses `S3Provider`)      | Endpoint `https://s3.<region>.backblazeb2.com`. No `region`, `endpoint` or `client` refuses at startup.     |
 
 Since 0.14.0 every cloud provider bounds each call with `requestTimeoutMs` (default `30000`; `0`
 disables; the SDK's own retries included; `getStream` up to the first chunk). A read that fails on
