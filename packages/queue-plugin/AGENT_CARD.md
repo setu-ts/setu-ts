@@ -53,8 +53,8 @@ export function createReceiptJobProcessor(
 - Read-back state can live in a module both files import; the factory gets `services` to resolve
   capabilities at `onInit` (a capability resolved there must be registered, e.g. `LoggerPlugin`).
 - `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
-- `onFailed` runs after the last attempt, not on retries; make it safe to repeat.
-- Concurrency is 1 per name.
+- `onFailed` runs after the last attempt, not on retries; keep it idempotent.
+- Default concurrency is 1 per name.
 - The default memory adapter is process-local; shutdown stops polling and disconnects it.
 
 ## Other options

@@ -87,6 +87,36 @@ describe('SQS settlement and renewal ordering', () => {
     },
   );
 
+  it('still deletes the source after a forward that outlived its claim', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    await transport.send('source', envelope(1));
+    const [job] = await queue.reserve('build', 1, 0);
+    const work = Promise.withResolvers<void>();
+    const originalSend = transport.send.bind(transport);
+    vi.spyOn(transport, 'send').mockImplementationOnce(async (...args) => {
+      await work.promise;
+      return originalSend(...args);
+    });
+    // Every renewal fails, so the claim lapses while the forward is held.
+    vi.spyOn(transport, 'changeVisibility').mockRejectedValue(new Error('Throttled'));
+    const deleted = vi.spyOn(transport, 'delete');
+    const terminal = queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+    try {
+      await drain();
+      await runtime.advanceMs(1000);
+      expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(false);
+      await runtime.advanceMs(3000);
+      work.resolve();
+      await terminal;
+      expect(deleted).toHaveBeenCalledTimes(1);
+      expect(transport.depth('dead')).toBe(1);
+    } finally {
+      work.resolve();
+      await Promise.allSettled([terminal]);
+      await queue.disconnect();
+    }
+  });
+
   it('keeps a slow terminal forward leased without a second onFailed or duplicate copy', async () => {
     const { queue, transport, runtime } = await sqsHarness();
     const service = new QueueService(queue, runtime, { pollIntervalMs: 100 });

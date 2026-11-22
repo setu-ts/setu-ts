@@ -467,11 +467,13 @@ injected transport).
 #### Long jobs
 
 While a processor runs, the adapter extends the message's visibility every third of
-`visibilityTimeoutSeconds`, so a job longer than the timeout runs once. SQS caps a message's
-visibility at 12 hours from the receive; the adapter asks for no more than the time left and stops
-extending at the cap, after which the job is reported as stale (`queue job claim renewal failed`)
-and SQS delivers it again. A settle (`ack`, retry or dead-letter) for a claim the adapter no longer
-holds fails and is reported as `queue job settlement failed`; it is not counted.
+`visibilityTimeoutSeconds`, so a job longer than the timeout runs once. Renewal also continues
+through `onFailed` and the dead-letter forward, and stops only for the final delete or visibility
+change. SQS caps a message's visibility at 12 hours from the receive; the adapter asks for no more
+than the time left and stops extending at the cap, after which the job is reported as stale
+(`queue job claim renewal failed`) and SQS delivers it again. A settle (`ack`, retry or dead-letter)
+for a claim the adapter no longer holds fails and is reported as `queue job settlement failed`; it
+is not counted.
 
 #### SQS Retry and DLQ
 

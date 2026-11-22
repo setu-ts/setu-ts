@@ -695,7 +695,11 @@ export class SqsQueue implements QueueAdapter {
     name: string,
     id: string,
     token: string,
-    call: (entry: ReceiptEntry, fence: () => Promise<void>, transport: ISqsTransport) => Promise<T>,
+    call: (
+      entry: ReceiptEntry,
+      fence: (recheck?: boolean) => Promise<void>,
+      transport: ISqsTransport,
+    ) => Promise<T>,
   ): Promise<T> {
     const transport = this.#transport;
     if (!transport) throw new Error('SqsQueue is not connected');
@@ -703,10 +707,14 @@ export class SqsQueue implements QueueAdapter {
     const activity = entry.activity;
     if (activity.settlementInProgress) throw new StaleClaimError();
     activity.settlementInProgress = true;
-    const fence = async (): Promise<void> => {
+    // `recheck: false` is for the source delete after a successful forward: the
+    // copy is already in the target, so the delete is always attempted. A stale
+    // receipt handle makes SQS skip it harmlessly; refusing here would leave the
+    // source to be delivered and forwarded again.
+    const fence = async (recheck = true): Promise<void> => {
       activity.settling = true;
       if (activity.renewal !== undefined) await activity.renewal;
-      this.#claim(name, id, token);
+      if (recheck) this.#claim(name, id, token);
     };
     try {
       const result = await call(entry, fence, transport);
@@ -726,7 +734,7 @@ export class SqsQueue implements QueueAdapter {
     attempts: number,
     reason: 'attempts-exhausted' | 'abandoned' | 'unreadable',
     id = messageId,
-    fence?: () => Promise<void>,
+    fence?: (recheck?: boolean) => Promise<void>,
   ): Promise<void | 'discarded'> {
     await this.prepareConsumer(name);
     const transport = this.#transport!;
@@ -747,7 +755,7 @@ export class SqsQueue implements QueueAdapter {
       'setu-source-message-id': { DataType: 'String', StringValue: messageId },
     });
     try {
-      if (fence !== undefined) await fence();
+      if (fence !== undefined) await fence(false);
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
     } catch (error) {
       this.#logger?.error(
