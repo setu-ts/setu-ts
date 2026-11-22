@@ -231,6 +231,13 @@
       },
       {
         "kind": "method",
+        "name": "unrefTimer",
+        "readonly": false,
+        "optional": true,
+        "signature": "unrefTimer?(handle:TimerHandle):void"
+      },
+      {
+        "kind": "method",
         "name": "uuid",
         "readonly": false,
         "optional": false,

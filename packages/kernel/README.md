@@ -49,9 +49,11 @@ internal.
   settle (a streamed body's run when the signal aborts, once the body's `cancel()` settles, with no
   time limit — a `cancel()` that never settles keeps the request's resources; a source that does
   work of its own, in `pull` or a pump it started, must make `cancel()` wait for it; a source with
-  no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its
-  `pull`), so a handler that never settles keeps what it holds; a failed response stream is logged
-  once as `Response stream failed`.
+  no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`;
+  with a logger registered, a wait still pending after 30 s logs one `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`), so
+  a handler that never settles keeps what it holds; a failed response stream is logged once as
+  `Response stream failed`.
 
 <!-- version:history -->
 

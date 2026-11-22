@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 
 import { wrapDeferredStream } from '../../src/context/deferred.ts';
+import type { StallWatch } from '../../src/context/deferred.ts';
 import { ServiceRegistry } from '../../src/registry/service-registry.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
@@ -147,6 +148,133 @@ describe('wrapDeferredStream and the request signal', () => {
     await consumerCancel;
     await settle();
     expect(order).toEqual(['source cancel', 'aborted', 'pull settled', 'cleanup', 'complete']);
+  });
+
+  /** A stall watch recording warnings and the clears it was handed. */
+  function stallWatch(): {
+    watch: StallWatch;
+    warned: number[];
+    tracked: Set<() => void>;
+  } {
+    const warned: number[] = [];
+    const tracked = new Set<() => void>();
+    return {
+      warned,
+      tracked,
+      watch: {
+        warn: (waitedMs) => void warned.push(waitedMs),
+        track: (clear) => void tracked.add(clear),
+        untrack: (clear) => void tracked.delete(clear),
+      },
+    };
+  }
+
+  /** A source whose cancel() settles only when released. */
+  function heldCancel(): { stream: ReadableStream<Uint8Array>; release: () => void } {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { stream: new ReadableStream<Uint8Array>({ cancel: () => held }), release };
+  }
+
+  it('warns once, after 30 s, while cancel() has not settled, and still holds the cleanups', async () => {
+    const fake = createFakeRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+    const stall = stallWatch();
+    let cleaned = 0;
+    const source = heldCancel();
+    const client = new AbortController();
+    wrapDeferredStream(
+      source.stream,
+      [() => void cleaned++],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      stall.watch,
+    );
+    client.abort();
+    await settle();
+    expect(stall.tracked.size).toBe(1);
+    fake.tick(29_999);
+    await settle();
+    expect(stall.warned).toEqual([]);
+    fake.tick(30_000);
+    fake.tick(30_000);
+    await settle();
+    // One warning; the fake clock has advanced 59 999 ms by now.
+    expect(stall.warned).toHaveLength(1);
+    expect(stall.warned[0]).toBeGreaterThanOrEqual(30_000);
+    expect(stall.tracked.size).toBe(0);
+    expect(cleaned).toBe(0);
+    source.release();
+    await settle();
+    expect(cleaned).toBe(1);
+  });
+
+  it('clears the stall timer and never warns when cancel() settles first', async () => {
+    const fake = createFakeRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+    const cleared = vi.spyOn(fake.runtime, 'clearTimeout');
+    const stall = stallWatch();
+    const source = heldCancel();
+    const client = new AbortController();
+    wrapDeferredStream(
+      source.stream,
+      [() => {}],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      stall.watch,
+    );
+    client.abort();
+    await settle();
+    source.release();
+    await settle();
+    expect(cleared).toHaveBeenCalledOnce();
+    expect(stall.tracked.size).toBe(0);
+    fake.tick(30_000);
+    await settle();
+    expect(stall.warned).toEqual([]);
+  });
+
+  it('asks the runtime to unref the stall timer where it can', async () => {
+    const fake = createFakeRuntime();
+    const unrefed: unknown[] = [];
+    const runtime = Object.assign(fake.runtime, {
+      unrefTimer: (handle: unknown) => void unrefed.push(handle),
+    });
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, runtime);
+    const client = new AbortController();
+    wrapDeferredStream(
+      heldCancel().stream,
+      [() => {}],
+      registry,
+      () => {},
+      client.signal,
+      undefined,
+      stallWatch().watch,
+    );
+    client.abort();
+    await settle();
+    expect(unrefed).toHaveLength(1);
+  });
+
+  it('sets no stall timer without a stall watch', async () => {
+    const fake = createFakeRuntime();
+    const registry = new ServiceRegistry();
+    registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+    const timers = vi.spyOn(fake.runtime, 'setTimeout');
+    const client = new AbortController();
+    wrapDeferredStream(heldCancel().stream, [() => {}], registry, () => {}, client.signal);
+    client.abort();
+    await settle();
+    expect(timers).not.toHaveBeenCalled();
   });
 
   it('runs the cleanups without waiting for a source with no cancel()', async () => {

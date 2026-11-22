@@ -396,7 +396,10 @@ export interface IRequestContext {
    * does work of its own (in `pull`, or a pump it started) must make its
    * `cancel()` wait for that work, and a source with no `cancel()` gets no
    * wait, so a limit released through `defer` does not cover work in its
-   * `pull`.
+   * `pull`. With a logger registered, a wait still pending after 30 s logs
+   * one `warn` line (`Request cleanup still waiting for the response stream
+   * to stop; its resources are still held`, with `requestId`, `method`,
+   * `path` and `waitedMs`); it releases nothing.
    * An abort never runs cleanups under a running handler: they wait for it to
    * settle, so a handler that never settles keeps what it holds.
    * Calls after completion run immediately. Failures are reported at warn.

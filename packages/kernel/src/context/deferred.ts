@@ -11,6 +11,26 @@ import type { ILogger, IRuntimeServices, IServiceRegistry } from '@setu-ts/commo
 /** Fixed bound for one asynchronous cleanup. @since 0.11.0 */
 const DEFERRED_CLEANUP_TIMEOUT_MS = 5000;
 
+/** How long an abort may wait on a source's `cancel()` before it is reported. @since 0.14.0 */
+export const CLEANUP_STALL_WARN_MS = 30_000;
+
+/**
+ * Reports, once, an abort still waiting on the source's `cancel()` after
+ * {@linkcode CLEANUP_STALL_WARN_MS}, and lets the owner clear the pending
+ * timer (at `stop()`).
+ *
+ * @since 0.14.0
+ * @internal
+ */
+export interface StallWatch {
+  /** Called once, with how long the abort has waited. */
+  warn(waitedMs: number): void;
+  /** Receives the function that clears the pending timer. */
+  track(clear: () => void): void;
+  /** Called when the timer is gone (it fired or the cancel settled). */
+  untrack(clear: () => void): void;
+}
+
 /**
  * Internal cleanup callback type.
  * @since 0.11.0
@@ -91,6 +111,9 @@ export function runDeferred(
  * @param onAbort - Called once when the signal aborts before the stream ended;
  *   the cleanups follow the source's `cancel()`
  *
+ * @param stall - Reports an abort still waiting on `cancel()` after 30 s;
+ *   omitted, no timer is set
+ *
  * @returns The wrapped streaming body
  *
  * @since 0.11.0
@@ -104,6 +127,7 @@ export function wrapDeferredStream(
   complete: () => void,
   signal?: AbortSignal,
   onAbort?: () => void,
+  stall?: StallWatch,
 ): ReadableStream<Uint8Array> {
   const finish = (): void | Promise<void> => {
     const pending = runDeferred(cleanups, registry);
@@ -137,9 +161,11 @@ export function wrapDeferredStream(
     // invisible from a reader, so cancel() is the source's one hook; one that
     // never settles keeps the resources, as a handler that never settles
     // does (security audit P15: a bounded wait let a limit be bypassed).
+    const stopWatching = watchStall(registry, stall);
     aborting = cancelSource(signal?.reason)
       .catch(() => {})
       .then(() => {
+        stopWatching();
         completed = true;
         return finish();
       });
@@ -176,4 +202,31 @@ export function wrapDeferredStream(
     },
     { highWaterMark: 0 },
   );
+}
+
+/**
+ * Starts the one-shot stall timer for an abort waiting on `cancel()`. The
+ * timer comes from the runtime, is unref'd where the runtime can, and never
+ * releases anything: it only reports. Returns the function that stops it.
+ */
+function watchStall(registry: IServiceRegistry, stall: StallWatch | undefined): () => void {
+  if (stall === undefined) return () => {};
+  const runtime = registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  const started = runtime.hrtime();
+  let pending = true;
+  const clear = (): void => {
+    if (!pending) return;
+    pending = false;
+    runtime.clearTimeout(handle);
+    stall.untrack(clear);
+  };
+  const handle = runtime.setTimeout(() => {
+    if (!pending) return;
+    pending = false;
+    stall.untrack(clear);
+    stall.warn(runtime.hrtime() - started);
+  }, CLEANUP_STALL_WARN_MS);
+  runtime.unrefTimer?.(handle);
+  stall.track(clear);
+  return clear;
 }

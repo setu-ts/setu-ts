@@ -65,6 +65,7 @@ import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
+import type { StallWatch } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { DispatchedRequest } from './dispatched-request.ts';
 import { StartCancelledError } from './start-cancelled-error.ts';
@@ -351,6 +352,8 @@ class Application implements IKernelApplication {
   #drainTimeoutMs = DEFAULT_DRAIN_TIMEOUT_MS;
   /** Requests whose streamed RPC reply holds the shutdown drain until it ends. */
   readonly #rpcStreams = new WeakSet<IRequestContext>();
+  /** Clears each pending stream-cancel stall timer; `stop()` runs them all. */
+  readonly #stallTimers = new Set<() => void>();
   /**
    * The kernel diagnostics collector — `undefined` unless the application was
    * created with `diagnostics` explicitly enabled. Every read of this field
@@ -1076,6 +1079,8 @@ class Application implements IKernelApplication {
       throw error;
     } finally {
       this.#unsubscribeFatalErrors();
+      // A stuck stream's stall warning has nothing left to say after stop.
+      for (const clear of [...this.#stallTimers]) clear();
       this.#collector?.markClosed(shutdownFailed);
     }
   }
@@ -2145,10 +2150,18 @@ class Application implements IKernelApplication {
       this.#completeRequest(ctx, outcome);
     };
     response.stream(
-      wrapDeferredStream(body, cleanups, this.#registry, complete, ctx.request.signal, () => {
-        // The context's watcher already reported an abort before settle.
-        if (!handle.abortReported) this.#onRequestAborted(ctx);
-      }),
+      wrapDeferredStream(
+        body,
+        cleanups,
+        this.#registry,
+        complete,
+        ctx.request.signal,
+        () => {
+          // The context's watcher already reported an abort before settle.
+          if (!handle.abortReported) this.#onRequestAborted(ctx);
+        },
+        this.#stallWatch(ctx),
+      ),
       response.streamOptions,
     );
     return response;
@@ -2176,6 +2189,30 @@ class Application implements IKernelApplication {
         });
       },
     );
+  }
+
+  /**
+   * The stall watch for a streamed body's abort, or none without a logger
+   * (then no timer is set). Its one line carries only the request id, method,
+   * path and the wait — never headers, query, body or error text.
+   */
+  #stallWatch(ctx: IRequestContext): StallWatch | undefined {
+    if (!this.#registry.has(CAPABILITIES.LOGGER)) return undefined;
+    return {
+      warn: (waitedMs) => {
+        this.#logSafely(
+          'warn',
+          'Request cleanup still waiting for the response stream to stop; its resources are still held',
+          { requestId: ctx.id, method: ctx.request.method, path: ctx.request.path, waitedMs },
+        );
+      },
+      track: (clear) => {
+        this.#stallTimers.add(clear);
+      },
+      untrack: (clear) => {
+        this.#stallTimers.delete(clear);
+      },
+    };
   }
 
   /**

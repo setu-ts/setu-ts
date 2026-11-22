@@ -8,6 +8,12 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import {
+  crossClearTimeout,
+  crossSetTimeout,
+  crossUnrefTimer,
+} from '../../src/services/cross-runtime.ts';
+import { buildNodeHost, createNodeRuntimeServices } from '../../src/adapters/node/node-runtime.ts';
 import type { IRequest, IResponse, ResponseSnapshot, WebSocketEventSink } from '@setu-ts/common';
 import { setUpgradeIntent } from '@setu-ts/common';
 
@@ -408,5 +414,38 @@ describe('Bun adapter', () => {
     await fetch(new Request('http://localhost/ws'), bun.server);
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ configured: 0, ceiling: BUN_WS_MAX_MESSAGE_BYTES });
+  });
+});
+
+describe('unrefTimer: a timer that does not keep the process alive', () => {
+  it('unrefs a Node timer, so the process can exit with it pending', () => {
+    const handle = crossSetTimeout(() => {}, 60_000) as NodeJS.Timeout;
+    try {
+      expect(handle.hasRef()).toBe(true);
+      crossUnrefTimer(handle);
+      expect(handle.hasRef()).toBe(false);
+    } finally {
+      crossClearTimeout(handle);
+    }
+  });
+
+  it("uses Deno.unrefTimer for Deno's numeric timer ids, and does nothing where neither exists", () => {
+    const unrefed: number[] = [];
+    const host = globalThis as { Deno?: unknown };
+    const previous = host.Deno;
+    host.Deno = { unrefTimer: (id: number) => void unrefed.push(id) };
+    try {
+      crossUnrefTimer(7);
+      expect(unrefed).toEqual([7]);
+    } finally {
+      if (previous === undefined) delete host.Deno;
+      else host.Deno = previous;
+    }
+    expect(() => crossUnrefTimer(8)).not.toThrow();
+    expect(() => crossUnrefTimer(undefined)).not.toThrow();
+  });
+
+  it('is part of every runtime the shared base builds', () => {
+    expect(createNodeRuntimeServices(buildNodeHost()).unrefTimer).toBe(crossUnrefTimer);
   });
 });

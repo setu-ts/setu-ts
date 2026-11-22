@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IGrpcService, IPlugin, IPluginContext, RpcReply } from '@setu-ts/common';
 
@@ -537,6 +537,78 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
       expect(cleaned).toBe(0);
     },
   );
+
+  /** An app on the fake clock with a stuck streamed route, its client already gone. */
+  async function stuckAfterAbort(withLogger: boolean): Promise<{
+    fake: ReturnType<typeof createFakeRuntime>;
+    calls: LogCall[];
+    app: ReturnType<typeof createApplication>;
+    timers: { mock: { calls: unknown[][] } };
+  }> {
+    const fake = createFakeRuntime();
+    const timers = vi.spyOn(fake.runtime, 'setTimeout');
+    const calls: LogCall[] = [];
+    const app = createApplication({
+      plugins: [fakeRuntime(fake), ...(withLogger ? [recordingLogger(calls)] : [])],
+    });
+    app.router.get('/stuck', (ctx) => {
+      ctx.defer?.(() => {});
+      return ctx.response.stream(heldCancel().stream);
+    });
+    await app.start({ drainTimeoutMs: 50 });
+    const client = new AbortController();
+    const response = await app.dispatch!(
+      new Request('http://localhost/stuck?token=secret', {
+        signal: client.signal,
+        headers: { authorization: 'Bearer secret' },
+      }),
+    );
+    await response.body!.getReader().read();
+    client.abort();
+    await flush();
+    return { fake, calls, app, timers };
+  }
+
+  const STALL =
+    'Request cleanup still waiting for the response stream to stop; its resources are still held';
+
+  it('warns once, with only the request id, method, path and wait, when a stream stays stuck 30 s', async () => {
+    const { fake, calls, app } = await stuckAfterAbort(true);
+    await advance(fake, 30_000);
+    await advance(fake, 30_000);
+    const stalls = withMessage(calls, STALL);
+    expect(stalls).toHaveLength(1);
+    expect(stalls[0]!.level).toBe('warn');
+    expect(Object.keys(stalls[0]!.metadata ?? {}).sort()).toEqual([
+      'method',
+      'path',
+      'requestId',
+      'waitedMs',
+    ]);
+    expect(stalls[0]!.metadata).toMatchObject({ method: 'GET', path: '/stuck', waitedMs: 30_000 });
+    expect(JSON.stringify(stalls[0])).not.toContain('secret');
+    void app.stop();
+    await advance(fake, 1_000);
+  });
+
+  it('sets no stall timer when no logger is registered', async () => {
+    const { fake, timers, app } = await stuckAfterAbort(false);
+    expect(timers.mock.calls.some((call) => call[1] === 30_000)).toBe(false);
+    void app.stop();
+    await advance(fake, 1_000);
+  });
+
+  it('clears a pending stall timer at stop()', async () => {
+    const { fake, calls, app } = await stuckAfterAbort(true);
+    let stopped = false;
+    void app.stop().then(() => {
+      stopped = true;
+    });
+    await advance(fake, 50);
+    expect(stopped).toBe(true);
+    await advance(fake, 30_000);
+    expect(withMessage(calls, STALL)).toHaveLength(0);
+  });
 
   it('does not hold the drain for a plain streamed route', async () => {
     const fake = createFakeRuntime();
