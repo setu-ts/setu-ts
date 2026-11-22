@@ -63,6 +63,19 @@ describe('request context abort watcher', () => {
     expect(aborts).toHaveLength(1);
   });
 
+  it('stays disarmed for a first defer made after the response was handed back', async () => {
+    const client = new AbortController();
+    const { handle, aborts } = contextWith(client.signal);
+    handle.disarmAbort();
+    client.abort();
+    let cleaned = 0;
+    handle.ctx.defer?.(() => void cleaned++);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(cleaned).toBe(0);
+    expect(aborts).toHaveLength(0);
+  });
+
   it('ignores an abort once disarmed, and an already-aborted signal disarmed before its microtask', async () => {
     const client = new AbortController();
     const { handle, aborts } = contextWith(client.signal);

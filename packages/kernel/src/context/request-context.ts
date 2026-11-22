@@ -89,6 +89,8 @@ class RequestContext implements IRequestContext {
   readonly #onAbort: ((ctx: IRequestContext) => void) | undefined;
   /** The signal listener `#watchAbort` attached, until it is removed. */
   #abortWatch: { readonly signal: AbortSignal; readonly aborted: () => void } | undefined;
+  /** Set by `disarmAbort`; once set, no later `defer` attaches a watcher. */
+  #abortDisarmed = false;
 
   constructor(
     request: IRequest,
@@ -226,6 +228,7 @@ class RequestContext implements IRequestContext {
    * none.
    */
   #watchAbort(): void {
+    if (this.#abortDisarmed) return;
     const signal = this.request.signal;
     if (signal === undefined) return;
     const aborted = (): void => {
@@ -247,9 +250,11 @@ class RequestContext implements IRequestContext {
    * so a later abort is not a client that left before it. Deno's legacy
    * `request.signal` aborts after every successful response, which would
    * otherwise run cleanups under a handler that is still running behind an
-   * early middleware response.
+   * early middleware response. Sticky: a first `defer` made after this call
+   * attaches no watcher.
    */
   disarmAbort(): void {
+    this.#abortDisarmed = true;
     const watch = this.#abortWatch;
     if (watch === undefined) return;
     this.#abortWatch = undefined;
