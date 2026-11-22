@@ -672,7 +672,8 @@ describe('a stop during start cancels the start (V13-43)', () => {
     await expect(starting).rejects.toBeInstanceOf(StartCancelledError);
     await stopping;
     expect(warnings.filter((line) => line === 'Startup cancelled')).toHaveLength(1);
-    expect(nested).toEqual([stopping]);
+    expect(nested).toHaveLength(1);
+    expect(nested[0]).toBe(stopping);
   });
 
   it('never waits past a 1 ms drain bound for a poll (CodeRabbit)', async () => {

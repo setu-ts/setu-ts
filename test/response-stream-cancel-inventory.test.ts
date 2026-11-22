@@ -225,10 +225,11 @@ const HAND_OFFS: readonly Row[] = [
     evidence: /return response\.stream\(controller\.readable\);/,
   },
   {
-    // Two settle-path wraps, one guard-only settle hand-off, and the RPC reply
-    // hand-off (#sendRpcResponse), whose body the settle path then handles.
+    // Three settle-path wraps (cleanups, early stream, plain stream), one
+    // guard-only settle hand-off, and the RPC reply hand-off (#sendRpcResponse),
+    // whose body the settle path then handles.
     file: 'packages/kernel/src/application/application.ts',
-    count: 4,
+    count: 5,
     cancelSettles: 'as-its-source',
     kind: 'kernel-wrapper',
     evidence: /wrapDeferredStream\(/,
