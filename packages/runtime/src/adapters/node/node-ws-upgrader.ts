@@ -152,7 +152,17 @@ export interface RawUpgradeSocket {
    * @since 0.14.0
    */
   on?(event: 'error', listener: (error: unknown) => void): unknown;
+  /**
+   * Calls the listener once the socket has been idle for `ms`. A refusal
+   * whose client never reads would otherwise never reach `'finish'`, holding
+   * the descriptor and the unsent body.
+   * @since 0.14.0
+   */
+  setTimeout?(ms: number, listener: () => void): unknown;
 }
+
+/** How long a refusal's socket may sit idle with bytes unsent before it is destroyed. */
+const REFUSAL_IDLE_TIMEOUT_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // Module loading (inject-or-lazy, AI_GUIDELINES §12.2)
@@ -539,7 +549,8 @@ const COMPUTED_HEADERS = new Set([
  * snapshot's own framing headers are replaced by a `content-length` of the
  * body and `connection: close`. A streamed body is cancelled and sent empty.
  * A status outside 200–599 is answered as 500. The socket is ended, then
- * destroyed once the bytes are flushed.
+ * destroyed once the bytes are flushed, or once it has been idle for 5 s
+ * (a client that never reads a large body).
  *
  * @param socket - The raw duplex socket
  * @param snapshot - The framework response the pipeline produced
@@ -577,5 +588,6 @@ export function writeRawUpgradeResponse(
     return;
   }
   socket.once?.('finish', () => socket.destroy());
+  socket.setTimeout?.(REFUSAL_IDLE_TIMEOUT_MS, () => socket.destroy());
   socket.end();
 }

@@ -203,6 +203,26 @@ describe('Node refused upgrade socket lifetime (security audit)', () => {
     expect(socket.destroyed).toBe(true);
   });
 
+  it('destroys a refusal its client never reads once the socket is idle for the bound', () => {
+    let idle: { ms: number; listener: () => void } | undefined;
+    const socket = Object.assign(rawSocket(), {
+      once() {},
+      setTimeout(ms: number, listener: () => void) {
+        idle = { ms, listener };
+      },
+    });
+    writeRawUpgradeResponse(socket, {
+      streaming: false,
+      status: 401,
+      headers: new Headers(),
+      body: 'x'.repeat(1024),
+    });
+    expect(idle?.ms).toBe(5_000);
+    expect(socket.destroyed).toBe(false);
+    idle?.listener();
+    expect(socket.destroyed).toBe(true);
+  });
+
   it('answers 500 for a status no Response could carry', () => {
     for (const status of [Number.NaN, 0, 101, 199, 600, 1000, 401.5]) {
       const socket = rawSocket();
