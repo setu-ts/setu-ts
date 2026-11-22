@@ -63,9 +63,10 @@ All notable changes to this project are documented here. The format follows
   are not committed, so a form on a page marked `public` fails CSRF. A missing asset starts no
   session. The React Router bridge sets a route's `Cache-Control` instead of appending it.
 - **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
-  `private`, `no-store` or varying on `Cookie`/`Authorization`, and serves a request carrying
-  `Authorization` or a credential cookie only from a `public` entry, outside the coalescer. New
-  option `credentialCookies`.
+  `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
+  from a `public` entry that does not vary on `Cookie`/`Authorization`, outside the coalescer. A
+  response varying on either is stored and served only for requests carrying neither. New option
+  `credentialCookies`.
 - **`@setu-ts/http-security-plugin` (M143a; V13-34).** Security headers run at priority 10 and CORS
   at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a; V13-60).** Swagger UI's Try-it-out sends

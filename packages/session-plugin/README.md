@@ -499,9 +499,9 @@ with `{ method, route, signal }`. `route` is the path with each route parameter 
 routes one line says further warnings are suppressed.
 
 The recipe: cache the anonymous variant with `public, s-maxage=…` only when no session was restored
-(it still carries `Vary: Cookie`, so a CDN keys it apart and `cacheMiddleware` does not store it);
-read the CSRF token in a loader rather than in deferred data; register `cacheMiddleware` outside the
-session middleware where possible.
+(it still carries `Vary: Cookie`, so a CDN keys it apart and `cacheMiddleware` serves it only to
+requests carrying no cookie); read the CSRF token in a loader rather than in deferred data; register
+`cacheMiddleware` outside the session middleware where possible.
 
 **A missing asset starts no session.** A new session holding only reserved keys is not committed on
 a `404` to a request that is not a document navigation (`Sec-Fetch-Dest: document`, or, without

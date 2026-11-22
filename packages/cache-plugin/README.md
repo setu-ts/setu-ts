@@ -102,18 +102,22 @@ programmatic read-through calls; the capability is typed as `ICacheStore`, so na
 
 `cacheMiddleware` stores nothing that belongs to one visitor:
 
-- A response is not stored when its `Cache-Control` holds `private` or `no-store`, when its `Vary`
-  names `Cookie` or `Authorization`, or when it sets a cookie (as before), whatever the request.
+- A response is not stored when its `Cache-Control` holds `private` or `no-store`, or when it sets a
+  cookie (as before), whatever the request.
 - A request carrying `Authorization`, or a credential cookie, is **credentialed**. It is served a
-  `HIT` only from an entry stored with `Cache-Control: public`, never shares an origin run with
-  another request, and its own response is stored only when that response says `public` and passes
-  the checks above. A bearer API that marks its responses `public` without `Vary: Authorization` is
-  still cached.
+  `HIT` only from an entry stored with `Cache-Control: public` whose `Vary` names neither `Cookie`
+  nor `Authorization`, never shares an origin run with another request, and its own response is
+  stored only when that response says `public`, varies on neither, and passes the checks above. A
+  bearer API that marks its responses `public` without `Vary: Authorization` is still cached.
+- A response whose `Vary` names `Cookie` or `Authorization` is stored from a request carrying no
+  credential, so the entry is the cookie-less variant, and it is served only to requests carrying
+  none. A localized application, whose responses vary on `Cookie` by default, is still cached for
+  visitors without cookies.
 
 The middleware cannot know which cookie identifies a visitor, so by default **any cookie** makes a
-request credentialed. An application whose every visitor carries an unrelated cookie (analytics,
-consent) gets nothing shared-cached until it marks responses `public` or names its session cookie in
-`credentialCookies`:
+request credentialed, an analytics or consent cookie included: such a request is taken out of the
+cache. An application whose every visitor carries an unrelated cookie gets nothing shared-cached
+until it marks responses `public` or names its session cookie in `credentialCookies`:
 
 ```typescript
 import { cacheMiddleware } from '@setu-ts/cache-plugin';
@@ -122,10 +126,11 @@ export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['
 ```
 
 `credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a page that
-reads the session, carries a CSRF token or belongs to a signed-in visitor is marked `private` or
-`Vary: Cookie`, so it is never stored whichever side of the session middleware the cache runs on.
-Register `cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a
-cached anonymous page is replayed before any session work.
+carries a CSRF token or belongs to a signed-in visitor is marked `private`, so it is never stored
+whichever side of the session middleware the cache runs on; an anonymous page that only read the
+session is marked `Vary: Cookie`, so it is stored for visitors without cookies only. Register
+`cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a cached
+anonymous page is replayed before any session work.
 
 ## Exports
 

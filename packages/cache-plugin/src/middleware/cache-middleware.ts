@@ -6,12 +6,14 @@
  * handler's response on MISS and stores it when the status is cacheable.
  *
  * It never stores a per-visitor response. A response whose `Cache-Control`
- * says `private` or `no-store`, or whose `Vary` names `Cookie` or
- * `Authorization`, is not stored. A request carrying `Authorization` or a
- * credential cookie (any cookie by default, see
- * {@linkcode CacheMiddlewareOptions.credentialCookies}) is served a HIT only
- * from an entry stored with `public`, never shares an origin run with another
- * request, and its own response is stored only when it says `public`.
+ * says `private` or `no-store` is not stored. A request carrying
+ * `Authorization` or a credential cookie (any cookie by default, see
+ * {@linkcode CacheMiddlewareOptions.credentialCookies}) is credentialed: it is
+ * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`
+ * nor `Authorization`, never shares an origin run with another request, and
+ * its own response is stored only when it says `public` and its `Vary` names
+ * neither. A response that varies on `Cookie` is stored only from a request
+ * that carries no credential, so it is only ever the cookie-less variant.
  *
  * @module
  */
@@ -83,11 +85,12 @@ export function cacheMiddleware(options?: CacheMiddlewareOptions): MiddlewareFun
     const store = ctx.services.get<ICacheStore>(storeToken);
 
     // A credentialed request may see a per-visitor response: it is served
-    // only a `public` entry, runs its own origin outside the coalescer, and
-    // stores its response only when that response says `public`.
+    // only a `public` entry that does not vary on a credential, runs its own
+    // origin outside the coalescer, and stores its response only when that
+    // response says `public` and does not vary on a credential.
     if (isCredentialed(ctx.request.headers, credentialCookies)) {
       const entry = await store.get<CachedResponsePayload>(key);
-      if (entry !== null && payloadIsPublic(entry)) {
+      if (entry !== null && sharedWithCredentialed(entry)) {
         replayCachedResponse(ctx, entry, 'HIT');
         return;
       }
@@ -145,7 +148,7 @@ async function captureOrigin(
   key: string,
   ttlSeconds: number | undefined,
   cacheableStatuses: readonly number[],
-  requirePublic = false,
+  credentialed = false,
 ): Promise<CacheOriginOutcome> {
   await next();
   const snapshot = ctx.response.snapshot();
@@ -153,8 +156,8 @@ async function captureOrigin(
     snapshot.streaming ||
     !cacheableStatuses.includes(snapshot.status) ||
     hasSetCookie(snapshot.headers) ||
-    isPerVisitor(snapshot.headers) ||
-    (requirePublic && !hasDirective(snapshot.headers.get('cache-control'), 'public'))
+    isPrivate(snapshot.headers.get('cache-control')) ||
+    (credentialed && !sharedWithCredentialed(snapshot.headers))
   ) {
     return { replayable: false };
   }
@@ -223,29 +226,35 @@ function isCredentialed(
   return credentialCookies.some((name) => Object.hasOwn(cookies, name));
 }
 
-/**
- * Whether a response is marked per-visitor: `Cache-Control` with `private` or
- * `no-store`, or a `Vary` naming `Cookie` or `Authorization`.
- */
-function isPerVisitor(headers: Headers): boolean {
-  const cacheControl = headers.get('cache-control');
-  if (hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store')) {
-    return true;
-  }
-  const vary = headers.get('vary');
-  if (vary === null) {
-    return false;
-  }
-  return vary
-    .split(',')
-    .map((field) => field.trim().toLowerCase())
-    .some((field) => field === 'cookie' || field === 'authorization');
+/** Whether a `Cache-Control` value holds `private` or `no-store`. */
+function isPrivate(cacheControl: string | null): boolean {
+  return hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store');
 }
 
-/** Whether a stored entry was a `public` response. */
-function payloadIsPublic(payload: CachedResponsePayload): boolean {
-  const entry = payload.headers.find(([name]) => name.toLowerCase() === 'cache-control');
-  return entry !== undefined && hasDirective(entry[1], 'public');
+/**
+ * Whether a response, live or stored, may be served to a credentialed request:
+ * it says `public` and its `Vary` names neither `Cookie` nor `Authorization`.
+ */
+function sharedWithCredentialed(source: Headers | CachedResponsePayload): boolean {
+  const read = (name: string): string | null => {
+    if (source instanceof Headers) {
+      return source.get(name);
+    }
+    const entry = source.headers.find(([header]) => header.toLowerCase() === name);
+    return entry === undefined ? null : entry[1];
+  };
+  const cacheControl = read('cache-control');
+  if (!hasDirective(cacheControl, 'public') || isPrivate(cacheControl)) {
+    return false;
+  }
+  const vary = read('vary');
+  return (
+    vary === null ||
+    !vary
+      .split(',')
+      .map((field) => field.trim().toLowerCase())
+      .some((field) => field === 'cookie' || field === 'authorization' || field === '*')
+  );
 }
 
 /**

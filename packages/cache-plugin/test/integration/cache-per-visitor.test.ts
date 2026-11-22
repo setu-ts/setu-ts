@@ -73,10 +73,13 @@ describe.each([
       expect((await app.inject(get('/page', { cookie: alice }))).body).toBe('hello user-alice');
       expect((await app.inject(get('/page', { cookie: bob }))).body).toBe('hello user-bob');
       expect((await app.inject(get('/page'))).body).toBe('hello guest');
-      expect((await app.inject(get('/page'))).body).toBe('hello guest');
-      expect((await app.inject(get('/page', { cookie: alice }))).body).toBe('hello user-alice');
-      // The anonymous page read the session, so it varies on Cookie and is not stored either.
-      expect(calls.page).toBe(5);
+      // The anonymous page read the session, so it varies on Cookie: it is stored for cookie-less
+      // visitors only, and never served to a request carrying a cookie.
+      const guest = await app.inject(get('/page'));
+      expect([guest.body, guest.headers.get('x-cache')]).toEqual(['hello guest', 'HIT']);
+      const again = await app.inject(get('/page', { cookie: alice }));
+      expect([again.body, again.headers.get('x-cache')]).toEqual(['hello user-alice', 'MISS']);
+      expect(calls.page).toBe(4);
     } finally {
       await app.stop();
     }

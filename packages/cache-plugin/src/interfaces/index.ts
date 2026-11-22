@@ -179,10 +179,12 @@ export interface CacheMiddlewareOptions {
   cacheableStatuses?: number[];
   /**
    * The cookie names that make a request credentialed. A credentialed request
-   * is served a HIT only from an entry stored with `Cache-Control: public`,
-   * never shares an origin run with another request, and its own response is
-   * stored only when it says `public`. `Authorization` always makes a request
-   * credentialed.
+   * is served a HIT only from an entry stored with `Cache-Control: public`
+   * whose `Vary` names neither `Cookie` nor `Authorization`, never shares an
+   * origin run with another request, and its own response is stored only when
+   * it says `public` and varies on neither. A response varying on `Cookie` or
+   * `Authorization` is stored and served only for requests that are not
+   * credentialed. `Authorization` always makes a request credentialed.
    *
    * Omitted, ANY cookie counts: the middleware cannot know which cookie
    * identifies a visitor. An application whose every visitor carries an

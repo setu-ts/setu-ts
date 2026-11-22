@@ -759,19 +759,54 @@ describe('cacheMiddleware — per-visitor responses', () => {
     ['private', withCacheControl('private, max-age=60')],
     ['no-store', withCacheControl('no-store')],
     ['private with a field list', withCacheControl('private="set-cookie", max-age=60')],
-    [
-      'Vary: Cookie',
-      (ctx: IRequestContext) => ctx.response.header('vary', 'Accept, Cookie').text('page'),
-    ],
-    [
-      'Vary: Authorization',
-      (ctx: IRequestContext) => ctx.response.header('vary', 'authorization').text('page'),
-    ],
   ] as const)('never stores a response marked %s', async (_name, handler) => {
     const { app, calls } = await appWith(handler);
     try {
       expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
       expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // A response that varies on a credential is the cookie-less variant only when a cookie-less request
+  // produced it, and only a cookie-less request may be served it. Each handler says `public`, so the
+  // `public` rule alone would let a credentialed request through: only the Vary check refuses it.
+  it.each([
+    ['Vary: Cookie', 'Accept, Cookie', { cookie: 'theme=dark' }],
+    ['Vary: Authorization', 'authorization', { authorization: 'Bearer t' }],
+    ['Vary: *', '*', { cookie: 'theme=dark' }],
+  ] as const)(
+    'stores a %s response from a cookie-less request and never serves it to a credentialed one',
+    async (_name, vary, credential) => {
+      const { app, calls } = await appWith((ctx) =>
+        ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary }).text('page'),
+      );
+      try {
+        await app.inject(get());
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+        expect(calls()).toBe(1);
+        const credentialed = await app.inject(get(credential));
+        expect(credentialed.headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(2);
+        // The credentialed response varies on a credential too, so it replaced nothing.
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+        expect(calls()).toBe(2);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it('stores a non-public Vary: Cookie response for cookie-less requests only', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.header('vary', 'Cookie').text('page'),
+    );
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      expect((await app.inject(get({ cookie: 'a=1' }))).headers.get('x-cache')).toBe('MISS');
       expect(calls()).toBe(2);
     } finally {
       await app.stop();
