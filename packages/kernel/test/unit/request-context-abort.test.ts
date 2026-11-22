@@ -1,7 +1,7 @@
 /**
- * The request context's abort watcher (V13-200, code-review M2): pending
- * cleanups run once on the request's own signal, only while the response has
- * not been handed back.
+ * The request context's abort watcher (V13-200, code-review M2, security
+ * audit): an abort of the request's own signal is reported once, only while
+ * the response has not been handed back, and runs no cleanup.
  *
  * @module
  */
@@ -38,29 +38,32 @@ function contextWith(signal?: AbortSignal): {
 }
 
 describe('request context abort watcher', () => {
-  it('runs pending cleanups once when the request signal aborts', () => {
+  it('reports an abort once and leaves the cleanups for the settle path', () => {
     const client = new AbortController();
     const { handle, aborts } = contextWith(client.signal);
     let cleaned = 0;
     handle.ctx.defer?.(() => void cleaned++);
     handle.ctx.defer?.(() => void cleaned++);
+    expect(handle.abortReported).toBe(false);
     client.abort();
     client.abort();
-    expect(cleaned).toBe(2);
+    expect(cleaned).toBe(0);
     expect(aborts).toHaveLength(1);
-    expect(handle.takeDeferred()).toBeUndefined();
+    expect(handle.abortReported).toBe(true);
+    expect(handle.takeDeferred()).toHaveLength(2);
   });
 
-  it('runs them in a microtask for a signal that was already aborted', async () => {
+  it('reports in a microtask for a signal that was already aborted', async () => {
     const client = new AbortController();
     client.abort();
     const { handle, aborts } = contextWith(client.signal);
     let cleaned = 0;
     handle.ctx.defer?.(() => void cleaned++);
-    expect(cleaned).toBe(0);
+    expect(aborts).toHaveLength(0);
     await Promise.resolve();
-    expect(cleaned).toBe(1);
     expect(aborts).toHaveLength(1);
+    expect(cleaned).toBe(0);
+    expect(handle.takeDeferred()).toHaveLength(1);
   });
 
   it('stays disarmed for a first defer made after the response was handed back', async () => {

@@ -2145,9 +2145,10 @@ class Application implements IKernelApplication {
       this.#completeRequest(ctx, outcome);
     };
     response.stream(
-      wrapDeferredStream(body, cleanups, this.#registry, complete, ctx.request.signal, () =>
-        this.#onRequestAborted(ctx),
-      ),
+      wrapDeferredStream(body, cleanups, this.#registry, complete, ctx.request.signal, () => {
+        // The context's watcher already reported an abort before settle.
+        if (!handle.abortReported) this.#onRequestAborted(ctx);
+      }),
       response.streamOptions,
     );
     return response;
@@ -2178,8 +2179,9 @@ class Application implements IKernelApplication {
   }
 
   /**
-   * Logs a request whose own signal aborted before it settled, so its
-   * cleanups ran early (a client that left, or a caller's deadline). An arrow
+   * Logs a request whose own signal aborted before its response was sent (a
+   * client that left, or a caller's deadline). Its cleanups wait for the
+   * handler to settle; only a streamed body's run on the abort. An arrow
    * property so it can be handed to every request context without a bind.
    */
   readonly #onRequestAborted = (ctx: IRequestContext): void => {

@@ -113,7 +113,7 @@ describe('implicit HEAD on GET routes (V13-113)', () => {
 });
 
 describe('cleanup when the client leaves (V13-200)', () => {
-  it('runs the cleanup of a handler that never settles when the request aborts', async () => {
+  it('logs an abort at once but keeps the cleanup of a handler that never settles', async () => {
     const calls: LogCall[] = [];
     const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
     let cleaned = 0;
@@ -130,11 +130,42 @@ describe('cleanup when the client leaves (V13-200)', () => {
     expect(cleaned).toBe(0);
     client.abort();
     await flush();
-    expect(cleaned).toBe(1);
+    // The handler still holds what it registered (security audit, §3.12 revised).
+    expect(cleaned).toBe(0);
     expect(withMessage(calls, 'Request aborted before completion')[0]?.metadata).toMatchObject({
       method: 'GET',
       path: '/hang',
     });
+  });
+
+  it('runs the cleanups when the handler settles after the abort, and logs the abort once', async () => {
+    const calls: LogCall[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), recordingLogger(calls)] });
+    const events: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    app.router.get('/late', async (ctx) => {
+      ctx.defer?.(() => {
+        events.push('cleanup');
+      });
+      await gate;
+      events.push('handler settled');
+      return ctx.response.stream(manualStream().stream);
+    });
+    await app.start();
+    const client = new AbortController();
+    const served = app.dispatch!(new Request('http://localhost/late', { signal: client.signal }));
+    await flush();
+    client.abort();
+    await flush();
+    expect(events).toEqual([]);
+    release();
+    await served;
+    await flush();
+    expect(events).toEqual(['handler settled', 'cleanup']);
+    expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(1);
   });
 
   it('runs the cleanup of a stream the client stops reading without cancelling', async () => {
@@ -234,6 +265,57 @@ describe('cleanup when the client leaves (V13-200)', () => {
     client.abort();
     await flush();
     expect(withMessage(calls, 'Request aborted before completion')).toHaveLength(0);
+  });
+});
+
+describe('resources a running handler holds when its client leaves (security audit)', () => {
+  it('never admits more handlers than a limit released through defer', async () => {
+    const LIMIT = 2;
+    let running = 0;
+    let active = 0;
+    let maxActive = 0;
+    const limiter: IPlugin = {
+      name: 'limiter',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.middleware.add((c, next) => {
+          if (running >= LIMIT) return c.response.status(503).text('busy');
+          running++;
+          c.defer?.(() => {
+            running--;
+          });
+          return next();
+        });
+      },
+    };
+    const app = createApplication({ plugins: [runtimePlugin(), limiter] });
+    app.router.get('/work', async (ctx) => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      active--;
+      return ctx.response.text('done');
+    });
+    await app.start();
+    try {
+      const served: Promise<unknown>[] = [];
+      for (let i = 0; i < 12; i++) {
+        const client = new AbortController();
+        served.push(
+          Promise.resolve(
+            app.dispatch!(new Request('http://localhost/work', { signal: client.signal })),
+          ),
+        );
+        await flush();
+        client.abort();
+        await flush();
+      }
+      await Promise.all(served);
+      expect(maxActive).toBeLessThanOrEqual(LIMIT);
+      expect(running).toBe(0);
+    } finally {
+      await app.stop();
+    }
   });
 });
 

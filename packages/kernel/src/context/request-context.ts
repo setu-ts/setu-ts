@@ -41,11 +41,17 @@ export interface RequestContextHandle {
    */
   takeDeferred(): DeferredCleanup[] | undefined;
   /**
-   * Stops running cleanups on the request signal's abort, once the response
-   * has been handed back.
+   * Stops reporting the request signal's abort, once the response has been
+   * handed back.
    * @since 0.14.0
    */
   disarmAbort(): void;
+  /**
+   * Whether an abort before the response was already reported, so a streamed
+   * body that later sees the same abort does not report it twice.
+   * @since 0.14.0
+   */
+  readonly abortReported: boolean;
 }
 
 /** Shared empty params — replaced by `setParams` once a route matches. */
@@ -91,6 +97,8 @@ class RequestContext implements IRequestContext {
   #abortWatch: { readonly signal: AbortSignal; readonly aborted: () => void } | undefined;
   /** Set by `disarmAbort`; once set, no later `defer` attaches a watcher. */
   #abortDisarmed = false;
+  /** Set when an abort before the response was reported. */
+  #abortReported = false;
 
   constructor(
     request: IRequest,
@@ -220,9 +228,11 @@ class RequestContext implements IRequestContext {
   }
 
   /**
-   * Runs pending cleanups once if the request's own signal aborts before the
-   * response settled — a handler that never settles because the client (or
-   * a caller's deadline) went away. Attached only on the first `defer`, and
+   * Reports, once, a request whose own signal aborts before the response
+   * settled: the client (or a caller's deadline) went away. It runs no
+   * cleanup: those wait for the handler to settle, since a request scope or
+   * a concurrency slot released under a running handler is still in use
+   * (security audit, §3.12 revised). Attached only on the first `defer`, and
    * only when the adapter's request carries a signal: the `signal` getter is
    * never read here, because it allocates a controller for a request with
    * none.
@@ -233,9 +243,9 @@ class RequestContext implements IRequestContext {
     if (signal === undefined) return;
     const aborted = (): void => {
       if (this.#completed || this.#abortWatch === undefined) return;
-      const cleanups = this.takeDeferred();
+      this.disarmAbort();
+      this.#abortReported = true;
       this.#onAbort?.(this);
-      if (cleanups !== undefined) void runDeferred(cleanups, this.#registry);
     };
     this.#abortWatch = { signal, aborted };
     if (signal.aborted) {
@@ -259,6 +269,11 @@ class RequestContext implements IRequestContext {
     if (watch === undefined) return;
     this.#abortWatch = undefined;
     watch.signal.removeEventListener('abort', watch.aborted);
+  }
+
+  /** Whether an abort before the response was reported. */
+  get abortReported(): boolean {
+    return this.#abortReported;
   }
 
   /** Internal completion handoff; no list is allocated for an unused request. */
@@ -303,5 +318,8 @@ export function createRequestContext(
     },
     takeDeferred: () => ctx.takeDeferred(),
     disarmAbort: () => ctx.disarmAbort(),
+    get abortReported(): boolean {
+      return ctx.abortReported;
+    },
   };
 }

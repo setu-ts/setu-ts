@@ -214,3 +214,53 @@ it('M131b 3.10 keeps a request scope alive until an early-responded handler sett
     await app.stop();
   }
 });
+
+it('keeps a request scope alive under a running handler whose client left, and disposes it when the handler settles', async () => {
+  const { app } = harness();
+  const events: string[] = [];
+  app.register({
+    name: 'providers',
+    version: '1.0.0',
+    dependencies: [CAPABILITIES.DI_CONTAINER],
+    register(ctx) {
+      ctx.container!.register(
+        'conn',
+        { useFactory: () => ({ open: true }) },
+        {
+          scope: 'scoped',
+          dispose: (conn) => {
+            conn.open = false;
+            events.push('scope disposed');
+          },
+        },
+      );
+    },
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  app.router.get('/work', async (ctx) => {
+    const conn = ctx.services
+      .get<IContainer>(CAPABILITIES.DI_CONTAINER)
+      .forRequest(ctx)
+      .resolve<{ open: boolean }>('conn');
+    events.push('handler started');
+    await gate;
+    events.push(`handler resumed (open=${String(conn.open)})`);
+    return ctx.response.text('done');
+  });
+  await app.start();
+  try {
+    const client = new AbortController();
+    const served = app.dispatch!(new Request('http://test/work', { signal: client.signal }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    client.abort();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    release();
+    await served;
+    expect(events).toEqual(['handler started', 'handler resumed (open=true)', 'scope disposed']);
+  } finally {
+    await app.stop();
+  }
+});
