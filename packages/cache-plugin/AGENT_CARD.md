@@ -35,9 +35,9 @@ const rates = await cache.get<{ eur: number }>('rates');
 
 - The middleware sets `X-Cache` itself: `MISS` when the handler ran, `HIT` when replayed,
   `COALESCED` when a concurrent miss shared one handler run. Do not set it in the handler.
-- Stores status `200` (`cacheableStatuses`); never a stream, cookie-setting, session-writing,
-  private, no-store or `Vary: *` response. Vary Cookie/Authorization: only for requests with
-  neither. Credentialed (`credentialCookies`): public only. Key: method, URL, tenant, locale.
+- Stores status `200` (`cacheableStatuses`); never a stream, cookie-setting, private, no-store,
+  `Vary: *` or session-flagged one (write, token read, data read). Vary Cookie/Authorization: only
+  for requests with neither. Credentialed: public only. Key: method, URL, tenant, locale.
 - `get` returns `null` for an absent or expired key, never `undefined`.
 - `ttlSeconds` is seconds; omitted, the store's `defaultTtl` applies.
 - `CAPABILITIES.CACHE` resolves only after `app.start()`; inside a handler `ctx.services` is ready.

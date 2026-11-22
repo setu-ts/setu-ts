@@ -75,8 +75,10 @@ tab) is refused too, so it cannot carry the old session's data to a fresh id. A 
 names the new id, and a sign-out of the old id also revokes the id it names: a sign-out that lands
 after a regeneration's marker check therefore still ends the regenerated session. Markers are
 written only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they
-expire after `maxAge`, and a commit whose request loaded the session longer ago than that (less one
-second, for stores that round a TTL down) is refused, since no marker could still fence it.
+expire one second after `maxAge` (for stores that round a TTL down), and a commit whose request
+loaded the session `maxAge` or more ago is refused, since no marker could still fence it. A marker
+names one successor: when two requests regenerate the same id at once (a double-submitted sign-in),
+a sign-out racing both ends only the session the later one moved to.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
@@ -462,7 +464,7 @@ visitor. The session middleware marks such a response `Cache-Control: private, n
   request, so `cacheMiddleware` inside the session middleware does not store it even when the
   handler then sets `public`;
 - a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read, which also sets
-  `PER_VISITOR_RESPONSE_STATE_KEY`, as does a read of a signed-in visitor's session.
+  `PER_VISITOR_RESPONSE_STATE_KEY`, as does a read of a restored session holding application data.
 
 A response that only _read_ the session for an anonymous visitor is the anonymous variant of a page:
 it gets `Vary: Cookie` alone. What counts as a read:

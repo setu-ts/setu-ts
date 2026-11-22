@@ -133,14 +133,14 @@ carries a CSRF token or belongs to a signed-in visitor is marked `private`; an a
 only read the session is marked `Vary: Cookie`, so it is stored for visitors without cookies only.
 The session plugin also sets `PER_VISITOR_RESPONSE_STATE_KEY` on a request that writes its session
 (an application key set, deleted or cleared, a `regenerate()` or a `destroy()`), reads a CSRF token,
-or reads a signed-in visitor's session, and `cacheMiddleware` never stores such a response, even
-when the handler marks it `public`. One case stays the application's: a signed-in visitor's response
-that never touches the session API but is personalised another way (through `ctx.request.user`, say)
-and that the handler marks `public` keeps that directive with no `Vary: Cookie`, so it can be stored
-and replayed (`RequestCacheMarking.finish()` keeps an application directive, as it must for public
-assets). Never mark a personalised response `public`. Register `cacheMiddleware` outside the session
-middleware (a priority below 260) where you can, so a cached anonymous page is replayed before any
-session work.
+or reads a restored session holding application data, and `cacheMiddleware` never stores such a
+response, even when the handler marks it `public`. One case stays the application's: a signed-in
+visitor's response that never touches the session API but is personalised another way (through
+`ctx.request.user`, say) and that the handler marks `public` keeps that directive with no
+`Vary: Cookie`, so it can be stored and replayed (`RequestCacheMarking.finish()` keeps an
+application directive, as it must for public assets). Never mark a personalised response `public`.
+Register `cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a
+cached anonymous page is replayed before any session work.
 
 ## Exports
 

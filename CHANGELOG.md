@@ -73,8 +73,10 @@ All notable changes to this project are documented here. The format follows
   and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
   `Authorization` never joins or leads a coalesced flight, and a response captured after the session
   plugin set `PER_VISITOR_RESPONSE_STATE_KEY` (new in `@setu-ts/common`; set at a request's first
-  application write, a CSRF token read and a read of a signed-in visitor's session) is never stored.
-  New option `credentialCookies`.
+  application write, a CSRF token read and a read of a restored session holding application data) is
+  never stored. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
+  arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
+  uses too.
 - **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
   CORS at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out

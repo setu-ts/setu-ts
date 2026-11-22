@@ -8,8 +8,7 @@
  * It never stores a per-visitor response. A response whose `Cache-Control`
  * says `private` or `no-store` is not stored, nor one captured after a
  * component set {@linkcode PER_VISITOR_RESPONSE_STATE_KEY} (the session plugin
- * does at a request's first application write, a CSRF token read and a read
- * of a signed-in visitor's session). A request carrying
+ * does at a request's first application write, a CSRF token read and a read of a restored session holding application data). A request carrying
  * `Authorization` or a credential cookie (any cookie by default, see
  * {@linkcode CacheMiddlewareOptions.credentialCookies}) is credentialed: it is
  * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`
@@ -25,7 +24,12 @@
  * @module
  */
 import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, parseCookie, PER_VISITOR_RESPONSE_STATE_KEY } from '@setu-ts/common';
+import {
+  cacheControlDirectives,
+  CAPABILITIES,
+  parseCookie,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
 import { cacheCoalescer } from '../services/coalescer.ts';
 import { composeCacheKey } from '../utils/cache-key.ts';
@@ -241,6 +245,9 @@ function isCredentialed(
 
 /** Whether a `Cache-Control` value holds `private` or `no-store`. */
 function isPrivate(cacheControl: string | null): boolean {
+  if (cacheControl !== null && cacheControlDirectives(cacheControl) === undefined) {
+    return true;
+  }
   return hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store');
 }
 
@@ -288,37 +295,7 @@ function hasDirective(cacheControl: string | null, directive: string): boolean {
   if (cacheControl === null) {
     return false;
   }
-  return directiveNames(cacheControl).includes(directive);
-}
-
-/**
- * The directive names of a `Cache-Control` value, lowercased (RFC 9111 §5.2): split at commas
- * outside quoted-string arguments, honouring backslash escapes inside them, so a comma or a
- * directive name inside an argument (`x="a,public"`) is not read as a directive.
- */
-function directiveNames(cacheControl: string): string[] {
-  const names: string[] = [];
-  let current = '';
-  let quoted = false;
-  for (let i = 0; i < cacheControl.length; i++) {
-    const char = cacheControl[i]!;
-    if (quoted) {
-      if (char === '\\') {
-        i++;
-      } else if (char === '"') {
-        quoted = false;
-      }
-      continue;
-    }
-    if (char === '"') {
-      quoted = true;
-    } else if (char === ',') {
-      names.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  names.push(current);
-  return names.map((part) => part.split('=')[0]!.trim().toLowerCase());
+  // A malformed value (an unclosed quote) holds no directive this middleware relies on; `isPrivate`
+  // reads it as private, so it is never stored.
+  return cacheControlDirectives(cacheControl)?.includes(directive) ?? false;
 }

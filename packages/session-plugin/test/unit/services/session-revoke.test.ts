@@ -75,7 +75,7 @@ async function makeService(store: ISessionStore, options: Partial<SessionPluginO
     },
     store,
   );
-  return { service, ring };
+  return { service, ring, clock, config };
 }
 
 async function signedIn(service: SessionService): Promise<{ cookie: string; id: string }> {
@@ -99,6 +99,46 @@ describe('revocation markers', () => {
     // ...and then reads the id's `superseded` marker for a regeneration to follow.
     expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:superseded:${id}`]);
     expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
+  });
+
+  it('a short maxAge still commits a request that took no time', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store, { maxAge: 1 });
+    const { cookie } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.set('cart', 1);
+    expect(await service.commit(c.ctx, s)).toBe('written');
+  });
+
+  it('markers outlive maxAge by a margin, for stores that round a TTL down', async () => {
+    const ttls: number[] = [];
+    const store = new ScriptedStore();
+    const write = store.write.bind(store);
+    store.write = (id, data, ttlMs) => {
+      if (id.startsWith('revoked:')) ttls.push(ttlMs);
+      return write(id, data, ttlMs);
+    };
+    const { service, config } = await makeService(store);
+    const { cookie } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.destroy();
+    await service.commit(c.ctx, s);
+    expect(ttls).toEqual([config.maxAgeMs + 1000]);
+  });
+
+  it('a regeneration refused for outliving every marker still revokes the old id', async () => {
+    const store = new ScriptedStore();
+    const { service, clock, config } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.regenerate();
+    clock.advance(config.maxAgeMs);
+    expect(await service.commit(c.ctx, s)).toBe('refused');
+    expect(store.rows.has(id)).toBe(false);
+    expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded' });
   });
 
   it('a regeneration records its new id on the superseded marker', async () => {

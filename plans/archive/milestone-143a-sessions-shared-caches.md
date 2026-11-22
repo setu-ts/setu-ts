@@ -934,9 +934,10 @@ API half (M143o, §0.2 X6) should read the same key.
 **CodeRabbit review on PR #609 (2026-11-22).** Fixed: a sign-out that lands after a regeneration's
 fence read now also revokes the regenerated id (the `superseded` marker names its successor; each
 side writes before it reads the other's marker); a commit whose request loaded the session longer
-ago than a marker lives is refused; a CSRF token read and a read of a signed-in visitor's session
-also set `PER_VISITOR_RESPONSE_STATE_KEY`; `Cache-Control` directive names are parsed outside quoted
-arguments in both plugins; Swagger UI's interceptor shares one in-flight token fetch.
+ago than a marker lives is refused; a CSRF token read and a read of a restored session holding
+application data also set `PER_VISITOR_RESPONSE_STATE_KEY`; `Cache-Control` directive names are
+parsed outside quoted arguments through one new `common` helper, `cacheControlDirectives` (an
+unclosed quote fails safe per caller); Swagger UI's interceptor shares one in-flight token fetch.
 
 ## 11. Plan review (2026-11-22)
 

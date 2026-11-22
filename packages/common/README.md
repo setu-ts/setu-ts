@@ -237,6 +237,7 @@ package fits the plugin architecture.
 | `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
+| `cacheControlDirectives`              | function  |
 | `causeMessage`                        | function  |
 | `checkWritePrecondition`              | function  |
 | `compileRealtimeDiagnosticsAlias`     | function  |

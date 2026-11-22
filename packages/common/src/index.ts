@@ -789,6 +789,7 @@ export type {
 
 // Cookie codec (shared by the session plugin and the decorator plugin's @Cookie)
 export { parseCookie, serializeCookie } from './cookie.ts';
+export { cacheControlDirectives } from './cache-control.ts';
 export type { CookieAttributes } from './cookie.ts';
 
 // Worker pool contracts

@@ -65,8 +65,8 @@ const SUCCESSOR_FIELD = 'next';
 const SUCCESSOR_DEPTH = 8;
 
 /**
- * Margin below the marker lifetime within which a request that loaded a stored session may still
- * commit: a store may round a TTL down to whole seconds.
+ * How much longer than `maxAge` a marker lives, so a store that rounds a TTL down to whole seconds
+ * still keeps it for the whole window in which a request that loaded the session may commit.
  */
 const MARKER_TTL_MARGIN_MS = 1000;
 
@@ -316,9 +316,11 @@ export class SessionService implements ISessionService {
     }
 
     const now = this.#deps.now();
-    // A marker lives `maxAgeMs` from its sign-out, which came after this request loaded the
+    // A marker lives at least `maxAgeMs` from its sign-out, which came after this request loaded the
     // session. A commit later than that could no longer see one, so it is refused outright.
-    if (source !== null && now - (this.#loadedAt.get(session) ?? now) >= this.#markerWindow()) {
+    if (source !== null && now - (this.#loadedAt.get(session) ?? now) >= this.#config.maxAgeMs) {
+      // A regeneration is still a revocation of the old id (an auth-session stamp relies on it).
+      await this.revokeSuperseded(session);
       return this.#refused(ctx);
     }
 
@@ -395,7 +397,11 @@ export class SessionService implements ISessionService {
         // The old id is superseded — or, when this commit moves the session into
         // the cookie (a logout by `clear()` and `regenerate()`), revoked, so an
         // in-flight regeneration on the old cookie is refused too.
-        await this.#revoke(source, cookieHeld ? 'revoked' : 'superseded', snapshot.id);
+        if (cookieHeld) {
+          await this.#revoke(source, 'revoked');
+        } else {
+          await this.#revoke(source, 'superseded', snapshot.id);
+        }
       } else if (cookieHeld && source !== null) {
         // Moving a stored session into the cookie (a logout clearing every
         // other key) revokes its row: otherwise a copy of the old id-only
@@ -500,11 +506,6 @@ export class SessionService implements ISessionService {
     return restored;
   }
 
-  /** How long after loading a stored session a commit is still fenced by any marker. */
-  #markerWindow(): number {
-    return Math.max(this.#config.maxAgeMs - MARKER_TTL_MARGIN_MS, 0);
-  }
-
   /** Whether the session was restored from a store row, which is the only kind a marker fences. */
   #hadRow(session: Session): boolean {
     return this.#store !== undefined && session.wasStoreHeld;
@@ -521,7 +522,10 @@ export class SessionService implements ISessionService {
    * regeneration writes that marker before its fence reads `revoked`, and a
    * sign-out writes `revoked` before reading `superseded`, so on a
    * linearizable store one of them always sees the other — the regeneration
-   * refuses, or the sign-out ends the new session.
+   * refuses, or the sign-out ends the new session. The marker names one
+   * successor: when two requests regenerate the same id at once, the later
+   * marker overwrites the earlier, and a sign-out racing both follows only
+   * the id the later one names.
    */
   async #revoke(id: string, kind: MarkerKind, successor?: string, depth = 0): Promise<void> {
     const store = this.#store!;
@@ -531,7 +535,7 @@ export class SessionService implements ISessionService {
         ? { [MARKER_FIELD]: kind }
         : { [MARKER_FIELD]: kind, [SUCCESSOR_FIELD]: successor };
     try {
-      await store.write(`${kind}:${id}`, marker, this.#config.maxAgeMs);
+      await store.write(`${kind}:${id}`, marker, this.#config.maxAgeMs + MARKER_TTL_MARGIN_MS);
     } catch (error) {
       fault = { error };
     }

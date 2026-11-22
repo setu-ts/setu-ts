@@ -90,10 +90,10 @@ tenant binding is no longer committed on a `404` that is not a page navigation.
 
 `cacheMiddleware` no longer stores a response marked `private` or `no-store`, nor one for a request
 whose session was written (an application key set, deleted or cleared, or a `regenerate()` or
-`destroy()`), that read a CSRF token, or that read a signed-in visitor's session, even when the
-handler marks it `public`, and a request carrying `Authorization` or any cookie is served only an
-entry stored with `Cache-Control: public` that does not vary on `Cookie` or `Authorization`. A
-response varying on either is stored and served only for requests carrying no cookie and no
+`destroy()`), that read a CSRF token, or that read a restored session holding application data, even
+when the handler marks it `public`, and a request carrying `Authorization` or any cookie is served
+only an entry stored with `Cache-Control: public` that does not vary on `Cookie` or `Authorization`.
+A response varying on either is stored and served only for requests carrying no cookie and no
 `Authorization`, and a `Vary: *` response is never stored. An application whose visitors all carry
 an unrelated cookie (analytics, consent) gets nothing cached until it marks responses `public` or
 names its session cookie: `cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request
