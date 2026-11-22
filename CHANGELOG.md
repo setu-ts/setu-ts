@@ -35,8 +35,9 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cli`, `@setu-ts/create` (M143b; V13-166).** `setu` and `npm create @setu-ts` refuse to
   start below Node 22.9.0 (exit 1, naming the supported range), the lowest version on which the CLI
   and a generated project both work. Between that floor and the supported range they warn and
-  continue. The check is the new `@setu-ts/cli/node-version` subpath, which both executables load
-  before anything else.
+  continue. The check is the new `@setu-ts/cli/node-version` subpath (`nodeFloorRefusal`,
+  `isNodeBelowFloor`, `isSupportedNode`, `HARD_FLOOR_NODE`, `SUPPORTED_NODE`), which both
+  executables load before anything else.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery
