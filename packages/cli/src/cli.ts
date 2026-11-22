@@ -55,7 +55,13 @@ import { InterruptedError } from './utils/interruption.ts';
  * misconfigured call silently degrade to "no filesystem" at runtime.
  */
 export interface CliDependencies {
-  /** Host process probe used solely to choose the project-lock refusal message. */
+  /**
+   * Whether a process is still running, read only to choose between the two
+   * refusal messages for a held `.setu-ts/write.lock`; unset, its owner is
+   * treated as running. The pid recorded for this run's own lock is
+   * `fs.invokingPid` when the filesystem supplies one.
+   * @since 0.14.0
+   */
   readonly isProcessAlive?: (pid: number) => boolean;
   /**
    * Creates secrets written only to ignored local configuration.
