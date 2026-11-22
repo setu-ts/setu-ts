@@ -166,8 +166,8 @@ export interface S3ProviderOptions {
   /** AWS secret access key. */
   secretAccessKey?: string;
   /**
-   * Custom S3-compatible endpoint (R2, MinIO, B2). For `'b2'`, `region` or
-   * `endpoint` is required.
+   * Custom S3-compatible endpoint (R2, MinIO, B2). For `'b2'`, `region`,
+   * `endpoint` or an injected `client` is required.
    */
   endpoint?: string;
   /**

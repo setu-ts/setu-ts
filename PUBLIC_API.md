@@ -9280,7 +9280,8 @@ body; the brand itself changes no behaviour. Options it cannot describe are refu
 middleware is built (`RangeError` naming the rule: a non-empty `fieldname`, whole-number `maxSize`
 and `maxFiles` of at least 1, `allowedMimeTypes` an array of strings). Since 0.14.0 every
 `StorageService` call refuses a key with a `.` or `..` path segment with a `400` hint (fixed
-detail); the S3, B2, GCS and Azure providers, used directly, refuse one too.
+detail); the S3, B2, GCS and Azure providers, used directly, refuse one too. A key that is not a
+string (a `String` object included) is refused the same way.
 
 Since M94b the middleware parses through the request's `formData` accessor (or the same shared
 `parseFormBody` when the request omits it), and a part carrying NO `filename` under the field name
