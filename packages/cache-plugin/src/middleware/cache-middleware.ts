@@ -19,7 +19,12 @@
  * one `credentialCookies` does not name, so it is only ever the cookie-less
  * variant, and it is served only to such a request. A request carrying any
  * cookie or `Authorization` never shares an origin run with another request. A `Vary: *` response is never
- * stored.
+ * stored. A response captured after a component set
+ * {@linkcode COOKIE_DEPENDENT_RESPONSE_STATE_KEY} (the session plugin does at
+ * the first application read) is treated as varying on `Cookie` whatever its
+ * own `Vary` says: never stored from a request carrying a cookie or
+ * `Authorization`, and stored from a cookie-less one with `Cookie` added to
+ * the stored `Vary`.
  *
  * @module
  */

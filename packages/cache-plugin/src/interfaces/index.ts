@@ -185,7 +185,9 @@ export interface CacheMiddlewareOptions {
    * it says `public` and varies on neither. A response varying on `Cookie` or
    * `Authorization` is stored and served only for requests carrying no cookie
    * and no `Authorization`, whatever this option names, and a request carrying
-   * any cookie never shares an origin run with another request.
+   * any cookie never shares an origin run with another request. A response
+   * that read the session (`COOKIE_DEPENDENT_RESPONSE_STATE_KEY`) counts as
+   * varying on `Cookie` whatever its own `Vary` says.
    * `Authorization` always makes a request credentialed.
    *
    * Omitted, ANY cookie counts: the middleware cannot know which cookie
