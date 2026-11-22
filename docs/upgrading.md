@@ -127,9 +127,10 @@ or cleared, or a `regenerate()` or `destroy()`), that read a CSRF token, or that
 session holding application data, even when the handler marks it `public`, and a request carrying
 `Authorization` or any cookie is served only an entry stored with `Cache-Control: public` that does
 not vary on `Cookie` or `Authorization`. A response varying on either is stored and served only for
-requests carrying no cookie and no `Authorization`, and a `Vary: *` response is never stored. An
-application whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached
-until it marks responses `public` or names its session cookie:
+requests carrying no cookie and no `Authorization`, and so is a page that read the session even when
+its handler replaced `Vary` and set `public`; a `Vary: *` response is never stored. An application
+whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached until it marks
+responses `public` or names its session cookie:
 `cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
 `Authorization` no longer shares a handler run with concurrent misses for the same key. One
 exception stays the application's: a signed-in visitor's response that never touches the session API
