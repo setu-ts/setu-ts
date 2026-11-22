@@ -776,7 +776,6 @@ describe('cacheMiddleware — per-visitor responses', () => {
   it.each([
     ['Vary: Cookie', 'Accept, Cookie', { cookie: 'theme=dark' }],
     ['Vary: Authorization', 'authorization', { authorization: 'Bearer t' }],
-    ['Vary: *', '*', { cookie: 'theme=dark' }],
   ] as const)(
     'stores a %s response from a cookie-less request and never serves it to a credentialed one',
     async (_name, vary, credential) => {
@@ -798,6 +797,43 @@ describe('cacheMiddleware — per-visitor responses', () => {
       }
     },
   );
+
+  // RFC 9111 §4.1: a stored `Vary: *` response can never be reused.
+  it('never stores a Vary: * response', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: '*' }).text('page'),
+    );
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // With `credentialCookies` narrowed, a cookie it does not name makes no credential, but a page
+  // varying on Cookie may still depend on it: such a request neither stores nor is served that page.
+  it('with credentialCookies a Vary: Cookie entry is stored and served only without any cookie', async () => {
+    const { app, calls } = await appWith(
+      (ctx) =>
+        ctx.response
+          .header('vary', 'Cookie')
+          .text(ctx.request.headers.get('cookie') ?? 'no cookie'),
+      { credentialCookies: ['setu_session'] },
+    );
+    try {
+      expect((await app.inject(get({ cookie: 'theme=dark' }))).body).toBe('theme=dark');
+      const anonymous = await app.inject(get());
+      expect([anonymous.body, anonymous.headers.get('x-cache')]).toEqual(['no cookie', 'MISS']);
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      const light = await app.inject(get({ cookie: 'theme=light' }));
+      expect([light.body, light.headers.get('x-cache')]).toEqual(['theme=light', 'MISS']);
+      expect(calls()).toBe(3);
+    } finally {
+      await app.stop();
+    }
+  });
 
   it('stores a non-public Vary: Cookie response for cookie-less requests only', async () => {
     const { app, calls } = await appWith((ctx) =>

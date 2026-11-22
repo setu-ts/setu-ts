@@ -109,10 +109,11 @@ programmatic read-through calls; the capability is typed as `ICacheStore`, so na
   nor `Authorization`, never shares an origin run with another request, and its own response is
   stored only when that response says `public`, varies on neither, and passes the checks above. A
   bearer API that marks its responses `public` without `Vary: Authorization` is still cached.
-- A response whose `Vary` names `Cookie` or `Authorization` is stored from a request carrying no
-  credential, so the entry is the cookie-less variant, and it is served only to requests carrying
-  none. A localized application, whose responses vary on `Cookie` by default, is still cached for
-  visitors without cookies.
+- A response whose `Vary` names `Cookie` or `Authorization` is stored only from a request carrying
+  no cookie and no `Authorization` at all, so the entry is the cookie-less variant, and it is served
+  only to such requests — also when `credentialCookies` names fewer cookies. A `Vary: *` response is
+  never stored. A localized application, whose responses vary on `Cookie` by default, is still
+  cached for visitors without cookies.
 
 The middleware cannot know which cookie identifies a visitor, so by default **any cookie** makes a
 request credentialed, an analytics or consent cookie included: such a request is taken out of the

@@ -12,8 +12,11 @@
  * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`
  * nor `Authorization`, never shares an origin run with another request, and
  * its own response is stored only when it says `public` and its `Vary` names
- * neither. A response that varies on `Cookie` is stored only from a request
- * that carries no credential, so it is only ever the cookie-less variant.
+ * neither. A response whose `Vary` names `Cookie` or `Authorization` is stored
+ * only from a request carrying no cookie and no `Authorization` at all (with
+ * `credentialCookies` set too), so it is only ever the cookie-less variant,
+ * and it is served only to such a request. A `Vary: *` response is never
+ * stored.
  *
  * @module
  */
@@ -88,13 +91,16 @@ export function cacheMiddleware(options?: CacheMiddlewareOptions): MiddlewareFun
     // only a `public` entry that does not vary on a credential, runs its own
     // origin outside the coalescer, and stores its response only when that
     // response says `public` and does not vary on a credential.
-    if (isCredentialed(ctx.request.headers, credentialCookies)) {
+    // A request that is not credentialed but carries a cookie (one `credentialCookies` does not
+    // name) gets the same exclusion from entries that vary on a cookie, without the `public` rule.
+    const credentialed = isCredentialed(ctx.request.headers, credentialCookies);
+    if (credentialed || carriesCookie(ctx.request.headers)) {
       const entry = await store.get<CachedResponsePayload>(key);
-      if (entry !== null && sharedWithCredentialed(entry)) {
+      if (entry !== null && servableWithCookies(entry, credentialed)) {
         replayCachedResponse(ctx, entry, 'HIT');
         return;
       }
-      await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses, true);
+      await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses, credentialed, true);
       ctx.response.header('X-Cache', 'MISS');
       return;
     }
@@ -149,6 +155,7 @@ async function captureOrigin(
   ttlSeconds: number | undefined,
   cacheableStatuses: readonly number[],
   credentialed = false,
+  withCookies = false,
 ): Promise<CacheOriginOutcome> {
   await next();
   const snapshot = ctx.response.snapshot();
@@ -157,7 +164,8 @@ async function captureOrigin(
     !cacheableStatuses.includes(snapshot.status) ||
     hasSetCookie(snapshot.headers) ||
     isPrivate(snapshot.headers.get('cache-control')) ||
-    (credentialed && !sharedWithCredentialed(snapshot.headers))
+    varyFields(snapshot.headers.get('vary')).includes('*') ||
+    (withCookies && !servableWithCookies(snapshot.headers, credentialed))
   ) {
     return { replayable: false };
   }
@@ -231,11 +239,25 @@ function isPrivate(cacheControl: string | null): boolean {
   return hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store');
 }
 
+/** Whether a request carries any cookie, whether or not it counts as a credential. */
+function carriesCookie(headers: Headers): boolean {
+  return Object.keys(parseCookie(headers.get('cookie'))).length > 0;
+}
+
+/** The lowercased field names of a `Vary` value. */
+function varyFields(vary: string | null): string[] {
+  return vary === null ? [] : vary.split(',').map((field) => field.trim().toLowerCase());
+}
+
 /**
- * Whether a response, live or stored, may be served to a credentialed request:
- * it says `public` and its `Vary` names neither `Cookie` nor `Authorization`.
+ * Whether a response, live or stored, may be served to (or stored from) a request carrying a
+ * cookie or `Authorization`: its `Vary` names neither `Cookie` nor `Authorization`, and, for a
+ * credentialed request, it says `public`.
  */
-function sharedWithCredentialed(source: Headers | CachedResponsePayload): boolean {
+function servableWithCookies(
+  source: Headers | CachedResponsePayload,
+  credentialed: boolean,
+): boolean {
   const read = (name: string): string | null => {
     if (source instanceof Headers) {
       return source.get(name);
@@ -243,18 +265,11 @@ function sharedWithCredentialed(source: Headers | CachedResponsePayload): boolea
     const entry = source.headers.find(([header]) => header.toLowerCase() === name);
     return entry === undefined ? null : entry[1];
   };
-  const cacheControl = read('cache-control');
-  if (!hasDirective(cacheControl, 'public') || isPrivate(cacheControl)) {
+  if (varyFields(read('vary')).some((field) => field === 'cookie' || field === 'authorization')) {
     return false;
   }
-  const vary = read('vary');
-  return (
-    vary === null ||
-    !vary
-      .split(',')
-      .map((field) => field.trim().toLowerCase())
-      .some((field) => field === 'cookie' || field === 'authorization' || field === '*')
-  );
+  const cacheControl = read('cache-control');
+  return !credentialed || (hasDirective(cacheControl, 'public') && !isPrivate(cacheControl));
 }
 
 /**

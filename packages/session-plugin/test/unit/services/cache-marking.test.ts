@@ -138,15 +138,17 @@ describe('signals and the after-handler decision', () => {
     expect(lines[0]![1]).toEqual({ method: 'GET', route: '/', signal: 'csrf-token' });
   });
 
-  it('S1 keeps a shared-cacheable directive an outer middleware set before it', () => {
+  // An outer default must not let a cache inside the session middleware store a signed-in page that
+  // never reads the session API (it may render `ctx.request.user`).
+  it('S1 replaces a shared-cacheable directive an outer middleware set before it', () => {
     const t = makeContext();
     t.response.header('cache-control', 'public, max-age=3600');
     const marking = new RequestCacheMarking(t.ctx, SIGNED_IN(), new PublicDirectiveWarnings());
     marking.begin();
-    expect(t.response.headers.get('cache-control')).toBe('public, max-age=3600');
+    expect(t.response.headers.get('cache-control')).toBe('private, no-store');
     marking.finish('skipped');
-    expect(t.response.headers.get('cache-control')).toBe('public, max-age=3600');
-    expect(t.response.headers.get('vary')).toBeNull();
+    expect(t.response.headers.get('cache-control')).toBe('private, no-store');
+    expect(t.response.headers.get('vary')).toBe('Cookie');
   });
 
   it('a session-dependent page with a public directive keeps it and gets Vary', () => {

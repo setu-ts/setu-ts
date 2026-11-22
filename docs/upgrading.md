@@ -90,8 +90,9 @@ navigation.
 `cacheMiddleware` no longer stores a response marked `private` or `no-store`, and a request carrying
 `Authorization` or any cookie is served only an entry stored with `Cache-Control: public` that does
 not vary on `Cookie` or `Authorization`. A response varying on either is stored and served only for
-requests carrying neither. An application whose visitors all carry an unrelated cookie (analytics,
-consent) gets nothing cached until it marks responses `public` or names its session cookie:
+requests carrying no cookie and no `Authorization`, and a `Vary: *` response is never stored. An
+application whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached
+until it marks responses `public` or names its session cookie:
 `cacheMiddleware({ credentialCookies: ['setu_session'] })`.
 
 ### Docs routes start no session (`@setu-ts/openapi-plugin`)

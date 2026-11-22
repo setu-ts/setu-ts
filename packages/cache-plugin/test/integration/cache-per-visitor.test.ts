@@ -21,7 +21,7 @@ function cookieOf(headers: Headers): string {
 }
 
 async function buildApp(priority: number) {
-  const calls = { page: 0, form: 0, plain: 0, write: 0 };
+  const calls = { page: 0, form: 0, plain: 0, write: 0, profile: 0 };
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -32,6 +32,21 @@ async function buildApp(priority: number) {
         version: '1.0.0',
         register(ctx: IPluginContext): void {
           ctx.middleware.add(cacheMiddleware({ ttlSeconds: 60 }), { priority, name: 'cache' });
+          // An application-wide default, set outside the session middleware, on /profile only.
+          ctx.middleware.add(
+            async (c, next) => {
+              if (c.request.path === '/profile') {
+                c.response.header('cache-control', 'public, max-age=60');
+              }
+              await next();
+            },
+            { priority: 100, name: 'public-default' },
+          );
+          // Personalised without the session API, as a page rendering ctx.request.user is.
+          ctx.router.get('/profile', (c) => {
+            calls.profile += 1;
+            return c.response.text(`profile ${c.request.headers.get('x-user') ?? 'guest'}`);
+          });
           ctx.router.get('/signin', (c) => {
             getSession(c).set('userId', `user-${c.request.headers.get('x-user') ?? 'a'}`);
             return c.response.text('ok');
@@ -80,6 +95,19 @@ describe.each([
       const again = await app.inject(get('/page', { cookie: alice }));
       expect([again.body, again.headers.get('x-cache')]).toEqual(['hello user-alice', 'MISS']);
       expect(calls.page).toBe(4);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it("an outer public default never lets a signed-in visitor's page be stored", async () => {
+    const { app, calls } = await buildApp(priority);
+    try {
+      const alice = cookieOf((await app.inject(get('/signin', { 'x-user': 'alice' }))).headers);
+      const own = await app.inject(get('/profile', { cookie: alice, 'x-user': 'alice' }));
+      expect(own.headers.get('cache-control')).toBe('private, no-store');
+      expect((await app.inject(get('/profile'))).body).toBe('profile guest');
+      expect(calls.profile).toBe(2);
     } finally {
       await app.stop();
     }

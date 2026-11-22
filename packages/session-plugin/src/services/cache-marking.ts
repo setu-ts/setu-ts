@@ -184,10 +184,10 @@ export class RequestCacheMarking {
    * marks the response at once.
    */
   begin(): void {
-    // A shared-cacheable directive an outer middleware already set is the application's own: it is
-    // left for the after-handler decision rather than replaced.
-    const preset = this.#ctx.response.snapshot().headers.get('cache-control');
-    if (this.#restoredApplicationData && !isSharedStorable(preset)) {
+    // Unconditional: a directive an outer middleware set is a default for every visitor, and a
+    // cache inside this middleware must not store a signed-in page under it. Only a directive the
+    // handler sets afterwards is the route's own decision.
+    if (this.#restoredApplicationData) {
       this.#ctx.response.header('cache-control', PRIVATE_DIRECTIVE);
     }
     this.#session.onFirstWrite(() => markPerVisitor(this.#ctx.response));

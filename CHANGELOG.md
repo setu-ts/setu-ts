@@ -65,8 +65,8 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cache-plugin` (M143a; V13-111).** `cacheMiddleware` stores no response marked
   `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
   from a `public` entry that does not vary on `Cookie`/`Authorization`, outside the coalescer. A
-  response varying on either is stored and served only for requests carrying neither. New option
-  `credentialCookies`.
+  response varying on either is stored and served only for requests carrying no cookie and no
+  `Authorization`, and a `Vary: *` response is never stored. New option `credentialCookies`.
 - **`@setu-ts/http-security-plugin` (M143a; V13-34).** Security headers run at priority 10 and CORS
   at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a; V13-60).** Swagger UI's Try-it-out sends

@@ -516,12 +516,15 @@ own read sees the marker. It uses only `read`/`write`/`destroy`, with one implem
      `private` or `no-store`; and, as today, streaming, a non-cacheable status and `Set-Cookie`. A
      refused leader's joiners run their own origin, as today. The `key` and `vary` options are
      unchanged. A response whose `Vary` names `Cookie` or `Authorization` is stored only from a
-     request that is not credentialed (step 4), so the entry is the cookie-less variant, and step 3
-     keeps it from every credentialed request. A session-dependent anonymous page carries
-     `Vary: Cookie` (§3.6), so it is cached in-process for cookie-less visitors only; the README
-     says so. (Amended 2026-11-22, decision A below: as first written, step 5 refused every
-     `Vary: Cookie` response, which stopped `cacheMiddleware` caching anything in a localized
-     application, whose locale middleware adds `Vary: Accept-Language, Cookie` by default.)
+     request carrying no cookie and no `Authorization` at all, so the entry is the cookie-less
+     variant, and it is served only to such a request: a request that `credentialCookies` leaves
+     uncredentialed but that carries some cookie skips such entries and the coalescer, without the
+     `public` rule. A `Vary: *` response is never stored (RFC 9111 §4.1). A session-dependent
+     anonymous page carries `Vary: Cookie` (§3.6), so it is cached in-process for cookie-less
+     visitors only; the README says so. (Amended 2026-11-22, decision A below: as first written,
+     step 5 refused every `Vary: Cookie` response, which stopped `cacheMiddleware` caching anything
+     in a localized application, whose locale middleware adds `Vary: Accept-Language, Cookie` by
+     default.)
 - **Why:** the page is safe whoever marked it — the session plugin, the application, or nothing —
   which is RFC 9111 §3.5's rule for `Authorization` widened to cookies. The cache-plugin cannot know
   the session plugin's cookie name, so the safe default counts any cookie; `credentialCookies` is
@@ -908,6 +911,13 @@ caveat A keeps is Q8's: any cookie, an analytics one included, takes a request o
 halves stay with M143o (§0.2 X6, X7): X6 must apply the same rule, which on the Cache API, keyed by
 URL alone, means refusing to store any response varying on `Cookie` or `Authorization` from a
 credentialed request and never serving a credentialed request an entry that varies on either.
+
+**Final review (2026-11-22, after decision A).** Three code findings fixed: S1 again sets
+`private, no-store` before `next()` whatever directive an outer middleware set, as §3.6 specifies
+(an earlier review fix had kept a preset shared-cacheable directive, which let a cache inside the
+session middleware store a signed-in page that renders `ctx.request.user`); a `Vary: Cookie` entry
+is stored and served only for a request carrying no cookie at all, also with `credentialCookies`
+narrowed; a `Vary: *` response is never stored.
 
 ## 11. Plan review (2026-11-22)
 

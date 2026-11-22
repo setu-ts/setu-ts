@@ -183,8 +183,9 @@ export interface CacheMiddlewareOptions {
    * whose `Vary` names neither `Cookie` nor `Authorization`, never shares an
    * origin run with another request, and its own response is stored only when
    * it says `public` and varies on neither. A response varying on `Cookie` or
-   * `Authorization` is stored and served only for requests that are not
-   * credentialed. `Authorization` always makes a request credentialed.
+   * `Authorization` is stored and served only for requests carrying no cookie
+   * and no `Authorization`, whatever this option names. `Authorization`
+   * always makes a request credentialed.
    *
    * Omitted, ANY cookie counts: the middleware cannot know which cookie
    * identifies a visitor. An application whose every visitor carries an
