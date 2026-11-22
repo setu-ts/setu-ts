@@ -315,7 +315,8 @@ With a logger registered, `stop()` logs `Server stopping` (`{ inFlight }`) as it
 `Server stopped` (`{ durationMs }`, at `warn` with `{ error }` when a hook failed). After the
 `onStopping` hooks the kernel calls `IHttpAdapter.beginDrain` once (Node: HTTP/2 `GOAWAY`, idle
 HTTP/1.1 connections closed), then waits up to `drainTimeoutMs` for in-flight requests. A streamed
-RPC reply (gRPC, Connect, gRPC-Web) holds the drain until it ends; other streamed bodies do not.
+RPC reply (gRPC, Connect, gRPC-Web) holds the drain until it ends, and so does a streamed body whose
+request registered `ctx.defer` cleanups; other streamed bodies do not.
 
 While it runs, the kernel subscribes `IRuntimeServices.onFatalError`, so an uncaught exception or an
 unhandled rejection logs one `fatal` line, `Process failed` (`{ origin, error }`); the process still
@@ -337,24 +338,23 @@ body; `inject()`, `dispatch()` and `app.fetch()` drop the body themselves and ke
 cancelling a streamed body. When the request's own signal aborts before the response is handed back,
 the kernel logs `Request aborted before completion` at once (for a request that called `ctx.defer`);
 its cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
-released under a running handler, and a handler that never settles keeps what it holds. A streamed
-body the kernel wraps (one whose request called `ctx.defer`, an early middleware stream whose
-handler is still running, or a gRPC or Connect reply) is cancelled when the request's signal aborts,
-with or without cleanups, so a client that leaves releases the source and the drain even on a
-runtime that never cancels the body. A streamed body's cleanups run once on that abort: the kernel
-cancels the body first and runs them once its `cancel()` settles, with no time limit, so a
-`cancel()` that never settles keeps the request's resources. It waits for the source's `cancel()`,
-not for its `pull` or any pump it started, which no reader can see; a source that does work of its
-own (in `pull`, or a pump it started) must make its `cancel()` wait for that work, and a source with
-no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`.
-`stop()` is not held by such a request beyond the drain bound; its cleanups run if and when the
-`cancel()` settles. When a logger is registered, a cleanup still waiting after 30 s logs one `warn`
-line, `Request cleanup still waiting for the response stream to stop; its resources are still held`,
-with `{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime,
-is unref'd (`IRuntimeServices.unrefTimer`), fires at most once, and is cleared when `cancel()`
-settles or at `stop()`; with no logger, no timer is set. A streamed body whose source fails is
-logged once as `Response stream failed` (`{ requestId, method, path, status, error }`), and the
-error still aborts the response.
+released under a running handler, and a handler that never settles keeps what it holds. Every
+streamed body is cancelled when the request's signal aborts, with or without cleanups, so a client
+that leaves releases the source and the drain even on a runtime that never cancels the body. A
+streamed body's cleanups run once on that abort: the kernel cancels the body first and runs them
+once its `cancel()` settles, with no time limit, so a `cancel()` that never settles keeps the
+request's resources. It waits for the source's `cancel()`, not for its `pull` or any pump it
+started, which no reader can see; a source that does work of its own (in `pull`, or a pump it
+started) must make its `cancel()` wait for that work, and a source with no `cancel()` gets no wait,
+so a limit released through `defer` does not cover work in its `pull`. `stop()` is not held by such
+a request beyond the drain bound; its cleanups run if and when the `cancel()` settles. When a logger
+is registered, a cleanup still waiting after 30 s logs one `warn` line,
+`Request cleanup still waiting for the response stream to stop; its resources are still held`, with
+`{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime, is
+unref'd (`IRuntimeServices.unrefTimer`), fires at most once, and is cleared when `cancel()` settles
+or at `stop()`; with no logger, no timer is set. A streamed body whose source fails is logged once
+as `Response stream failed` (`{ requestId, method, path, status, error }`), and the error still
+aborts the response.
 
 ### Route Introspection
 
