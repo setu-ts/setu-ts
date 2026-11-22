@@ -362,7 +362,10 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
     the positive control (`cancel()` releases at once) admitted 6–7/s and never held more than 2.
     With no bound, a `cancel()` that never settles keeps its slot: the limit fails closed and holds
     at K, as a handler that never settles does. Option B (keep the 5000 ms bound and document the
-    bypass as an accepted Medium) was rejected.
+    bypass as an accepted Medium) was rejected. Re-run at `1e3438249` (no bound): rows 2, 3 and 5
+    held at 2 throughout (row 2: 2 admitted, 178 refused), the positive control unchanged, the same
+    on Bun and Deno, in front of a streamed RPC reply, and for a `dispatch()` caller that cancels
+    before the abort; row 4 (no `cancel()`) held 40, 80 and 120 at 6, 12 and 18 s.
   - **Outside what the kernel can see.** A source with no `cancel()` gets no wait (P15 row 4: a
     `pull` pending forever with no `cancel()` admitted 6–7/s and held 120 at 18 s), so a limit
     released through `defer` does not cover work in its `pull`. Documented, not fixed.

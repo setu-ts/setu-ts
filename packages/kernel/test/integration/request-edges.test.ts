@@ -439,7 +439,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
   });
 
   it.each([false, true])(
-    'holds stop() until the drain bound while a streamed RPC reply source cancel() is pending (released: %s)',
+    'holds stop() while a streamed RPC reply source cancel() is pending, until it settles or the drain bound (released: %s)',
     async (released) => {
       const fake = createFakeRuntime();
       let cleaned = 0;
@@ -494,7 +494,7 @@ describe('streamed RPC replies hold the drain (V13-23)', () => {
   );
 
   it.each([false, true])(
-    'holds stop() until the drain bound while a plain streamed route source cancel() is pending (released: %s)',
+    'holds stop() while a plain streamed route source cancel() is pending, until it settles or the drain bound (released: %s)',
     async (released) => {
       const fake = createFakeRuntime();
       let cleaned = 0;

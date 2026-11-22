@@ -39,13 +39,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
   produced (for example a Problem Details 401) instead of a bare status line, and `rejectRawUpgrade`
   writes `401 Unauthorized` (not `401 Bad Request`), with an empty reason phrase for a status it
   does not name.
-- **Stream sources and `ctx.defer`.** When a client leaves a streamed response, the kernel cancels
-  the body and runs the request's `ctx.defer` cleanups once the body's `cancel()` settles, with no
-  time limit. A custom `ReadableStream` source whose `cancel()` never settles now keeps its
-  request's resources (a request scope, a concurrency slot) until it does; make `cancel()` settle,
-  and make it wait for any work the source still has running in `pull` or a pump it started. A
-  source with no `cancel()` gets no wait, so that work is not covered by a limit released through
-  `defer`.
+- **Stream sources and `ctx.defer`.** When the request's signal aborts before a streamed response
+  ends (on Workers, where the body is not cancelled for you), the kernel now cancels the body and
+  runs the request's `ctx.defer` cleanups once its `cancel()` settles, with no time limit; on Node,
+  Bun and Deno the consumer's cancel already waited for `cancel()` the same way. On every runtime,
+  then, a custom `ReadableStream` source whose `cancel()` never settles keeps its request's
+  resources (a request scope, a concurrency slot) until it does: make `cancel()` settle, and make it
+  wait for any work the source still has running in `pull` or a pump it started. A source with no
+  `cancel()` gets no wait, so that work is not covered by a limit released through `defer`.
 - **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
