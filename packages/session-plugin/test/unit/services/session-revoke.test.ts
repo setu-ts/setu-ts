@@ -96,7 +96,72 @@ describe('revocation markers', () => {
     store.calls.length = 0;
     s.destroy();
     expect(await service.commit(c.ctx, s)).toBe('written');
-    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`]);
+    // ...and then reads the id's `superseded` marker for a regeneration to follow.
+    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:superseded:${id}`]);
+    expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
+  });
+
+  it('a regeneration records its new id on the superseded marker', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.regenerate();
+    expect(await service.commit(c.ctx, s)).toBe('written');
+    expect(store.rows.get(`superseded:${id}`)).toEqual({ __setu_marker: 'superseded', next: s.id });
+  });
+
+  it.each([
+    ['a non-string successor', 42],
+    ['a marker id as successor', 'revoked:other'],
+  ] as const)('a sign-out ignores %s', async (_name, next) => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    store.rows.set(`superseded:${id}`, { __setu_marker: 'superseded', next });
+    store.rows.set('other', { userId: 'u2' });
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    store.calls.length = 0;
+    s.destroy();
+    expect(await service.commit(c.ctx, s)).toBe('written');
+    expect(store.calls).toEqual([`write:revoked:${id}`, `destroy:${id}`, `read:superseded:${id}`]);
+    expect(store.rows.has('other')).toBe(true);
+  });
+
+  it('a sign-out follows a chain of regenerations, to a bound', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    // A chain of twelve successors: the sign-out revokes the first eight after its own id.
+    const chain = Array.from({ length: 12 }, (_v, i) => `succ-${i}`);
+    let previous = id;
+    for (const next of chain) {
+      store.rows.set(`superseded:${previous}`, { __setu_marker: 'superseded', next });
+      store.rows.set(next, { userId: 'u1' });
+      previous = next;
+    }
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.destroy();
+    await service.commit(c.ctx, s);
+    expect(chain.map((next) => store.rows.has(next))).toEqual([
+      ...Array<boolean>(8).fill(false),
+      ...Array<boolean>(4).fill(true),
+    ]);
+  });
+
+  it('a fault reading the successor fails the sign-out after its own revocation', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    store.failing = { step: 'read', key: (k) => k.startsWith('superseded:') };
+    s.destroy();
+    await expect(service.commit(c.ctx, s)).rejects.toThrow();
+    expect(store.rows.has(id)).toBe(false);
     expect(store.rows.get(`revoked:${id}`)).toEqual({ __setu_marker: 'revoked' });
   });
 

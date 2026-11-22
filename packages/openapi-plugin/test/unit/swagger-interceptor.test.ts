@@ -55,6 +55,35 @@ describe('Swagger UI CSRF request interceptor', () => {
     },
   );
 
+  it('concurrent calls share one token fetch, and a later call fetches again', async () => {
+    let minted = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const s: InterceptorScope = {
+      location: { href: PAGE, origin: 'https://api.example' },
+      fetch: async () => {
+        const token = `t${++minted}`;
+        await gate;
+        return {
+          status: 200,
+          json: () => Promise.resolve({ headerName: 'x-form-token', token }),
+        };
+      },
+    };
+    const intercept = createCsrfRequestInterceptor('/docs/csrf-token', s);
+    const first = intercept({ url: '/orders', method: 'post' });
+    const second = intercept({ url: '/orders', method: 'delete' });
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect(minted).toBe(1);
+    expect([a.headers?.['x-form-token'], b.headers?.['x-form-token']]).toEqual(['t1', 't1']);
+    const later = await intercept({ url: '/orders', method: 'post' });
+    expect(minted).toBe(2);
+    expect(later.headers?.['x-form-token']).toBe('t2');
+  });
+
   it('leaves a cross-origin post (an OAuth2 token URL, another server) alone with no fetch', async () => {
     const { scope: s, fetched } = scope(TOKEN);
     for (const url of ['https://idp.example/token', 'http://api.example/orders']) {

@@ -58,6 +58,9 @@ export function markPerVisitor(response: IResponse): void {
 export function noteCsrfTokenRead(ctx: IRequestContext, session: ISession): void {
   const tracked = session as Partial<Pick<Session, 'markCsrfTokenRead'>>;
   tracked.markCsrfTokenRead?.();
+  // The token belongs to this visitor's session: an in-process cache never stores the page, even
+  // when an explicit `public` keeps it shareable on the wire (with the warning).
+  ctx.state.set(PER_VISITOR_RESPONSE_STATE_KEY, true);
   // An explicit shared-cacheable directive the application already set is left for the
   // after-handler decision (kept, with a warning); `Vary: Cookie` keeps caches apart meanwhile.
   if (isSharedStorable(ctx.response.snapshot().headers.get('cache-control'))) {
@@ -75,8 +78,40 @@ export function isSharedStorable(cacheControl: string | null): boolean {
   if (cacheControl === null) {
     return false;
   }
-  const names = cacheControl.split(',').map((part) => part.split('=')[0]!.trim().toLowerCase());
+  const names = directiveNames(cacheControl);
   return !names.includes('private') && !names.includes('no-store');
+}
+
+/**
+ * The directive names of a `Cache-Control` value, lowercased (RFC 9111 §5.2): split at commas
+ * outside quoted-string arguments, honouring backslash escapes inside them, so a comma or a
+ * directive name inside an argument (`x="a,public"`) is not read as a directive.
+ */
+function directiveNames(cacheControl: string): string[] {
+  const names: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < cacheControl.length; i++) {
+    const char = cacheControl[i]!;
+    if (quoted) {
+      if (char === '\\') {
+        i++;
+      } else if (char === '"') {
+        quoted = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      names.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  names.push(current);
+  return names.map((part) => part.split('=')[0]!.trim().toLowerCase());
 }
 
 /**
@@ -198,7 +233,14 @@ export class RequestCacheMarking {
     });
     // A page that read the session depends on the cookie: vary on it at once, so a cache inside
     // this middleware does not store the anonymous variant without `Vary: Cookie`.
-    this.#session.onFirstRead(() => appendVaryCookie(this.#ctx.response));
+    this.#session.onFirstRead(() => {
+      appendVaryCookie(this.#ctx.response);
+      // A read of a signed-in visitor's data personalises the page whatever the handler then does
+      // to its headers, so an in-process cache never stores it.
+      if (this.#restoredApplicationData) {
+        this.#ctx.state.set(PER_VISITOR_RESPONSE_STATE_KEY, true);
+      }
+    });
   }
 
   /** The application's own directive, or `null` when it set none (or left the plugin's). */

@@ -71,9 +71,12 @@ regeneration writes `superseded:<old id>` (`revoked:<old id>` when it is a logou
 restored session writes its row and then reads the markers, and deletes its own write when one is
 present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
 cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
-tab) is refused too, so it cannot carry the old session's data to a fresh id. Markers are written
-only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they expire after
-`maxAge`.
+tab) is refused too, so it cannot carry the old session's data to a fresh id. A `superseded` marker
+names the new id, and a sign-out of the old id also revokes the id it names: a sign-out that lands
+after a regeneration's marker check therefore still ends the regenerated session. Markers are
+written only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they
+expire after `maxAge`, and a commit whose request loaded the session longer ago than that (less one
+second, for stores that round a TTL down) is refused, since no marker could still fence it.
 
 **The one window.** A request that _starts_ during a racing commit, between that commit's write and
 its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
@@ -95,8 +98,8 @@ before it) and must not evict a live key:
 
 An evicted or not-yet-visible marker reverts that one revocation to an unfenced delete. Your own
 store sees ids of the form `revoked:<uuid>` and `superseded:<uuid>` beside session ids, holding the
-payload `{ "__setu_marker": "revoked" }` (or `"superseded"`). The cookie strategy has no row to
-revoke; `signIn.sessionStamp` (below) is its answer.
+payload `{ "__setu_marker": "revoked" }` (a `superseded` marker also carries `"next": "<new id>"`).
+The cookie strategy has no row to revoke; `signIn.sessionStamp` (below) is its answer.
 
 ### Concurrent requests
 
@@ -458,7 +461,8 @@ visitor. The session middleware marks such a response `Cache-Control: private, n
   application write, which also sets `PER_VISITOR_RESPONSE_STATE_KEY` (`@setu-ts/common`) on the
   request, so `cacheMiddleware` inside the session middleware does not store it even when the
   handler then sets `public`;
-- a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read.
+- a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read, which also sets
+  `PER_VISITOR_RESPONSE_STATE_KEY`, as does a read of a signed-in visitor's session.
 
 A response that only _read_ the session for an anonymous visitor is the anonymous variant of a page:
 it gets `Vary: Cookie` alone. What counts as a read:

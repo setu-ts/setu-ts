@@ -9,8 +9,9 @@
 /**
  * The `ctx.state` key a component sets to `true` once it knows the response belongs to one visitor
  * whatever its headers end up saying. `session-plugin` sets it at a request's first application
- * write, which also issues or changes the session cookie, so a cache inside the session middleware
- * does not store a response the handler then marks `public` before the commit adds `Set-Cookie`.
+ * write (which also issues or changes the session cookie), at a CSRF token read, and at a read of a
+ * signed-in visitor's session, so a cache inside the session middleware does not store such a
+ * response even when the handler then marks it `public`.
  * `cacheMiddleware` never stores a response captured with it set.
  *
  * @example

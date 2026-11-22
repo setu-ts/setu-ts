@@ -931,6 +931,13 @@ and rule A stored it for every cookie-less visitor. Fixed with an additive `comm
 write sets it, and `cacheMiddleware` never stores a response captured with it set. The Workers Cache
 API half (M143o, §0.2 X6) should read the same key.
 
+**CodeRabbit review on PR #609 (2026-11-22).** Fixed: a sign-out that lands after a regeneration's
+fence read now also revokes the regenerated id (the `superseded` marker names its successor; each
+side writes before it reads the other's marker); a commit whose request loaded the session longer
+ago than a marker lives is refused; a CSRF token read and a read of a signed-in visitor's session
+also set `PER_VISITOR_RESPONSE_STATE_KEY`; `Cache-Control` directive names are parsed outside quoted
+arguments in both plugins; Swagger UI's interceptor shares one in-flight token fetch.
+
 ## 11. Plan review (2026-11-22)
 
 An independent agent that did not write the plan reviewed it against the row texts, the ROADMAP

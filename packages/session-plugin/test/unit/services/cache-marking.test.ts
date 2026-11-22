@@ -138,6 +138,31 @@ describe('signals and the after-handler decision', () => {
     expect(lines[0]![1]).toEqual({ method: 'GET', route: '/', signal: 'csrf-token' });
   });
 
+  it('a CSRF token read flags the response per-visitor, even under an explicit public', () => {
+    const t = makeContext();
+    t.response.header('cache-control', PUBLIC);
+    noteCsrfTokenRead(t.ctx, fresh());
+    expect(t.ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY)).toBe(true);
+  });
+
+  it("a read of a signed-in visitor's session flags the response; an anonymous read does not", () => {
+    const signedIn = makeContext();
+    const session = SIGNED_IN();
+    new RequestCacheMarking(signedIn.ctx, session, new PublicDirectiveWarnings()).begin();
+    session.get('userId');
+    expect(signedIn.ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY)).toBe(true);
+    const anonymous = makeContext();
+    const guest = fresh();
+    new RequestCacheMarking(anonymous.ctx, guest, new PublicDirectiveWarnings()).begin();
+    guest.get('userId');
+    expect(anonymous.ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY)).toBeUndefined();
+  });
+
+  it('a quoted Cache-Control argument naming private does not make public non-storable', () => {
+    expect(isSharedStorable('public, example="a,private"')).toBe(true);
+    expect(isSharedStorable('public, private="set-cookie"')).toBe(false);
+  });
+
   it('the first application write flags the response per-visitor for a cache inside', () => {
     const t = makeContext();
     const session = fresh();

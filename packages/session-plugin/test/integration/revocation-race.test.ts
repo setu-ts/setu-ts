@@ -292,3 +292,112 @@ describe('an evicted marker', () => {
     expect(await userOf(service, cookie)).toBe('u1');
   });
 });
+
+/** A store that pauses after the `nth` read of one id, until released. */
+class ReadPausingStore implements ISessionStore {
+  readonly #inner: ISessionStore;
+  #target: { id: string; remaining: number } | undefined;
+  #landed: () => void = () => {};
+  #gate: Promise<void> = Promise.resolve();
+  #release: () => void = () => {};
+
+  constructor(inner: ISessionStore) {
+    this.#inner = inner;
+  }
+
+  pauseAfterRead(id: string, nth: number): { landed: Promise<void>; release: () => void } {
+    this.#target = { id, remaining: nth };
+    const landed = new Promise<void>((resolve) => {
+      this.#landed = resolve;
+    });
+    this.#gate = new Promise<void>((resolve) => {
+      this.#release = resolve;
+    });
+    return { landed, release: () => this.#release() };
+  }
+
+  async read(id: string): Promise<SessionData | null> {
+    const row = await this.#inner.read(id);
+    if (this.#target?.id === id && --this.#target.remaining === 0) {
+      this.#target = undefined;
+      this.#landed();
+      await this.#gate;
+    }
+    return row;
+  }
+
+  write(id: string, data: SessionData, ttlMs: number): Promise<void> {
+    return this.#inner.write(id, data, ttlMs);
+  }
+
+  destroy(id: string): Promise<boolean> {
+    return this.#inner.destroy(id);
+  }
+}
+
+const memoryStore = (): MemorySessionStore =>
+  new MemorySessionStore({
+    now: () => 1_000,
+    setInterval: () => 0 as never,
+    clearInterval: () => {},
+  });
+
+describe('a sign-out racing a regeneration past its fence', () => {
+  it('also ends the session the regeneration moved to', async () => {
+    const store = new ReadPausingStore(memoryStore());
+    const service = await createService(store);
+    const cookie = await signedIn(service);
+    // The sign-out request loaded the old id before the regeneration superseded it.
+    const logout = makeContext({ headers: { cookie } });
+    const ls = await service.load(logout.ctx);
+    const stepUp = makeContext({ headers: { cookie } });
+    const su = await service.load(stepUp.ctx);
+    su.regenerate();
+    // The regeneration reads `revoked:<old>` twice (pre-check, fence): pause after the fence.
+    const pause = store.pauseAfterRead(`revoked:${su.loadedId}`, 2);
+    const committing = service.commit(stepUp.ctx, su);
+    await pause.landed;
+    ls.destroy();
+    await service.commit(logout.ctx, ls);
+    pause.release();
+    expect(await committing).toBe('written');
+    expect(await userOf(service, cookieOf(stepUp.response.setCookies()))).toBeUndefined();
+  });
+});
+
+describe('a commit that outlives every marker', () => {
+  it('is refused, so a sign-out whose marker has expired still holds', async () => {
+    const store = memoryStore();
+    const clock = makeClock();
+    const config = resolveSessionConfig({
+      mode: 'encrypt',
+      store,
+      storeCommit: 'snapshot',
+      rolling: true,
+    });
+    const ring = await deriveKeyRing(crypto.subtle, [SECRET], 'encrypt');
+    const service = new SessionService(
+      config,
+      ring,
+      {
+        subtle: crypto.subtle,
+        randomBytes: (n) => crypto.getRandomValues(new Uint8Array(n)),
+        now: clock.now,
+        uuid: clock.uuid,
+      },
+      store,
+    );
+    const cookie = await signedIn(service);
+    const inflight = makeContext({ headers: { cookie } });
+    const inflightSession = await service.load(inflight.ctx);
+    const logout = makeContext({ headers: { cookie } });
+    const ls = await service.load(logout.ctx);
+    ls.destroy();
+    await service.commit(logout.ctx, ls);
+    // The marker's lifetime passes (its TTL is `maxAgeMs`) while the request is still running.
+    await store.destroy(`revoked:${inflightSession.id}`);
+    clock.advance(config.maxAgeMs);
+    expect(await service.commit(inflight.ctx, inflightSession)).toBe('refused');
+    expect(await userOf(service, cookie)).toBeUndefined();
+  });
+});

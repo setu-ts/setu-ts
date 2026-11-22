@@ -30,7 +30,8 @@ export interface InterceptorScope {
  * token from `tokenUrl` and, on a `200`, sets the named header. Every other request (the spec load,
  * `$ref` resolution, an OAuth2 token request to an outside provider, a call to a server on another
  * origin) passes unchanged with no fetch, and so does any request when the token route answers
- * `204` or the fetch fails.
+ * `204` or the fetch fails. Concurrent calls share one token fetch, so a session that has no token
+ * yet mints exactly one and every call sends it; the next call after it settles fetches again.
  *
  * @param tokenUrl - The plugin's own token route
  * @param scope - The browser globals (`window` in the page)
@@ -40,6 +41,25 @@ export function createCsrfRequestInterceptor(
   tokenUrl: string,
   scope: InterceptorScope,
 ): (request: SwaggerRequest) => Promise<SwaggerRequest> {
+  let pending:
+    Promise<{ readonly headerName: string; readonly token: string } | undefined> | undefined;
+  const fetchToken = async (): Promise<
+    { readonly headerName: string; readonly token: string } | undefined
+  > => {
+    try {
+      const response = await scope.fetch(tokenUrl, { credentials: 'same-origin' });
+      if (response.status !== 200) {
+        return undefined;
+      }
+      const body = (await response.json()) as { headerName?: unknown; token?: unknown };
+      return typeof body.headerName === 'string' && typeof body.token === 'string'
+        ? { headerName: body.headerName, token: body.token }
+        : undefined;
+    } catch {
+      // A failed token fetch leaves the request as Swagger UI built it.
+      return undefined;
+    }
+  };
   return async (request) => {
     try {
       const origin = new URL(request.url, scope.location.href).origin;
@@ -52,16 +72,19 @@ export function createCsrfRequestInterceptor(
       ) {
         return request;
       }
-      const response = await scope.fetch(tokenUrl, { credentials: 'same-origin' });
-      if (response.status !== 200) {
-        return request;
+      if (pending === undefined) {
+        const shared = fetchToken();
+        pending = shared;
+        void shared.then(() => {
+          if (pending === shared) pending = undefined;
+        });
       }
-      const body = (await response.json()) as { headerName?: unknown; token?: unknown };
-      if (typeof body.headerName === 'string' && typeof body.token === 'string') {
-        request.headers = { ...request.headers, [body.headerName]: body.token };
+      const found = await pending;
+      if (found !== undefined) {
+        request.headers = { ...request.headers, [found.headerName]: found.token };
       }
     } catch {
-      // A failed token fetch leaves the request as Swagger UI built it.
+      // A request URL that cannot be parsed passes unchanged.
     }
     return request;
   };

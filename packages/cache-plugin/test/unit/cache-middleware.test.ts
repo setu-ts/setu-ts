@@ -813,6 +813,27 @@ describe('cacheMiddleware — per-visitor responses', () => {
     }
   });
 
+  // A comma inside a quoted argument does not split directives (RFC 9111 §5.2).
+  it.each([
+    ['a quoted argument holding "public"', 'max-age=60, example="one,public,two"', 'MISS'],
+    ['an escaped quote before "public"', 'example="a\\",public", max-age=60', 'MISS'],
+    ['a real public directive', 'max-age=60, example="one,two", public', 'HIT'],
+  ] as const)(
+    'reads Cache-Control directives outside quotes: %s',
+    async (_name, cacheControl, second) => {
+      const { app } = await appWith((ctx) =>
+        ctx.response.header('cache-control', cacheControl).text('page'),
+      );
+      try {
+        await app.inject(get({ authorization: 'Bearer a' }));
+        const next = await app.inject(get({ authorization: 'Bearer b' }));
+        expect(next.headers.get('x-cache')).toBe(second);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
   // RFC 9111 §4.1: a stored `Vary: *` response can never be reused.
   it('never stores a Vary: * response', async () => {
     const { app, calls } = await appWith((ctx) =>

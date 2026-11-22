@@ -527,6 +527,7 @@ describe('the published token accessor', () => {
   it('mints and returns the token of a restored session', async () => {
     const { access, session } = await accessorFor(false);
     const token = access.tokenForExistingSession();
+    expect(typeof token === 'string' && token.length > 0).toBe(true);
     expect(token).toBe(readCsrfToken(session));
     expect(access.tokenForExistingSession()).toBe(token);
   });

@@ -129,14 +129,18 @@ export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['
 ```
 
 `credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a page that
-carries a CSRF token or belongs to a signed-in visitor is marked `private`, so it is never stored
-whichever side of the session middleware the cache runs on; an anonymous page that only read the
-session is marked `Vary: Cookie`, so it is stored for visitors without cookies only. A response for
-a request whose session was written (an application key set, deleted or cleared, or a `regenerate()`
-or `destroy()`) is never stored, even when the handler marks it `public`: the session plugin sets
-`PER_VISITOR_RESPONSE_STATE_KEY` at that first write, before the commit adds `Set-Cookie`. Register
-`cacheMiddleware` outside the session middleware (a priority below 260) where you can, so a cached
-anonymous page is replayed before any session work.
+carries a CSRF token or belongs to a signed-in visitor is marked `private`; an anonymous page that
+only read the session is marked `Vary: Cookie`, so it is stored for visitors without cookies only.
+The session plugin also sets `PER_VISITOR_RESPONSE_STATE_KEY` on a request that writes its session
+(an application key set, deleted or cleared, a `regenerate()` or a `destroy()`), reads a CSRF token,
+or reads a signed-in visitor's session, and `cacheMiddleware` never stores such a response, even
+when the handler marks it `public`. One case stays the application's: a signed-in visitor's response
+that never touches the session API but is personalised another way (through `ctx.request.user`, say)
+and that the handler marks `public` keeps that directive with no `Vary: Cookie`, so it can be stored
+and replayed (`RequestCacheMarking.finish()` keeps an application directive, as it must for public
+assets). Never mark a personalised response `public`. Register `cacheMiddleware` outside the session
+middleware (a priority below 260) where you can, so a cached anonymous page is replayed before any
+session work.
 
 ## Exports
 

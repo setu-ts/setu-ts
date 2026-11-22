@@ -55,6 +55,21 @@ const MARKER_FIELD = '__setu_marker';
 
 const MARKER_KINDS: readonly MarkerKind[] = ['revoked', 'superseded'];
 
+/** The field of a `superseded` marker naming the id the regeneration moved the session to. */
+const SUCCESSOR_FIELD = 'next';
+
+/**
+ * How many regenerations a sign-out follows from the id it signs out. A chain longer than this
+ * within one marker lifetime is not a real session's history.
+ */
+const SUCCESSOR_DEPTH = 8;
+
+/**
+ * Margin below the marker lifetime within which a request that loaded a stored session may still
+ * commit: a store may round a TTL down to whole seconds.
+ */
+const MARKER_TTL_MARGIN_MS = 1000;
+
 /** Whether an id is a marker id rather than a session id. */
 function isMarkerId(id: string): boolean {
   return MARKER_KINDS.some((kind) => id.startsWith(`${kind}:`));
@@ -121,6 +136,8 @@ export class SessionService implements ISessionService {
   readonly #ring: KeyRing;
   readonly #deps: SessionServiceDeps;
   readonly #store: ISessionStore | undefined;
+  /** When each store-held session was loaded, so a commit outliving every marker is refused. */
+  readonly #loadedAt = new WeakMap<Session, number>();
 
   /**
    * @param config - Resolved configuration
@@ -298,6 +315,13 @@ export class SessionService implements ISessionService {
       return 'skipped';
     }
 
+    const now = this.#deps.now();
+    // A marker lives `maxAgeMs` from its sign-out, which came after this request loaded the
+    // session. A commit later than that could no longer see one, so it is refused outright.
+    if (source !== null && now - (this.#loadedAt.get(session) ?? now) >= this.#markerWindow()) {
+      return this.#refused(ctx);
+    }
+
     // A regeneration whose source was signed out while this request ran must
     // not carry that session's data to a fresh id.
     if (store !== undefined && session.wasRegenerated && source !== null) {
@@ -306,7 +330,6 @@ export class SessionService implements ISessionService {
       }
     }
 
-    const now = this.#deps.now();
     session.touch(now);
     if (rolling) {
       session.extend(now + this.#config.maxAgeMs);
@@ -372,7 +395,7 @@ export class SessionService implements ISessionService {
         // The old id is superseded — or, when this commit moves the session into
         // the cookie (a logout by `clear()` and `regenerate()`), revoked, so an
         // in-flight regeneration on the old cookie is refused too.
-        await this.#revoke(source, cookieHeld ? 'revoked' : 'superseded');
+        await this.#revoke(source, cookieHeld ? 'revoked' : 'superseded', snapshot.id);
       } else if (cookieHeld && source !== null) {
         // Moving a stored session into the cookie (a logout clearing every
         // other key) revokes its row: otherwise a copy of the old id-only
@@ -464,13 +487,22 @@ export class SessionService implements ISessionService {
       // session behind it is gone, so this must not restore.
       return null;
     }
-    return restoreSession(
+    const restored = restoreSession(
       { ...snapshot, data: stored },
       now,
       this.#deps.uuid,
       this.#config.idleTimeoutMs,
       true,
     );
+    if (restored !== null) {
+      this.#loadedAt.set(restored, now);
+    }
+    return restored;
+  }
+
+  /** How long after loading a stored session a commit is still fenced by any marker. */
+  #markerWindow(): number {
+    return Math.max(this.#config.maxAgeMs - MARKER_TTL_MARGIN_MS, 0);
   }
 
   /** Whether the session was restored from a store row, which is the only kind a marker fences. */
@@ -483,12 +515,23 @@ export class SessionService implements ISessionService {
    * marker that is written fences every later commit to the id even when the
    * delete then fails. A marker write that fails still attempts the delete and
    * then rethrows, so a sign-out never reports success with its marker missing.
+   *
+   * A `superseded` marker names the regeneration's new id. A sign-out then
+   * reads its id's `superseded` marker and revokes the id it names too: a
+   * regeneration writes that marker before its fence reads `revoked`, and a
+   * sign-out writes `revoked` before reading `superseded`, so on a
+   * linearizable store one of them always sees the other — the regeneration
+   * refuses, or the sign-out ends the new session.
    */
-  async #revoke(id: string, kind: MarkerKind): Promise<void> {
+  async #revoke(id: string, kind: MarkerKind, successor?: string, depth = 0): Promise<void> {
     const store = this.#store!;
     let fault: { readonly error: unknown } | undefined;
+    const marker =
+      successor === undefined
+        ? { [MARKER_FIELD]: kind }
+        : { [MARKER_FIELD]: kind, [SUCCESSOR_FIELD]: successor };
     try {
-      await store.write(`${kind}:${id}`, { [MARKER_FIELD]: kind }, this.#config.maxAgeMs);
+      await store.write(`${kind}:${id}`, marker, this.#config.maxAgeMs);
     } catch (error) {
       fault = { error };
     }
@@ -498,6 +541,21 @@ export class SessionService implements ISessionService {
       if (fault === undefined) throw error;
     }
     if (fault !== undefined) throw fault.error;
+    if (kind === 'revoked' && depth < SUCCESSOR_DEPTH) {
+      const next = await this.#successorOf(id);
+      if (next !== undefined) {
+        await this.#revoke(next, 'revoked', undefined, depth + 1);
+      }
+    }
+  }
+
+  /** The id a regeneration of `id` moved the session to, from its `superseded` marker. */
+  async #successorOf(id: string): Promise<string | undefined> {
+    const row = await this.#store!.read(`superseded:${id}`);
+    const next = row?.[SUCCESSOR_FIELD];
+    return row?.[MARKER_FIELD] === 'superseded' && typeof next === 'string' && !isMarkerId(next)
+      ? next
+      : undefined;
   }
 
   /** Whether any of the given markers is present for `id`; a read fault propagates. */

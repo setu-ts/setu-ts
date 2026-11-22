@@ -21,7 +21,16 @@ function cookieOf(headers: Headers): string {
 }
 
 async function buildApp(priority: number) {
-  const calls = { page: 0, form: 0, plain: 0, write: 0, profile: 0, cart: 0 };
+  const calls = {
+    page: 0,
+    form: 0,
+    plain: 0,
+    write: 0,
+    profile: 0,
+    cart: 0,
+    publicForm: 0,
+    publicMe: 0,
+  };
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -66,6 +75,19 @@ async function buildApp(priority: number) {
             getSession(c).set('cart', `cart-${calls.cart}`);
             c.response.header('cache-control', 'public, max-age=60');
             return c.response.text(`cart-${calls.cart}`);
+          });
+          // Explicit `public` around a token read and around a signed-in read that also replaces
+          // the session plugin's `Vary`: the wire keeps the directive, the cache must not store.
+          ctx.router.get('/public-form', (c) => {
+            calls.publicForm += 1;
+            c.response.header('cache-control', 'public, max-age=60');
+            return c.response.text(`token ${getCsrfToken(c)}`);
+          });
+          ctx.router.get('/public-me', (c) => {
+            calls.publicMe += 1;
+            const user = String(getSession(c).get('userId') ?? 'guest');
+            c.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Accept' });
+            return c.response.text(`me ${user}`);
           });
           ctx.router.get('/write', (c) => {
             calls.write += 1;
@@ -130,6 +152,23 @@ describe.each([
       const second = await app.inject(get('/cart'));
       expect([second.body, second.headers.get('x-cache')]).toEqual(['cart-2', 'MISS']);
       expect(calls.cart).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('never stores a token page or a signed-in read, even when the handler marks it public', async () => {
+    const { app, calls } = await buildApp(priority);
+    try {
+      const first = await app.inject(get('/public-form'));
+      const second = await app.inject(get('/public-form'));
+      expect(second.headers.get('x-cache')).toBe('MISS');
+      expect(first.body).not.toBe(second.body);
+      const alice = cookieOf((await app.inject(get('/signin', { 'x-user': 'alice' }))).headers);
+      const bob = cookieOf((await app.inject(get('/signin', { 'x-user': 'bob' }))).headers);
+      expect((await app.inject(get('/public-me', { cookie: alice }))).body).toBe('me user-alice');
+      expect((await app.inject(get('/public-me', { cookie: bob }))).body).toBe('me user-bob');
+      expect([calls.publicForm, calls.publicMe]).toEqual([2, 2]);
     } finally {
       await app.stop();
     }

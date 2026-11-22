@@ -48,7 +48,9 @@ All notable changes to this project are documented here. The format follows
   `destroy()` or `regenerate()` stays in force whatever request on the session was already in
   flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every
   commit to a restored session checks it after its write and deletes its own write when present,
-  sending no cookie. A regeneration whose source was signed out meanwhile is refused.
+  sending no cookie. A regeneration whose source was signed out meanwhile is refused, and a sign-out
+  that lands after a regeneration's check also ends the regenerated session. A commit whose request
+  loaded the session longer ago than a marker lives (`maxAge`) is refused.
   `restoreRevocationCheck: true` also checks the markers on every store-held restore. Store commits
   write this request's changes onto the current row (`storeCommit: 'changes'`, the new default;
   `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.
@@ -70,8 +72,9 @@ All notable changes to this project are documented here. The format follows
   response. A response varying on either is stored and served only for requests carrying no cookie
   and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
   `Authorization` never joins or leads a coalesced flight, and a response captured after the session
-  plugin's first application write (`PER_VISITOR_RESPONSE_STATE_KEY`, new in `@setu-ts/common`) is
-  never stored. New option `credentialCookies`.
+  plugin set `PER_VISITOR_RESPONSE_STATE_KEY` (new in `@setu-ts/common`; set at a request's first
+  application write, a CSRF token read and a read of a signed-in visitor's session) is never stored.
+  New option `credentialCookies`.
 - **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
   CORS at 125, so the request-size 400 and 413 carry them.
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out
