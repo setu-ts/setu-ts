@@ -866,7 +866,7 @@ here.
   target checked, a project write lock, a Node 22.9.0 floor through `@setu-ts/cli/node-version`,
   telemetry peers on every runtime, Pub/Sub emulator host in the dotenv, view CSS before tests, an
   empty workspace's root test; V13-36, V13-140…V13-143, V13-145, V13-148, V13-154, V13-161, V13-166,
-  V13-168) — complete (PR pending).
+  V13-168) — complete (PR #610).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
