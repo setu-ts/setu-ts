@@ -275,7 +275,10 @@ describe('first-command scaffold gates', () => {
         try {
           const installed = await npmInstall(project, overlay);
           expect(installed.code, installed.output).toBe(0);
-          const tested = await npmRun(project, 'test');
+          const tested = await runIn(project, 'npm', ['run', '--silent', 'test'], undefined, {
+            PUBSUB_EMULATOR_HOST: undefined,
+            PUBSUB_PROJECT_ID: undefined,
+          });
           expect(tested.code, tested.output).toBe(0);
         } finally {
           await overlay.close();

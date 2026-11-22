@@ -31,8 +31,9 @@ framework.
 
 ## Installation
 
-`setu` is a Node program (Node 22.23.4+, 24.22.1+ or 26.12.1+), published to npm with a `bin`. Run
-it without an install, install it globally, or start through `npm create`:
+`setu` is a Node program requiring Node 22.9.0 or newer; its supported range is
+`^22.23.4 || ^24.22.1 || >=26.12.1`. It is published to npm with a `bin`. Run it without an install,
+install it globally, or start through `npm create`:
 
 ```bash
 npx @setu-ts/cli new my-app
@@ -474,8 +475,9 @@ refusal pointing to `--dotenv <path>`.
 It refuses a file anywhere in the target path and reports the entry count for a non-empty target.
 Dry runs print `WOULD REFUSE` for these cases and write nothing.
 
-On a Node host outside `^22.23.4 || ^24.22.1 || >=26.12.1`, the CLI prints one warning to stderr and
-continues. Bun and Deno hosts skip this warning.
+Below Node 22.9.0, the CLI refuses to start with exit `1` and names the supported range
+`^22.23.4 || ^24.22.1 || >=26.12.1`. On a Node host at or above Node 22.9.0 but outside that range,
+it prints one warning to stderr and continues. Bun and Deno hosts skip both checks.
 
 `add`, `generate` and `sync` hold `.setu-ts/write.lock/` while changing a project, using the
 workspace root for members. Dry runs skip the lock. A second writer exits `1` and names the lock

@@ -205,6 +205,21 @@ describe('new target validation', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it.each([false, true])(
+    'V13-168 gives no delete hint for a git clone, dry run %s',
+    async (dry) => {
+      const h = harness({
+        '/work/app/.git/HEAD': 'ref: refs/heads/main',
+        '/work/app/README.md': 'mine',
+      });
+      expect(await h.run(['app', ...(dry ? ['--dry-run'] : [])])).toBe(1);
+      expect(h.err.text()).toContain('/work/app already exists and is not empty (1 entries)');
+      expect(h.err.text()).not.toContain('delete /work/app');
+      expect(h.fs.read('/work/app/README.md')).toBe('mine');
+      expect(h.fs.writes).toEqual([]);
+    },
+  );
+
   it('V13-168 accepts an existing empty directory', async () => {
     const h = harness();
     await h.fs.mkdir('/work');

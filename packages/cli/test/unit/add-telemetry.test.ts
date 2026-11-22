@@ -91,6 +91,26 @@ it.each(['node', 'bun', 'deno', 'cloudflare-workers'] as const)(
   },
 );
 
+it.each([
+  ['node', 'rest'],
+  ['node', 'full-stack'],
+  ['bun', 'rest'],
+  ['bun', 'full-stack'],
+])(
+  'V13-36 leaves the %s workspace root byte-identical for a %s member',
+  async (runtime, template) => {
+    const h = harness();
+    expect(await h.run(['new', 'ws', '--workspace', '--runtime', runtime])).toBe(0);
+    const before = h.fs.read('/work/ws/package.json');
+    expect(
+      await h.run(['g', 'app', 'api', '--template', template, '--dir', '/work/ws']),
+      h.errors.join('\n'),
+    ).toBe(0);
+    expect(h.fs.read('/work/ws/apps/api/package.json')).toContain('dependencies');
+    expect(h.fs.read('/work/ws/package.json'), template).toBe(before);
+  },
+);
+
 it.each(['node', 'bun'])(
   'V13-36 records generated microservice peers in the %s workspace root',
   async (runtime) => {

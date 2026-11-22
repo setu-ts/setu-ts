@@ -9,7 +9,7 @@ import { escapeName } from './names.ts';
  *
  * The interrupted-run hint (which tells the user to delete the directory) is
  * added only when every existing entry is one this run would itself create, so
- * a directory holding the user's own files is never called debris.
+ * a directory holding the user's own files or a git repository is never called debris.
  *
  * @param fs - The target filesystem
  * @param root - The resolved project directory
@@ -35,15 +35,17 @@ export async function newTargetRefusal(
       throw cause;
     }
   }
-  const entries = (await fs.readdir(root)).filter((entry) => entry !== '.git');
+  const contents = await fs.readdir(root);
+  const entries = contents.filter((entry) => entry !== '.git');
   if (entries.length === 0) return [];
   const refusal = `${escapeName(root)} already exists and is not empty (${entries.length} entries); choose another name or empty it.`;
   const plannedTop = new Set((planned ?? []).map((path) => path.split('/')[0]));
-  const hint = entries.every((entry) => plannedTop.has(entry))
-    ? interruptedRunRetryHint(
-        entries.map((entry) => joinPath(root, entry)),
-        root,
-      )
-    : undefined;
+  const hint =
+    !contents.includes('.git') && entries.every((entry) => plannedTop.has(entry))
+      ? interruptedRunRetryHint(
+          entries.map((entry) => joinPath(root, entry)),
+          root,
+        )
+      : undefined;
   return hint === undefined ? [refusal] : [refusal, hint];
 }

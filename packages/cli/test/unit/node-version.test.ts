@@ -9,6 +9,27 @@ import {
 import { readFile } from 'node:fs/promises';
 
 describe('supported Node versions', () => {
+  it.each(['../../README.md', '../../../../docs/cli.md', '../../../create/README.md'])(
+    'V13-166 documents the hard floor alongside the supported range in %s',
+    async (path) => {
+      const source = await readFile(new URL(path, import.meta.url), 'utf8');
+      const paragraphs = source.split(/\n\s*\n/).map((paragraph) => paragraph.replace(/\s+/g, ' '));
+      const ranges = paragraphs.filter((paragraph) => paragraph.includes('22.23.4'));
+      expect(ranges.length).toBeGreaterThan(0);
+      for (const paragraph of ranges) {
+        expect(paragraph).toContain(`Node ${HARD_FLOOR_NODE}`);
+        expect(paragraph).toContain('24.22.1');
+        expect(paragraph).toContain('26.12.1');
+      }
+      if (path === '../../README.md') {
+        expect(source.replace(/\s+/g, ' ')).toMatch(/[Bb]elow Node 22\.9\.0.*refuses.*exit `1`/);
+        expect(source.replace(/\s+/g, ' ')).toMatch(
+          /at or above Node 22\.9\.0.*outside.*warning.*continues/,
+        );
+      }
+    },
+  );
+
   it.each<readonly [Readonly<Record<string, string | undefined>>, boolean, boolean]>([
     [{ node: '18.20.8' }, false, true],
     [{ node: '20.20.2' }, false, true],

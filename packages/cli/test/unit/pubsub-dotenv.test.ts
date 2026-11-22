@@ -50,6 +50,56 @@ it('V13-143 new and add write each Pub/Sub row with its own value and print the 
   }
 });
 
+it.each(['node', 'bun', 'deno'])(
+  'V13-143 generated %s workspace members write only the broker emulator env row',
+  async (runtime) => {
+    for (const broker of ['pubsub', 'redis', 'memory']) {
+      for (const style of ['functional', 'class-based']) {
+        const fs = createFakeFs();
+        const log = createRecorder();
+        const deps = { fs, cwd: '/work', now: () => 0, log: log.sink, error: log.sink };
+        expect(
+          await runCli(
+            ['new', 'ws', '--workspace', '--runtime', runtime, '--broker', broker],
+            deps,
+          ),
+          log.text(),
+        ).toBe(0);
+        expect(
+          await runCli(
+            [
+              'g',
+              'app',
+              'api',
+              '--template',
+              'microservice',
+              '--style',
+              style,
+              '--dir',
+              '/work/ws',
+            ],
+            deps,
+          ),
+          log.text(),
+        ).toBe(0);
+        const root = '/work/ws/apps/api';
+        for (const suffix of ['', '.example']) {
+          const env = fs.read(`${root}/.env${suffix}`);
+          expect(env, `${broker} ${style} ${suffix}`).not.toContain('PUBSUB_PROJECT_ID=');
+          if (broker === 'pubsub')
+            expect(env).toContain(
+              `PUBSUB_EMULATOR_HOST=${suffix === '' ? '127.0.0.1:8085' : ''}\n`,
+            );
+          else expect(env).not.toContain('PUBSUB_EMULATOR_HOST=');
+        }
+        if (broker === 'pubsub') {
+          expect(fs.read(`${root}/src/transport/index.ts`)).toContain("'setu-local'");
+        }
+      }
+    }
+  },
+);
+
 it.each(['node', 'bun', 'deno', 'cloudflare-workers'] as const)(
   'V13-143 start and test scripts agree on the dotenv fragment for %s',
   async (runtime) => {

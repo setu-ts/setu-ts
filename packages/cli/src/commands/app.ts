@@ -38,6 +38,7 @@ import {
   withDevtool,
 } from '../devtool/planner.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
+import { TELEMETRY_PEERS } from '../templates/client-dependencies.ts';
 import {
   cliInvocation,
   projectFiles,
@@ -954,9 +955,9 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
 
   if (profile.manifestKind === 'npm') {
     try {
-      const peers = Object.entries(portHost.manifest?.npmDependencies ?? {}).map(
-        ([name, range]) => ({ name, range }),
-      );
+      const peers = Object.entries(portHost.manifest?.npmDependencies ?? {})
+        .filter(([name]) => Object.hasOwn(TELEMETRY_PEERS, name))
+        .map(([name, range]) => ({ name, range }));
       const root = await planWorkspacePeers(deps.fs, deps.dir, peers, deps.log);
       if (root !== undefined)
         files.push({ path: root.path, contents: root.contents, managed: true });
