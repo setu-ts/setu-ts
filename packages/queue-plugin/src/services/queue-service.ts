@@ -96,6 +96,9 @@ export class QueueService implements IQueue {
   /** Per-delivery timers are also owned by the service's disconnect boundary. */
   #renewalHandles = new Set<TimerHandle>();
   #connected = false;
+  #preparations = new Map<string, Promise<void>>();
+  #preparationRefused = new Set<string>();
+  #generation = 0;
   #logger: QueueLogger | undefined;
   /**
    * Per-loop failure state (M131a X88-9): the set of loop names currently in a
@@ -223,12 +226,14 @@ export class QueueService implements IQueue {
     }
     await this.#adapter.connect();
     this.#connected = true;
+    for (const name of this.#processors.keys()) this.#startPreparation(name);
     this.#startWorkerLoop();
     this.#startRecurringLoop();
   }
 
   async disconnect(): Promise<void> {
     this.#connected = false;
+    this.#generation++;
     // Stop worker loop
     if (this.#workerHandle !== null) {
       this.#runtime.clearInterval(this.#workerHandle);
@@ -245,6 +250,9 @@ export class QueueService implements IQueue {
     this.#renewalHandles.clear();
 
     await this.#adapter.disconnect();
+    await Promise.allSettled(this.#preparations.values());
+    this.#preparations.clear();
+    this.#preparationRefused.clear();
   }
 
   isReady(): boolean {
@@ -285,6 +293,22 @@ export class QueueService implements IQueue {
     return id;
   }
 
+  /**
+   * Prepares a declared processor before registration; producer names never call it.
+   * @param name - Consumed name
+   * @returns Resolves after the adapter proves consumption safe
+   * @throws {Error} If preparation refuses
+   * @since 0.14.0
+   */
+  prepare(name: string): Promise<void> {
+    let pending = this.#preparations.get(name);
+    if (pending === undefined) {
+      pending = Promise.resolve().then(() => this.#adapter.prepareConsumer?.(name));
+      this.#preparations.set(name, pending);
+    }
+    return pending;
+  }
+
   process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
     this.#refuseUnusableName(name);
     const concurrency = options?.concurrency ?? 1;
@@ -297,6 +321,19 @@ export class QueueService implements IQueue {
       // Omitted rather than assigned `undefined` (`exactOptionalPropertyTypes`).
       ...(options?.onFailed === undefined ? {} : { onFailed: options.onFailed }),
     } as ProcessorRegistration<unknown>);
+    this.#startPreparation(name);
+  }
+
+  /** Starts independent consumer reads together, including pre-connect registrations. */
+  #startPreparation(name: string): void {
+    if (!this.#connected || this.#adapter.prepareConsumer === undefined) return;
+    const generation = this.#generation;
+    void this.prepare(name).catch((error: unknown) => {
+      if (generation === this.#generation && !this.#preparationRefused.has(name)) {
+        this.#preparationRefused.add(name);
+        this.#report('queue consumer preparation failed', error, { name });
+      }
+    });
   }
 
   async addRecurring<T>(name: string, data: T, options: RecurringOptions): Promise<void> {
@@ -507,8 +544,11 @@ export class QueueService implements IQueue {
 
   async #poll(): Promise<void> {
     const now = this.#runtime.now();
+    const generation = this.#generation;
 
     for (const [name, reg] of this.#processors.entries()) {
+      // A refused imperative consumer stays stopped until disconnect.
+      if (this.#preparationRefused.has(name)) continue;
       // Skip if reserve is already in progress for this name
       if (reg.reserveInProgress) {
         continue;
@@ -526,6 +566,15 @@ export class QueueService implements IQueue {
       reg.reserveInProgress = true;
 
       try {
+        if (this.#adapter.prepareConsumer !== undefined) {
+          try {
+            await this.prepare(name);
+          } catch {
+            // process() owns the once-only error report.
+            continue;
+          }
+          if (!this.#connected || generation !== this.#generation) return;
+        }
         let jobs: readonly StoredJob<unknown>[];
         try {
           jobs = await this.#adapter.reserve<unknown>(name, limit, now);
@@ -608,19 +657,24 @@ export class QueueService implements IQueue {
             abandoned,
             (message, error, meta) => this.#report(message, error, meta),
           );
+          let disposition: void | 'discarded';
           try {
-            await this.#adapter.deadLetter(
+            disposition = await this.#adapter.deadLetter(
               storedJob.name,
               storedJob.id,
               this.#runtime.now(),
               storedJob.claimToken ?? storedJob.id,
+              'abandoned',
             );
           } catch (error) {
             observed?.settled('terminal-error', 'failed');
             throw error;
           }
           observed?.settled('terminal-error', 'dead-lettered');
-          this.#collector?.jobSettled(storedJob.name, 'dead_lettered');
+          this.#collector?.jobSettled(
+            storedJob.name,
+            disposition === 'discarded' ? 'discarded' : 'dead_lettered',
+          );
           return;
         }
         await runJob<T>(

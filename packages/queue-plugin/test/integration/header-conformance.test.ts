@@ -60,6 +60,7 @@ const ADAPTERS: readonly { name: string; build: () => Promise<QueueAdapter> }[] 
     build: async () => {
       const queue = new SqsQueue(new FakeRuntimeServices(), {
         queues: { orders: 'https://sqs.us-east-1.amazonaws.com/1/orders' },
+        deadLetterQueues: { orders: 'https://sqs.local/dead' },
         client: new FakeSqsTransport(),
       });
       await queue.connect();

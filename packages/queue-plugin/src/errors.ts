@@ -16,6 +16,28 @@ export class StaleClaimError extends Error {
 }
 
 /**
+ * A consumer has no proven dead-letter target. Raised before its first poll.
+ * @since 0.14.0
+ */
+export class SqsDeadLetterTargetMissingError extends Error {
+  /**
+   * @param jobName - The consumed name
+   * @param queueUrl - Source queue URL
+   * @returns The refusal error
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor(jobName: string, queueUrl: string) {
+    super(
+      `SQS job "${jobName}" at "${queueUrl}": the queue's RedrivePolicy cannot be read or no dead-letter target is available. ` +
+        `Add a deadLetterQueues entry, configure a redrive policy on the queue, or set deadLetterQueues: { '${jobName}': false } to discard exhausted jobs. ` +
+        'Required IAM rights: sqs:GetQueueAttributes on the source, sqs:GetQueueUrl for a policy target, sqs:SendMessage on the target, and kms:GenerateDataKey for a customer-managed encrypted target.',
+    );
+    this.name = 'SqsDeadLetterTargetMissingError';
+  }
+}
+
+/**
  * Thrown by a queue backend's `connect()` when the runtime platform is
  * Cloudflare Workers and the SDK cannot function. The throw fails
  * `app.start()` at the earliest possible point.

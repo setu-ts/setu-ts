@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { runJob } from '../../src/processors/job-processor.ts';
 import type { StoredJob } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
@@ -265,7 +265,7 @@ describe('runJob', () => {
 
 /**
  * M98f — the processor outcome and the settlement are separate signals. The
- * metric hook fires where it always did, BEFORE the settlement call; the
+ * metric hook fires only AFTER a resolving settlement call; the
  * diagnostics hook fires only AFTER the adapter's promise settled, with
  * `failed` when it rejected — and the rejection is then rethrown unchanged.
  */
@@ -334,7 +334,7 @@ describe('runJob — outcome versus settlement (M98f)', () => {
   ] as const;
 
   for (const row of matrix) {
-    it(`reports ${row.label} after the settlement settled, metric before`, async () => {
+    it(`reports ${row.label} after the settlement settled, metric after`, async () => {
       const log: string[] = [];
       const observed: unknown[][] = [];
       await runJob(
@@ -356,10 +356,10 @@ describe('runJob — outcome versus settlement (M98f)', () => {
         },
       );
       expect(log).toEqual([
-        `metric:${row.metric}`,
         `${row.kind}:called`,
         `${row.kind}:settled`,
         'observer',
+        `metric:${row.metric}`,
       ]);
       expect(observed).toEqual([[row.outcome, row.settlement]]);
       // The observer signature carries no payload, header, claim or error.
@@ -379,10 +379,14 @@ describe('runJob — outcome versus settlement (M98f)', () => {
           }
         },
         undefined,
-        { onAttemptSettled: (...args) => observed.push(args) },
+        {
+          onAttemptSettled: (...args) => observed.push(args),
+          onProcessorOutcome: () => log.push('metric'),
+        },
       );
       await expect(run).rejects.toThrow(`${row.kind} refused`);
       expect(observed).toEqual([[row.outcome, 'failed']]);
+      expect(log).not.toContain('metric');
     });
   }
 
@@ -432,4 +436,26 @@ describe('runJob — outcome versus settlement (M98f)', () => {
     expect(log).toEqual(['ack:called', 'ack:settled']);
     expect(reported).toEqual(['queue diagnostics observer threw']);
   });
+});
+
+import { withIngressBehaviors } from '../../src/processors/job-processor.ts';
+it('holds dispatch until the behavior gate resolves and retains a rejected gate', async () => {
+  const processor = vi.fn();
+  const ready = Promise.withResolvers<void>();
+  const wrapped = withIngressBehaviors(processor, [], ready.promise);
+  const job = { id: 'j', name: 'build', data: {}, attempts: 1 };
+  const pending = wrapped(job);
+  expect(processor).not.toHaveBeenCalled();
+  ready.resolve();
+  await pending;
+  expect(processor).toHaveBeenCalledTimes(1);
+  await wrapped(job);
+  expect(processor).toHaveBeenCalledTimes(2);
+  const failed = Promise.withResolvers<void>();
+  const blocked = withIngressBehaviors(processor, [], failed.promise);
+  const rejected = expect(blocked(job)).rejects.toThrow('startup refused');
+  failed.reject(new Error('startup refused'));
+  await rejected;
+  await expect(blocked(job)).rejects.toThrow('startup refused');
+  expect(processor).toHaveBeenCalledTimes(2);
 });

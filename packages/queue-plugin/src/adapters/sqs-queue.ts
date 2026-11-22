@@ -13,10 +13,14 @@
 
 import type { IRuntimeServices } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import { decodeSqsEnvelope, encodeSqsEnvelope } from './sqs-envelope.ts';
+import { SqsRedrive } from './sqs-redrive.ts';
+import type { ISqsRedriveTarget } from './sqs-redrive.ts';
 import type { QueueAdapter } from './queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import {
   QueueBackendUnavailableError,
+  StaleClaimError,
   SqsDelayTooLongError,
   SqsQueueNotConfiguredError,
 } from '../errors.ts';
@@ -46,10 +50,28 @@ export interface SqsSdkModule {
   ReceiveMessageCommand: new (input: Record<string, unknown>) => unknown;
   DeleteMessageCommand: new (input: Record<string, unknown>) => unknown;
   ChangeMessageVisibilityCommand: new (input: Record<string, unknown>) => unknown;
+  /**
+   * Reads source redrive policy.
+   * @param input - SDK command input
+   * @returns The SDK command
+   * @throws Never
+   * @since 0.14.0
+   */
+  GetQueueAttributesCommand: new (input: Record<string, unknown>) => unknown;
+  /**
+   * Resolves a policy ARN target.
+   * @param input - SDK command input
+   * @returns The SDK command
+   * @throws Never
+   * @since 0.14.0
+   */
+  GetQueueUrlCommand: new (input: Record<string, unknown>) => unknown;
 }
 
 /** A message received from SQS with its receipt handle. */
 export interface SqsReceivedMessage {
+  /** Stable source SQS id, used in dead-letter attributes and warnings. @since 0.14.0 */
+  messageId?: string;
   /** The message body (JSON string). */
   body: string;
   /** Receipt handle for settle operations. */
@@ -62,8 +84,43 @@ export interface SqsReceivedMessage {
  * Domain port for SQS operations. The adapter depends on this, not the SDK.
  */
 export interface ISqsTransport {
-  /** Send a message to a queue. */
-  send(queueUrl: string, body: string, delaySeconds?: number): Promise<void>;
+  /**
+   * Sends a body with optional dead-letter metadata.
+   * @param queueUrl - Destination URL
+   * @param body - Body bytes as a string
+   * @param delaySeconds - Delivery delay
+   * @param attributes - SQS message attributes; producer attributes are not copied
+   * @returns Resolves after sending
+   * @throws {Error} On transport rejection
+   * @since 0.14.0
+   */
+  send(
+    queueUrl: string,
+    body: string,
+    delaySeconds?: number,
+    attributes?: Readonly<Record<string, { DataType: 'String' | 'Number'; StringValue: string }>>,
+  ): Promise<void>;
+  /**
+   * Reads named queue attributes.
+   * @param queueUrl - Source URL
+   * @param names - Attribute names
+   * @returns Present attributes
+   * @throws {Error} On transport rejection
+   * @since 0.14.0
+   */
+  getQueueAttributes?(
+    queueUrl: string,
+    names: readonly string[],
+  ): Promise<Readonly<Record<string, string>>>;
+  /**
+   * Resolves a dead-letter queue in its owner's account.
+   * @param queueName - Queue name from the policy ARN
+   * @param ownerAccountId - Account from the policy ARN
+   * @returns Queue URL
+   * @throws {Error} On transport rejection
+   * @since 0.14.0
+   */
+  getQueueUrl?(queueName: string, ownerAccountId: string): Promise<string>;
   /** Receive messages from a queue. */
   receive(
     queueUrl: string,
@@ -75,8 +132,8 @@ export interface ISqsTransport {
   /** Change visibility timeout (requeue). */
   changeVisibility(queueUrl: string, receiptHandle: string, seconds: number): Promise<void>;
   /**
-   * M70c: reports whether the queue is reachable — the real adapter issues
-   * `GetQueueAttributes`. Optional so a minimal injected fake still
+   * Reports whether the queue is reachable when an injected transport supplies
+   * a probe. The SDK adapter has no reachability probe. Optional so a minimal fake still
    * type-checks; a transport that omits it is *unknown*, not `false`.
    *
    * @returns `true` when the queue is reachable
@@ -93,8 +150,12 @@ export interface ISqsTransport {
 export interface SqsQueueOptions {
   /** Job name → queue URL mapping. */
   queues: Record<string, string>;
-  /** Job name → dead-letter queue URL mapping (optional). */
-  deadLetterQueues?: Record<string, string>;
+  /**
+   * Consumed name → target URL, or false to discard exhausted work. A URL wins
+   * over the queue policy; false bypasses policy reads and budget clamps.
+   * @since 0.14.0
+   */
+  deadLetterQueues?: Record<string, string | false>;
   /** Visibility timeout in seconds for claims (default 30). */
   visibilityTimeoutSeconds?: number;
   /** AWS region (for lazy SDK load). */
@@ -139,7 +200,7 @@ export function adaptSqsModule(
   const client = new mod.SQSClient(clientConfig);
 
   return {
-    send: async (queueUrl: string, body: string, delaySeconds?: number): Promise<void> => {
+    send: async (queueUrl, body, delaySeconds, attributes): Promise<void> => {
       const input: Record<string, unknown> = {
         QueueUrl: queueUrl,
         MessageBody: body,
@@ -147,6 +208,7 @@ export function adaptSqsModule(
       if (delaySeconds !== undefined) {
         input.DelaySeconds = delaySeconds;
       }
+      if (attributes !== undefined) input.MessageAttributes = attributes;
       await client.send(new mod.SendMessageCommand(input));
     },
     receive: async (
@@ -175,6 +237,7 @@ export function adaptSqsModule(
           Attributes?: Record<string, string>;
         };
         return {
+          ...(msg.MessageId === undefined ? {} : { messageId: msg.MessageId }),
           body: msg.Body ?? '',
           receiptHandle: msg.ReceiptHandle ?? '',
           approximateReceiveCount: msg.Attributes?.ApproximateReceiveCount,
@@ -202,20 +265,42 @@ export function adaptSqsModule(
         }),
       );
     },
+    getQueueAttributes: async (queueUrl, names) => {
+      const result = await client.send(
+        new mod.GetQueueAttributesCommand({
+          QueueUrl: queueUrl,
+          AttributeNames: names,
+        }),
+      );
+      return (result as { Attributes?: Record<string, string> }).Attributes ?? {};
+    },
+    getQueueUrl: async (queueName, ownerAccountId) => {
+      const result = await client.send(
+        new mod.GetQueueUrlCommand({
+          QueueName: queueName,
+          QueueOwnerAWSAccountId: ownerAccountId,
+        }),
+      );
+      const url = (result as { QueueUrl?: string }).QueueUrl;
+      if (!url) throw new Error('SQS GetQueueUrl returned no QueueUrl');
+      return url;
+    },
     close: async () => {
       await client.destroy();
     },
   };
 }
 
-/** Internal receipt handle entry keyed by envelope id. */
+/** Per-delivery receipt state, fenced against replacement while I/O is pending. */
 interface ReceiptEntry {
+  readonly name: string;
   readonly receiptHandle: string;
   readonly claimExpiresAtMs: number;
-  /** Original message body (for DLQ forwarding). */
-  readonly body?: string;
-  /** Opaque claim token for validating settlement operations. */
-  readonly claimToken?: string;
+  readonly receivedAtMs: number;
+  readonly body: string;
+  readonly claimToken: string;
+  readonly attempts: number;
+  readonly messageId: string;
 }
 
 /**
@@ -226,7 +311,7 @@ interface ReceiptEntry {
 export class SqsQueue implements QueueAdapter {
   #runtime: IRuntimeServices;
   #queues: Record<string, string>;
-  #deadLetterQueues: Record<string, string>;
+  #deadLetterQueues: Record<string, string | false>;
   #visibilityTimeoutSeconds: number;
   #region: string | undefined;
   #credentials: unknown;
@@ -235,8 +320,8 @@ export class SqsQueue implements QueueAdapter {
   #transport: ISqsTransport | null = null;
   #ready = false;
   /**
-   * M70c: present only when the transport exposes `isHealthy?()` (the real
-   * adapter issues `GetQueueAttributes`); its absence is *unknown* reachability,
+   * Present only when an injected transport exposes `isHealthy?()`;
+   * the SDK adapter has no probe. Its absence is *unknown* reachability,
    * not `false`.
    *
    * @since 0.1.0
@@ -244,17 +329,66 @@ export class SqsQueue implements QueueAdapter {
   isHealthy?: () => Promise<boolean>;
   #receipts: Map<string, ReceiptEntry>;
   #recurring: Map<string, StoredRecurring>;
-  #logger: { error: (msg: string) => void } | undefined;
+  #logger: { error: (msg: string) => void; warn: (msg: string) => void } | undefined;
+  #defaultMaxAttempts: number;
+  #redrive = new SqsRedrive();
+  #preparations = new Map<string, Promise<ISqsRedriveTarget>>();
+  #targets = new Map<string, ISqsRedriveTarget>();
+  #clampWarned = new Set<string>();
+  /**
+   * Per-receipt renewal, driven and cleared by QueueService.
+   * @since 0.14.0
+   */
+  readonly claimRenewal: {
+    /** Renewal cadence in milliseconds, one third of visibility. @since 0.14.0 */
+    readonly intervalMs: number;
+    /**
+     * Extends only the current, unexpired receipt.
+     * @param name - Job name
+     * @param id - Job id
+     * @param claimToken - Delivery fence
+     * @returns True after extending the current receipt
+     * @throws Never
+     * @since 0.14.0
+     */
+    extend(name: string, id: string, claimToken: string): Promise<boolean>;
+  };
+
+  /**
+   * @param runtime - Clock, timers and delivery token generator
+   * @param options - Queue URLs and SQS connection options
+   * @param logger - Optional error and warning sink
+   * @param defaults - Consumer attempt default for externally published work (default 3)
+   * @returns The queue adapter
+   * @throws {RangeError} For an invalid visibilityTimeoutSeconds or maxAttempts default
+   * @since 0.14.0
+   */
 
   constructor(
     runtime: IRuntimeServices,
     options: SqsQueueOptions,
-    logger?: { error: (msg: string) => void },
+    logger?: { error: (msg: string) => void; warn: (msg: string) => void },
+    defaults?: { maxAttempts?: number },
   ) {
     this.#runtime = runtime;
     this.#queues = options.queues;
     this.#deadLetterQueues = options.deadLetterQueues ?? {};
     this.#visibilityTimeoutSeconds = options.visibilityTimeoutSeconds ?? DEFAULT_VISIBILITY_TIMEOUT;
+    if (
+      !Number.isInteger(this.#visibilityTimeoutSeconds) ||
+      this.#visibilityTimeoutSeconds < 1 ||
+      this.#visibilityTimeoutSeconds > 43_200
+    ) {
+      throw new RangeError('visibilityTimeoutSeconds must be an integer from 1 to 43200');
+    }
+    this.#defaultMaxAttempts = defaults?.maxAttempts ?? 3;
+    if (!Number.isInteger(this.#defaultMaxAttempts) || this.#defaultMaxAttempts < 1) {
+      throw new RangeError('maxAttempts must be a positive integer');
+    }
+    this.claimRenewal = {
+      intervalMs: Math.floor((this.#visibilityTimeoutSeconds * 1000) / 3),
+      extend: (name, id, token) => this.#extend(name, id, token),
+    };
     this.#region = options.region;
     this.#credentials = options.credentials;
     this.#endpoint = options.endpoint;
@@ -291,6 +425,7 @@ export class SqsQueue implements QueueAdapter {
       });
     }
 
+    this.#redrive = new SqsRedrive();
     this.#ready = true;
     this.#installProbe();
   }
@@ -310,6 +445,12 @@ export class SqsQueue implements QueueAdapter {
   }
 
   async disconnect(): Promise<void> {
+    this.#ready = false;
+    this.#redrive.close();
+    await Promise.allSettled(this.#preparations.values());
+    this.#preparations.clear();
+    this.#targets.clear();
+    this.#clampWarned.clear();
     if (this.#transport) {
       await this.#transport.close();
       this.#transport = null;
@@ -340,260 +481,261 @@ export class SqsQueue implements QueueAdapter {
       }
     }
 
-    // SQS is the ONE adapter that names each member: memory spreads the job
-    // object and redis/rabbitmq serialize it whole, so all three carry a new
-    // member for free while this envelope must list it explicitly and validate
-    // it back on `reserve`.
-    const body = JSON.stringify({
-      v: 1,
+    const body = encodeSqsEnvelope({
       id: job.id,
       name: job.name,
       data: job.data,
       maxAttempts: job.maxAttempts,
-      // Omitted when the job carried no channel, so the round trip preserves
-      // ABSENT rather than turning it into `{}` — the distinction `IJob.headers`
-      // documents.
       ...(job.headers === undefined ? {} : { headers: job.headers }),
     });
 
     await this.#transport.send(queueUrl, body, delaySeconds);
   }
 
+  /**
+   * Prepares one consumed name once; concurrent callers share the same read.
+   * @param name - Consumed job name
+   * @returns Resolves after a target is proved
+   * @throws {SqsDeadLetterTargetMissingError} If no target is available
+   * @throws {Error} If disconnected or the name is not configured
+   * @since 0.14.0
+   */
+  async prepareConsumer(name: string): Promise<void> {
+    if (!this.#ready || !this.#transport) throw new Error('SqsQueue is not connected');
+    let preparation = this.#preparations.get(name);
+    if (!preparation) {
+      const transport = this.#transport;
+      preparation = this.#redrive
+        .resolve(
+          this.#runtime,
+          transport,
+          name,
+          this.#getQueueUrl(name),
+          this.#deadLetterQueues[name],
+          (message) => this.#logger?.warn(message),
+        )
+        .then((target) => {
+          if (!this.#ready || this.#transport !== transport)
+            throw new Error('SqsQueue is not connected');
+          this.#targets.set(name, target);
+          return target;
+        });
+      this.#preparations.set(name, preparation);
+    }
+    await preparation;
+  }
+
   async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
-
+    await this.prepareConsumer(name);
+    const transport = this.#transport;
+    if (!this.#ready || !transport) throw new Error('SqsQueue is not connected');
     const queueUrl = this.#getQueueUrl(name);
-    const max = Math.min(limit, SQS_MAX_RECEIVE);
-
-    const messages = await this.#transport.receive(queueUrl, max, this.#visibilityTimeoutSeconds);
-
+    const target = this.#targets.get(name)!;
+    const messages = await transport.receive(
+      queueUrl,
+      Math.min(limit, SQS_MAX_RECEIVE),
+      this.#visibilityTimeoutSeconds,
+    );
+    if (!this.#ready || this.#transport !== transport) throw new Error('SqsQueue is not connected');
+    const receivedAtMs = this.#runtime.now();
     const jobs: StoredJob<T>[] = [];
     for (const msg of messages) {
-      // Skip messages with no receipt handle (field is optional in SDK types).
       if (!msg.receiptHandle) {
-        if (this.#logger) {
-          this.#logger.error(`SQS message with no ReceiptHandle skipped on reserve`);
-        }
+        this.#logger?.error('SQS message with no ReceiptHandle skipped on reserve');
         continue;
       }
-
-      // B4: Parse envelope — skip malformed messages with diagnostics.
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(msg.body);
-      } catch {
-        if (this.#logger) {
-          this.#logger.error(`SQS reserve: malformed JSON envelope skipped on "${name}"`);
-        }
-        continue;
-      }
-
-      // Validate envelope shape: unknown → structural checks, no unsafe casts.
-      if (!this.#validateEnvelope(parsed, name)) {
-        if (this.#logger) {
-          this.#logger.error(
-            `SQS reserve: invalid envelope skipped on "${name}": ${JSON.stringify(parsed)}`,
+      const decoded = decodeSqsEnvelope(msg.body, name);
+      const attempts =
+        msg.approximateReceiveCount === undefined ? 1 : Number(msg.approximateReceiveCount);
+      const validCount = Number.isInteger(attempts) && attempts >= 1;
+      if (!decoded.ok || !validCount) {
+        const reason = !decoded.ok ? decoded.reason : 'invalid ApproximateReceiveCount';
+        try {
+          const disposition = await this.#retire(
+            name,
+            msg.body,
+            msg.receiptHandle,
+            msg.messageId ?? 'unknown',
+            validCount ? attempts : 0,
+            'unreadable',
+          );
+          this.#logger?.warn(
+            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; ${disposition === 'discarded' ? `discarded after ${validCount ? attempts : 0} attempts; deadLetterQueues[name] is false` : 'retired'}`,
+          );
+        } catch {
+          this.#logger?.warn(
+            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; forwarding or deletion failed; left for its visibility timeout`,
           );
         }
         continue;
       }
-
-      // Safe to cast after validation.
-      const envelope = parsed as {
-        v: number;
-        id: string;
-        name: string;
-        data: T;
-        maxAttempts: number;
-        headers?: unknown;
-      };
-
-      // Attempts come from the platform's ApproximateReceiveCount.
-      // Validate ApproximateReceiveCount is a finite positive integer.
-      let attempts: number;
-      if (msg.approximateReceiveCount) {
-        const count = Number(msg.approximateReceiveCount);
-        if (!Number.isFinite(count) || count < 1 || !Number.isInteger(count)) {
-          if (this.#logger) {
-            this.#logger.error(
-              `SQS reserve: invalid ApproximateReceiveCount "${msg.approximateReceiveCount}" skipped on "${name}"`,
-            );
-          }
-          continue;
-        }
-        attempts = count;
-      } else {
-        attempts = 1;
-      }
-
-      // A header map that is not a flat string map is DROPPED and reported, and
-      // the job still runs: the envelope validator above skips a malformed
-      // message, and applying that to an observability field would lose the
-      // work in order to protect the record of it. The job is then simply
-      // untraced, which is exactly what a job enqueued before this channel
-      // existed is.
+      const envelope = decoded.envelope;
       const headers = readStringMap(envelope.headers);
-      if (envelope.headers !== undefined && headers === undefined && this.#logger) {
-        this.#logger.error(
+      if (envelope.headers !== undefined && headers === undefined) {
+        this.#logger?.error(
           `SQS reserve: malformed headers dropped on "${name}" job "${envelope.id}" — job runs untraced`,
         );
       }
-
-      // Generate a unique claim token for this reservation.
-      // This prevents stale settlement from overlapping deliveries.
-      const claimToken = `${envelope.id}:${msg.receiptHandle}:${nowMs}`;
-
-      // Record the receipt entry keyed by the STABLE envelope id.
-      // When the same logical job is redelivered with a new receipt handle,
-      // this entry is overwritten so subsequent settlement targets the current receipt.
-      const maxAttempts = envelope.maxAttempts ?? 3;
+      let maxAttempts = envelope.maxAttempts ?? this.#defaultMaxAttempts;
+      if (target.maxReceiveCount !== undefined) {
+        const budget = Math.max(1, Math.min(maxAttempts, target.maxReceiveCount - 1));
+        if (budget < maxAttempts && !this.#clampWarned.has(name)) {
+          this.#clampWarned.add(name);
+          this.#logger?.warn(
+            `SQS "${name}": maxAttempts=${maxAttempts}, maxReceiveCount=${target.maxReceiveCount}, effective budget=${budget}; recommend maxReceiveCount = maxAttempts + 1` +
+              (target.maxReceiveCount === 1
+                ? '; a worker dying on this attempt leaves native redrive without onFailed'
+                : ''),
+          );
+        }
+        maxAttempts = budget;
+      }
+      const claimToken = this.#runtime.uuid();
       this.#receipts.set(envelope.id, {
+        name,
         receiptHandle: msg.receiptHandle,
-        claimExpiresAtMs: nowMs + this.#visibilityTimeoutSeconds * 1000,
+        receivedAtMs,
+        claimExpiresAtMs: receivedAtMs + this.#visibilityTimeoutSeconds * 1000,
         body: msg.body,
-        claimToken, // Store the claim token for validation
+        claimToken,
+        attempts,
+        messageId: msg.messageId ?? 'unknown',
       });
-
       jobs.push({
-        // Expose the stable queue-generated ID, not the transient receipt handle.
         id: envelope.id,
         name,
-        data: envelope.data,
+        data: envelope.data as T,
         attempts,
         maxAttempts,
         availableAtMs: nowMs,
-        // Pass the claim token through for settlement operations
         claimToken,
         ...(headers === undefined ? {} : { headers }),
       });
     }
-
     return jobs;
   }
 
   async ack(name: string, id: string, claimToken: string): Promise<void> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
-
-    const queueUrl = this.#getQueueUrl(name);
-    const entry = this.findReceiptEntry(id);
-
-    if (!entry) {
-      // Unknown or expired receipt handle — the claim has lapsed,
-      // the message will be redelivered.
-      if (this.#logger) {
-        this.#logger.error(`SQS ack: unknown or expired receipt handle ${id}`);
-      }
-      return;
-    }
-
-    // Validate claim token to prevent stale settlement
-    if (!this.validateClaim(id, claimToken)) {
-      if (this.#logger) {
-        this.#logger.error(`SQS ack: stale claim token for ${id}`);
-      }
-      return;
-    }
-
-    await this.#transport.delete(queueUrl, entry.receiptHandle);
-    this.#receipts.delete(id);
+    const entry = this.#claim(name, id, claimToken);
+    await this.#transport.delete(this.#getQueueUrl(name), entry.receiptHandle);
+    this.#forget(id, entry);
   }
 
   async requeue(
     name: string,
     id: string,
     availableAtMs: number,
-    // Unused by this adapter, and it cannot be otherwise: an SQS message body
-    // is immutable, so `ChangeMessageVisibility` has nowhere to carry a new
-    // attempt count. `reserve` reads the authoritative count from the
-    // platform's `ApproximateReceiveCount` instead. The parameter stays to
-    // satisfy the shared `QueueAdapter` seam.
     _attempts: number,
     claimToken: string,
   ): Promise<void> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
-
-    const queueUrl = this.#getQueueUrl(name);
-    const entry = this.findReceiptEntry(id);
-
-    if (!entry) {
-      if (this.#logger) {
-        this.#logger.error(`SQS requeue: unknown or expired receipt handle ${id}`);
-      }
-      return;
-    }
-
-    // Validate claim token to prevent stale settlement
-    if (!this.validateClaim(id, claimToken)) {
-      if (this.#logger) {
-        this.#logger.error(`SQS requeue: stale claim token for ${id}`);
-      }
-      return;
-    }
-
-    const now = this.#runtime.now();
-    const seconds = Math.ceil(Math.max(0, availableAtMs - now) / 1000);
-
-    await this.#transport.changeVisibility(queueUrl, entry.receiptHandle, seconds);
-    this.#receipts.delete(id);
+    const entry = this.#claim(name, id, claimToken);
+    const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
+    await this.#transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+    this.#forget(id, entry);
   }
 
-  async deadLetter(name: string, id: string, _nowMs: number, claimToken: string): Promise<void> {
+  /**
+   * Forwards terminal work before deleting the source, or explicitly discards it.
+   * @param name - Consumed name
+   * @param id - Job id
+   * @param _nowMs - Caller time (receipt expiry uses the adapter clock)
+   * @param claimToken - Delivery fence
+   * @param reason - Final failure or dead-worker abandonment
+   * @returns Discard marker only after a successful opt-out deletion
+   * @throws {StaleClaimError} If this delivery no longer owns the claim
+   * @throws {Error} On transport rejection; the receipt is retained for retry
+   * @since 0.14.0
+   */
+  async deadLetter(
+    name: string,
+    id: string,
+    _nowMs: number,
+    claimToken: string,
+    reason: 'attempts-exhausted' | 'abandoned' = 'attempts-exhausted',
+  ): Promise<void | 'discarded'> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
+    const entry = this.#claim(name, id, claimToken);
+    const outcome = await this.#retire(
+      name,
+      entry.body,
+      entry.receiptHandle,
+      entry.messageId,
+      entry.attempts,
+      reason,
+      id,
+    );
+    this.#forget(id, entry);
+    return outcome;
+  }
 
-    const queueUrl = this.#getQueueUrl(name);
+  async #retire(
+    name: string,
+    body: string,
+    receiptHandle: string,
+    messageId: string,
+    attempts: number,
+    reason: 'attempts-exhausted' | 'abandoned' | 'unreadable',
+    id = messageId,
+  ): Promise<void | 'discarded'> {
+    await this.prepareConsumer(name);
+    const transport = this.#transport!;
+    const target = this.#targets.get(name)!;
+    if (target.url === false) {
+      await transport.delete(this.#getQueueUrl(name), receiptHandle);
+      if (reason !== 'unreadable') {
+        this.#logger?.warn(
+          `SQS "${name}" job "${id}" discarded after ${attempts} attempts; deadLetterQueues[name] is false`,
+        );
+      }
+      return 'discarded';
+    }
+    await transport.send(target.url, body, undefined, {
+      'setu-dead-letter-reason': { DataType: 'String', StringValue: reason },
+      'setu-attempts': { DataType: 'Number', StringValue: String(attempts) },
+      'setu-source-message-id': { DataType: 'String', StringValue: messageId },
+    });
+    try {
+      await transport.delete(this.#getQueueUrl(name), receiptHandle);
+    } catch (error) {
+      this.#logger?.error(
+        `SQS deadLetter: source delete for "${name}" failed (possible duplicate on re-claim)`,
+      );
+      throw error;
+    }
+  }
+
+  async #extend(name: string, id: string, token: string): Promise<boolean> {
+    const transport = this.#transport;
     const entry = this.findReceiptEntry(id);
-
-    if (!entry) {
-      if (this.#logger) {
-        this.#logger.error(`SQS deadLetter: unknown or expired receipt handle ${id}`);
-      }
-      return;
+    if (!this.#ready || !transport || !entry || entry.name !== name || entry.claimToken !== token)
+      return false;
+    const now = this.#runtime.now();
+    const remaining = 43_200 - Math.floor((now - entry.receivedAtMs) / 1000);
+    if (remaining <= 0) return false;
+    const seconds = Math.min(this.#visibilityTimeoutSeconds, remaining);
+    try {
+      await transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+    } catch {
+      return false;
     }
+    if (!this.#ready || this.#transport !== transport || this.#receipts.get(id) !== entry)
+      return false;
+    this.#receipts.set(id, { ...entry, claimExpiresAtMs: now + seconds * 1000 });
+    return true;
+  }
 
-    // Validate claim token to prevent stale settlement
-    if (!this.validateClaim(id, claimToken)) {
-      if (this.#logger) {
-        this.#logger.error(`SQS deadLetter: stale claim token for ${id}`);
-      }
-      return;
-    }
+  #claim(name: string, id: string, token: string): ReceiptEntry {
+    this.#getQueueUrl(name);
+    const entry = this.findReceiptEntry(id);
+    if (!entry || entry.name !== name || entry.claimToken !== token) throw new StaleClaimError();
+    return entry;
+  }
 
-    const dlqUrl = this.#deadLetterQueues[name];
-
-    if (dlqUrl) {
-      let dlqSendFailed = false;
-      try {
-        // Send to DLQ first with original body, then delete from source.
-        await this.#transport.send(dlqUrl, entry.body ?? '');
-      } catch (err) {
-        // DLQ send failed — source remains undeleted so it can be re-claimed.
-        dlqSendFailed = true;
-        if (this.#logger) {
-          this.#logger.error(`SQS deadLetter: DLQ send to "${dlqUrl}" failed: ${err}`);
-        }
-      }
-
-      if (!dlqSendFailed) {
-        try {
-          await this.#transport.delete(queueUrl, entry.receiptHandle);
-        } catch (err) {
-          // Source delete failed after successful DLQ send — risk of duplicate.
-          if (this.#logger) {
-            this.#logger.error(
-              `SQS deadLetter: source delete for "${name}" failed (possible duplicate on re-claim): ${err}`,
-            );
-          }
-        }
-      }
-    } else {
-      // No DLQ configured — log and delete.
-      if (this.#logger) {
-        this.#logger.error(`SQS deadLetter: no DLQ configured for "${name}", deleting message`);
-      }
-      await this.#transport.delete(queueUrl, entry.receiptHandle);
-    }
-
-    this.#receipts.delete(id);
+  #forget(id: string, entry: ReceiptEntry): void {
+    if (this.#receipts.get(id)?.claimToken === entry.claimToken) this.#receipts.delete(id);
   }
 
   storeRecurring(rec: StoredRecurring): Promise<void> {
@@ -619,58 +761,6 @@ export class SqsQueue implements QueueAdapter {
     return Promise.resolve();
   }
 
-  /**
-   * B4: Validate an unknown parsed envelope against the expected SQS envelope
-   * schema. Returns true only when every required field passes structural and
-   * type checks.
-   */
-  #validateEnvelope(value: unknown, polledName: string): boolean {
-    if (typeof value !== 'object' || value === null) {
-      return false;
-    }
-    const obj = value as Record<string, unknown>;
-
-    // Version must be exactly 1.
-    if (obj.v !== 1) {
-      return false;
-    }
-
-    // id must be a non-empty string.
-    if (typeof obj.id !== 'string' || !obj.id) {
-      return false;
-    }
-
-    // name must be a non-empty string matching the polled queue name.
-    if (typeof obj.name !== 'string' || !obj.name || obj.name !== polledName) {
-      return false;
-    }
-
-    // data must be present (object or allowed primitives).
-    if (obj.data === undefined) {
-      return false;
-    }
-
-    // maxAttempts must be a finite positive integer.
-    if (
-      typeof obj.maxAttempts !== 'number' ||
-      !Number.isFinite(obj.maxAttempts) ||
-      obj.maxAttempts < 1 ||
-      !Number.isInteger(obj.maxAttempts)
-    ) {
-      return false;
-    }
-
-    // `headers` is deliberately NOT validated here, and its absence from this
-    // function is the decision rather than an omission: this validator's
-    // failure mode is SKIPPING the message, and refusing to run a job because
-    // its observability field is malformed would lose the work to protect the
-    // record of it. That is the inversion this package already rejects
-    // elsewhere ("losing the job as well as the notification would be strictly
-    // worse than losing the notification" — `notifyFailed`). A malformed map is
-    // dropped in `reserve` instead, and the job runs untraced.
-    return true;
-  }
-
   /** Find a receipt entry by stable job id. */
   private findReceiptEntry(id: string): ReceiptEntry | undefined {
     const entry = this.#receipts.get(id);
@@ -678,25 +768,11 @@ export class SqsQueue implements QueueAdapter {
       return undefined;
     }
     // Sweep expired entries.
-    if (entry.claimExpiresAtMs < this.#runtime.now()) {
+    if (entry.claimExpiresAtMs <= this.#runtime.now()) {
       this.#receipts.delete(id);
       return undefined;
     }
     return entry;
-  }
-
-  /** Validate that a claim token matches the current receipt entry. */
-  private validateClaim(id: string, claimToken: string): boolean {
-    const entry = this.#receipts.get(id);
-    if (!entry) {
-      return false;
-    }
-    // Sweep expired entries.
-    if (entry.claimExpiresAtMs < this.#runtime.now()) {
-      this.#receipts.delete(id);
-      return false;
-    }
-    return entry.claimToken === claimToken;
   }
 }
 

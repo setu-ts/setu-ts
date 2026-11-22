@@ -1,0 +1,208 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import type { IIngressBehavior, IMetricsService } from '@setu-ts/common';
+import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
+import { QueueService } from '../../src/services/queue-service.ts';
+import { QueueCollector } from '../../src/metrics/queue-collector.ts';
+import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
+import { SqsDeadLetterTargetMissingError, SqsQueue } from '../../src/index.ts';
+import { sqsHarness, envelope } from '../fixtures/sqs-harness.ts';
+import { FakeSqsTransport } from '../fixtures/fake-sqs-transport.ts';
+import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
+
+describe('SQS consumer preparation', () => {
+  it('prepares a processor registered before connect and honors the plugin consumer default', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const transport = new FakeSqsTransport(() => runtime.now());
+    await transport.send('source', JSON.stringify({ v: 1, id: 'j1', name: 'build', data: {} }));
+    const reserve = vi.spyOn(SqsQueue.prototype, 'reserve');
+    const processor = vi.fn();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin({ platform: 'node', adapters: { node: () => runtime } }),
+        QueuePlugin({
+          adapter: 'sqs',
+          defaultMaxAttempts: 7,
+          pollIntervalMs: 100,
+          sqs: {
+            queues: { build: 'source' },
+            deadLetterQueues: { build: false },
+            client: transport,
+          },
+          processors: [{ name: 'build', processor }],
+        }),
+      ],
+    });
+    try {
+      await app.start();
+      await runtime.advanceMs(500);
+      expect(processor).toHaveBeenCalledTimes(1);
+      const jobs = await reserve.mock.results[0]!.value;
+      expect(jobs[0]!.maxAttempts).toBe(7);
+    } finally {
+      reserve.mockRestore();
+      await app.stop();
+    }
+
+    const adapter = new SqsQueue(runtime, {
+      queues: { build: 'source' },
+      deadLetterQueues: { build: false },
+      client: transport,
+    });
+    const service = new QueueService(adapter, runtime, { pollIntervalMs: 100 });
+    const early = vi.fn();
+    service.process('build', early);
+    await service.connect();
+    await service.add('build', {});
+    await runtime.advanceMs(500);
+    expect(early).toHaveBeenCalledTimes(1);
+    await service.disconnect();
+  });
+  it.each(['instance', 'factory', 'behavior-factory'] as const)(
+    'refuses a declared %s processor at app.start',
+    async (arm) => {
+      const transport = new FakeSqsTransport();
+      const definition = { name: 'build', processor: () => {} };
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          QueuePlugin({
+            adapter: 'sqs',
+            sqs: { queues: { build: 'source' }, client: transport },
+            processors: [arm === 'factory' ? () => definition : definition],
+            ...(arm === 'behavior-factory'
+              ? { behaviors: [() => ({ handle: (_ctx, next) => next() }) as IIngressBehavior] }
+              : {}),
+          }),
+        ],
+      });
+      await expect(app.start()).rejects.toThrow(/dead-letter target|RedrivePolicy/);
+      await app.stop();
+      expect(transport.closed).toBe(true);
+    },
+  );
+  it('starts an application which only produces without attributes rights', async () => {
+    const transport = new FakeSqsTransport();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        QueuePlugin({
+          adapter: 'sqs',
+          sqs: { queues: { build: 'source' }, client: transport },
+        }),
+      ],
+    });
+    await app.start();
+    await app.stop();
+    expect(transport.closed).toBe(true);
+  });
+  it('reports an imperative refusal once at error and never polls that name', async () => {
+    const { queue, runtime, transport } = await sqsHarness({ deadLetterQueues: { other: 'dead' } });
+    const receive = vi.spyOn(transport, 'receive');
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    await service.connect();
+    service.process('build', vi.fn());
+    service.process('other', vi.fn());
+    await transport.send('source', envelope());
+    await runtime.advanceMs(3000);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error.mock.calls[0]![0]).toBe('queue consumer preparation failed');
+    expect(receive.mock.calls.some(([url]) => url === 'source')).toBe(false);
+    expect(receive.mock.calls.some(([url]) => url === 'other-source')).toBe(true);
+    expect(transport.depth('source')).toBe(1);
+    await service.disconnect();
+    expect(runtime.timerCount).toBe(0);
+  });
+  it('clears a preparation in flight before shutdown and never polls after it completes', async () => {
+    const read = Promise.withResolvers<Record<string, string>>();
+    const { queue, runtime, transport } = await sqsHarness(
+      { deadLetterQueues: {} },
+      { getQueueAttributes: () => read.promise },
+    );
+    const receive = vi.spyOn(transport, 'receive');
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    await service.connect();
+    service.process('build', vi.fn());
+    await runtime.advanceMs(200);
+    await service.disconnect();
+    read.resolve({});
+    await runtime.advanceMs(1000);
+    expect(receive).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(runtime.timerCount).toBe(0);
+  });
+  it('adapters without preparation preserve their processing behavior', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const adapter = new MemoryQueue();
+    expect(adapter).not.toHaveProperty('prepareConsumer');
+    const service = new QueueService(adapter, runtime, { pollIntervalMs: 100 });
+    const processor = vi.fn();
+    await service.connect();
+    service.process('build', processor);
+    await service.add('build', { value: 1 });
+    await runtime.advanceMs(500);
+    expect(processor).toHaveBeenCalledTimes(1);
+    await service.disconnect();
+  });
+  it.each([false, true])(
+    'counts discarded only after deleting, including abandoned=%s',
+    async (abandoned) => {
+      const read = vi.fn(() => Promise.resolve({ RedrivePolicy: '{}' }));
+      const { queue, runtime, transport, logger } = await sqsHarness(
+        { deadLetterQueues: { build: false } },
+        { getQueueAttributes: read },
+      );
+      const inc = vi.fn();
+      const metrics = { counter: () => ({ inc }) } as unknown as IMetricsService;
+      const collector = new QueueCollector(metrics, vi.fn());
+      const observer = { begin: vi.fn(() => ({ settled: vi.fn(), abandon: vi.fn() })) };
+      const service = new QueueService(queue, runtime, {
+        collector,
+        observer,
+        pollIntervalMs: 100,
+      });
+      await service.connect();
+      const failed = vi.fn();
+      const processor = vi.fn(() => {
+        throw new Error('failed');
+      });
+      await transport.send('source', envelope(1));
+      if (abandoned) {
+        await queue.reserve('build', 1, 0);
+        await runtime.advanceMs(3000);
+      }
+      service.process('build', processor, { onFailed: failed });
+      const gate = Promise.withResolvers<void>();
+      const originalDelete = transport.delete.bind(transport);
+      vi.spyOn(transport, 'delete').mockImplementationOnce(async (url, receipt) => {
+        await gate.promise;
+        return originalDelete(url, receipt);
+      });
+      await runtime.advanceMs(500);
+      expect(failed).toHaveBeenCalledTimes(1);
+      expect(inc).not.toHaveBeenCalled();
+      gate.resolve();
+      await runtime.advanceMs(1000);
+      expect(inc).toHaveBeenCalledExactlyOnceWith(1, { name: 'build', outcome: 'discarded' });
+      expect(observer.begin.mock.results.at(-1)!.value.settled).toHaveBeenCalledWith(
+        'terminal-error',
+        'dead-lettered',
+      );
+      expect(processor).toHaveBeenCalledTimes(abandoned ? 0 : 1);
+      expect(transport.depth('source')).toBe(0);
+      expect(transport.sent.filter((s) => s.queueUrl === 'dead')).toHaveLength(0);
+      expect(read).not.toHaveBeenCalled();
+      expect(JSON.stringify(logger.warn.mock.calls)).toContain('discarded after');
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('payload-canary');
+      await service.disconnect();
+    },
+  );
+  it('exports a stable missing-target error type', () => {
+    expect(new SqsDeadLetterTargetMissingError('build', 'source').name).toBe(
+      'SqsDeadLetterTargetMissingError',
+    );
+  });
+});

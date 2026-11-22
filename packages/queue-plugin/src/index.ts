@@ -65,6 +65,7 @@ export { adaptSnsModule, loadSnsModule } from './sns/sns-publisher.ts';
 
 // Error classes
 export {
+  SqsDeadLetterTargetMissingError,
   QueueBackendUnavailableError,
   SqsDelayTooLongError,
   SqsQueueNotConfiguredError,
