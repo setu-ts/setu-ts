@@ -344,18 +344,42 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   Looked up 2026-11-22, evidence partial. Nothing found releases request resources under a running
   handler; the decision rests mainly on the audit's measurement.
 
-- **Streamed body on abort (A′, 2026-11-22, the coordinating session's call under the decision
-  above, reported to the maintainer).** `wrapDeferredStream` cancels the body first, awaits
-  `reader.cancel()` bounded by the existing 5000 ms cleanup bound, then runs the cleanups once. The
-  plain reading ("wait for an in-flight read") cannot be built: measured on Node 24, Bun 1.4.5 and
-  Deno 2.9.6, a source with the default high-water mark is inside `pull` with no read pending, and
-  `reader.cancel()` resolves when the source's `cancel()` settles, not its `pull`. So the source's
-  `cancel()` is its one hook: a source that does work of its own (in `pull`, or a pump it started
-  from `start`) must make `cancel()` wait for it. The 5000 ms bound is the one place cleanups can
-  run under a still-pending `pull`; it exists because a `cancel()` that never settles would
-  otherwise leak the cleanups, the workerd leak V13-200 fixes. The framework's own stream sources
-  are classified in `test/response-stream-cancel-inventory.test.ts`; the storage provider streams
-  and React Router's render stream are handed over to their lanes.
+- **Streamed body on abort (2026-11-22, the coordinating session's calls under the decision above,
+  reported to the maintainer, who may overrule them).** `wrapDeferredStream` cancels the body first,
+  waits for `reader.cancel()` with no time limit, then runs the cleanups once; the abort and a
+  consumer's cancel share one `reader.cancel()` (code review: a second call resolved at once on the
+  closed stream and ran the cleanups under the first). The plain reading ("wait for an in-flight
+  read") cannot be built: measured on Node 24, Bun 1.4.5 and Deno 2.9.6, a source with the default
+  high-water mark is inside `pull` with no read pending, and `reader.cancel()` resolves when the
+  source's `cancel()` settles, not its `pull`. So the source's `cancel()` is its one hook: a source
+  that does work of its own (in `pull`, or a pump it started from `start`) must make `cancel()` wait
+  for it.
+  - **Why no bound (option A, chosen).** The audit's P15 (a limit of K = 2 released through `defer`,
+    10 clients/s for 18 s, each leaving after 300 ms) measured the first form, which ran the
+    cleanups 5000 ms after the abort: with a `cancel()` that never settles, or a `pull` pending
+    forever whose `cancel()` waits for it, the limit admitted 2 every 5 s and the sources still
+    holding work grew 2 → 4 → 6 → 8 at 18 s; with a 12 s `pull`, up to 6 at once (about K × 12 / 5);
+    the positive control (`cancel()` releases at once) admitted 6–7/s and never held more than 2.
+    With no bound, a `cancel()` that never settles keeps its slot: the limit fails closed and holds
+    at K, as a handler that never settles does. Option B (keep the 5000 ms bound and document the
+    bypass as an accepted Medium) was rejected.
+  - **Outside what the kernel can see.** A source with no `cancel()` gets no wait (P15 row 4: a
+    `pull` pending forever with no `cancel()` admitted 6–7/s and held 120 at 18 s), so a limit
+    released through `defer` does not cover work in its `pull`. Documented, not fixed.
+  - **Shutdown.** `stop()` is not held past the drain bound: a request whose stream has cleanups
+    stays in the drain until they finish (`#settleRequest` releases it from `wrapDeferredStream`'s
+    `complete`), so `stop()` waits up to the bound and then closes, as for a handler that never
+    settles (`#drainRequests`). The stuck request's cleanups are not run at the deadline; they run
+    if and when its `cancel()` settles, as a never-settling handler's run when it settles. Tests:
+    `request-edges.test.ts`, "lets stop() finish at the drain bound while a source cancel() never
+    settles" (a streamed RPC reply and a plain streamed route).
+  - **Memory.** Per stuck request the kernel holds the pending `reader.cancel()` promise, its
+    continuation and the request's cleanup list — no timer and no growing list; the unit test
+    asserts no timer is set.
+  - The framework's own stream sources, with whether each `cancel()` always settles, are classified
+    in `test/response-stream-cancel-inventory.test.ts`; the storage provider streams, React Router's
+    render stream, the MCP SDK body, the Workers Cache API body and the gRPC iterators are handed
+    over to their lanes.
 
 ### 3.13 Bun idle streams (V13-42)
 
@@ -678,8 +702,10 @@ enforces; the response headers and body a refused upgrade carries; the operator'
   number in range.
 
 **Approved budgets.** `drainTimeoutMs` (default 10 000 ms, at most 2 147 483 647) bounds the drain;
-each asynchronous `ctx.defer` cleanup keeps its 5 000 ms bound. A refused upgrade writes one
-response and then gives up the socket; it holds no descriptor after its bytes are flushed.
+each asynchronous `ctx.defer` cleanup keeps its 5 000 ms bound; the wait for a streamed body's
+`cancel()` on abort has no bound (§3.12), so a stuck source keeps its request's resources. A refused
+upgrade writes one response and then gives up the socket; it holds no descriptor after its bytes are
+flushed.
 
 **Obligations on the committed-tree audit.**
 

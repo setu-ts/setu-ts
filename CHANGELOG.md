@@ -46,9 +46,10 @@ All notable changes to this project are documented here. The format follows
   `ctx.defer` cleanups run when the request's signal aborts, so a client that leaves on workerd
   still runs them, while other cleanups wait for the handler to settle and are never run under it
   (V13-200). On that abort the kernel cancels the body and runs the cleanups once its `cancel()`
-  settles, or after 5000 ms: it cannot see a source's `pull` or a pump it started, so a source that
-  does work of its own must make `cancel()` wait for it, a source with no `cancel()` gets no wait,
-  and past the bound cleanups can run under that work. A failed response stream is logged once,
+  settles, with no time limit, so a `cancel()` that never settles keeps the request's resources. It
+  cannot see a source's `pull` or a pump it started: a source that does work of its own must make
+  `cancel()` wait for it, and a source with no `cancel()` gets no wait, so a limit released through
+  `defer` does not cover work in its `pull`. A failed response stream is logged once,
   `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or gRPC-Web
   reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()` cancels the
   start: its close hooks run, a close hook registered later runs at once, and the application never
