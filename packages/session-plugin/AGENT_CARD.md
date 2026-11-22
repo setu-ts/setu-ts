@@ -57,5 +57,5 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 - `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
   sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
 - `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.
-- Signed-in, cookie-setting and token-reading responses are marked private, no-store; a form on a
-  page marked public fails CSRF. Store commits write only this request's changes.
+- Signed-in, cookie-setting and token-reading responses are marked private, no-store unless the
+  handler sets public (cookie-setting: always); then a form fails CSRF.

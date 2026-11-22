@@ -448,9 +448,9 @@ describe('a commit that stalls past every marker after its age check', () => {
     expect(await store.read(inflightSession.id)).toBeNull();
   });
 
-  // No marker can tell a stalled commit whether its session was signed out, so it ends the
-  // session as a sign-out does, marker included, and a concurrent commit is refused too.
-  it('ends an unrevoked session as a sign-out, so concurrent commits agree', async () => {
+  // No marker can tell a stalled commit whether its session was signed out, so it deletes the row
+  // under a `superseded` marker: a concurrent plain commit is refused, a sign-in in another tab is not.
+  it('ends an unrevoked session; a concurrent commit is refused, a regeneration is not', async () => {
     const { store, clock, config, service } = await stalledService();
     const cookie = await signedIn(service);
     const inflight = makeContext({ headers: { cookie } });
@@ -459,10 +459,45 @@ describe('a commit that stalls past every marker after its age check', () => {
     const pause = store.pauseNextWrite();
     const committing = service.commit(inflight.ctx, inflightSession);
     await pause.landed;
-    clock.advance(config.maxAgeMs);
+    // Two requests that load during the stall, well inside their own windows.
+    clock.advance(config.maxAgeMs - 1000);
+    const other = makeContext({ headers: { cookie } });
+    const otherSession = await service.load(other.ctx);
+    const stepUp = makeContext({ headers: { cookie } });
+    const stepUpSession = await service.load(stepUp.ctx);
+    clock.advance(1000);
     pause.release();
     expect(await committing).toBe('refused');
     expect(await store.read(inflightSession.id)).toBeNull();
-    expect(await store.read(`revoked:${inflightSession.id}`)).toEqual({ __setu_marker: 'revoked' });
+    expect(await store.read(`superseded:${inflightSession.id}`)).toEqual({
+      __setu_marker: 'superseded',
+    });
+    expect(await store.read(`revoked:${inflightSession.id}`)).toBeNull();
+    // A concurrent plain commit is refused at its fence...
+    otherSession.set('cart', 2);
+    expect(await service.commit(other.ctx, otherSession)).toBe('refused');
+    // ...while a sign-in in another tab still moves the session on.
+    stepUpSession.regenerate();
+    expect(await service.commit(stepUp.ctx, stepUpSession)).toBe('written');
+    expect(await userOf(service, cookieOf(stepUp.response.setCookies()))).toBe('u1');
+  });
+
+  it('a stalled regeneration deletes only its new row', async () => {
+    const { store, clock, config, service } = await stalledService();
+    const cookie = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    const oldId = s.id;
+    s.regenerate();
+    const pause = store.pauseNextWrite();
+    const committing = service.commit(c.ctx, s);
+    await pause.landed;
+    clock.advance(config.maxAgeMs);
+    pause.release();
+    expect(await committing).toBe('refused');
+    expect(await store.read(s.id)).toBeNull();
+    expect(await store.read(oldId)).toBeNull();
+    expect(await store.read(`superseded:${oldId}`)).toEqual({ __setu_marker: 'superseded' });
+    expect(await store.read(`revoked:${oldId}`)).toBeNull();
   });
 });

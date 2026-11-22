@@ -195,6 +195,26 @@ describe('revocation markers', () => {
     expect(store.rows.has(s.id)).toBe(false);
   });
 
+  it('a link fault is the one rethrown when the marker write fails too', async () => {
+    const store = new ScriptedStore();
+    const { service } = await makeService(store);
+    const { cookie, id } = await signedIn(service);
+    const c = makeContext({ headers: { cookie } });
+    const s = await service.load(c.ctx);
+    s.regenerate();
+    let call = 0;
+    const write = store.write.bind(store);
+    store.write = (key, data, ttlMs) => {
+      if (key.startsWith('successor:') || key.startsWith('superseded:')) {
+        call += 1;
+        return Promise.reject(new Error(`fault ${call}`));
+      }
+      return write(key, data, ttlMs);
+    };
+    await expect(service.commit(c.ctx, s)).rejects.toThrow('fault 1');
+    expect(store.rows.has(id)).toBe(false);
+  });
+
   it("a failed regeneration's cleanup keeps a committed regeneration's link", async () => {
     const store = new ScriptedStore();
     const { service } = await makeService(store);

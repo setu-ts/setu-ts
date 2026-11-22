@@ -60,13 +60,15 @@ before it. Move such a middleware below 10 (or 125) if it must run first.
 ### Sessions: revocation markers and `storeCommit` (`@setu-ts/session-plugin`)
 
 On the store strategy a sign-out or regeneration now writes a marker entry, `revoked:<id>` or
-`superseded:<id>`, beside the session rows, and a regeneration also writes a link, `successor:<id>`,
-naming the new id; all expire one second after `maxAge`, and an `ISessionStore` of your own sees
-those ids. A commit that finds its session revoked while it ran is refused and sends no cookie, and
-so is a commit whose request loaded the session `maxAge` or more ago (a regeneration or a `clear()`
-sign-out refused that way still revokes the old id); one that reaches its marker check that late
-ends its session as a sign-out does. Use Redis with `noeviction` (or a dedicated instance) for
-sessions; cache-plugin's memory cache evicts at `maxSize` and is for development only.
+`superseded:<id>`, beside the session rows, and a regeneration that stays in the store also writes a
+link, `successor:<id>`, naming the new id; all expire one second after `maxAge`, and an
+`ISessionStore` of your own sees those ids. A commit that finds its session revoked while it ran is
+refused and sends no cookie, and so is a commit whose request loaded the session `maxAge` or more
+ago (a regeneration or a `clear()` sign-out refused that way still revokes the old id); one that
+reaches its marker check that late ends its session (deleting its row under a `superseded` marker,
+which concurrent commits refuse; a regeneration deletes only its new row). Use Redis with
+`noeviction` (or a dedicated instance) for sessions; cache-plugin's memory cache evicts at `maxSize`
+and is for development only.
 
 Store commits now default to `storeCommit: 'changes'`: a commit writes this request's changes onto
 the current row, and a commit whose row is gone is refused. Set `storeCommit: 'snapshot'` to keep

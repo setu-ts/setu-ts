@@ -5509,10 +5509,11 @@ package README's "What `SameSite` does not separate".
   starts during a racing commit. Markers expire one second after `maxAge`, and a commit whose
   request loaded the session `maxAge` or more ago is refused (a regeneration or a `clear()` sign-out
   refused that way still revokes the old id); a commit that reaches its marker check that late ends
-  its session as a sign-out does. A regeneration also writes a link, `successor:<old id>`, before
-  its marker check, naming the new id, and a sign-out of the old id revokes the whole chain of
-  linked ids (a failed regeneration's cleanup never touches a link); when two requests regenerate
-  one id at once, only the later successor is named.
+  its session (deleting its row under a `superseded` marker, which concurrent commits refuse; a
+  regeneration deletes only its new row). A regeneration that stays in the store also writes a link,
+  `successor:<old id>`, before its marker check, naming the new id, and a sign-out of the old id
+  revokes the whole chain of linked ids (a failed regeneration's cleanup never touches a link); when
+  two requests regenerate one id at once, only the later successor is named.
 - **Cache marking (0.14.0).** The middleware writes `Cache-Control: private, no-store` and
   `Vary: Cookie` on a response for a restored session holding application data (before the handler),
   at the first application write, and at a `getCsrfToken` read; an anonymous response that read the

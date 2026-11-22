@@ -625,8 +625,10 @@ export class SessionService implements ISessionService {
       await this.#store!.destroy(written);
     } else if (stale) {
       // The row is this session's own, shared by every request on it, and no marker can now say
-      // whether it was signed out: end it as a sign-out does, so concurrent commits agree.
-      await this.#revoke(source, 'revoked');
+      // whether it was signed out: delete it under a `superseded` marker, which every concurrent
+      // plain commit's fence refuses, while a regeneration in another tab (whose fence reads only
+      // `revoked`) still succeeds and no successor chain is ended.
+      await this.#revoke(source, 'superseded');
     }
     return marked || stale;
   }

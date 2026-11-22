@@ -52,7 +52,8 @@ All notable changes to this project are documented here. The format follows
   that lands after a regeneration's check also ends the regenerated session. A commit whose request
   loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), a
   regeneration or `clear()` sign-out refused that way still revokes the old id, and a commit that
-  reaches its marker check that late ends its session as a sign-out does.
+  reaches its marker check that late ends its session (deleting its row under a `superseded` marker,
+  which concurrent commits refuse; a regeneration deletes only its new row).
   `restoreRevocationCheck: true` also checks the markers on every store-held restore. Store commits
   write this request's changes onto the current row (`storeCommit: 'changes'`, the new default;
   `'snapshot'` keeps the whole-payload write), so a concurrent request's keys survive.

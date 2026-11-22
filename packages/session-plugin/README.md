@@ -71,17 +71,18 @@ regeneration writes `superseded:<old id>` (`revoked:<old id>` when it is a logou
 restored session writes its row and then reads the markers, and deletes its own write when one is
 present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
 cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
-tab) is refused too, so it cannot carry the old session's data to a fresh id. A regeneration also
-writes a link, `successor:<old id>`, naming the new id, before its marker check (a regeneration
-refused there leaves a link to an id it deleted, which a sign-out revokes harmlessly), and a
-sign-out of the old id also revokes the id it names, along the whole chain: a sign-out that lands
-after a regeneration's marker check therefore still ends the regenerated session. Markers are
-written only for an id that had a row, so anonymous `POST /logout` traffic writes nothing; they
-expire one second after `maxAge` (for stores that round a TTL down), and a commit whose request
-loaded the session `maxAge` or more ago is refused, since no marker could still fence it (a
-regeneration or a `clear()` sign-out refused that way still revokes the old id). A commit that
-reaches its marker check that late, having passed the first check, cannot tell whether its session
-was signed out, so it ends the session as a sign-out does, marker included. A failed regeneration's
+tab) is refused too, so it cannot carry the old session's data to a fresh id. A regeneration that
+stays in the store also writes a link, `successor:<old id>`, naming the new id, before its marker
+check (a regeneration refused there leaves a link to an id it deleted, which a sign-out revokes
+harmlessly), and a sign-out of the old id also revokes the id it names, along the whole chain: a
+sign-out that lands after a regeneration's marker check therefore still ends the regenerated
+session. Markers are written only for an id that had a row, so anonymous `POST /logout` traffic
+writes nothing; they expire one second after `maxAge` (for stores that round a TTL down), and a
+commit whose request loaded the session `maxAge` or more ago is refused, since no marker could still
+fence it (a regeneration or a `clear()` sign-out refused that way still revokes the old id). A
+commit that reaches its marker check that late, having passed the first check, cannot tell whether
+its session was signed out, so it ends the session (deleting its row under a `superseded` marker,
+which concurrent commits refuse; a regeneration deletes only its new row). A failed regeneration's
 cleanup never touches the link. A link names one successor: when two requests regenerate the same id
 (a double-submitted sign-in), the later link wins, and a sign-out racing both ends only the session
 it names.
