@@ -46,8 +46,10 @@ internal.
 - Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank.
 - A request that called `ctx.defer` and whose signal aborts before its response is logged as
   `Request aborted before completion` at once; its `ctx.defer` cleanups wait for the handler to
-  settle (a streamed body's run when the signal aborts), so a handler that never settles keeps what
-  it holds; a failed response stream is logged once as `Response stream failed`.
+  settle (a streamed body's run when the signal aborts, once the body's `cancel()` settles or after
+  5000 ms — a source that does work in `pull` must make `cancel()` wait for it), so a handler that
+  never settles keeps what it holds; a failed response stream is logged once as
+  `Response stream failed`.
 
 <!-- version:history -->
 

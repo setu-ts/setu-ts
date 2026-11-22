@@ -6,8 +6,24 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { CAPABILITIES } from '@setu-ts/common';
+
 import { wrapDeferredStream } from '../../src/context/deferred.ts';
 import { ServiceRegistry } from '../../src/registry/service-registry.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+
+/** A registry holding a fake runtime whose timers the test advances. */
+function withRuntime(): { registry: ServiceRegistry; tick: (ms: number) => void } {
+  const fake = createFakeRuntime();
+  const registry = new ServiceRegistry();
+  registry.register(CAPABILITIES.RUNTIME, fake.runtime);
+  return { registry, tick: fake.tick };
+}
+
+/** Lets promise callbacks run. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
 
 /** A source that never ends unless cancelled. */
 function endless(onCancel: () => void): ReadableStream<Uint8Array> {
@@ -19,20 +35,95 @@ function endless(onCancel: () => void): ReadableStream<Uint8Array> {
 }
 
 describe('wrapDeferredStream and the request signal', () => {
-  it('runs the cleanups at once for a signal that was already aborted', async () => {
+  it('cancels the source first, then runs the cleanups, for a signal that was already aborted', async () => {
     const order: string[] = [];
     const client = new AbortController();
     client.abort();
     wrapDeferredStream(
       endless(() => order.push('source cancelled')),
       [() => void order.push('cleanup')],
-      new ServiceRegistry(),
+      withRuntime().registry,
       () => order.push('complete'),
       client.signal,
       () => order.push('aborted'),
     );
-    await Promise.resolve();
-    expect(order).toEqual(['aborted', 'cleanup', 'complete', 'source cancelled']);
+    await settle();
+    expect(order).toEqual(['aborted', 'source cancelled', 'cleanup', 'complete']);
+  });
+
+  it('waits for a source whose cancel() waits for its pending pull (security audit)', async () => {
+    const order: string[] = [];
+    let finishPull!: () => void;
+    let pulling: Promise<void> | undefined;
+    const source = new ReadableStream<Uint8Array>({
+      pull() {
+        // Pulled ahead to fill the queue: work no read of the kernel's waits on.
+        pulling ??= new Promise<void>((resolve) => {
+          finishPull = () => {
+            order.push('pull settled');
+            resolve();
+          };
+        });
+        return pulling;
+      },
+      cancel() {
+        order.push('source cancel');
+        return pulling;
+      },
+    });
+    const client = new AbortController();
+    wrapDeferredStream(
+      source,
+      [() => void order.push('cleanup')],
+      withRuntime().registry,
+      () => order.push('complete'),
+      client.signal,
+      () => order.push('aborted'),
+    );
+    await settle();
+    client.abort();
+    await settle();
+    expect(order).toEqual(['aborted', 'source cancel']);
+    finishPull();
+    await settle();
+    expect(order).toEqual(['aborted', 'source cancel', 'pull settled', 'cleanup', 'complete']);
+  });
+
+  it('runs the cleanups once at the 5 s bound when cancel() never settles', async () => {
+    let cleaned = 0;
+    const { registry, tick } = withRuntime();
+    const source = new ReadableStream<Uint8Array>({
+      cancel: () => new Promise<void>(() => {}),
+    });
+    const client = new AbortController();
+    wrapDeferredStream(source, [() => void cleaned++], registry, () => {}, client.signal);
+    client.abort();
+    await settle();
+    tick(4_999);
+    await settle();
+    expect(cleaned).toBe(0);
+    // The fake runtime fires a timer whose delay fits in one tick.
+    tick(5_000);
+    await settle();
+    expect(cleaned).toBe(1);
+    tick(10_000);
+    await settle();
+    expect(cleaned).toBe(1);
+  });
+
+  it('runs the cleanups without waiting for a source with no cancel()', async () => {
+    let cleaned = 0;
+    const client = new AbortController();
+    wrapDeferredStream(
+      new ReadableStream<Uint8Array>({ pull: () => new Promise<void>(() => {}) }),
+      [() => void cleaned++],
+      withRuntime().registry,
+      () => {},
+      client.signal,
+    );
+    client.abort();
+    await settle();
+    expect(cleaned).toBe(1);
   });
 
   it('ignores an abort that comes after the stream finished', async () => {

@@ -74,7 +74,8 @@ export function runDeferred(
  * once when the source ends, errors, or the consumer cancels — or, when a
  * signal is given and there is cleanup to run, when that signal aborts first
  * (a client that left on a runtime that never cancels the body, such as
- * workerd). On abort the source is cancelled after the cleanups start.
+ * workerd). On abort the source is cancelled first and the cleanups run once
+ * its `cancel()` settles, or after 5000 ms if it does not.
  *
  * @param body - Source streaming body
  *
@@ -109,7 +110,11 @@ export function wrapDeferredStream(
   };
   const reader = body.getReader();
   let completed = false;
+  // Set while an abort waits for the source's cancel(); the stream's own end,
+  // error or cancel joins it instead of running the cleanups early.
+  let aborting: Promise<void> | undefined;
   const once = (): void | Promise<void> => {
+    if (aborting !== undefined) return aborting;
     if (completed) return;
     completed = true;
     signal?.removeEventListener('abort', aborted);
@@ -118,8 +123,26 @@ export function wrapDeferredStream(
   // `once()` removes this listener, so it never runs after completion.
   function aborted(): void {
     onAbort?.();
-    void once();
-    reader.cancel(signal?.reason).catch(() => {});
+    // Cancel first and wait for the source's own cancel(), so a source whose
+    // cancel() waits for work still running in its pull keeps the request's
+    // resources until that work settles. A pull itself is invisible from a
+    // reader, so cancel() is the source's one hook. Bounded by the cleanup
+    // bound: a cancel() that never settles must not leak the cleanups (the
+    // workerd case, V13-200), so past it they run under a pull still pending.
+    const cancelled = reader.cancel(signal?.reason).catch(() => {});
+    aborting = withDeadline(() => cancelled, {
+      timeoutMs: DEFERRED_CLEANUP_TIMEOUT_MS,
+      timing: resolveProbeTiming(registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+      onTimeout: () =>
+        new Error(`Response stream cancel timeout after ${DEFERRED_CLEANUP_TIMEOUT_MS} ms`),
+    })
+      .catch((error: unknown) => {
+        report(registry, error);
+      })
+      .then(() => {
+        completed = true;
+        return finish();
+      });
   }
   // A listener only when there is work it could run early: an abort with no
   // cleanup changes nothing the stream's own cancel would not.
