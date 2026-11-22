@@ -106,6 +106,24 @@ where the documentation is silent, its source on GitHub.
 | 13  | SNS to SQS envelope and trace context         | MassTransit turns on raw delivery on every subscription it creates; the AWS .NET framework puts its envelope in `Message`, detects the wrapper by `Type` and `TopicArn`, and carries trace context in the envelope (`otel.traceparent`); OpenTelemetry's JS AWS SDK instrumentation writes `traceparent` as a message attribute and skips it when the message would exceed 10 attributes; SNS drops a message with more than 10 attributes bound for a raw SQS subscription | [MassTransit `TopicEntity.cs`](https://github.com/MassTransit/MassTransit/blob/develop/src/Transports/MassTransit.AmazonSqsTransport/AmazonSqsTransport/Topology/Entities/TopicEntity.cs), [AWS .NET `SNSMessageParser.cs`](https://github.com/aws/aws-dotnet-messaging/blob/main/src/AWS.Messaging/Serialization/Parsers/SNSMessageParser.cs), [OTel `MessageAttributes.ts`](https://github.com/open-telemetry/opentelemetry-js-contrib/blob/main/packages/instrumentation-aws-sdk/src/services/MessageAttributes.ts), [SNS raw delivery](https://docs.aws.amazon.com/sns/latest/dg/sns-large-payload-raw-message-delivery.html) |
 | 14  | Reading the queue's own attributes at startup | No surveyed framework reads `RedrivePolicy` to clamp a budget (MassTransit writes one; Spring, AWS .NET, Shoryuken and Celery defer to it); NServiceBus reads queue attributes at startup and refuses to start when its delayed-delivery queue has a redrive policy                                                                                                                                                                                                         | [NServiceBus `DelayedMessagesPump.cs`](https://github.com/Particular/NServiceBus.AmazonSQS/blob/master/src/NServiceBus.Transport.SQS/Receiving/DelayedMessagesPump.cs), [MassTransit SQS](https://masstransit.massient.com/documentation/transports/amazon-sqs)                                                                                                                                                                                                                                                                                                                                                                   |
 
+| 15 | Which queues a starting service checks (D9) | NServiceBus creates and checks only an
+endpoint's own queues, and a send-only endpoint none; MassTransit creates queues for each receive
+endpoint at bus start (send endpoints not verified); Spring Cloud AWS applies
+`queue-not-found-strategy` to listeners | coordinator lookup, 2026-11-22 (maintainer decision D9) |
+| 16 | Opting out of the dead store: BullMQ | `removeOnFail` (`number \| boolean \| KeepJobs`), per
+job or in `defaultJobOptions`; default keeps the job in the failed set; `true` removes it "when it
+fails after all attempts"; whether the `failed` event still fires is not stated |
+[BaseJobOptions](https://docs.bullmq.io/api/interfaces/v5.BaseJobOptions.html) | | 17 | Opting out
+of the dead store: Sidekiq | `sidekiq_options retry: 5, dead: false` per job class: "will retry 5
+times and then disappear"; whether `sidekiq_retries_exhausted` still runs is not stated |
+[Error Handling](https://github.com/sidekiq/sidekiq/wiki/Error-Handling) | | 18 | Opting out of the
+dead store: MassTransit | `DiscardFaultedMessages()` inside a `ReceiveEndpoint` configuration, per
+receive endpoint; default moves faulted messages to `_error`; whether `Fault<T>` is still published
+when discarding is not stated. Celery has no equivalent on its tasks page (`acks_late`,
+`Reject(requeue=False)` only) |
+[exceptions](https://masstransit.massient.com/documentation/concepts/exceptions),
+[Celery tasks](https://docs.celeryq.dev/en/stable/userguide/tasks.html) |
+
 What rows 10 to 14 settle for Part A: the unreadable rule follows NServiceBus and the RabbitMQ
 sibling (§3.5), but leaves the message for its visibility timeout when the forward fails rather than
 setting visibility 0, which would make a failing target a hot loop. The renewal keeps the Redis
@@ -259,18 +277,26 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
      turned into a URL once with `GetQueueUrl` (new optional
      `ISqsTransport.getQueueUrl(queueName, ownerAccountId)`; name and account from the ARN), bounded
      the same way.
-  4. A consumed name with neither target is refused with `SqsDeadLetterTargetMissingError` naming
-     the job name and the queue URL. So are a policy with `maxReceiveCount` 1 (no receive is left
-     for the framework, see step 5), and a policy target when the transport lacks `getQueueUrl`.
+  4. A consumed name with no target is refused with `SqsDeadLetterTargetMissingError`, naming the
+     job name and the queue URL and all three ways past it: a `deadLetterQueues` entry, a redrive
+     policy on the queue, or `deadLetterQueues: { '<name>': false }` to discard exhausted jobs
+     (§3.3a). "No target" means: no explicit entry, together with any of: no policy, an unreadable
+     policy, a refused or unavailable attribute read, or a policy target the transport cannot turn
+     into a URL (no `getQueueUrl`). This is the only refusal in §3.3, because carrying on would
+     delete the job with nothing keeping it (the maintainer's rule: refuse only when carrying on
+     would lose data silently; otherwise adjust, warn once and keep running).
   5. When a policy exists, the effective attempt budget for that name is
-     `min(job.maxAttempts, maxReceiveCount - 1)`, applied in `reserve` to the `maxAttempts` it
-     returns (so `IJob.maxAttempts` shows the clamped value). SQS delivers a message at most
+     `max(1, min(job.maxAttempts, maxReceiveCount - 1))`, applied in `reserve` to the `maxAttempts`
+     it returns (so `IJob.maxAttempts` shows the clamped value). SQS delivers a message at most
      `maxReceiveCount` times and moves it on the receive after that. With budget B the final failure
      runs on receive B, and a worker that dies on receive B leaves receive B + 1 <=
      `maxReceiveCount` for the dead-worker path (`queue-service.ts:597-625`), so `onFailed` always
      fires before SQS can take the message. The first time a job of a name is clamped, the adapter
      warns once for that name with the job's `maxAttempts`, the queue's `maxReceiveCount` and the
-     budget used, and recommends `maxReceiveCount = maxAttempts + 1`.
+     budget used, and recommends `maxReceiveCount = maxAttempts + 1`. The budget is never a reason
+     to refuse (maintainer, D3). With `maxReceiveCount` 1 the budget is 1 and the warning adds that
+     a worker dying on that one attempt leaves the message to SQS's own redrive without `onFailed`;
+     the payload is still kept in the dead-letter queue.
   6. When the attribute read is refused (`AccessDenied`) or the transport lacks
      `getQueueAttributes`: with an explicit `deadLetterQueues[name]` the adapter warns once that a
      redrive policy cannot be detected and continues unclamped; without one it refuses (step 4),
@@ -287,6 +313,30 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
      delete-without-target branch (`:588-594`) is removed. No error message text is attached (§10).
      The receive requests no message attributes (`sqs-queue.ts:162`), so any attributes a producer
      set are not carried to the forwarded copy; this is documented.
+- **§3.3a The discard opt-out.** `deadLetterQueues` widens from `Record<string, string>` to
+  `Record<string, string | false>`. `false` for a name means "discard exhausted jobs of this name":
+  1. the name is never refused and its queue attributes are not read (no clamp, no
+     `GetQueueAttributes` right needed); an explicit `false` wins over a redrive policy;
+  2. an exhausted job still runs `onFailed` once (both the final-failure path and the dead-worker
+     path, unchanged), and `deadLetter` then deletes the source message instead of forwarding it;
+  3. each discard is logged at `warn` with the job name, the job id and the receive count, never the
+     payload ("discarded after N attempts; deadLetterQueues[name] is false");
+  4. the outcome is counted as `queue_jobs_total{outcome="discarded"}`, a new value of the package's
+     own `JobOutcome` (`job-processor.ts:52`), counted after the delete succeeds (§3.2). The
+     diagnostics observer's settlement vocabulary is a `common` type (`diagnostics.ts:618-619`) with
+     no discard member, so the observer is told `dead-lettered` with outcome `terminal-error`;
+     adding `discarded` there is a Core-lane hand-over (§11);
+  5. an unreadable message on a `false` name (§3.5) is deleted and warned the same way; no
+     `onFailed`, no count, as in §3.5.
+
+  Name: a `false` entry beside the targets, rather than a separate option, so the target and its
+  absence are decided in one place and the refusal can quote the one line to add. Compared with rows
+  16 to 18: Sidekiq spells it `dead: false` per job class; BullMQ `removeOnFail: true` per job or as
+  a default; MassTransit `DiscardFaultedMessages()` per receive endpoint; this repo's messaging
+  brokers use `consumerRetry: false` for the same "opt out of the dead-letter store" meaning. Per
+  queue matches MassTransit's receive endpoint and is the only scope the SQS adapter has (one queue
+  per name).
+
 - **Rights:** consuming now needs `sqs:GetQueueAttributes` on the source queue, `sqs:GetQueueUrl`
   when the policy names the target, `sqs:SendMessage` on the target, and `kms:GenerateDataKey` when
   the target is encrypted with a customer-managed KMS key. Native redrive needed none of them. The
@@ -299,8 +349,10 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   mechanism and one place where `onFailed` and the counter run (D3).
 - **Test home:** `sqs-dead-letter-target.test.ts` (each step against a recording fake transport:
   parse rules, consumed names only, parallel bounded reads, the clamp and its one warning, both
-  refusals, forward attributes, a failed send keeps the source and throws, no delete without a
-  target); `exhausted-job-conformance.test.ts`.
+  refusal and its message naming all three ways past it, forward attributes, a failed send keeps the
+  source and throws, no delete without a target or `false`; the opt-out: starts with no target and
+  no attribute read, runs `onFailed` once, deletes the message, warns without the payload, counts
+  `discarded`; without it the start is refused); `exhausted-job-conformance.test.ts`.
 
 ### 3.4 `SnsPublisher.publishJob` writes the envelope `SqsQueue` reads, and `SqsQueue` reads a wrapped delivery
 
@@ -616,6 +668,7 @@ default.
 | `SqsDeadLetterTargetMissingError` (queue-plugin)                                                    | class              | Thrown by `SqsQueue.prepareConsumer` (D9); an application catches it from `app.start()` for a declared processor     |
 | `ISqsTransport.getQueueAttributes?`, `getQueueUrl?`                                                 | interface members  | Called by `sqs-redrive.ts` when a name is first consumed; `adaptSqsModule` implements both                           |
 | `ISqsTransport.send` 4th parameter `attributes?`                                                    | parameter          | Read by `adaptSqsModule`'s send; written by the dead-letter forward                                                  |
+| `SqsQueueOptions.deadLetterQueues` value type `string \| false`                                     | type widening      | Read by `sqs-redrive.ts` and `deadLetter` (§3.3a)                                                                    |
 | `SqsReceivedMessage.messageId?`                                                                     | interface member   | Filled by `adaptSqsModule`; read by the unreadable warning and the `setu-source-message-id` attribute                |
 | `SqsSdkModule.GetQueueAttributesCommand`, `GetQueueUrlCommand`                                      | interface members  | Used by `adaptSqsModule`                                                                                             |
 | `SqsQueue` constructor 4th parameter `defaults?`                                                    | parameter          | Filled by `QueuePlugin` from `defaultMaxAttempts`; read by `reserve` for an envelope without `maxAttempts`           |
@@ -636,17 +689,17 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                                              | Consumer                                                         | Behavior (per implementation)                                                                                             |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `SqsQueueOptions.visibilityTimeoutSeconds` (existing, now validated and documented) | `SqsQueue` receive and `claimRenewal`                            | Integer 1 to 43,200; renewal every third                                                                                  |
-| `SqsQueueOptions.deadLetterQueues` (existing)                                       | `sqs-redrive.ts` target resolution                               | Explicit target; wins over the redrive policy's target; only consumed names are checked                                   |
-| `SnsPublisherOptions.telemetry`                                                     | `SnsPublisher.publishJob`                                        | Producer span and `traceparent` in the envelope; ignored by `publish` (documented)                                        |
-| `SnsPublisherOptions.runtime`                                                       | `SnsPublisher.publishJob`                                        | `runtime.uuid()` for an absent `id`; without it and without `id`, `publishJob` throws a `TypeError`; ignored by `publish` |
-| `consumerRetry` on Pub/Sub                                                          | `GcpPubSubBroker` subscription creation and handler failure path | §3.11                                                                                                                     |
-| `deadLetterTopic` on Pub/Sub                                                        | `GcpPubSubBroker` dead-letter policy and not-retryable forward   | §3.11                                                                                                                     |
-| `consumerRetry` on Service Bus                                                      | `ServiceBusBroker` handler failure path                          | §3.12                                                                                                                     |
-| `maxFrameAgeMs` (messaging and redis transports)                                    | each transport's receive filter                                  | §3.9; not on the memory arm                                                                                               |
-| `SubscribeOptions.fanOut`                                                           | every broker's subscribe; the custom arm passes it through       | §3.7                                                                                                                      |
+| Option                                                                              | Consumer                                                         | Behavior (per implementation)                                                                                                                          |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SqsQueueOptions.visibilityTimeoutSeconds` (existing, now validated and documented) | `SqsQueue` receive and `claimRenewal`                            | Integer 1 to 43,200; renewal every third                                                                                                               |
+| `SqsQueueOptions.deadLetterQueues` (existing, widened to `string \| false` values)  | `sqs-redrive.ts` target resolution; `deadLetter`                 | A URL is the explicit target and wins over the redrive policy's; `false` discards exhausted jobs of that name (§3.3a); only consumed names are checked |
+| `SnsPublisherOptions.telemetry`                                                     | `SnsPublisher.publishJob`                                        | Producer span and `traceparent` in the envelope; ignored by `publish` (documented)                                                                     |
+| `SnsPublisherOptions.runtime`                                                       | `SnsPublisher.publishJob`                                        | `runtime.uuid()` for an absent `id`; without it and without `id`, `publishJob` throws a `TypeError`; ignored by `publish`                              |
+| `consumerRetry` on Pub/Sub                                                          | `GcpPubSubBroker` subscription creation and handler failure path | §3.11                                                                                                                                                  |
+| `deadLetterTopic` on Pub/Sub                                                        | `GcpPubSubBroker` dead-letter policy and not-retryable forward   | §3.11                                                                                                                                                  |
+| `consumerRetry` on Service Bus                                                      | `ServiceBusBroker` handler failure path                          | §3.12                                                                                                                                                  |
+| `maxFrameAgeMs` (messaging and redis transports)                                    | each transport's receive filter                                  | §3.9; not on the memory arm                                                                                                                            |
+| `SubscribeOptions.fanOut`                                                           | every broker's subscribe; the custom arm passes it through       | §3.7                                                                                                                                                   |
 
 ## 5. Implementation files
 
@@ -785,10 +838,11 @@ report, not assumed. The Core PR runs its own `packages/common` gates first.
   the forward-failure report name the right; the README and the upgrade note list them. Without
   `SendMessage` every forward fails and SQS's own redrive takes the message one receive later, after
   `onFailed` may have run twice (final failure, then the dead-worker path); the payload is kept.
-- **The SNS to SQS suite cannot run in CI or on this machine today**: no LocalStack service in
-  `.github/` or the local backend set, and ElasticMQ has no SNS → the wrapped shape is unit-tested
-  against AWS's documented notification example; the guarded suite is written and runs where
-  `AWS_LOCALSTACK_ENDPOINT_URL` is set; the closure note says so.
+- **The SNS to SQS suite has no CI service**: no LocalStack in `.github/` or the CI backend set, and
+  ElasticMQ has no SNS → the wrapped shape is also unit-tested against AWS's documented notification
+  example; the guarded suite runs locally against the shared `smoke-localstack` container
+  (`localstack/localstack:3`, `http://127.0.0.1:4566`) with resources prefixed `m143p-` and deleted
+  afterwards; the closure note says CI does not run it.
 - **A forwarded SQS dead letter carries no `DeadLetterQueueSourceArn`**, so a console redrive to the
   source may need an explicit destination (not verified) → the README says how to redrive.
 
@@ -832,13 +886,14 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   replaces the 10,000 ms constant in `sqs-redrive.ts`; V13-262's README text says a Service Bus
   retry delay holds one concurrency slot; V13-265's `custom` contract documents `fanOut` and the
   `ISubscription.fanOut` marker.
-- **Outside the lanes table, Part A (decide before implementing):**
-  `packages/diagnostics-plugin/test/e2e/queue-observations.test.ts:134-141` starts an SQS queue that
-  consumes `report.build` with no dead-letter target and no `getQueueAttributes` on its fake, so it
-  will refuse to start. `diagnostics-plugin` is in no lane; by the lane rule it joins the Messaging
-  lane for this one test edit (add `deadLetterQueues`), and the lanes table is corrected first.
-  `docs/messaging-emulators.md:141-148` lists the SQS emulator variables; the new
-  `AWS_LOCALSTACK_ENDPOINT_URL` goes there, or is handed to M143n.
+- **Out-of-lane edits approved by the maintainer (2026-11-22), made in Part A:** a one-line
+  `deadLetterQueues` entry in `packages/diagnostics-plugin/test/e2e/queue-observations.test.ts`
+  (`:134-141` starts an SQS consumer with no target, which would now refuse); the coordinator
+  corrects the lanes table in `ROADMAP.md`, not this letter. `docs/messaging-emulators.md:141-148`
+  gains `AWS_LOCALSTACK_ENDPOINT_URL` here.
+- **Core lane (any time, additive):** a `discarded` member for the diagnostics settlement vocabulary
+  (`common` `diagnostics.ts:618-619`), so the observer can report §3.3a's discard; until then it
+  reports `dead-lettered`.
 - **M143o (Workers):** apply §3.15's rule to `WorkersQueue` (V13-197): `onFailed` once, then a
   dead-letter target, or refuse at start when none can be proved. No change is needed for the
   backplane: `WorkersBroker` subscriptions carry no `fanOut` marker, so the `messaging` transport is
@@ -865,28 +920,32 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   and Service Bus; (c) make queue-less mean fan-out everywhere, reversing the M119a decision of
   2026-10-24. **Recommendation: (a).**
 - **D2, an SQS queue with no dead-letter target.** **DECIDED by the maintainer, 2026-11-22: (a),
-  refuse at `connect()`, with the queue's redrive policy accepted as a target.** (a) Refuse at
-  `connect()` (data never lost, start fails loudly); (b) leave the message in the queue as Spring
-  Cloud AWS and the .NET framework do, which loops through the dead-worker path until retention
-  expires; (c) create an error queue as MassTransit does, which needs `sqs:CreateQueue`.
-  **Recommendation: (a)**, with the redrive policy accepted as a target so a queue configured the
-  AWS way needs no option.
-- **D3 (settled in planning, listed for review): native SQS redrive or framework forward.** Native
-  redrive at the last attempt only works when the job's budget equals `maxReceiveCount`, and a
-  natively moved copy cannot carry the reason, count or source id, so the plan always forwards and
-  clamps the budget to `maxReceiveCount - 1` (§3.3 step 5; the off-by-one was re-derived in the Part
-  A review). No surveyed framework clamps (Compared with, row 14). Spring Cloud AWS and the .NET
-  framework defer to native redrive; MassTransit forwards.
-- **D9 (Part A, new in review), when the dead-letter target of a consumed name is checked.** The
-  adapter connects in `register` before any processor exists, and `queues` also lists names the
-  process only enqueues to, so checking at `connect()` would refuse a producer-only service. (a) An
-  internal `prepareConsumer(name)` the service awaits before a name's first poll; the plugin awaits
-  it for every declared processor, so `app.start()` fails for those; an imperative `process()`
-  refusal is reported once at `error` and the name is never polled, its messages left in SQS; (b)
-  check every name in `queues` at `connect()` and list producer-only services as BREAKING (they need
-  a target or a policy too); (c) a new `sqs.consume` list naming the consumed queues.
-  **Recommendation: (a)**: it keeps D2's start-time refusal for the normal (declared) case, asks
-  nothing of a producer, and adds no option.
+  refuse at `connect()`, with the queue's redrive policy accepted as a target.** Amended the same
+  day: the check runs before a consumed name's first poll (D9), and
+  `deadLetterQueues: { name: false }` is the explicit opt-out that discards exhausted jobs (§3.3a).
+  (a) Refuse at `connect()` (data never lost, start fails loudly); (b) leave the message in the
+  queue as Spring Cloud AWS and the .NET framework do, which loops through the dead-worker path
+  until retention expires; (c) create an error queue as MassTransit does, which needs
+  `sqs:CreateQueue`. **Recommendation: (a)**, with the redrive policy accepted as a target so a
+  queue configured the AWS way needs no option.
+- **D3: native SQS redrive or framework forward.** **Kept by the maintainer, 2026-11-22**: lower the
+  budget and warn once per queue, never refuse for it (§3.3 step 5). Native redrive at the last
+  attempt only works when the job's budget equals `maxReceiveCount`, and a natively moved copy
+  cannot carry the reason, count or source id, so the plan always forwards and clamps the budget to
+  `maxReceiveCount - 1` (§3.3 step 5; the off-by-one was re-derived in the Part A review). No
+  surveyed framework clamps (Compared with, row 14). Spring Cloud AWS and the .NET framework defer
+  to native redrive; MassTransit forwards.
+- **D9 (Part A, new in review), when the dead-letter target of a consumed name is checked.**
+  **DECIDED by the maintainer, 2026-11-22: (a)** (Compared with, row 15). The adapter connects in
+  `register` before any processor exists, and `queues` also lists names the process only enqueues
+  to, so checking at `connect()` would refuse a producer-only service. (a) An internal
+  `prepareConsumer(name)` the service awaits before a name's first poll; the plugin awaits it for
+  every declared processor, so `app.start()` fails for those; an imperative `process()` refusal is
+  reported once at `error` and the name is never polled, its messages left in SQS; (b) check every
+  name in `queues` at `connect()` and list producer-only services as BREAKING (they need a target or
+  a policy too); (c) a new `sqs.consume` list naming the consumed queues. **Recommendation: (a)**:
+  it keeps D2's start-time refusal for the normal (declared) case, asks nothing of a producer, and
+  adds no option.
 - **D4, retries on by default for Pub/Sub and Service Bus.** (a) On by default, as RabbitMQ and
   Redis Streams are; (b) opt-in, as Google's default subscription has no retry policy.
   **Recommendation: (a)**; Spring Cloud Stream also retries by default.
