@@ -62,8 +62,8 @@ export class GrpcUnavailableError extends Error {
 /**
  * A client call whose request header list is larger than the peer advertised
  * in its HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`. The call is stopped before
- * the peer processes it (once the session holds the peer's SETTINGS; the first
- * call on a new session is not checked), it is never reported against the instance, and it is not sent
+ * the peer processes it (a call started before the session holds the peer's
+ * SETTINGS, such as the first on a new session, is not checked), it is never reported against the instance, and it is not sent
  * to another one: the headers are the caller's to shrink. It reaches the caller
  * as the `cause` of the call's `ConnectError`.
  *

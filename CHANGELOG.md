@@ -62,12 +62,14 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/grpc-plugin`.** `GrpcHeaderListTooLargeError`: a client call whose header list is over
   the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` (RFC 7541 §4.1 sizes) is stopped
   before the peer processes it, with this error as the call error's `cause`; it is never counted
-  against the instance or resent. A peer that advertises no limit gets no check, nor does the first
-  call on a new HTTP/2 session (the peer's SETTINGS have not arrived yet).
-- **`@setu-ts/service-discovery-plugin`.** At most 256 names that have only ever answered empty
-  (absent DNS names, services not yet registered) stay cached; the oldest unwatched one is evicted.
-  `cacheTtlMs` outside 0–2147483647 is refused (see above). The per-name resolve warnings share a
-  budget of 20 `warn` lines a minute; past it they log at `debug`, with one notice.
+  against the instance or resent. A peer that advertises no limit gets no check, nor do calls
+  started before the session holds the peer's SETTINGS (the first on each new session, and after a
+  reconnect).
+- **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
+  empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
+  watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The per-name
+  resolve warnings share a budget of 20 `warn` lines a minute; past it they log at `debug`, with one
+  notice.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
   on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
   failures leave no cached failure state. A name keeps its reporter while its failure run is open

@@ -47,9 +47,9 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - One provider watch per name; joiners get the cache at once; lists may repeat.
 - `degraded`: warm failures/held empties. `staleForMs`: failed-list age. All providers cache health
   for 5 s; DNS uses its last lookup outcome. DNS absent names resolve `[]`; other errors reject.
-- Failing names keep a reporter (max 256; 20 warns/min shared). At most 256 empty-only names stay
-  cached. Listener errors are isolated, warn once. Failed reads older than a watch delivery keep its
-  list.
+- Failing names keep a reporter (max 256; 20 warns/min shared). At most 256 unwatched empty-only
+  names stay cached. Listener errors are isolated, warn once. Failed reads older than a watch
+  delivery keep its list.
 - Consul ids default to `<serviceName>-<address>-<port>` (own address).
 - Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears state.
 

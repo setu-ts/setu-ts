@@ -4,11 +4,12 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createConnectionErrorReporter, describeError, httpStatusHintOf } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { ServiceDiscoveryService } from '../../src/services/service-discovery-service.ts';
+import { RefreshBackoff } from '../../src/services/refresh-backoff.ts';
 import { createProvider } from '../../src/providers/provider-factory.ts';
 import { resolveOptions, type ServiceDiscoveryPluginOptions } from '../../src/options.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
@@ -933,5 +934,60 @@ it('answers a read raced by a cold empty watch delivery, and a joiner gets the e
   watched.emit('other', []);
   fail(new Error('down'));
   expect(await second).toEqual([]);
+  service.close();
+});
+
+it('shrinks back to 256 empty-only names after watches end and evicts a failing name last', async () => {
+  const runtime = createFakeRuntime();
+  const provider = createFakeProvider();
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+  );
+  const stops: Array<() => void> = [];
+  for (let n = 0; n < 300; n++) {
+    stops.push(await service.watch(`watched-${n}`, () => {}));
+    await service.resolve(`watched-${n}`);
+  }
+  expect(service.cachedServices).toBe(300); // Watched names are never evicted.
+  for (const stop of stops) stop();
+  // A failing empty-only name is kept while others can go.
+  await service.resolve('bad');
+  provider.failWith(new Error('down'));
+  await service.resolve('bad'); // Starts the refresh that fails.
+  await flush();
+  expect(service.degraded).toBe(true);
+  provider.failWith(null);
+  await service.resolve('fresh-0');
+  expect(service.cachedServices).toBe(256);
+  for (let n = 1; n < 200; n++) await service.resolve(`fresh-${n}`);
+  expect(service.cachedServices).toBe(256);
+  expect(service.degraded).toBe(true);
+  service.close();
+});
+
+it('drops an evicted name retry spacing and reporter with its cache entry', async () => {
+  const runtime = createFakeRuntime();
+  const provider = createFakeProvider();
+  const reset = vi.spyOn(RefreshBackoff.prototype, 'reset');
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+  );
+  for (let n = 0; n < 257; n++) {
+    await service.resolve(`name-${n}`);
+    provider.failWith(new Error('down'));
+    await service.resolve(`name-${n}`); // Its background refresh fails: failing, spaced.
+    await flush();
+    provider.failWith(null);
+    // name-0 never succeeds again, so any later reset of it is the eviction's.
+    if (n === 0) reset.mockClear();
+  }
+  // Every cached name is failing, so the oldest failing one went: name-0.
+  expect(service.cachedServices).toBe(256);
+  expect(reset.mock.calls.some(([name]) => name === 'name-0')).toBe(true);
+  reset.mockRestore();
   service.close();
 });

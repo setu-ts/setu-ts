@@ -439,17 +439,31 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   /**
-   * Keeps at most {@linkcode MAX_EMPTY_ONLY_NAMES} empty-only names cached,
-   * evicting the oldest one nobody watches (never the one just stored).
+   * Evicts empty-only names until at most {@linkcode MAX_EMPTY_ONLY_NAMES}
+   * remain, oldest first, never a watched one or the one just stored, and a
+   * failing one only when no other is left; an evicted name's retry spacing
+   * and reporter go with it. Watched names can keep the set above the cap.
    */
   #evictEmptyOnly(current: string): void {
-    if (this.#emptyOnly.size <= MAX_EMPTY_ONLY_NAMES) return;
-    for (const name of this.#emptyOnly) {
-      if (name === current || this.#nameWatches.has(name)) continue;
+    while (this.#emptyOnly.size > MAX_EMPTY_ONLY_NAMES) {
+      const name =
+        this.#evictableEmptyOnly(current, false) ?? this.#evictableEmptyOnly(current, true);
+      if (name === undefined) return;
       this.#emptyOnly.delete(name);
       this.#cache.delete(name);
-      return;
+      this.#backoff.reset(name);
+      this.#resolveReporters.delete(name);
     }
+  }
+
+  /** The oldest evictable empty-only name; failing ones only when allowed. */
+  #evictableEmptyOnly(current: string, failing: boolean): string | undefined {
+    for (const name of this.#emptyOnly) {
+      if (name === current || this.#nameWatches.has(name)) continue;
+      if (!failing && this.#cache.get(name)?.failed === true) continue;
+      return name;
+    }
+    return undefined;
   }
 
   /** Store every successful read and watch delivery through the same empty rule. */

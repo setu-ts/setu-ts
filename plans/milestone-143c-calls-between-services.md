@@ -666,9 +666,10 @@ because the drain answer is written through the application's error responder wh
 ### 3.12 Security audit fixes (committed-tree audit of 73e025603, 2026-11-23)
 
 - **F1, `cacheTtlMs` refused out of range.** `resolveOptions` refuses a non-finite or out-of-range
-  `cacheTtlMs` with `deadlineRangeError`, as it does `resolveTimeoutMs` and `emptyAnswerGraceMs`:
-  with background refresh a `NaN` (`age >= NaN` is false) would have kept a warm list forever with
-  nothing reporting it. Test: `test/unit/options.test.ts` refusal and acceptance rows.
+  `cacheTtlMs` with its own `RangeError` (naming that `0` refreshes on every warm call), alongside
+  `resolveTimeoutMs` and `emptyAnswerGraceMs`: with background refresh a `NaN` (`age >= NaN` is
+  false) would have kept a warm list forever with nothing reporting it. Test:
+  `test/unit/options.test.ts` refusal and acceptance rows.
 - **F2, a header list over the peer's advertised limit (coordinator decision A).** The client wraps
   each HTTP/2 session manager's `request` (`client/header-list-guard.ts`): when the stream's
   `session.remoteSettings.maxHeaderListSize` is below 4294967295 (what Node reports when the peer
@@ -678,18 +679,20 @@ because the drain answer is written through the application's error responder wh
   report), and it is not a refused stream (no resend). The accounting was measured on Node 24.22.1
   against a peer advertising 16384: 16384 octets is accepted and 16385 refused, matching the RFC
   formula. The check runs after the pick, because the limit belongs to the picked instance's
-  session; the pick itself records nothing. Not covered: the first call on a new HTTP/2 session
+  session; the pick itself records nothing. Not covered: calls started before the session holds the
+  peer's SETTINGS (the first on each new HTTP/2 session, and after a reconnect or GOAWAY)
   (connect-node's `gotoReady` waits only for the `connect` event, not the peer's SETTINGS, so the
   limit still reads 4294967295; found in review), and a peer that advertises no limit. Node's own
   server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`, which no
   client can predict; Core can make Setu's listener advertise its limit (§11). grpc-go's handling of
   an over-limit send is not verified.
 - **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is cached
-  like any other, but at most 256 names that have only ever answered empty stay cached; past that
-  the oldest one nobody watches is evicted (a first version that stored nothing broke the watch
-  race, made every call to an empty name read the backend, and left joiners without the list; caught
-  in review). A warm name keeps the §3.2 grace rule. The per-name resolve warnings share a budget of
-  20 `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn`
+  like any other, but at most 256 unwatched names that have only ever answered empty stay cached;
+  past that the oldest is evicted (a failing one last, its retry spacing and reporter with it), and
+  watched names are never evicted (a first version that stored nothing broke the watch race, made
+  every call to an empty name read the backend, and left joiners without the list; caught in
+  review). A warm name keeps the §3.2 grace rule. The per-name resolve warnings share a budget of 20
+  `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn`
   notice per window. The README says discovery names should be chosen by the application, not taken
   from requests.
 - **F3, a payload that makes a healthy handler throw (held for the maintainer).** OD10 counts a

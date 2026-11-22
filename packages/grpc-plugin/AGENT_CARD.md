@@ -48,7 +48,7 @@ export function registerRpcService(
 - Registering the same service type name twice throws. Omitting the implementation registers a
   service for reflection only.
 - Wire app answers succeed; other errors fail. Caller abort and pre-send faults (serialization,
-  `writeMaxBytes`, a refused header, a list over the peer's advertised size) report nothing.
+  `writeMaxBytes`, a refused header, an over-limit list once SETTINGS arrived) report nothing.
 - Drain 503s are not resent. Discover pods to balance calls.
 - Stream cancellation aborts `ctx.signal`, then awaits cleanup unbounded.
 - The health bridge reports serving without a health capability; an aggregate degraded status is not
