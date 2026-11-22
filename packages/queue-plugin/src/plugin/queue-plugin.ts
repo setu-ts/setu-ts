@@ -322,24 +322,12 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Register the service
       ctx.services.register<IQueue>(token, registrar);
 
-      // Declared processor INSTANCES register now, exactly as an imperative
-      // `process()` call made before this arm existed.
-      //
-      // UNLESS a behaviour FACTORY is declared. Registering a processor arms
-      // the poll loop, so a job already sitting in a durable queue can be
-      // reserved and dispatched before `onInit` resolved the factory
-      // behaviours — reaching the processor through a PARTIAL chain, skipping
-      // exactly the behaviours that needed a resolved capability. Deferring
-      // the whole set into the same `onInit` hook, after the chain is final,
-      // is what makes the arm's guarantee true. With no factory declared the
-      // chain is already complete here and the timing is unchanged.
-      // With no factory in the array, declared order IS registration order and
-      // the instances register here, at their pre-arm timing. With a factory
-      // present the WHOLE array is registered in `onInit` instead, in declared
-      // order — because `process()` is last-wins on a job name, and splitting
-      // the arms made `[factoryA, instanceB]` on one name resolve to factoryA,
-      // contradicting this option's own documented last-wins contract.
-      if (processorFactories.length === 0 && behaviorFactories.length === 0) {
+      // Instances keep their register() timing when there are no processor
+      // factories. A behavior factory holds dispatch on chainReady until onInit,
+      // so registration never runs work through a partial behavior chain.
+      // With processor factories, register the WHOLE array in onInit in declared
+      // order: process() is last-wins, including mixed factories and instances.
+      if (processorFactories.length === 0) {
         try {
           await Promise.all(
             processorInstances.map((definition) => service.prepare(definition.name)),
@@ -416,18 +404,24 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
 
             // DECLARED order, walking the original array — not instances then
             // factories — so the last entry for a job name wins, as documented.
-            const definitions = processors.map((entry, index) =>
-              typeof entry === 'function'
-                ? resolveRegistryEntry(entry, ctx.services, `QueuePlugin({ processors })[${index}]`)
-                : entry,
-            );
-            await Promise.all(definitions.map((definition) => service.prepare(definition.name)));
-            for (const definition of definitions) {
-              registrar.process(
-                definition.name,
-                (job) => definition.processor(job),
-                definition.options,
+            if (processorFactories.length > 0) {
+              const definitions = processors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                      entry,
+                      ctx.services,
+                      `QueuePlugin({ processors })[${index}]`,
+                    )
+                  : entry,
               );
+              await Promise.all(definitions.map((definition) => service.prepare(definition.name)));
+              for (const definition of definitions) {
+                registrar.process(
+                  definition.name,
+                  (job) => definition.processor(job),
+                  definition.options,
+                );
+              }
             }
 
             // LAST: the chain is final, so any job held during startup may run.

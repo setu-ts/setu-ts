@@ -188,15 +188,15 @@ export class SnsPublisher {
    * @param data - JSON-serializable job payload
    * @param options - Explicit identity, optional attempt budget and copied headers
    * @returns SNS message id, or undefined when unavailable
-   * @throws {TypeError} Without options.id or options.runtime, or for invalid work
-   * @throws {Error} If disconnected or publishing rejects
+   * @throws {TypeError} As a rejection without options.id or options.runtime, or for invalid work
+   * @throws {Error} As a rejection if disconnected or publishing fails
    * @example
    * ```typescript
    * await publisher.publishJob('report.build', { reportId: 'r1' }, { id: 'job-1' });
    * ```
    * @since 0.14.0
    */
-  publishJob<T>(
+  async publishJob<T>(
     name: string,
     data: T,
     options?: {
@@ -223,8 +223,8 @@ export class SnsPublisher {
           ...(headers === undefined ? {} : { headers: { ...headers } }),
         }),
       );
-    if (!this.#telemetry) return publish(options?.headers);
-    return this.#telemetry.withSpan(
+    if (!this.#telemetry) return await publish(options?.headers);
+    return await this.#telemetry.withSpan(
       `enqueue ${name}`,
       (span) => {
         const traceparent = contextToTraceparent({

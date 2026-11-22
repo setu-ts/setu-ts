@@ -8277,12 +8277,12 @@ Provides background job queue with Memory and Redis adapters.
 - **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
   `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, claim renewal every third of
   the visibility timeout capped at SQS's 12-hour limit, dead-letter forwarding). Constructor
-  `(runtime, options, logger?, defaults?)`: `logger` is `{ error, warn }`; `defaults.maxAttempts`
-  (default 3) applies to an envelope without `maxAttempts`, and `QueuePlugin` fills it from
-  `defaultMaxAttempts`. Since 0.14.0: a stale `ack`, retry or dead-letter rejects instead of logging
-  and returning; a consumed name is prepared before its first poll and refused with
-  `SqsDeadLetterTargetMissingError` when no dead-letter target can be proved; when the queue has a
-  `RedrivePolicy`, each job's attempts are lowered to
+  `(runtime, options, logger?, defaults?)`: `logger` is `{ error, warn? }` (warnings go to `error`
+  without `warn`); `defaults.maxAttempts` (default 3) applies to an envelope without `maxAttempts`,
+  and `QueuePlugin` fills it from `defaultMaxAttempts`. Since 0.14.0: a stale `ack`, retry or
+  dead-letter rejects instead of logging and returning; a consumed name is prepared before its first
+  poll and refused with `SqsDeadLetterTargetMissingError` when no dead-letter target can be proved;
+  when the queue has a `RedrivePolicy`, each job's attempts are lowered to
   `max(1, min(maxAttempts, maxReceiveCount - 1))` with one warning per name; an exhausted, abandoned
   or unreadable message is sent to the target with `setu-dead-letter-reason`, `setu-attempts` and
   `setu-source-message-id` attributes and then deleted; an unreadable message is never logged with

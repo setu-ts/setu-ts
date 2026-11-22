@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SqsDeadLetterTargetMissingError } from '../../src/index.ts';
+import { SqsQueue, SqsDeadLetterTargetMissingError } from '../../src/index.ts';
 import { sqsHarness, envelope } from '../fixtures/sqs-harness.ts';
 
 const arn = 'arn:aws:sqs:us-east-1:123456789012:dead.fifo';
@@ -8,6 +8,53 @@ const policy = (maxReceiveCount: unknown = '3', deadLetterTargetArn: unknown = a
 });
 
 describe('SQS consumer dead-letter targets', () => {
+  it.each(['toString', 'constructor'])(
+    'refuses inherited dead-letter targets for %s',
+    async (name) => {
+      const { queue } = await sqsHarness({ queues: { [name]: 'source' }, deadLetterQueues: {} });
+      try {
+        await expect(queue.prepareConsumer(name)).rejects.toBeInstanceOf(
+          SqsDeadLetterTargetMissingError,
+        );
+      } finally {
+        await queue.disconnect();
+      }
+    },
+  );
+  it.each(['toString', 'constructor'])(
+    'refuses inherited source queue URLs for %s',
+    async (name) => {
+      const { queue } = await sqsHarness({ queues: {}, deadLetterQueues: { [name]: false } });
+      try {
+        await expect(queue.prepareConsumer(name)).rejects.toThrow('is not configured');
+      } finally {
+        await queue.disconnect();
+      }
+    },
+  );
+  it('falls back to an error-only logger for clamp warnings', async () => {
+    const {
+      queue: existing,
+      transport,
+      runtime,
+    } = await sqsHarness({}, { getQueueAttributes: () => Promise.resolve(policy(3)) });
+    await existing.disconnect();
+    const error = vi.fn<(message: string) => void>();
+    const queue = new SqsQueue(
+      runtime,
+      { queues: { build: 'source' }, deadLetterQueues: { build: 'dead' }, client: transport },
+      { error },
+    );
+    await queue.connect();
+    try {
+      await transport.send('source', envelope(8));
+      const [job] = await queue.reserve('build', 1, 0);
+      expect(job!.maxAttempts).toBe(2);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('effective budget=2'));
+    } finally {
+      await queue.disconnect();
+    }
+  });
   it('does not prepare producer-only names and refuses consumption without a target', async () => {
     const { queue, transport } = await sqsHarness({ deadLetterQueues: {} });
     await queue.enqueue({

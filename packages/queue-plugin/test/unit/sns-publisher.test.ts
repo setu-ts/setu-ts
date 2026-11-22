@@ -318,6 +318,32 @@ import { fakeTelemetry, TRACEPARENT } from '../fixtures/fake-telemetry.ts';
 import { encodeSqsEnvelope, decodeSqsEnvelope } from '../../src/adapters/sqs-envelope.ts';
 
 describe('SNS job publishing', () => {
+  for (const telemetry of [undefined, fakeTelemetry().service]) {
+    it.each([
+      { label: 'NaN attempts', data: {}, maxAttempts: NaN },
+      { label: 'undefined data', data: undefined, maxAttempts: 3 },
+      { label: 'BigInt data', data: 1n, maxAttempts: 3 },
+    ])(
+      `rejects $label consistently with telemetry=${telemetry !== undefined}`,
+      async ({ data, maxAttempts }) => {
+        const publish = vi.fn(() => Promise.resolve('mid'));
+        const publisher = new SnsPublisher({
+          topicArn: 'topic',
+          ...(telemetry === undefined ? {} : { telemetry }),
+          client: { publish, close: () => Promise.resolve() },
+        });
+        await publisher.connect();
+        try {
+          await expect(
+            publisher.publishJob('build', data, { id: 'explicit', maxAttempts }),
+          ).rejects.toThrow(TypeError);
+          expect(publish).not.toHaveBeenCalled();
+        } finally {
+          await publisher.disconnect();
+        }
+      },
+    );
+  }
   it('uses runtime identity, copies headers and omits an absent attempt budget', async () => {
     const publish = vi.fn(() => Promise.resolve('message-id'));
     const publisher = new SnsPublisher({
@@ -343,15 +369,15 @@ describe('SNS job publishing', () => {
       topicArn: 'topic',
       client: { publish: () => Promise.resolve(undefined), close: async () => {} },
     });
-    expect(() => publisher.publishJob('build', {})).toThrow('not connected');
+    await expect(publisher.publishJob('build', {})).rejects.toThrow('not connected');
     await publisher.connect();
-    expect(() => publisher.publishJob('build', {})).toThrow(/options.id.*runtime/);
+    await expect(publisher.publishJob('build', {})).rejects.toThrow(/options.id.*runtime/);
     expect(
       await publisher.publishJob('build', {}, { id: 'explicit', maxAttempts: 5 }),
     ).toBeUndefined();
-    expect(() => publisher.publishJob('build', {}, { id: 'explicit', maxAttempts: NaN })).toThrow(
-      TypeError,
-    );
+    await expect(
+      publisher.publishJob('build', {}, { id: 'explicit', maxAttempts: NaN }),
+    ).rejects.toThrow(TypeError);
     await publisher.disconnect();
   });
   it.each([true, false])(

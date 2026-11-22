@@ -301,6 +301,11 @@ interface ReceiptEntry {
   readonly claimToken: string;
   readonly attempts: number;
   readonly messageId: string;
+  /** Shared by renewed snapshots of this delivery, never by a redelivery. */
+  readonly activity: {
+    settling: boolean;
+    renewal: Promise<boolean> | undefined;
+  };
 }
 
 /**
@@ -343,11 +348,12 @@ export class SqsQueue implements QueueAdapter {
     /** Renewal cadence in milliseconds, one third of visibility. @since 0.14.0 */
     readonly intervalMs: number;
     /**
-     * Extends only the current, unexpired receipt.
+     * Extends the current, unexpired receipt, or succeeds without I/O while
+     * that delivery is settling.
      * @param name - Job name
      * @param id - Job id
      * @param claimToken - Delivery fence
-     * @returns True after extending the current receipt
+     * @returns True after extension or when settlement already owns the receipt
      * @throws Never
      * @since 0.14.0
      */
@@ -357,7 +363,7 @@ export class SqsQueue implements QueueAdapter {
   /**
    * @param runtime - Clock, timers and delivery token generator
    * @param options - Queue URLs and SQS connection options
-   * @param logger - Optional error and warning sink
+   * @param logger - Optional sink; warnings fall back to error when warn is absent
    * @param defaults - Consumer attempt default for externally published work (default 3)
    * @returns The queue adapter
    * @throws {RangeError} For an invalid visibilityTimeoutSeconds or maxAttempts default
@@ -367,7 +373,7 @@ export class SqsQueue implements QueueAdapter {
   constructor(
     runtime: IRuntimeServices,
     options: SqsQueueOptions,
-    logger?: { error: (msg: string) => void; warn: (msg: string) => void },
+    logger?: { error: (msg: string) => void; warn?: (msg: string) => void },
     defaults?: { maxAttempts?: number },
   ) {
     this.#runtime = runtime;
@@ -395,12 +401,18 @@ export class SqsQueue implements QueueAdapter {
     this.#injectedClient = options.client;
     this.#receipts = new Map();
     this.#recurring = new Map();
-    this.#logger = logger;
+    this.#logger =
+      logger === undefined
+        ? undefined
+        : {
+            error: (message) => logger.error(message),
+            warn: (message) => (logger.warn ?? logger.error).call(logger, message),
+          };
   }
 
   /** Get the queue URL for a job name, or throw if unconfigured. */
   #getQueueUrl(name: string): string {
-    const url = this.#queues[name];
+    const url = Object.hasOwn(this.#queues, name) ? this.#queues[name] : undefined;
     if (url === undefined) {
       throw new SqsQueueNotConfiguredError(name, Object.keys(this.#queues) as string[]);
     }
@@ -511,7 +523,7 @@ export class SqsQueue implements QueueAdapter {
           transport,
           name,
           this.#getQueueUrl(name),
-          this.#deadLetterQueues[name],
+          Object.hasOwn(this.#deadLetterQueues, name) ? this.#deadLetterQueues[name] : undefined,
           (message) => this.#logger?.warn(message),
         )
         .then((target) => {
@@ -604,6 +616,7 @@ export class SqsQueue implements QueueAdapter {
         claimToken,
         attempts,
         messageId: msg.messageId ?? 'unknown',
+        activity: { settling: false, renewal: undefined },
       });
       jobs.push({
         id: envelope.id,
@@ -619,25 +632,23 @@ export class SqsQueue implements QueueAdapter {
     return jobs;
   }
 
-  async ack(name: string, id: string, claimToken: string): Promise<void> {
-    if (!this.#transport) throw new Error('SqsQueue is not connected');
-    const entry = this.#claim(name, id, claimToken);
-    await this.#transport.delete(this.#getQueueUrl(name), entry.receiptHandle);
-    this.#forget(id, entry);
+  ack(name: string, id: string, claimToken: string): Promise<void> {
+    return this.#settle(name, id, claimToken, (entry, transport) =>
+      transport.delete(this.#getQueueUrl(name), entry.receiptHandle),
+    );
   }
 
-  async requeue(
+  requeue(
     name: string,
     id: string,
     availableAtMs: number,
     _attempts: number,
     claimToken: string,
   ): Promise<void> {
-    if (!this.#transport) throw new Error('SqsQueue is not connected');
-    const entry = this.#claim(name, id, claimToken);
-    const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
-    await this.#transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
-    this.#forget(id, entry);
+    return this.#settle(name, id, claimToken, (entry, transport) => {
+      const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
+      return transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+    });
   }
 
   /**
@@ -652,26 +663,48 @@ export class SqsQueue implements QueueAdapter {
    * @throws {Error} On transport rejection; the receipt is retained for retry
    * @since 0.14.0
    */
-  async deadLetter(
+  deadLetter(
     name: string,
     id: string,
     _nowMs: number,
     claimToken: string,
     reason: 'attempts-exhausted' | 'abandoned' = 'attempts-exhausted',
   ): Promise<void | 'discarded'> {
-    if (!this.#transport) throw new Error('SqsQueue is not connected');
-    const entry = this.#claim(name, id, claimToken);
-    const outcome = await this.#retire(
-      name,
-      entry.body,
-      entry.receiptHandle,
-      entry.messageId,
-      entry.attempts,
-      reason,
-      id,
+    return this.#settle(name, id, claimToken, (entry) =>
+      this.#retire(
+        name,
+        entry.body,
+        entry.receiptHandle,
+        entry.messageId,
+        entry.attempts,
+        reason,
+        id,
+      ),
     );
-    this.#forget(id, entry);
-    return outcome;
+  }
+
+  /** Fences renewal before settlement and rechecks ownership after an older renewal finishes. */
+  async #settle<T>(
+    name: string,
+    id: string,
+    token: string,
+    call: (entry: ReceiptEntry, transport: ISqsTransport) => Promise<T>,
+  ): Promise<T> {
+    const transport = this.#transport;
+    if (!transport) throw new Error('SqsQueue is not connected');
+    const entry = this.#claim(name, id, token);
+    const activity = entry.activity;
+    if (activity.settling) throw new StaleClaimError();
+    activity.settling = true;
+    try {
+      if (activity.renewal !== undefined) await activity.renewal;
+      const current = this.#claim(name, id, token);
+      const result = await call(current, transport);
+      this.#forget(id, current);
+      return result;
+    } finally {
+      activity.settling = false;
+    }
   }
 
   async #retire(
@@ -712,9 +745,32 @@ export class SqsQueue implements QueueAdapter {
 
   async #extend(name: string, id: string, token: string): Promise<boolean> {
     const transport = this.#transport;
-    const entry = this.findReceiptEntry(id);
+    const entry = this.#receipts.get(id);
     if (!this.#ready || !transport || !entry || entry.name !== name || entry.claimToken !== token)
       return false;
+    // Settlement owns this receipt until it finishes. A suppressed renewal is
+    // successful, including while its transport response is still pending.
+    if (entry.activity.settling) return true;
+    if (this.findReceiptEntry(id) === undefined) return false;
+    if (entry.activity.renewal !== undefined) return entry.activity.renewal;
+    const pending = Promise.withResolvers<boolean>();
+    entry.activity.renewal = pending.promise;
+    // Publish the in-flight promise before entering the transport, including
+    // an injected transport that synchronously calls back into the adapter.
+    void this.#renewReceipt(name, id, entry, transport).then(pending.resolve, pending.reject);
+    try {
+      return await pending.promise;
+    } finally {
+      entry.activity.renewal = undefined;
+    }
+  }
+
+  async #renewReceipt(
+    name: string,
+    id: string,
+    entry: ReceiptEntry,
+    transport: ISqsTransport,
+  ): Promise<boolean> {
     const now = this.#runtime.now();
     const remaining = 43_200 - Math.floor((now - entry.receivedAtMs) / 1000);
     if (remaining <= 0) return false;
