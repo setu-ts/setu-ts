@@ -138,6 +138,20 @@ export interface RawUpgradeSocket {
    * @since 0.14.0
    */
   end?(): void;
+  /**
+   * Runs a listener once. A refusal destroys the socket on `'finish'`, after
+   * its bytes are flushed, so a client that never closes its side cannot hold
+   * the descriptor open.
+   * @since 0.14.0
+   */
+  once?(event: 'finish', listener: () => void): unknown;
+  /**
+   * Adds a listener. The adapter adds an `'error'` listener as soon as the
+   * upgrade arrives, so a client that resets the connection cannot crash the
+   * process with an unhandled `'error'` event.
+   * @since 0.14.0
+   */
+  on?(event: 'error', listener: (error: unknown) => void): unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +538,8 @@ const COMPUTED_HEADERS = new Set([
  * phrase, every header (each `Set-Cookie` on its own line), and the body. The
  * snapshot's own framing headers are replaced by a `content-length` of the
  * body and `connection: close`. A streamed body is cancelled and sent empty.
+ * A status outside 200–599 is answered as 500. The socket is ended, then
+ * destroyed once the bytes are flushed.
  *
  * @param socket - The raw duplex socket
  * @param snapshot - The framework response the pipeline produced
@@ -544,7 +560,11 @@ export function writeRawUpgradeResponse(
   } else {
     body = snapshot.body;
   }
-  let head = statusLine(snapshot.status);
+  // A `Response` can only carry 200–599; Bun, Deno and Node's own path refuse
+  // anything else, so a status no `Response` could hold is answered as 500.
+  const status = snapshot.status;
+  const valid = Number.isInteger(status) && status >= 200 && status <= 599;
+  let head = statusLine(valid ? status : 500);
   snapshot.headers.forEach((value, name) => {
     if (!COMPUTED_HEADERS.has(name)) head += `${name}: ${value}\r\n`;
   });
@@ -552,6 +572,10 @@ export function writeRawUpgradeResponse(
   head += `content-length: ${body.length}\r\nconnection: close\r\n\r\n`;
   socket.write(head);
   if (body.length > 0) socket.write(body);
-  if (socket.end !== undefined) socket.end();
-  else socket.destroy();
+  if (socket.end === undefined) {
+    socket.destroy();
+    return;
+  }
+  socket.once?.('finish', () => socket.destroy());
+  socket.end();
 }

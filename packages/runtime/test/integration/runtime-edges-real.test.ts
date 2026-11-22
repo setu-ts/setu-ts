@@ -117,6 +117,53 @@ describe('a refused upgrade on Node (V13-53)', () => {
   });
 });
 
+describe('a client that resets a refused upgrade (security audit)', () => {
+  it('cannot crash the process, whether it resets after the refusal or while it is decided', async () => {
+    const crashes: unknown[] = [];
+    const onCrash = (error: unknown): void => {
+      crashes.push(error);
+    };
+    process.on('uncaughtException', onCrash);
+    const port = await unusedPort();
+    const adapter = new NodeHttpAdapter();
+    adapter.setUpgradeRouter(() => Promise.resolve(null));
+    adapter.setHandler(async (request: IRequest): Promise<IResponse> => {
+      if (request.headers.get('x-slow') === '1') {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      const headers = new Headers();
+      return {
+        snapshot: () => ({ streaming: false, status: 401, headers, body: 'no' }),
+      } as unknown as IResponse;
+    });
+    const handle = await adapter.listen(port, '127.0.0.1');
+    const upgrade = (slow: boolean): string =>
+      `GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${
+        slow ? 'x-slow: 1\r\n' : ''
+      }Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`;
+    const reset = (slow: boolean): Promise<void> =>
+      new Promise((resolve) => {
+        const socket = netConnect({ port, host: '127.0.0.1', allowHalfOpen: true }, () => {
+          socket.write(upgrade(slow));
+          if (slow) setTimeout(() => socket.resetAndDestroy(), 30);
+        });
+        socket.on('data', () => socket.resetAndDestroy());
+        socket.on('error', () => {});
+        socket.on('close', () => resolve());
+      });
+    try {
+      for (let i = 0; i < 5; i++) await Promise.all([reset(false), reset(true)]);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(crashes).toEqual([]);
+      const reply = await raw(port, upgrade(false));
+      expect(reply.startsWith('HTTP/1.1 401 Unauthorized\r\n')).toBe(true);
+    } finally {
+      process.off('uncaughtException', onCrash);
+      await adapter.close(handle);
+    }
+  });
+});
+
 describe('HEAD on a real server (V13-113)', () => {
   it('answers a GET route with its content-length and no body', async () => {
     const port = await serve((app) => {

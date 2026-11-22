@@ -549,6 +549,9 @@ export class NodeHttpServerHandle {
         RawUpgradeSocket,
         unknown,
       ];
+      // A client that resets the connection emits 'error' on this raw socket;
+      // with no listener that event would end the process.
+      socket.on?.('error', () => socket.destroy());
       // The listener cannot be async — Node ignores a returned promise — so the
       // rejection is handled here rather than escaping as an unhandled one.
       void this.#handleUpgrade(incoming, socket, head).catch(() => {

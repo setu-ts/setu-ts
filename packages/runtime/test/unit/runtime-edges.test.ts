@@ -183,6 +183,40 @@ describe('Node refused upgrade (V13-53)', () => {
   });
 });
 
+describe('Node refused upgrade socket lifetime (security audit)', () => {
+  it('destroys the socket once the refusal has flushed, so a half-open client holds no descriptor', () => {
+    const listeners = new Map<string, () => void>();
+    const socket = Object.assign(rawSocket(), {
+      once(event: string, listener: () => void) {
+        listeners.set(event, listener);
+      },
+    });
+    writeRawUpgradeResponse(socket, {
+      streaming: false,
+      status: 401,
+      headers: new Headers(),
+      body: 'no',
+    });
+    expect(socket.ended).toBe(true);
+    expect(socket.destroyed).toBe(false);
+    listeners.get('finish')?.();
+    expect(socket.destroyed).toBe(true);
+  });
+
+  it('answers 500 for a status no Response could carry', () => {
+    for (const status of [Number.NaN, 0, 101, 199, 600, 1000, 401.5]) {
+      const socket = rawSocket();
+      writeRawUpgradeResponse(socket, {
+        streaming: false,
+        status,
+        headers: new Headers(),
+        body: 'x',
+      });
+      expect(written(socket).startsWith('HTTP/1.1 500 Internal Server Error\r\n')).toBe(true);
+    }
+  });
+});
+
 describe('Node drain start (V13-23)', () => {
   async function listening(
     server: NodeServer,
