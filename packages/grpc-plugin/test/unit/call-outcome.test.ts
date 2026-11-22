@@ -173,7 +173,15 @@ it('does not attribute a request header Node refuses before sending to the insta
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const session = http2.connect(`http://localhost:${port}`);
-  for (const name of ['connection', 'keep-alive', 'upgrade', 'transfer-encoding', 'te']) {
+  for (const name of [
+    'connection',
+    'keep-alive',
+    'proxy-connection',
+    'upgrade',
+    'transfer-encoding',
+    'http2-settings',
+    'te',
+  ]) {
     try {
       session.request({ ':path': '/', [name]: 'x' });
     } catch (error) {
@@ -188,7 +196,7 @@ it('does not attribute a request header Node refuses before sending to the insta
     refusals.push(error);
   }
   expect(refusals.map((error) => (error as { code?: unknown }).code)).toEqual([
-    ...Array<string>(5).fill('ERR_HTTP2_INVALID_CONNECTION_HEADERS'),
+    ...Array<string>(7).fill('ERR_HTTP2_INVALID_CONNECTION_HEADERS'),
     'ERR_INVALID_CHAR',
   ]);
   for (const cause of refusals) {

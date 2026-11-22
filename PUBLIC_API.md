@@ -13413,14 +13413,15 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   at `warn` as `service-discovery-plugin: watch listener for '<name>' failed` with the masked error
   and no instance data, once per name until every failing listener has succeeded, unsubscribed, or
   its watch stopped. A read that started before a newer watch delivery neither replaces the
-  delivered list nor marks the name failed.
+  delivered list nor marks the name failed or starts retry spacing; its failure is still logged and
+  opens a failure run that the next success closes.
 - Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
   await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
   16, then 30 s; success resets spacing. Cold failures are not spaced and leave no cached failure
   state. A name keeps its reporter while its failure run is open and drops it at recovery; at most
-  256 names keep one at once, the oldest open run giving way to a 257th. Per-name reporters warn on
-  first/changed error, debug on identical repeats, info on recovery, with URL userinfo masked. DNS
-  can also log its probe failure.
+  256 names keep one at once, a 257th failing name evicts the one whose last failure is oldest.
+  Per-name reporters warn on first/changed error, debug on identical repeats, info on recovery, with
+  URL userinfo masked. DNS can also log its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
   other failures reject. Use a trusted host resolver. The runtime currently retains only the first
   failed address family, so an absent A record can conceal a timed-out AAAA lookup.
@@ -16357,14 +16358,14 @@ with no response metadata: Connect's binary serialization failure (`serialize bi
 `Internal`) and its exact `writeMaxBytes` refusal (`ResourceExhausted`). A refused-header code
 (`ERR_HTTP2_INVALID_CONNECTION_HEADERS`, `ERR_INVALID_CHAR`) within five cause-chain objects is
 excluded whatever the metadata: a connection-specific header on HTTP/2 (`connection`, `keep-alive`,
-`upgrade`, `transfer-encoding`, `te` other than `trailers`) or a control character in a header value
-on HTTP/1.1. A header name or value the WHATWG `Headers` rejects fails the call before any instance
-is picked, so it is never reported. All other errors fail. Streaming reports success at headers;
-later iteration errors report nothing. Tight caller deadlines can eject healthy instances under
-discovery's ejection limits. Only refused unary streams are resent once within the remaining
-deadline; a drain 503 is not resent. The plugin's own post-close 503 is unmarked. Discover per-pod
-addresses (headless DNS mode `'a'` or Kubernetes) to balance calls: one Service address pins the
-session to one pod.
+`proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`, `te` other than `trailers`) or
+a control character in a header value on HTTP/1.1. A header name or value the WHATWG `Headers`
+rejects fails the call before any instance is picked, so it is never reported. All other errors
+fail. Streaming reports success at headers; later iteration errors report nothing. Tight caller
+deadlines can eject healthy instances under discovery's ejection limits. Only refused unary streams
+are resent once within the remaining deadline; a drain 503 is not resent. The plugin's own
+post-close 503 is unmarked. Discover per-pod addresses (headless DNS mode `'a'` or Kubernetes) to
+balance calls: one Service address pins the session to one pod.
 
 Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals

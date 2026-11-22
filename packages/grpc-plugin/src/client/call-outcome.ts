@@ -68,8 +68,9 @@ const ANSWER_CODES: ReadonlySet<number> = new Set([
 /**
  * Node's codes for a request header it refuses before anything is sent, as
  * reachable through Connect with a WHATWG `Headers` (probed on Node 24): a
- * connection-specific header on HTTP/2 (`connection`, `keep-alive`, `upgrade`,
- * `transfer-encoding`, `te` other than `trailers`), and a control character in
+ * connection-specific header on HTTP/2 (`connection`, `keep-alive`,
+ * `proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`, `te` other
+ * than `trailers`), and a control character in
  * a value on HTTP/1.1, which `Headers` accepts and Node's `ClientRequest`
  * refuses. An invalid name or value that `Headers` itself rejects never gets
  * here: the client builds the call's `Headers` before it picks an instance.

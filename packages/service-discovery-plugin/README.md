@@ -159,7 +159,8 @@ listeners or mark discovery degraded. Its error logs at `warn` as
 `service-discovery-plugin: watch listener for '<name>' failed`, with the service name and masked
 error and no instance data, once per name until every failing listener has succeeded, unsubscribed,
 or its watch stopped. A read that started before a newer watch delivery neither replaces the
-delivered list nor marks the name failed.
+delivered list nor marks the name failed or starts retry spacing; its failure is still logged and
+opens a failure run that the next success closes.
 
 ## Self-registration (Consul only)
 
@@ -286,9 +287,10 @@ Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name
 keeps its reporter while its failure run is open, across cold and warm failures, so repeats log at
 debug and the first success logs the recovery at info; the reporter is dropped at recovery. At most
-256 names keep a reporter at once; when a 257th name starts failing, the oldest open run's reporter
-is dropped. A watch listener error logs at `warn` once per name (see Watching). Cold failures are
-not retry-spaced and do not mark discovery degraded. A DNS failure may also produce a probe reporter
+256 names keep a reporter at once; when a 257th name starts failing, the reporter of the name that
+failed least recently is dropped (its recovery then logs nothing, and its next failure warns again).
+A watch listener error logs at `warn` once per name (see Watching). Cold failures are not
+retry-spaced and do not mark discovery degraded. A DNS failure may also produce a probe reporter
 line.
 
 ## Health indicator

@@ -100,7 +100,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param reporter - Receives each probe failure's reason and each recovery
    *   (M139f X10-3); the plugin passes a logging reporter
    * @param resolveReporter - Builds an independent reporter for each failing name
-   * @param onListenerError - Receives one listener error per name until its failing listeners recover
+   * @param onListenerError - Receives one listener error per name until every failing listener has succeeded or unsubscribed, or the watch stopped
    */
   constructor(
     provider: DiscoveryProvider,

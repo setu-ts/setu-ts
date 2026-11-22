@@ -60,8 +60,9 @@ All notable changes to this project are documented here. The format follows
   failures leave no cached failure state. A name keeps its reporter while its failure run is open
   (repeats at debug, recovery at info), bounded at 256 concurrently failing names. Watch listener
   errors are isolated and warn once per failing run. A read that started before a newer watch
-  delivery neither replaces the delivered list nor marks the name failed. Kubernetes probe timeouts
-  name the API and bound.
+  delivery neither replaces the delivered list nor marks the name failed or starts retry spacing;
+  its failure is still logged and opens a failure run that the next success closes. Kubernetes probe
+  timeouts name the API and bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.
