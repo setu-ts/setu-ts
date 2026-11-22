@@ -294,13 +294,16 @@ run. No other `docs/` file is touched.
   `setu needs Node 22.9.0 or newer; this is Node <v>. Supported: ^22.23.4 || ^24.22.1 || >=26.12.1.`
   From 22.9.0 up to but outside the declared `engines` range (`SUPPORTED_NODE` =
   `^22.23.4 || ^24.22.1 || >=26.12.1`) it writes the existing one-line warning and continues (exit
-  code unaffected). The floor check runs in `bin.ts` (and the `create` package's bin) BEFORE any
-  other module is imported: `bin.ts` statically imports only `node:process` and the dependency-free
-  `utils/node-version.ts`, refuses or continues, and only then loads `main.ts` with a dynamic
-  `import()`. Measured on Node 18 the CLI dies on import (`crypto is not defined`), so a check
-  inside `runMain` could never print. The warning stays in `runMain` as built. Both skip Bun and
-  Deno. `HARD_FLOOR_NODE = '22.9.0'` lives beside `SUPPORTED_NODE` with the measurement in its
-  JSDoc.
+  code unaffected). The floor check runs in `bin.ts` and in the `create` package's bin BEFORE any
+  other module is imported. Both bins statically import only `node:process` and the dependency-free
+  `node-version` module, call one function `nodeFloorRefusal(versions, isDeno)` that returns the
+  refusal message or `undefined` (Bun and Deno always `undefined`), refuse or continue, and only
+  then load the rest with a dynamic `import()`. `create` reaches the module through a new subpath
+  export `@setu-ts/cli/node-version` (see §4): importing `@setu-ts/cli/main` would load the command
+  modules before the check, and a relative path into the CLI's `dist/` assumes an install layout.
+  Measured on Node 18 the CLI dies on import (`crypto is not defined`), so a check inside `runMain`
+  could never print. The warning stays in `runMain` as built. `HARD_FLOOR_NODE = '22.9.0'` lives
+  beside `SUPPORTED_NODE` with the measurement in its JSDoc.
 - **How the floor was measured (2026-11-22, official `node:<v>-slim` images, the branch's built
   CLI):** each version ran `setu --version`, `setu new p --template rest --runtime node --yes`, then
   in `p`: `npm install`, `npm test`, `npm run check`, `npm run build`, `npm start` + `GET /health`.
@@ -324,8 +327,9 @@ run. No other `docs/` file is touched.
   21.7.3, 22.8.0 refused and 22.9.0, 22.12.0 warned; the constant equals both `engines.node`);
   `test/unit/main-node-runtime.test.ts` (warning printed / not printed / skipped under Bun); a bin
   test that spawns the built `bin.js` under a faked version (an injected `process.versions` override
-  through a `--import` preload) and asserts exit 1 with the message and no other output, and that
-  `bin.ts` has no static import besides `node:process` and `node-version.ts`.
+  through a `--import` preload) and asserts exit 1 with the message and no other output, for BOTH
+  bins, and that neither bin has a static import besides `node:process` and the `node-version`
+  module.
 
 ### 3.10a Decisions taken from the comparison (maintainer, 2026-11-22)
 
@@ -368,10 +372,11 @@ nodejs/node#67642 (open PR, 2026-11-20, "read env files only from Node.js option
 `MainProcess`, which is additive). The CLI flag `--env-file` is renamed `--dotenv` (a command-line
 break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ships in minor `0.14.0`.
 
-| Exported symbol                                           | Kind                                 | Consumer / real code path that READS it                                                                                                                                                                  |
-| --------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MainProcess.nodeVersion?`, `MainProcess.isProcessAlive?` | optional fields, `@setu-ts/cli/main` | `runMain` (version warning) and `withProjectLock` (refusal message); `PUBLIC_API.md` `MainProcess` entry updated in the same PR.                                                                         |
-| Nothing new from any package `src/index.ts`               | —                                    | All new symbols are internal to `packages/cli` (`TELEMETRY_PEERS`, `withProjectLock`, the node-version comparator, `TransportConnection.emulator`). `packages/telemetry-plugin` changes only its README. |
+| Exported symbol                                                                                                                           | Kind                                                             | Consumer / real code path that READS it                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MainProcess.nodeVersion?`, `MainProcess.isProcessAlive?`                                                                                 | optional fields, `@setu-ts/cli/main`                             | `runMain` (version warning) and `withProjectLock` (refusal message); `PUBLIC_API.md` `MainProcess` entry updated in the same PR.                                                                                                                                                                                                                                                                                |
+| `@setu-ts/cli/node-version` (new subpath): `SUPPORTED_NODE`, `HARD_FLOOR_NODE`, `isNodeBelowFloor`, `isSupportedNode`, `nodeFloorRefusal` | subpath export (`package.json` `exports`, `deno.json` `exports`) | `nodeFloorRefusal` is read by both bins (`packages/cli/src/bin.ts`, `packages/create/src/bin.ts`); `isSupportedNode`/`SUPPORTED_NODE` by `runMain`'s warning; `HARD_FLOOR_NODE`/`isNodeBelowFloor` by `nodeFloorRefusal`. `PUBLIC_API.md` gains the subpath entry. Deviation from the earlier "all internal" plan, taken 2026-11-22 because `create` must check the floor before importing `@setu-ts/cli/main`. |
+| Nothing new from any package `src/index.ts`                                                                                               | —                                                                | The other new symbols are internal to `packages/cli` (`TELEMETRY_PEERS`, `withProjectLock`, `TransportConnection.emulator`). `packages/telemetry-plugin` changes only its README.                                                                                                                                                                                                                               |
 
 ### 4.1 Options — every option names its consumer
 
@@ -384,32 +389,33 @@ break, listed under BREAKING in `CHANGELOG.md` and in `docs/upgrading.md`); ship
 
 ## 5. Implementation files
 
-| File                                                                                                     | Purpose                                                                                               |
-| -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `packages/cli/src/index.ts`                                                                              | unchanged (no new export).                                                                            |
-| `packages/cli/src/cli.ts`                                                                                | §3.1 `--env-file` refusal, §3.2 empty-value gate.                                                     |
-| `packages/cli/src/args.ts`                                                                               | JSDoc only (§3.2).                                                                                    |
-| `packages/cli/src/constants.ts`, `src/flags.ts`                                                          | `env-file` → `dotenv`.                                                                                |
-| `packages/cli/src/templates/env-file.ts`                                                                 | reads `dotenv`; messages name `--dotenv`.                                                             |
-| `packages/cli/src/workspace/manifest.ts`, `examples/new.ts`, `workspace/compose.ts`, `templates/rest.ts` | `readEnvFilePath` caller and the remaining `--env-file` mentions (§3.1); `examples/new.ts` also §3.9. |
-| `apps/*/.dockerignore` (six files)                                                                       | the regenerated CLI comment naming `--dotenv`.                                                        |
-| `packages/cli/src/templates/style.ts` (if the class-based manifest is built there)                       | §3.3 peers on the class-based microservice host.                                                      |
-| `PUBLIC_API.md`                                                                                          | `MainProcess` optional fields (§4).                                                                   |
-| `packages/cli/src/commands/new.ts`, `commands/app.ts`                                                    | help/refusal text; §3.9 target checks.                                                                |
-| `packages/cli/src/commands/add.ts`                                                                       | §3.3 peers on Workers, §3.4 bigtable peers, §3.6 note printing, §3.7 lock.                            |
-| `packages/cli/src/commands/add-view.ts`                                                                  | §3.5 test scripts.                                                                                    |
-| `packages/cli/src/commands/generate.ts`, `commands/sync.ts`                                              | §3.7 lock.                                                                                            |
-| `packages/cli/src/templates/client-dependencies.ts`                                                      | `TELEMETRY_PEERS`.                                                                                    |
-| `packages/cli/src/templates/microservice.ts`                                                             | `npmDependencies` from `TELEMETRY_PEERS` on both hosts.                                               |
-| `packages/cli/src/templates/project-files.ts`                                                            | §3.6 test scripts load the dotenv; §3.7 `.gitignore` line.                                            |
-| `packages/cli/src/workspace/transport.ts`, `templates/broker.ts`                                         | §3.6 `emulator` field and second env row.                                                             |
-| `packages/cli/src/workspace/runtime-profile.ts`, `workspace/root-files.ts`                               | §3.8 root test script and `scripts/test.mjs`.                                                         |
-| `packages/cli/src/utils/project-lock.ts` (new)                                                           | §3.7.                                                                                                 |
-| `packages/cli/src/utils/node-version.ts` (new)                                                           | §3.10 comparator and `SUPPORTED_NODE`.                                                                |
-| `packages/cli/src/main.ts`                                                                               | §3.10 check; `nodeVersion`/`isProcessAlive` on the Node host.                                         |
-| `packages/cli/README.md`, `docs/cli.md`, `docs/deployment.md`                                            | §2 C1, and every behaviour above that the docs describe.                                              |
-| `packages/telemetry-plugin/README.md`                                                                    | §2 C2: peers on every runtime, microservice template lists them, Bigtable note.                       |
-| `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `CLAUDE.md`                                           | letter entries.                                                                                       |
+| File                                                                                                           | Purpose                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `packages/cli/src/index.ts`                                                                                    | unchanged (no new export).                                                                               |
+| `packages/cli/src/cli.ts`                                                                                      | §3.1 `--env-file` refusal, §3.2 empty-value gate.                                                        |
+| `packages/cli/src/args.ts`                                                                                     | JSDoc only (§3.2).                                                                                       |
+| `packages/cli/src/constants.ts`, `src/flags.ts`                                                                | `env-file` → `dotenv`.                                                                                   |
+| `packages/cli/src/templates/env-file.ts`                                                                       | reads `dotenv`; messages name `--dotenv`.                                                                |
+| `packages/cli/src/workspace/manifest.ts`, `examples/new.ts`, `workspace/compose.ts`, `templates/rest.ts`       | `readEnvFilePath` caller and the remaining `--env-file` mentions (§3.1); `examples/new.ts` also §3.9.    |
+| `apps/*/.dockerignore` (six files)                                                                             | the regenerated CLI comment naming `--dotenv`.                                                           |
+| `packages/cli/src/templates/style.ts` (if the class-based manifest is built there)                             | §3.3 peers on the class-based microservice host.                                                         |
+| `PUBLIC_API.md`                                                                                                | `MainProcess` optional fields (§4).                                                                      |
+| `packages/cli/src/commands/new.ts`, `commands/app.ts`                                                          | help/refusal text; §3.9 target checks.                                                                   |
+| `packages/cli/src/commands/add.ts`                                                                             | §3.3 peers on Workers, §3.4 bigtable peers, §3.6 note printing, §3.7 lock.                               |
+| `packages/cli/src/commands/add-view.ts`                                                                        | §3.5 test scripts.                                                                                       |
+| `packages/cli/src/commands/generate.ts`, `commands/sync.ts`                                                    | §3.7 lock.                                                                                               |
+| `packages/cli/src/templates/client-dependencies.ts`                                                            | `TELEMETRY_PEERS`.                                                                                       |
+| `packages/cli/src/templates/microservice.ts`                                                                   | `npmDependencies` from `TELEMETRY_PEERS` on both hosts.                                                  |
+| `packages/cli/src/templates/project-files.ts`                                                                  | §3.6 test scripts load the dotenv; §3.7 `.gitignore` line.                                               |
+| `packages/cli/src/workspace/transport.ts`, `templates/broker.ts`                                               | §3.6 `emulator` field and second env row.                                                                |
+| `packages/cli/src/workspace/runtime-profile.ts`, `workspace/root-files.ts`                                     | §3.8 root test script and `scripts/test.mjs`.                                                            |
+| `packages/cli/src/utils/project-lock.ts` (new)                                                                 | §3.7.                                                                                                    |
+| `packages/cli/src/utils/node-version.ts` (new)                                                                 | §3.10 comparator, `SUPPORTED_NODE`, `HARD_FLOOR_NODE`, `nodeFloorRefusal`; the `./node-version` subpath. |
+| `packages/cli/src/bin.ts`, `packages/create/src/bin.ts`, `packages/cli/package.json`, `packages/cli/deno.json` | §3.10 floor check before any other import; the subpath export.                                           |
+| `packages/cli/src/main.ts`                                                                                     | §3.10 check; `nodeVersion`/`isProcessAlive` on the Node host.                                            |
+| `packages/cli/README.md`, `docs/cli.md`, `docs/deployment.md`                                                  | §2 C1, and every behaviour above that the docs describe.                                                 |
+| `packages/telemetry-plugin/README.md`                                                                          | §2 C2: peers on every runtime, microservice template lists them, Bigtable note.                          |
+| `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `CLAUDE.md`                                                 | letter entries.                                                                                          |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
