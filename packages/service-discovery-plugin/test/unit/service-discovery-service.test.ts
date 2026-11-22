@@ -873,3 +873,17 @@ it('keeps a failing name reporter while long-recovered names refresh, so its rec
   expect(created.filter((name) => name === 'now-0')).toHaveLength(2);
   service.close();
 });
+
+it('does not store a cold empty answer, so absent names never grow the cache', async () => {
+  const provider = createFakeProvider();
+  const service = new ServiceDiscoveryService(
+    provider,
+    createFakeRuntime(),
+    resolveOptions({ provider: 'custom', discovery: provider }),
+  );
+  for (let n = 0; n < 1000; n++) expect(await service.resolve(`absent-${n}`)).toEqual([]);
+  expect(service.cachedServices).toBe(0);
+  expect(service.degraded).toBe(false);
+  expect(service.everResolved).toBe(true);
+  service.close();
+});

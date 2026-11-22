@@ -329,11 +329,11 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   signal.
 - **Test home:** `test/unit/empty-answer-rule.test.ts` (new; one table driven through BOTH `#read`
   and `watch` on the fake clock: warm then `[]` keeps the list and is degraded; `[]` after the grace
-  replaces; a non-empty answer in between resets; cold `[]` stored at once; `0` replaces at once;
-  the watch listener receives the held list during the grace); `test/unit/dns-provider.test.ts`
-  (each classifier input as a table row, in SRV mode and wrapped in mode `'a'`'s `cause`:
-  `ENOTFOUND`, `ENODATA`, Deno `NotFound` resolve `[]`; `ETIMEOUT`, `ECONNREFUSED`, `ESERVFAIL`
-  reject; a cause chain deeper than the bound rejects).
+  replaces; a non-empty answer in between resets; cold `[]` returned and not stored (security audit
+  F4); `0` replaces at once; the watch listener receives the held list during the grace);
+  `test/unit/dns-provider.test.ts` (each classifier input as a table row, in SRV mode and wrapped in
+  mode `'a'`'s `cause`: `ENOTFOUND`, `ENODATA`, Deno `NotFound` resolve `[]`; `ETIMEOUT`,
+  `ECONNREFUSED`, `ESERVFAIL` reject; a cause chain deeper than the bound rejects).
 
 ### 3.3 A stable default Consul registration id (V13-103)
 
@@ -663,6 +663,39 @@ because the drain answer is written through the application's error responder wh
   `inject()`: a server-stream handler awaiting its next event is cancelled by `body.cancel()` and
   its `finally` runs.
 
+### 3.12 Security audit fixes (committed-tree audit of 73e025603, 2026-11-23)
+
+- **F1, `cacheTtlMs` refused out of range.** `resolveOptions` refuses a non-finite or out-of-range
+  `cacheTtlMs` with `deadlineRangeError`, as it does `resolveTimeoutMs` and `emptyAnswerGraceMs`:
+  with background refresh a `NaN` (`age >= NaN` is false) would have kept a warm list forever with
+  nothing reporting it. Test: `test/unit/options.test.ts` refusal and acceptance rows.
+- **F2, a header list over the peer's advertised limit (coordinator decision A).** The client wraps
+  each HTTP/2 session manager's `request` (`client/header-list-guard.ts`): when the stream's
+  `session.remoteSettings.maxHeaderListSize` is below 4294967295 (what Node reports when the peer
+  advertised none) and the sent header list's RFC 7541 §4.1 size (name + value octets + 32 per
+  field, from `stream.sentHeaders`) is over it, the stream is destroyed at once with
+  `GrpcHeaderListTooLargeError`. `callOutcome` exempts that error by name in the cause chain (no
+  report), and it is not a refused stream (no resend). The accounting was measured on Node 24.22.1
+  against a peer advertising 16384: 16384 octets is accepted and 16385 refused, matching the RFC
+  formula. The check runs after the pick, because the limit belongs to the picked instance's
+  session; the pick itself records nothing. Not covered: a peer that advertises no limit. Node's own
+  server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`, which no
+  client can predict; Core can make Setu's listener advertise its limit (§11). grpc-go's handling of
+  an over-limit send is not verified.
+- **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is
+  returned and not stored; a warm name keeps the §3.2 grace rule. The per-name resolve warnings
+  share a budget of 20 `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`,
+  with one `warn` notice per window. The README says discovery names should be chosen by the
+  application, not taken from requests.
+- **F3, a payload that makes a healthy handler throw (held for the maintainer).** OD10 counts a
+  handler's `Internal` as an instance failure, so crafted input can eject healthy replicas.
+  `EjectionTracker.record` clears an instance's failure window on any success. Measured with two
+  healthy Setu servers, default ejection (5 failures in 30 s, 50 % cap), on Node 24.22.1: with no
+  other traffic, 9 sequential bad calls eject one instance; with background successful traffic at
+  20, 100 or 400 calls/s, 400 sequential bad calls (or bursts of 5) eject nothing; bursts of 20
+  concurrent bad calls eject one instance after 20–40 bad calls at every background rate. Options
+  are in the coordinator report; the outcome rule is unchanged until the maintainer decides.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none in this lane. `DiscoveryProvider.resolve` gains an optional
@@ -684,6 +717,7 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `ConnectRuntime.errorMetadata`                                          | internal port member         | The marked-503 resend rule in `GrpcClients.#call` (after the Core gate, §3.9). Not exported; added only with §3.9.                                                          |
 | Streaming-procedure local `AbortController`                             | internal (no symbol)         | `rpc-dispatcher.ts` creates it; `iterableStream` and `nativeGrpcReply` `cancel()` abort it (§3.11).                                                                         |
 | `callOutcome`                                                           | internal function            | `GrpcClients.#attempt` and `#call`. Not exported.                                                                                                                           |
+| `GrpcHeaderListTooLargeError`                                           | class, barrel export         | Thrown by the header-list guard; `callOutcome` exempts it; callers read it as the call error's `cause` (§3.12).                                                             |
 | `validateCircuitBreakerPolicy`                                          | internal function            | `ResiliencePlugin.register` and `ResilienceService.#resolveCircuitBreaker`. Not exported.                                                                                   |
 
 ### 4.1 Options — every option names its consumer
@@ -716,6 +750,9 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `packages/resilience-plugin/src/services/resilience-service.ts`               | Validates a breaker policy from `wrap`.                                                                                                                 |
 | `packages/resilience-plugin/src/plugin/resilience-plugin.ts`                  | Validates `defaultCircuitBreaker` at registration.                                                                                                      |
 | `packages/grpc-plugin/src/client/call-outcome.ts`                             | New: `callOutcome`, and (after the Core gate, §3.9) the marked-503 resend rule.                                                                         |
+| `packages/grpc-plugin/src/client/header-list-guard.ts`                        | New: wraps each session manager's `request`; destroys an over-limit stream with `GrpcHeaderListTooLargeError` (§3.12).                                  |
+| `packages/grpc-plugin/src/errors/grpc-errors.ts`                              | `GrpcHeaderListTooLargeError` (§3.12).                                                                                                                  |
+| `packages/service-discovery-plugin/src/plugin/warn-budget.ts`                 | New: the shared resolve-warning budget (§3.12).                                                                                                         |
 | `packages/grpc-plugin/src/client/grpc-client.ts`                              | Uses `callOutcome`; passes the caller's signal; resends a marked drain 503 (after the Core gate).                                                       |
 | `packages/grpc-plugin/src/interfaces/connect-runtime.ts`                      | `isWireError(error): boolean`; `errorMetadata(error): Headers \| undefined` (with §3.9 only).                                                           |
 | `packages/grpc-plugin/src/transports/connect-loader.ts`                       | Implements `isWireError` (and, with §3.9, `errorMetadata`) over `ConnectError`.                                                                         |
@@ -726,37 +763,39 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                         | src covered                    | Key assertions (and the signature each call type-checks against)                                                                                                                               |
-| --------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `service-discovery-plugin/test/unit/service-discovery-service.test.ts` (extend)   | `service-discovery-service.ts` | §3.1 rows, including "a warm caller never awaits the backend" with a fake whose refresh never resolves; `new ServiceDiscoveryService(provider, runtime, resolved, reporter, resolveReporter)`. |
-| `service-discovery-plugin/test/unit/refresh-backoff.test.ts` (new)                | `refresh-backoff.ts`           | 1, 2, 4, 8, 16, 30, 30 s spacing on a fake clock; reset on success; names independent.                                                                                                         |
-| `service-discovery-plugin/test/unit/empty-answer-rule.test.ts` (new)              | `service-discovery-service.ts` | §3.2 table through `resolve()` and `watch()`.                                                                                                                                                  |
-| `service-discovery-plugin/test/unit/options.test.ts` (extend)                     | `options.ts`                   | Defaults `2000`/`30_000`, `0` accepted, `-1`/`NaN`/over range refused; `servers` shape refused.                                                                                                |
-| `service-discovery-plugin/test/unit/consul-provider.test.ts` (extend)             | `consul-provider.ts`           | Signal on `request`; default id `<name>-<address>-<port>`.                                                                                                                                     |
-| `service-discovery-plugin/test/unit/providers/consul-health.test.ts` (extend)     | `consul-provider.ts`           | Probe bound through `withDeadline`; results unchanged.                                                                                                                                         |
-| `service-discovery-plugin/test/unit/kubernetes-provider.test.ts` (extend)         | `kubernetes-provider.ts`       | Signal on `request` in `resolve`.                                                                                                                                                              |
-| `service-discovery-plugin/test/unit/providers/kubernetes-health.test.ts` (extend) | `kubernetes-provider.ts`       | Named bound message, no `AbortError`.                                                                                                                                                          |
-| `service-discovery-plugin/test/unit/dns-provider.test.ts` (extend)                | `dns-provider.ts`              | `isNameAbsent` table; `[]` for absent; other errors reject.                                                                                                                                    |
-| `service-discovery-plugin/test/unit/providers/dns-health.test.ts` (rewrite)       | `dns-provider.ts`              | Last-outcome table.                                                                                                                                                                            |
-| `service-discovery-plugin/test/unit/provider-factory.test.ts` (extend)            | `provider-factory.ts`          | `servers` path and refusal with a fake runtime carrying `createDnsResolver`.                                                                                                                   |
-| `service-discovery-plugin/test/unit/static-provider.test.ts` (extend)             | `static-provider.ts`           | Accepts a signal, unchanged answer.                                                                                                                                                            |
-| `service-discovery-plugin/test/unit/plugin/health-indicator.test.ts` (extend)     | `service-discovery-plugin.ts`  | DNS `down` and `up`+`degraded` rows; `staleForMs` present and status `up` while refreshes fail; resolve reporter wired.                                                                        |
-| `service-discovery-plugin/test/integration/readiness.test.ts` (extend)            | plugin + service               | Hung Consul fake in a kernel app via `inject()`: warm calls answer at once, `/ready` 200, `degraded` true, `staleForMs` above zero.                                                            |
-| `service-discovery-plugin/test/integration/self-registration.test.ts` (extend)    | `consul-provider.ts`, plugin   | Restart with the same registration leaves one agent entry.                                                                                                                                     |
-| `resilience-plugin/test/unit/circuit-breaker.test.ts` (extend)                    | `circuit-breaker.ts`           | Count arm unchanged; rate arm rows.                                                                                                                                                            |
-| `resilience-plugin/test/unit/resilience-service.test.ts` (extend)                 | `resilience-service.ts`        | Refusal rows; both entry points under one non-default rate policy agree.                                                                                                                       |
-| `resilience-plugin/test/unit/resilience-plugin.test.ts` (extend)                  | `resilience-plugin.ts`         | `defaultCircuitBreaker` refused at registration.                                                                                                                                               |
-| `grpc-plugin/test/unit/grpc-client.test.ts` (extend)                              | `grpc-client.ts`               | Outcome wiring; marked-503 resend rows (after the Core gate); an unmarked 503 is never resent.                                                                                                 |
-| `grpc-plugin/test/unit/call-outcome.test.ts` (new)                                | `call-outcome.ts`              | The §3.8 table as data, including JSON-parsed wire `Unimplemented`/`Unavailable`.                                                                                                              |
-| `grpc-plugin/test/unit/rpc-call.test.ts` (extend)                                 | `rpc-call.ts`                  | §3.11: abort before `return()`, a signal-watching suspended generator settles.                                                                                                                 |
-| `grpc-plugin/test/unit/native-grpc-reply.test.ts` (new)                           | `native-grpc-reply.ts`         | §3.11 rows for the native reply, plus its existing trailer behaviour.                                                                                                                          |
-| `grpc-plugin/test/unit/rpc-dispatcher.test.ts` (extend)                           | `rpc-dispatcher.ts`            | Combined signal for a streaming procedure only.                                                                                                                                                |
-| `grpc-plugin/test/e2e/grpc-streaming-e2e.test.ts` (extend)                        | streaming end to end           | A handler awaiting its next event is cancelled by `body.cancel()` and its `finally` runs.                                                                                                      |
-| `grpc-plugin/test/unit/connect-loader.test.ts` (extend)                           | `connect-loader.ts`            | `isWireError` true for a decoded trailer error and a JSON-parsed body, false for `HTTP 503` and a transport error; `errorMetadata` (with §3.9).                                                |
-| `grpc-plugin/test/unit/connect-real-import.test.ts` (extend)                      | `connect-loader.ts`            | Guarded REAL import: `isWireError` on real `ConnectError` instances.                                                                                                                           |
-| `grpc-plugin/test/e2e/grpc-client-scenarios-e2e.test.ts` (extend)                 | client end to end              | Four dead-port rows ejected; drain 503 resent to the other replica.                                                                                                                            |
-| `grpc-plugin/test/e2e/grpc-client-e2e.test.ts` (extend)                           | client end to end              | Two instances share 100 calls.                                                                                                                                                                 |
-| `grpc-plugin/test/fixtures/fake-connect-runtime.ts` (fixture)                     | n/a                            | Gains `isWireError`, matching the real flag (cross-checked by the real-import test).                                                                                                           |
+| Test file                                                                         | src covered                              | Key assertions (and the signature each call type-checks against)                                                                                                                               |
+| --------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `service-discovery-plugin/test/unit/service-discovery-service.test.ts` (extend)   | `service-discovery-service.ts`           | §3.1 rows, including "a warm caller never awaits the backend" with a fake whose refresh never resolves; `new ServiceDiscoveryService(provider, runtime, resolved, reporter, resolveReporter)`. |
+| `service-discovery-plugin/test/unit/refresh-backoff.test.ts` (new)                | `refresh-backoff.ts`                     | 1, 2, 4, 8, 16, 30, 30 s spacing on a fake clock; reset on success; names independent.                                                                                                         |
+| `service-discovery-plugin/test/unit/empty-answer-rule.test.ts` (new)              | `service-discovery-service.ts`           | §3.2 table through `resolve()` and `watch()`.                                                                                                                                                  |
+| `service-discovery-plugin/test/unit/options.test.ts` (extend)                     | `options.ts`                             | Defaults `2000`/`30_000`, `0` accepted, `-1`/`NaN`/over range refused; `servers` shape refused.                                                                                                |
+| `service-discovery-plugin/test/unit/consul-provider.test.ts` (extend)             | `consul-provider.ts`                     | Signal on `request`; default id `<name>-<address>-<port>`.                                                                                                                                     |
+| `service-discovery-plugin/test/unit/providers/consul-health.test.ts` (extend)     | `consul-provider.ts`                     | Probe bound through `withDeadline`; results unchanged.                                                                                                                                         |
+| `service-discovery-plugin/test/unit/kubernetes-provider.test.ts` (extend)         | `kubernetes-provider.ts`                 | Signal on `request` in `resolve`.                                                                                                                                                              |
+| `service-discovery-plugin/test/unit/providers/kubernetes-health.test.ts` (extend) | `kubernetes-provider.ts`                 | Named bound message, no `AbortError`.                                                                                                                                                          |
+| `service-discovery-plugin/test/unit/dns-provider.test.ts` (extend)                | `dns-provider.ts`                        | `isNameAbsent` table; `[]` for absent; other errors reject.                                                                                                                                    |
+| `service-discovery-plugin/test/unit/providers/dns-health.test.ts` (rewrite)       | `dns-provider.ts`                        | Last-outcome table.                                                                                                                                                                            |
+| `service-discovery-plugin/test/unit/provider-factory.test.ts` (extend)            | `provider-factory.ts`                    | `servers` path and refusal with a fake runtime carrying `createDnsResolver`.                                                                                                                   |
+| `service-discovery-plugin/test/unit/static-provider.test.ts` (extend)             | `static-provider.ts`                     | Accepts a signal, unchanged answer.                                                                                                                                                            |
+| `service-discovery-plugin/test/unit/plugin/health-indicator.test.ts` (extend)     | `service-discovery-plugin.ts`            | DNS `down` and `up`+`degraded` rows; `staleForMs` present and status `up` while refreshes fail; resolve reporter wired.                                                                        |
+| `service-discovery-plugin/test/integration/readiness.test.ts` (extend)            | plugin + service                         | Hung Consul fake in a kernel app via `inject()`: warm calls answer at once, `/ready` 200, `degraded` true, `staleForMs` above zero.                                                            |
+| `service-discovery-plugin/test/integration/self-registration.test.ts` (extend)    | `consul-provider.ts`, plugin             | Restart with the same registration leaves one agent entry.                                                                                                                                     |
+| `resilience-plugin/test/unit/circuit-breaker.test.ts` (extend)                    | `circuit-breaker.ts`                     | Count arm unchanged; rate arm rows.                                                                                                                                                            |
+| `resilience-plugin/test/unit/resilience-service.test.ts` (extend)                 | `resilience-service.ts`                  | Refusal rows; both entry points under one non-default rate policy agree.                                                                                                                       |
+| `resilience-plugin/test/unit/resilience-plugin.test.ts` (extend)                  | `resilience-plugin.ts`                   | `defaultCircuitBreaker` refused at registration.                                                                                                                                               |
+| `grpc-plugin/test/unit/grpc-client.test.ts` (extend)                              | `grpc-client.ts`                         | Outcome wiring; marked-503 resend rows (after the Core gate); an unmarked 503 is never resent.                                                                                                 |
+| `grpc-plugin/test/unit/call-outcome.test.ts` (new)                                | `call-outcome.ts`                        | The §3.8 table as data, including JSON-parsed wire `Unimplemented`/`Unavailable`.                                                                                                              |
+| `grpc-plugin/test/unit/header-list-guard.test.ts` (new)                           | `header-list-guard.ts`, `grpc-errors.ts` | RFC 7541 sizes; over/at/no-limit/no-settings rows; outcome exemption.                                                                                                                          |
+| `service-discovery-plugin/test/unit/warn-budget.test.ts` (new)                    | `warn-budget.ts`                         | Budget, notice, window reset, no logger.                                                                                                                                                       |
+| `grpc-plugin/test/unit/rpc-call.test.ts` (extend)                                 | `rpc-call.ts`                            | §3.11: abort before `return()`, a signal-watching suspended generator settles.                                                                                                                 |
+| `grpc-plugin/test/unit/native-grpc-reply.test.ts` (new)                           | `native-grpc-reply.ts`                   | §3.11 rows for the native reply, plus its existing trailer behaviour.                                                                                                                          |
+| `grpc-plugin/test/unit/rpc-dispatcher.test.ts` (extend)                           | `rpc-dispatcher.ts`                      | Combined signal for a streaming procedure only.                                                                                                                                                |
+| `grpc-plugin/test/e2e/grpc-streaming-e2e.test.ts` (extend)                        | streaming end to end                     | A handler awaiting its next event is cancelled by `body.cancel()` and its `finally` runs.                                                                                                      |
+| `grpc-plugin/test/unit/connect-loader.test.ts` (extend)                           | `connect-loader.ts`                      | `isWireError` true for a decoded trailer error and a JSON-parsed body, false for `HTTP 503` and a transport error; `errorMetadata` (with §3.9).                                                |
+| `grpc-plugin/test/unit/connect-real-import.test.ts` (extend)                      | `connect-loader.ts`                      | Guarded REAL import: `isWireError` on real `ConnectError` instances.                                                                                                                           |
+| `grpc-plugin/test/e2e/grpc-client-scenarios-e2e.test.ts` (extend)                 | client end to end                        | Four dead-port rows ejected; drain 503 resent to the other replica.                                                                                                                            |
+| `grpc-plugin/test/e2e/grpc-client-e2e.test.ts` (extend)                           | client end to end                        | Two instances share 100 calls.                                                                                                                                                                 |
+| `grpc-plugin/test/fixtures/fake-connect-runtime.ts` (fixture)                     | n/a                                      | Gains `isWireError`, matching the real flag (cross-checked by the real-import test).                                                                                                           |
 
 `connect-runtime.ts` and `service-discovery-plugin/src/interfaces/index.ts` are types-only files (no
 runtime code to cover). Every fix row except V13-24 (documentation, §3.10) has a test that fails
@@ -888,6 +927,9 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   README, `PUBLIC_API.md` SDK section and a CHANGELOG line for that behaviour change." Owning
   letter: the CLI-lane letter that holds `sdk` (M143k per the lane table), to be confirmed by the
   maintainer.
+- **Core lane (security audit F2, small):** `packages/runtime` Node HTTP/2 listener: "advertise the
+  server's real `maxHeaderListSize` in its SETTINGS, so a Setu client can stop an over-limit call
+  before it is sent instead of the peer refusing it as a stream it never processed."
 - **CLI lane (V13-24; M143d, whose ROADMAP section lists "Half of a row owned elsewhere: V13-24
   (owned by M143c)"):** `packages/cli/src/workspace/k8s.ts` and
   `packages/cli/src/workspace/discovery-module.ts`: "for a member whose transport is gRPC, emit a

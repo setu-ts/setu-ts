@@ -121,6 +121,9 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
         abort(): void {
           this.#entry.aborted = true;
         }
+        request(): Promise<never> {
+          return Promise.reject(new Error('the fake transport never opens a stream'));
+        }
         state(): string {
           stateReads.count++;
           const state = states.get(this.#entry.url) ?? 'idle';

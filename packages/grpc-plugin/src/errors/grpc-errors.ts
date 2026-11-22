@@ -58,3 +58,31 @@ export class GrpcUnavailableError extends Error {
     this.name = 'GrpcUnavailableError';
   }
 }
+
+/**
+ * A client call whose request header list is larger than the peer advertised
+ * in its HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`. The call is stopped before it
+ * is processed, it is never reported against the instance, and it is not sent
+ * to another one: the headers are the caller's to shrink. It reaches the caller
+ * as the `cause` of the call's `ConnectError`.
+ *
+ * Sizes follow RFC 7541 §4.1: each field counts its name and value octets plus
+ * 32.
+ * @since 0.14.0
+ */
+export class GrpcHeaderListTooLargeError extends Error {
+  /** The request's header list size, in octets. */
+  readonly size: number;
+  /** The peer's advertised limit, in octets. */
+  readonly limit: number;
+
+  constructor(size: number, limit: number) {
+    super(
+      `The call's header list is ${size} octets, over the ${limit} the peer accepts ` +
+        '(HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE); send fewer or smaller headers.',
+    );
+    this.name = 'GrpcHeaderListTooLargeError';
+    this.size = size;
+    this.limit = limit;
+  }
+}

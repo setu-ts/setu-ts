@@ -38,6 +38,10 @@ All notable changes to this project are documented here. The format follows
   refresh in the background. `cacheTtlMs: 0` now refreshes every warm call, coalesced; no setting
   restores waiting on every warm read. Applications requiring that policy must provide their own
   `IServiceDiscovery` implementation.
+- **BREAKING — `@setu-ts/service-discovery-plugin`.** `cacheTtlMs` outside 0–2147483647, or `NaN` or
+  `Infinity`, is now refused with `RangeError` at `ServiceDiscoveryPlugin(...)`. A `NaN` (an unset
+  variable read through `Number()`) used to make every call read the backend; with background
+  refresh it would have kept a warm list forever. Pass a finite value.
 - **BREAKING — `@setu-ts/service-discovery-plugin`.** Empty answers hold a nonempty list for 30000
   ms; set `emptyAnswerGraceMs: 0` to restore immediate replacement. A grace timer re-reads without
   another backend event and broadcasts replacement to all watchers; read changes also reach watchers
@@ -55,6 +59,13 @@ All notable changes to this project are documented here. The format follows
   old outcome mapping; `ejection: false` on discovery disables automatic ejection if the changed
   classifications are unsuitable, without restoring old reports. A response-stream cancel now aborts
   the handler's signal before awaiting cleanup without a bound.
+- **`@setu-ts/grpc-plugin`.** `GrpcHeaderListTooLargeError`: a client call whose header list is over
+  the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` (RFC 7541 §4.1 sizes) is stopped
+  before the peer processes it, with this error as the call error's `cause`; it is never counted
+  against the instance or resent. A peer that advertises no limit gets no check.
+- **`@setu-ts/service-discovery-plugin`.** A cold empty answer is returned and no longer stored, so
+  absent names cannot grow the cache. The per-name resolve warnings share a budget of 20 `warn`
+  lines a minute; past it they log at `debug`, with one notice.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
   on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
   failures leave no cached failure state. A name keeps its reporter while its failure run is open

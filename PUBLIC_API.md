@@ -13305,31 +13305,31 @@ token from.
 
 ### Options
 
-| Option               | Arms               | Default                      | Behavior                                                                 |
-| -------------------- | ------------------ | ---------------------------- | ------------------------------------------------------------------------ |
-| `provider`           | all                | —                            | Discriminant; always explicit                                            |
-| `cacheTtlMs`         | all                | `30_000`                     | Age that starts background refresh; `0` refreshes every warm call        |
-| `resolveTimeoutMs`   | all                | `2000`                       | Read bound (DNS watch too); `0` unbounded; finite 0–2147483647           |
-| `emptyAnswerGraceMs` | all                | `30_000`                     | Hold nonempty lists on empty answers; `0` immediate; finite 0–2147483647 |
-| `strategy`           | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`                 |
-| `ejection`           | all                | see below                    | `false` disables outlier ejection entirely                               |
-| `selfRegistration`   | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms             |
-| `watchIntervalMs`    | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread              |
-| `services`           | static             | —                            | Unknown name resolves to `[]`, never a throw                             |
-| `address`            | consul             | —                            | Agent base URL                                                           |
-| `token`              | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset      |
-| `datacenter`         | consul             | —                            | Sent as `?dc=`                                                           |
-| `waitSeconds`        | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600     |
-| `namespace`          | kubernetes         | —                            | Required                                                                 |
-| `apiServer`          | kubernetes         | in-cluster env               | Absent both, `register()` throws                                         |
-| `token`              | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo          |
-| `portName`           | kubernetes         | —                            | Unset with one port uses it; unset with several throws                   |
-| `mode`               | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records     |
-| `domainTemplate`     | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                       |
-| `port`               | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port                 |
-| `secure`             | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme          |
-| `http`               | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                                 |
-| `discovery`          | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied              |
+| Option               | Arms               | Default                      | Behavior                                                                                                 |
+| -------------------- | ------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `provider`           | all                | —                            | Discriminant; always explicit                                                                            |
+| `cacheTtlMs`         | all                | `30_000`                     | Age that starts background refresh; `0` refreshes every warm call; outside 0–2147483647 or `NaN` refused |
+| `resolveTimeoutMs`   | all                | `2000`                       | Read bound (DNS watch too); `0` unbounded; finite 0–2147483647                                           |
+| `emptyAnswerGraceMs` | all                | `30_000`                     | Hold nonempty lists on empty answers; `0` immediate; finite 0–2147483647                                 |
+| `strategy`           | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`                                                 |
+| `ejection`           | all                | see below                    | `false` disables outlier ejection entirely                                                               |
+| `selfRegistration`   | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms                                             |
+| `watchIntervalMs`    | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread                                              |
+| `services`           | static             | —                            | Unknown name resolves to `[]`, never a throw                                                             |
+| `address`            | consul             | —                            | Agent base URL                                                                                           |
+| `token`              | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset                                      |
+| `datacenter`         | consul             | —                            | Sent as `?dc=`                                                                                           |
+| `waitSeconds`        | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600                                     |
+| `namespace`          | kubernetes         | —                            | Required                                                                                                 |
+| `apiServer`          | kubernetes         | in-cluster env               | Absent both, `register()` throws                                                                         |
+| `token`              | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo                                          |
+| `portName`           | kubernetes         | —                            | Unset with one port uses it; unset with several throws                                                   |
+| `mode`               | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records                                     |
+| `domainTemplate`     | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                                                       |
+| `port`               | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port                                                 |
+| `secure`             | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme                                          |
+| `http`               | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                                                                 |
+| `discovery`          | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied                                              |
 
 ### Outlier ejection
 
@@ -13405,9 +13405,10 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   coalesced, retry-spaced background read at the grace deadline. If still empty, replacement reaches
   every watcher without another backend event. Changes from reads also notify watchers once;
   unchanged watch deliveries still notify. Nonempty answers, replacement and close clear the timer.
-  Cold empty answers are stored at once. A read of a watched name still starts a background refresh
-  once its list is `cacheTtlMs` old. Subscribers to one name share one provider watch; a later
-  subscriber receives the cached list at once. A listener may receive the current list on
+  A cold empty answer (a name with no list yet, such as an absent DNS name) is returned and not
+  stored, so absent names never grow the cache. A read of a watched name still starts a background
+  refresh once its list is `cacheTtlMs` old. Subscribers to one name share one provider watch; a
+  later subscriber receives the cached list at once. A listener may receive the current list on
   subscription and the same list more than once. The provider watch stops when the last subscriber
   unsubscribes. Each listener failure is isolated from discovery and other subscribers; it is logged
   at `warn` as `service-discovery-plugin: watch listener for '<name>' failed` with the masked error
@@ -16328,19 +16329,20 @@ grpc.addService(AnotherDefinition, anotherImpl);
 
 ### Exports
 
-| Export                 | Kind     | Purpose                                                                                       |
-| ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `GrpcPlugin`           | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                           |
-| `grpcClient`           | function | `grpcClient(services, definition, target, options?)`: a typed Connect `Client` (`0.13.0`)     |
-| `grpcClientProvider`   | function | The same client as an `@Module` provider entry under a token (`0.13.0`)                       |
-| `GrpcService`          | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing       |
-| `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
-| `GrpcUnavailableError` | class    | **Deprecated** — nothing throws it since M70a; `handleRequest` needs no adapter capability    |
-| `GrpcRuntimeLoadError` | class    | A Connect/Protobuf-ES specifier, or connect-node on a client's first call, cannot be imported |
-| `GrpcDescriptorError`  | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service        |
-| `GrpcPluginOptions`    | type     | The factory parameter shape; `readMaxBytes`, `serve`, `clients` are `@since 0.13.0`           |
-| `GrpcClientOptions`    | type     | Re-exported from `@setu-ts/common`: `basePath`, `protocol`, `httpVersion`, `timeoutMs`        |
-| `ConnectModuleLike`    | type     | The four-module bundle `adaptConnectModule` accepts                                           |
+| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GrpcPlugin`                  | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                                                                                                                                                                                                                                                       |
+| `grpcClient`                  | function | `grpcClient(services, definition, target, options?)`: a typed Connect `Client` (`0.13.0`)                                                                                                                                                                                                                                 |
+| `grpcClientProvider`          | function | The same client as an `@Module` provider entry under a token (`0.13.0`)                                                                                                                                                                                                                                                   |
+| `GrpcService`                 | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing                                                                                                                                                                                                                                   |
+| `adaptConnectModule`          | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port                                                                                                                                                                                                                             |
+| `GrpcUnavailableError`        | class    | **Deprecated** — nothing throws it since M70a; `handleRequest` needs no adapter capability                                                                                                                                                                                                                                |
+| `GrpcRuntimeLoadError`        | class    | A Connect/Protobuf-ES specifier, or connect-node on a client's first call, cannot be imported                                                                                                                                                                                                                             |
+| `GrpcDescriptorError`         | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                                                                                                                    |
+| `GrpcHeaderListTooLargeError` | class    | `@since 0.14.0`. The `cause` of a client call whose header list (RFC 7541 §4.1: name + value octets + 32 per field) is over the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`; carries `size` and `limit`. Never reported against the instance and never resent. A peer that advertises no limit gets no check |
+| `GrpcPluginOptions`           | type     | The factory parameter shape; `readMaxBytes`, `serve`, `clients` are `@since 0.13.0`                                                                                                                                                                                                                                       |
+| `GrpcClientOptions`           | type     | Re-exported from `@setu-ts/common`: `basePath`, `protocol`, `httpVersion`, `timeoutMs`                                                                                                                                                                                                                                    |
+| `ConnectModuleLike`           | type     | The four-module bundle `adaptConnectModule` accepts                                                                                                                                                                                                                                                                       |
 
 > `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
 > port; publishing them would commit the package to a shape that tracks Connect's own API.

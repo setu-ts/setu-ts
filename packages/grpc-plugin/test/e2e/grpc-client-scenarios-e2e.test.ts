@@ -381,6 +381,7 @@ interface Echo {
     options?: {
       timeoutMs?: number;
       signal?: AbortSignal;
+      headers?: HeadersInit;
       onHeader?: (headers: Headers) => void;
       onTrailer?: (trailers: Headers) => void;
     },
@@ -620,5 +621,68 @@ describeNode('grpcClient scenarios', () => {
     const refused = await failure(billing.echo({ message: 'x'.repeat(200) }));
     expect(Code[refused.code]).toBe('ResourceExhausted');
     expect((await billing.echo({ message: 'small' })).response).toBe('echo: small');
+  });
+});
+
+describeNode('grpcClient and a peer header-list limit', () => {
+  it('stops an over-limit call before a peer processes it and never ejects the healthy instances', async () => {
+    const { connectNodeAdapter } = await import('@connectrpc/connect-node');
+    const limit = 4096;
+    const served: Record<string, number> = { a: 0, b: 0 };
+    const instances: { id: string; port: number }[] = [];
+    for (const id of ['a', 'b']) {
+      const port = await unusedPort();
+      const server = http2Server(
+        { settings: { maxHeaderListSize: limit } },
+        connectNodeAdapter({
+          requestPathPrefix: '/grpc',
+          routes: (router) => {
+            router.service(SVC.echo, {
+              echo: (request: { message: string }) => {
+                served[id]! += 1;
+                return { response: `echo: ${request.message}` };
+              },
+            } as never);
+          },
+        }),
+      );
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+      closers.push(
+        () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.unref();
+          }),
+      );
+      instances.push({ id, port });
+    }
+    const caller = await startCaller(instances);
+    const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+    // One ordinary call per instance opens its session and reads its settings.
+    for (let n = 0; n < 2; n++) await billing.echo({ message: 'warm' });
+    await sleep(50);
+    const before = { ...served };
+    const big = { 'x-big': 'a'.repeat(limit) };
+    for (let n = 0; n < 10; n++) {
+      const error = await failure(billing.echo({ message: 'big' }, { headers: big }));
+      let cause: unknown = error;
+      let named = false;
+      for (let depth = 0; depth < 5 && typeof cause === 'object' && cause !== null; depth++) {
+        if ((cause as { name?: unknown }).name === 'GrpcHeaderListTooLargeError') named = true;
+        cause = (cause as { cause?: unknown }).cause;
+      }
+      expect(named, JSON.stringify({ code: error.code, message: error.rawMessage })).toBe(true);
+    }
+    // No peer processed an over-limit call, and both instances stay in rotation.
+    expect(served).toEqual(before);
+    const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+    const picked = new Set<string>();
+    for (let n = 0; n < 4; n++) picked.add((await discovery.pick('billing'))!.id);
+    expect([...picked].sort()).toEqual(['a', 'b']);
+    // A header list under the limit still goes through: the guard counts what was sent.
+    const underLimit = { 'x-small': 'a'.repeat(limit - 1024) };
+    expect((await billing.echo({ message: 'small' }, { headers: underLimit })).response).toBe(
+      'echo: small',
+    );
   });
 });

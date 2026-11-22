@@ -443,6 +443,13 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       old.instances.length > 0 &&
       now - emptySince < this.#options.emptyAnswerGraceMs;
     const accepted = held ? old.instances : instances;
+    if (old === undefined && instances.length === 0) {
+      // A cold empty answer is not stored: a name nobody has a list for gains
+      // no cache entry, so absent names (NXDOMAIN on the DNS arm) cannot grow
+      // the cache. It is still a successful read.
+      this.#readSucceeded(serviceName);
+      return { instances, changed: false };
+    }
     this.#cache.set(serviceName, {
       instances: accepted,
       stampMs: now,

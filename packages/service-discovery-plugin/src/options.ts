@@ -26,6 +26,8 @@ interface CommonDiscoveryOptions {
    *
    * Warm names always return the cached list. `0` refreshes on every call,
    * coalesced while a refresh runs. Failed refreshes keep the last good list.
+   * Must be a finite number from 0 to 2147483647; anything else (`NaN`,
+   * `Infinity`, a negative) is refused with a `RangeError` at construction.
    */
   readonly cacheTtlMs?: number;
   /** Read bound in milliseconds; default 2000, `0` unbounded. @since 0.14.0 */
@@ -239,9 +241,14 @@ export interface ResolvedDiscoveryOptions {
 export function resolveOptions(options: ServiceDiscoveryPluginOptions): ResolvedDiscoveryOptions {
   const resolveTimeoutMs = options.resolveTimeoutMs ?? 2000;
   const emptyAnswerGraceMs = options.emptyAnswerGraceMs ?? 30_000;
+  const cacheTtlMs = options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000;
+  // `cacheTtlMs` is refused like the two bounds: a `NaN` (an unset variable
+  // through `Number()`) would make `age >= cacheTtlMs` always false, so a warm
+  // list would never be refreshed, with nothing reporting it.
   for (const [name, value] of [
     ['resolveTimeoutMs', resolveTimeoutMs],
     ['emptyAnswerGraceMs', emptyAnswerGraceMs],
+    ['cacheTtlMs', cacheTtlMs],
   ] as const) {
     const refusal = deadlineRangeError(name, value);
     if (refusal !== null) throw refusal;
@@ -262,7 +269,7 @@ export function resolveOptions(options: ServiceDiscoveryPluginOptions): Resolved
   const base = {
     resolveTimeoutMs,
     emptyAnswerGraceMs,
-    cacheTtlMs: options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000,
+    cacheTtlMs,
     strategy: options.strategy ?? ('round-robin' as const),
     ejection,
     watchIntervalMs,

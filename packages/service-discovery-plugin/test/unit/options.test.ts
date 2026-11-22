@@ -132,7 +132,7 @@ it('defaults the read bound and empty grace, and accepts zero', () => {
     }),
   ).toMatchObject({ resolveTimeoutMs: 0, emptyAnswerGraceMs: 0 });
 });
-for (const field of ['resolveTimeoutMs', 'emptyAnswerGraceMs'] as const) {
+for (const field of ['resolveTimeoutMs', 'emptyAnswerGraceMs', 'cacheTtlMs'] as const) {
   for (const value of [-1, NaN, Infinity, 2147483648]) {
     it(`refuses ${field}=${value} both at the resolver and plugin`, () => {
       const options = { provider: 'static' as const, services: {}, [field]: value };
@@ -141,3 +141,11 @@ for (const field of ['resolveTimeoutMs', 'emptyAnswerGraceMs'] as const) {
     });
   }
 }
+
+it('keeps a valid cacheTtlMs, including 0 and the largest timer value', () => {
+  for (const cacheTtlMs of [0, 1, 2147483647]) {
+    expect(resolveOptions({ provider: 'static', services: {}, cacheTtlMs }).cacheTtlMs).toBe(
+      cacheTtlMs,
+    );
+  }
+});

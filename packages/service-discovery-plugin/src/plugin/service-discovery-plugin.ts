@@ -20,6 +20,7 @@ import type { DiscoveryProvider, SelfRegistration } from '../interfaces/index.ts
 import type { ServiceDiscoveryPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';
 import { createProvider } from '../providers/provider-factory.ts';
+import { createWarnBudget } from './warn-budget.ts';
 import { ServiceDiscoveryService } from '../services/service-discovery-service.ts';
 import { SelfRegistrationNotSupportedError } from '../errors.ts';
 import { isMissingFile, TOKEN_PATH } from '../providers/kubernetes-provider.ts';
@@ -84,6 +85,12 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         source: `service-discovery-plugin: ${provider.kind}`,
         logger: () => ctx.logger,
       });
+      // One shared budget caps the warn lines of every per-name resolve reporter.
+      const resolveLogger = createWarnBudget(
+        () => ctx.logger,
+        () => ctx.runtime.hrtime(),
+        `service-discovery-plugin: ${provider.kind} resolve`,
+      );
       const service = new ServiceDiscoveryService(
         provider,
         ctx.runtime,
@@ -92,7 +99,7 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         (serviceName) =>
           createConnectionErrorReporter({
             source: `service-discovery-plugin: ${provider.kind} resolve '${serviceName}'`,
-            logger: () => ctx.logger,
+            logger: resolveLogger,
           }),
         (serviceName, error) =>
           ctx.logger?.warn(`service-discovery-plugin: watch listener for '${serviceName}' failed`, {

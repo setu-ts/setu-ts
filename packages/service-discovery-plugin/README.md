@@ -162,6 +162,10 @@ or its watch stopped. A read that started before a newer watch delivery neither 
 delivered list nor marks the name failed or starts retry spacing; its failure is still logged and
 opens a failure run that the next success closes.
 
+Discovery names should be chosen by the application, never taken from a request. As a backstop, the
+per-name resolve warnings share a budget of 20 `warn` lines a minute; past it, further ones log at
+`debug` and one `warn` says so.
+
 ## Self-registration (Consul only)
 
 ```typescript
@@ -239,7 +243,7 @@ working while the pod is still healthy.
 | Option               | Arms               | Default                      | Notes                                                                                                                      |
 | -------------------- | ------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `provider`           | all                | —                            | Discriminant; always explicit                                                                                              |
-| `cacheTtlMs`         | all                | `30_000`                     | Age that starts a background refresh; `0` refreshes every warm call                                                        |
+| `cacheTtlMs`         | all                | `30_000`                     | Age that starts a background refresh; `0` refreshes every warm call; outside 0–2147483647 or `NaN` is refused              |
 | `resolveTimeoutMs`   | all                | `2000`                       | Read bound, including DNS watch ticks; `0` unbounded; finite 0–2147483647                                                  |
 | `emptyAnswerGraceMs` | all                | `30_000`                     | Hold a warm list on empty answers; `0` immediate; finite 0–2147483647                                                      |
 | `strategy`           | all                | `'round-robin'`              | Overridable per `pick()` call                                                                                              |
@@ -274,8 +278,9 @@ An empty answer holds a nonempty list for `emptyAnswerGraceMs` (default 30000 ms
 once). Read and watch callers see the same held list, with `degraded: true`. Nonempty answers reset
 the grace and clear its timer. A per-name timer starts a background read at the grace deadline,
 coalesced with any active read and subject to normal failure retry spacing. Its empty answer
-replaces the list and reaches every watcher without another backend event. Cold empty answers are
-stored at once; replacement and close clear the timer. An empty answer succeeded, so it does not
+replaces the list and reaches every watcher without another backend event. A cold empty answer (a
+name with no list yet, such as an absent DNS name) is returned and not stored, so absent names never
+grow the cache; replacement and close clear the timer. An empty answer succeeded, so it does not
 raise `staleForMs` or incur failure spacing.
 
 DNS NXDOMAIN/no-record answers (`ENOTFOUND`, `ENODATA`, Deno `NotFound`, including wrapped causes)

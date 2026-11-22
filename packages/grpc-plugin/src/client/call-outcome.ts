@@ -113,6 +113,7 @@ export function callOutcome(
 function isPreSendFault(error: unknown, code: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   if (hasInvalidRequestHeaderCause(error)) return true;
+  if (hasHeaderListTooLargeCause(error)) return true;
   const record = error as { metadata?: unknown; rawMessage?: unknown };
   if (
     record.metadata !== undefined &&
@@ -127,6 +128,21 @@ function isPreSendFault(error: unknown, code: unknown): boolean {
     );
   // Binary only: the client always sends the binary format (`useBinaryFormat`).
   return code === GRPC_CODE.Internal && message.startsWith('serialize binary: ');
+}
+
+/**
+ * Whether the cause chain (at most five objects) holds the header-list guard's
+ * refusal (`GrpcHeaderListTooLargeError`), matched by name so an error built
+ * by another copy of the package still matches.
+ */
+function hasHeaderListTooLargeCause(error: object): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    const { name, cause } = current as { name?: unknown; cause?: unknown };
+    if (name === 'GrpcHeaderListTooLargeError') return true;
+    current = cause;
+  }
+  return false;
 }
 
 /** Whether the cause chain (at most five objects) holds a refused caller header. */
