@@ -89,12 +89,13 @@ tenant binding is no longer committed on a `404` that is not a page navigation.
 ### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
 
 `cacheMiddleware` no longer stores a response marked `private` or `no-store`, nor one for a request
-that wrote application data to the session (even when the handler marks it `public`), and a request
-carrying `Authorization` or any cookie is served only an entry stored with `Cache-Control: public`
-that does not vary on `Cookie` or `Authorization`. A response varying on either is stored and served
-only for requests carrying no cookie and no `Authorization`, and a `Vary: *` response is never
-stored. An application whose visitors all carry an unrelated cookie (analytics, consent) gets
-nothing cached until it marks responses `public` or names its session cookie:
+whose session was written (an application key set, deleted or cleared, or a `regenerate()` or
+`destroy()`) even when the handler marks it `public`, and a request carrying `Authorization` or any
+cookie is served only an entry stored with `Cache-Control: public` that does not vary on `Cookie` or
+`Authorization`. A response varying on either is stored and served only for requests carrying no
+cookie and no `Authorization`, and a `Vary: *` response is never stored. An application whose
+visitors all carry an unrelated cookie (analytics, consent) gets nothing cached until it marks
+responses `public` or names its session cookie:
 `cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
 `Authorization` no longer shares a handler run with concurrent misses for the same key.
 
