@@ -155,8 +155,11 @@ list is `cacheTtlMs` old.
 Subscribers to one name share one provider watch. A later subscriber receives the cached list at
 once; a listener may receive the current list on subscription and the same list more than once. The
 provider watch stops when the last subscriber unsubscribes. A throwing listener does not block other
-listeners or mark discovery degraded. Its error logs once per name until the failing listeners
-succeed again, with the service name and masked error, without instance data.
+listeners or mark discovery degraded. Its error logs at `warn` as
+`service-discovery-plugin: watch listener for '<name>' failed`, with the service name and masked
+error and no instance data, once per name until every failing listener has succeeded, unsubscribed,
+or its watch stopped. A read that started before a newer watch delivery neither replaces the
+delivered list nor marks the name failed.
 
 ## Self-registration (Consul only)
 
@@ -280,11 +283,13 @@ can empty the list after the grace. The runtime currently retains only the first
 family, so an absent A answer can conceal a timed-out AAAA lookup. DNS record TTLs are not read.
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
-error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked.
-Reporters persist across cold failures, so repeated failures log at debug and the first success logs
-recovery at info. The 256 most recently used names retain independent reporters; the least recently
-used is evicted when another name fails. Cold failures are not retry-spaced and do not mark
-discovery degraded. A DNS failure may also produce a probe reporter line.
+error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name
+keeps its reporter while its failure run is open, across cold and warm failures, so repeats log at
+debug and the first success logs the recovery at info; the reporter is dropped at recovery. At most
+256 names keep a reporter at once; when a 257th name starts failing, the oldest open run's reporter
+is dropped. A watch listener error logs at `warn` once per name (see Watching). Cold failures are
+not retry-spaced and do not mark discovery degraded. A DNS failure may also produce a probe reporter
+line.
 
 ## Health indicator
 

@@ -44,12 +44,11 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - Failed warm refreshes retry after 1, 2, 4, 8, 16, then 30 s; cold failures are not spaced.
 - `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
   at expiry; empty results reach watchers without another event. Nonempty answers/close clear it.
-- Subscribers share one provider watch per name; later subscribers get cache at once. Subscription
-  may deliver the current list; lists may repeat. Last unsubscribe stops the provider watch.
+- One provider watch per name; joiners get the cache at once; lists may repeat.
 - `degraded`: warm failures/held empties. `staleForMs`: failed-list age. All providers cache health
   for 5 s; DNS uses its last lookup outcome. DNS absent names resolve `[]`; other errors reject.
-- Reporters retain 256 names by recency: warn first/changed, debug repeats, info recovery, even
-  cold.
+- Failing names keep a reporter (max 256): warn, debug repeats, info recovery. Listener errors are
+  isolated, warn once. Reads older than a watch delivery are dropped.
 - Consul ids default to `<serviceName>-<address>-<port>`; use the instance's own address.
 - Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears state.
 

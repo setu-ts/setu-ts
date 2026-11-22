@@ -49,17 +49,19 @@ All notable changes to this project are documented here. The format follows
   `<serviceName>-<address>-<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
   an existing identity; `address` must be the instance's own address, never a shared hostname.
 - **BREAKING — `@setu-ts/grpc-plugin`.** Instance outcomes now distinguish wire application answers,
-  server faults and unclassified transport faults. Caller aborts and pre-send
-  serialization/write-limit/header-validation faults report nothing. No option restores the old
-  outcome mapping; `ejection: false` on discovery disables automatic ejection if the changed
+  server faults and unclassified transport faults. Caller aborts and pre-send faults (binary
+  serialization, `writeMaxBytes`, a request header Node refuses) report nothing; a header name or
+  value `Headers` rejects now fails the call before any instance is picked. No option restores the
+  old outcome mapping; `ejection: false` on discovery disables automatic ejection if the changed
   classifications are unsuitable, without restoring old reports. A response-stream cancel now aborts
   the handler's signal before awaiting cleanup without a bound.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
   on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
-  failures leave no cached failure state; reporters retain the 256 most recently used names so
-  repeated cold failures log at debug and recovery at info. Watch listener errors are isolated and
-  warn once per failing run; an older read cannot overwrite a newer watch delivery. Kubernetes probe
-  timeouts name the API and bound.
+  failures leave no cached failure state. A name keeps its reporter while its failure run is open
+  (repeats at debug, recovery at info), bounded at 256 concurrently failing names. Watch listener
+  errors are isolated and warn once per failing run. A read that started before a newer watch
+  delivery neither replaces the delivered list nor marks the name failed. Kubernetes probe timeouts
+  name the API and bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.

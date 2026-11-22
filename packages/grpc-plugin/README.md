@@ -112,15 +112,18 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   target and is checked the same way at `GrpcPlugin()`. After each call the client reports to
   discovery: an instance fails when it did not answer, or answered with a server-fault code
   (`Unavailable`, `Unimplemented`, `Internal`, `Unknown`, `DataLoss`, `DeadlineExceeded`), wire or
-  not. A few client-side faults raised before the request leaves report nothing: Connect's
+  not. A few client-side faults raised before the request leaves report nothing: Connect's binary
   serialization failure (`Internal`), its `writeMaxBytes` refusal (`ResourceExhausted`), and a
-  caller header that `node:http2` refuses (`connection`, an invalid name, a repeated single-value
-  header). Peer `Canceled` fails; caller cancellation reports nothing. Wire application/caller codes
-  (`InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
-  `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed; all other errors
-  fail. Streaming reports success when response headers arrive; later iteration errors report
-  nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
-  discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
+  request header Node refuses before sending: a connection-specific header on HTTP/2 (`connection`,
+  `keep-alive`, `upgrade`, `transfer-encoding`, `te` other than `trailers`) or a control character
+  in a header value on HTTP/1.1. A header name or value that `Headers` itself rejects fails the call
+  before any instance is picked. Peer `Canceled` fails; caller cancellation reports nothing. Wire
+  application/caller codes (`InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`,
+  `Unauthenticated`, `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed;
+  all other errors fail. Streaming reports success when response headers arrive; later iteration
+  errors report nothing. A deadline tighter than healthy latency can eject a healthy instance,
+  bounded by discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s
+  ejection).
 - **Connections.** A Service address that balances connections pins every call to one pod. Discover
   pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
   pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every

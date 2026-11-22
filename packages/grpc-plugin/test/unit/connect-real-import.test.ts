@@ -67,7 +67,11 @@ it.skipIf(!available)(
     try {
       jsonSerializers.serialize(input);
     } catch (error) {
-      errors.push(error);
+      // JSON is never sent by the client (it always uses the binary format),
+      // so this shape is not excluded: it would be reported as a failure.
+      if (!(error instanceof ConnectError))
+        throw new Error('Expected a real ConnectError', { cause: error });
+      expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
     }
     const limited = limitSerialization(
       { serialize: () => new Uint8Array(10), parse: () => ({}) },
@@ -78,10 +82,10 @@ it.skipIf(!available)(
     } catch (error) {
       errors.push(error);
     }
-    expect(errors).toHaveLength(3);
+    expect(errors).toHaveLength(2);
     for (const [index, error] of errors.entries()) {
       if (!(error instanceof ConnectError)) throw new Error('Expected a real ConnectError');
-      expect(error.code).toBe([Code.Internal, Code.Internal, Code.ResourceExhausted][index]);
+      expect(error.code).toBe([Code.Internal, Code.ResourceExhausted][index]);
       expect(runtime.isWireError(error)).toBe(false);
       expect([...error.metadata]).toEqual([]);
       expect(callOutcome(error, undefined, runtime.isWireError)).toBeUndefined();

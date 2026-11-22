@@ -1134,3 +1134,37 @@ it('neither reports nor retries a caller-aborted refused stream', async () => {
   expect(discovery.reports).toEqual([]);
   clientSet.close();
 });
+
+it('refuses an invalid caller header before picking or reporting an instance', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  let picks = 0;
+  const pick = discovery.pick.bind(discovery);
+  discovery.pick = (...args: Parameters<typeof pick>) => {
+    picks++;
+    return pick(...args);
+  };
+  let calls = 0;
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      return Promise.resolve({});
+    }),
+  );
+  const client = clientSet.client(BILLING, 'billing') as { transport: ClientTransportLike };
+  for (const header of [{ 'x a': '1' }, { 'x-a': 'a\nb' }, { 'x-a': 'é€' }]) {
+    await expect(
+      client.transport.unary({}, undefined, undefined, header, {}),
+    ).rejects.toBeInstanceOf(TypeError);
+    await expect(
+      client.transport.stream({}, undefined, undefined, header, (async function* () {})()),
+    ).rejects.toBeInstanceOf(TypeError);
+  }
+  expect(picks).toBe(0);
+  expect(calls).toBe(0);
+  expect(discovery.reports).toEqual([]);
+  // A valid header, given as a plain object, still reaches the transport.
+  await client.transport.unary({}, undefined, undefined, { 'x-a': 'ok' }, {});
+  expect(calls).toBe(1);
+  clientSet.close();
+});

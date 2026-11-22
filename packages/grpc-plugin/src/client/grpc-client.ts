@@ -365,7 +365,14 @@ export class GrpcClients {
       // interceptor: an interceptor is one more async layer on every call, even
       // one with no active span to carry.
       unary: (method, signal, timeoutMs, header, input, contextValues) => {
-        const traced = this.#withTraceparent(header);
+        let traced: HeadersInit | undefined;
+        try {
+          traced = this.#withTraceparent(header);
+        } catch (error) {
+          // An invalid caller header is the caller's fault: refused before
+          // any instance is picked, so it is never reported against one.
+          return Promise.reject(error);
+        }
         return this.#call(
           target,
           base,
@@ -378,7 +385,14 @@ export class GrpcClients {
         );
       },
       stream: (method, signal, timeoutMs, header, input, contextValues) => {
-        const traced = this.#withTraceparent(header);
+        let traced: HeadersInit | undefined;
+        try {
+          traced = this.#withTraceparent(header);
+        } catch (error) {
+          // An invalid caller header is the caller's fault: refused before
+          // any instance is picked, so it is never reported against one.
+          return Promise.reject(error);
+        }
         return this.#call(
           target,
           base,
@@ -591,11 +605,19 @@ export class GrpcClients {
 
   /**
    * The call's headers with the active span's `traceparent` added, unless it
-   * already carries one. Unchanged — no copy — when there is no span.
+   * already carries one. Headers given in any form other than a `Headers` instance are
+   * built here, so an invalid name or value throws before the call picks an
+   * instance (Connect would otherwise throw it inside the call, where it would
+   * be reported against the instance). A `Headers` instance with no span to
+   * add is passed through unchanged.
+   *
+   * @throws {TypeError} When a header name or value is invalid
    */
   #withTraceparent(header: HeadersInit | undefined): HeadersInit | undefined {
     const value = this.#traceparent();
-    if (value === null) return header;
+    if (value === null) {
+      return header === undefined || header instanceof Headers ? header : new Headers(header);
+    }
     const headers = new Headers(header);
     if (!headers.has('traceparent')) headers.set('traceparent', value);
     return headers;

@@ -422,10 +422,11 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
 
   #readSucceeded(name: string): void {
     this.#backoff.reset(name);
+    // The reporter lives only while the name's failure run is open, so the
+    // 256 bound counts names failing now, never names that recovered long ago.
     const reporter = this.#resolveReporters.get(name);
     if (reporter !== undefined) {
       this.#resolveReporters.delete(name);
-      this.#resolveReporters.set(name, reporter);
       reporter.recovered();
     }
     this.#everResolved = true;
@@ -473,6 +474,12 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
         const reporter = this.#resolveReporterFor(serviceName);
         reporter.report(error);
         const stale = this.#cache.get(serviceName);
+        // A newer watch delivery arrived while this read was in flight: the
+        // list in hand is fresher than the failed read, so it is not marked
+        // failed and no retry spacing starts.
+        if (stale !== undefined && (this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
+          return stale.instances;
+        }
         if (stale !== undefined) {
           stale.failed = true;
           this.#backoff.failed(serviceName);

@@ -72,7 +72,7 @@ it('gives caller abort first priority, refused streams second, and defaults unkn
 
 it('does not attribute local serialization or write-limit faults to the instance', async () => {
   const runtime = await loadConnectModule();
-  const serialization = ConnectError.from(new Error('cannot serialize request'), Code.Internal);
+  const serialization = new ConnectError('serialize binary: cannot encode request', Code.Internal);
   const writeLimit = new ConnectError(
     'message size 10 is larger than configured writeMaxBytes 1',
     Code.ResourceExhausted,
@@ -134,13 +134,14 @@ it('limits the serialization/write-limit exclusions to their message, code and a
   const limit = 'message size 10 is larger than configured writeMaxBytes 1';
   for (const error of [
     new ConnectError(serialization, Code.Internal),
-    ConnectError.from(new TypeError('invalid JSON request'), Code.Internal),
     new ConnectError(limit, Code.ResourceExhausted),
   ])
     expect(callOutcome(error, undefined, runtime.isWireError)).toBeUndefined();
   for (const error of [
     new ConnectError('parse binary: bad response', Code.Internal),
     new ConnectError('serialize binary:invalid request', Code.Internal),
+    // The JSON format is never sent by the client, so its shape is not excluded.
+    ConnectError.from(new TypeError('invalid JSON request'), Code.Internal),
     new ConnectError(serialization, Code.Unknown),
     new ConnectError(serialization, Code.Internal, { 'content-type': 'application/grpc' }),
     new ConnectError(limit, Code.Internal),
@@ -162,33 +163,33 @@ it('limits the serialization/write-limit exclusions to their message, code and a
     expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
 });
 
-it('does not attribute a caller header node:http2 refuses before sending to the instance', async () => {
+it('does not attribute a request header Node refuses before sending to the instance', async () => {
   const runtime = await loadConnectModule();
   const http2 = await import('node:http2');
+  const http = await import('node:http');
+  const refusals: unknown[] = [];
   const server = http2.createServer();
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const address = server.address();
   const port = typeof address === 'object' && address !== null ? address.port : 0;
   const session = http2.connect(`http://localhost:${port}`);
-  const refusals: unknown[] = [];
-  const headers: readonly Record<string, string | string[]>[] = [
-    { connection: 'close' },
-    { 'bad header': 'x' },
-    { host: ['a', 'b'] },
-  ];
-  for (const header of headers) {
+  for (const name of ['connection', 'keep-alive', 'upgrade', 'transfer-encoding', 'te']) {
     try {
-      session.request({ ':path': '/', ...header });
+      session.request({ ':path': '/', [name]: 'x' });
     } catch (error) {
       refusals.push(error);
     }
   }
   session.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  try {
+    http.request({ host: 'localhost', port: 1, headers: { 'x-a': 'a\u0001b' } });
+  } catch (error) {
+    refusals.push(error);
+  }
   expect(refusals.map((error) => (error as { code?: unknown }).code)).toEqual([
-    'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-    'ERR_INVALID_HTTP_TOKEN',
-    'ERR_HTTP2_HEADER_SINGLE_VALUE',
+    ...Array<string>(5).fill('ERR_HTTP2_INVALID_CONNECTION_HEADERS'),
+    'ERR_INVALID_CHAR',
   ]);
   for (const cause of refusals) {
     const wrapped = new ConnectError('request failed', Code.Internal, undefined, undefined, cause);
@@ -196,18 +197,20 @@ it('does not attribute a caller header node:http2 refuses before sending to the 
     const deep = new ConnectError(
       'request failed',
       Code.Unknown,
-      undefined,
+      { 'x-response': '1' },
       undefined,
       new Error('wrapper', { cause }),
     );
     expect(callOutcome(deep, undefined, runtime.isWireError)).toBeUndefined();
   }
-  const other = new ConnectError(
-    'request failed',
-    Code.Internal,
-    undefined,
-    undefined,
-    Object.assign(new Error('reset'), { code: 'ECONNRESET' }),
-  );
-  expect(callOutcome(other, undefined, runtime.isWireError)).toBe('failure');
+  for (const code of ['ERR_INVALID_HTTP_TOKEN', 'ERR_HTTP2_HEADER_SINGLE_VALUE', 'ECONNRESET']) {
+    const other = new ConnectError(
+      'request failed',
+      Code.Internal,
+      undefined,
+      undefined,
+      Object.assign(new Error('fault'), { code }),
+    );
+    expect(callOutcome(other, undefined, runtime.isWireError)).toBe('failure');
+  }
 });

@@ -790,3 +790,86 @@ it('does not overwrite a newer watch delivery with an older in-flight refresh, b
   await flush();
   service.close();
 });
+
+it('does not mark a name failed when its read fails after a newer watch delivery', async () => {
+  const runtime = createFakeRuntime();
+  const watched = createFakeProvider([a]);
+  let fail!: (error: Error) => void;
+  let calls = 0;
+  const provider = {
+    ...watched,
+    resolve: () => {
+      calls++;
+      return calls === 1
+        ? Promise.resolve([a])
+        : new Promise<readonly (typeof a)[]>((_, reject) => {
+            fail = reject;
+          });
+    },
+  };
+  const logger = new RecordingLogger();
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0, resolveTimeoutMs: 0 }),
+    undefined,
+    (name) => createConnectionErrorReporter({ source: name, logger: () => logger }),
+  );
+  await service.resolve('billing');
+  await service.watch('billing', () => {});
+  await service.resolve('billing'); // Starts the background read that will fail.
+  await flush();
+  watched.emit('billing', [b]);
+  fail(new Error('down'));
+  await flush();
+  expect(service.degraded).toBe(false);
+  expect(service.staleForMs).toBe(0);
+  // No retry spacing started: the next expired call refreshes at once.
+  const before = calls;
+  await service.resolve('billing');
+  await flush();
+  expect(calls).toBe(before + 1);
+  expect(await service.resolve('billing')).toEqual([b]);
+  service.close();
+});
+
+it('keeps a failing name reporter while long-recovered names refresh, so its recovery logs', async () => {
+  const runtime = createFakeRuntime();
+  const provider = createFakeProvider([a]);
+  const logger = new RecordingLogger();
+  const created: string[] = [];
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+    undefined,
+    (name) => {
+      created.push(name);
+      return createConnectionErrorReporter({ source: name, logger: () => logger });
+    },
+  );
+  provider.failWith(new Error('down'));
+  for (let n = 0; n < 256; n++) await expect(service.resolve(`old-${n}`)).rejects.toThrow();
+  provider.failWith(null);
+  for (let n = 0; n < 256; n++) await service.resolve(`old-${n}`); // All recover.
+  provider.failWith(new Error('down'));
+  await expect(service.resolve('failing')).rejects.toThrow();
+  provider.failWith(null);
+  // The recovered names keep refreshing successfully (background refreshes on
+  // every call with cacheTtlMs 0), which must not push the failing name out.
+  for (let n = 0; n < 256; n++) {
+    await service.resolve(`old-${n}`);
+    await flush();
+  }
+  provider.failWith(new Error('down'));
+  await expect(service.resolve('another')).rejects.toThrow();
+  provider.failWith(null);
+  await service.resolve('failing');
+  expect(logger.forSource('failing').map((entry) => entry.level)).toEqual(['warn', 'info']);
+  // 257 names failing at once evict the oldest open run.
+  provider.failWith(new Error('down'));
+  for (let n = 0; n < 257; n++) await expect(service.resolve(`now-${n}`)).rejects.toThrow();
+  await expect(service.resolve('now-0')).rejects.toThrow();
+  expect(created.filter((name) => name === 'now-0')).toHaveLength(2);
+  service.close();
+});

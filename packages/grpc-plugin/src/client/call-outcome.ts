@@ -66,23 +66,26 @@ const ANSWER_CODES: ReadonlySet<number> = new Set([
 ]);
 
 /**
- * Node's `node:http2` codes for a request header the caller supplied that it
- * refuses before anything is sent, probed on Node 24: a connection-specific
- * header (`connection`, `te` other than `trailers`), an invalid header name, and
- * a single-value header given several values.
+ * Node's codes for a request header it refuses before anything is sent, as
+ * reachable through Connect with a WHATWG `Headers` (probed on Node 24): a
+ * connection-specific header on HTTP/2 (`connection`, `keep-alive`, `upgrade`,
+ * `transfer-encoding`, `te` other than `trailers`), and a control character in
+ * a value on HTTP/1.1, which `Headers` accepts and Node's `ClientRequest`
+ * refuses. An invalid name or value that `Headers` itself rejects never gets
+ * here: the client builds the call's `Headers` before it picks an instance.
  */
 const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
   'ERR_HTTP2_INVALID_CONNECTION_HEADERS',
-  'ERR_INVALID_HTTP_TOKEN',
-  'ERR_HTTP2_HEADER_SINGLE_VALUE',
+  'ERR_INVALID_CHAR',
 ]);
 
 /**
- * Reports only faults attributable to the selected instance.
+ * Reports every failed call against the selected instance, except caller
+ * cancellation and the pre-send client faults `isPreSendFault` recognises.
  * @param error - The rejected call
  * @param signal - The caller's signal
  * @param isWireError - Whether Connect decoded this error from a server answer
- * @returns The discovery outcome, or no report for caller cancellation or local client faults
+ * @returns The discovery outcome, or no report for caller cancellation or a pre-send client fault
  */
 export function callOutcome(
   error: unknown,
@@ -101,11 +104,15 @@ export function callOutcome(
   return 'failure';
 }
 
-/** Connect constructs these errors before it sends the request. */
+/**
+ * Connect's and Node's errors raised before the request is sent: a refused
+ * request header (whatever the metadata), and, with no response metadata,
+ * Connect's binary serialization failure and its `writeMaxBytes` refusal.
+ */
 function isPreSendFault(error: unknown, code: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   if (hasInvalidRequestHeaderCause(error)) return true;
-  const record = error as { metadata?: unknown; rawMessage?: unknown; cause?: unknown };
+  const record = error as { metadata?: unknown; rawMessage?: unknown };
   if (
     record.metadata !== undefined &&
     (!(record.metadata instanceof Headers) || !record.metadata.keys().next().done)
@@ -117,13 +124,8 @@ function isPreSendFault(error: unknown, code: unknown): boolean {
     return /^message size [0-9]+ is larger than configured writeMaxBytes [0-9]+(?:\.[0-9]+)?$/.test(
       message,
     );
-  if (code !== GRPC_CODE.Internal) return false;
-  if (message.startsWith('serialize binary: ')) return true;
-  // JSON serialization uses ConnectError.from(error, Internal), retaining the
-  // original plain error as cause and its exact message. Node faults carry code.
-  return (
-    record.cause instanceof Error && !('code' in record.cause) && message === record.cause.message
-  );
+  // Binary only: the client always sends the binary format (`useBinaryFormat`).
+  return code === GRPC_CODE.Internal && message.startsWith('serialize binary: ');
 }
 
 /** Whether the cause chain (at most five objects) holds a refused caller header. */
