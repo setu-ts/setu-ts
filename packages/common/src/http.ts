@@ -391,12 +391,12 @@ export interface IRequestContext {
    * before the 2026-11-17 compatibility date). On that abort the body is
    * cancelled first and the cleanups run once its `cancel()` settles, or after
    * 5000 ms if it does not: the kernel waits for the source's `cancel()`, not
-   * for its `pull`, which no reader can see. A source that does work in
-   * `pull` must make its `cancel()` wait for that work; a source with no
-   * `cancel()` gets no wait, and past the 5000 ms bound cleanups can run
-   * while a `pull` is still pending. An abort never runs cleanups under a
-   * running handler: they wait for it to settle, so a handler that never
-   * settles keeps what it holds.
+   * for its `pull` or any pump it started, which no reader can see. A source
+   * that does work of its own (in `pull`, or a pump it started) must make its
+   * `cancel()` wait for that work; a source with no `cancel()` gets no wait;
+   * past the 5000 ms bound cleanups can run while that work is still pending.
+   * An abort never runs cleanups under a running handler: they wait for it to
+   * settle, so a handler that never settles keeps what it holds.
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
    * continues with the next cleanup. Later settlement is ignored. Synchronous

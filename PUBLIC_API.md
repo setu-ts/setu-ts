@@ -337,11 +337,12 @@ cleanups still wait for the handler to settle, so a request scope or a concurren
 released under a running handler, and a handler that never settles keeps what it holds. A streamed
 body's cleanups run once when the signal aborts, even on a runtime that never cancels the body: the
 kernel cancels the body first and runs them once its `cancel()` settles, or after 5000 ms if it does
-not. It waits for the source's `cancel()`, not for its `pull`, which no reader can see; a source
-that does work in `pull` must make its `cancel()` wait for that work, a source with no `cancel()`
-gets no wait, and past the bound cleanups can run while a `pull` is still pending. A streamed body
-whose source fails is logged once as `Response stream failed`
-(`{ requestId, method, path, status, error }`), and the error still aborts the response.
+not. It waits for the source's `cancel()`, not for its `pull` or any pump it started, which no
+reader can see; a source that does work of its own (in `pull`, or a pump it started) must make its
+`cancel()` wait for that work, a source with no `cancel()` gets no wait, and past the bound cleanups
+can run while that work is still pending. A streamed body whose source fails is logged once as
+`Response stream failed` (`{ requestId, method, path, status, error }`), and the error still aborts
+the response.
 
 ### Route Introspection
 
@@ -14116,18 +14117,19 @@ cleanups in reverse registration order only after the handler settles: normally 
 response is handed back (awaiting any that return a promise), and when a streaming body ends, errors
 or is cancelled. Since 0.14.0 a streamed body's cleanups also run, once, when the request's own
 signal aborts first, after the body's `cancel()` settles (at most 5000 ms; the kernel cannot see a
-source's `pull`) (on Workers the signal needs the `enable_request_signal` compatibility flag before
-the 2026-11-17 compatibility date); an abort never runs cleanups under a running handler. An early
-middleware response returns immediately, but its cleanup and shutdown-drain accounting wait for the
-running handler; late handler cleanup registrations join that same cleanup list. A handler still
-running when `stop()`'s drain bound expires keeps its cleanup until it settles, which is then after
-`stop()` returned and the close hooks ran. On failure, cleanup follows the error response
-construction. Each asynchronous cleanup is bounded at 5000 ms: on expiry the kernel reports it and
-moves on, and the cleanup's later outcome is ignored. A cleanup's throw or rejection is reported at
-`warn` through the logger capability when one is registered, and never changes the response; a
-`defer` after completion runs at once. The member is optional, so no implementor breaks: the
-kernel's context implements it, `createTestContext` does not. A request that never calls it stays on
-the synchronous path.
+source's `pull`, so a source that does work of its own must make `cancel()` wait for it, a source
+with no `cancel()` gets no wait, and past the bound cleanups can run under that work) (on Workers
+the signal needs the `enable_request_signal` compatibility flag before the 2026-11-17 compatibility
+date); an abort never runs cleanups under a running handler. An early middleware response returns
+immediately, but its cleanup and shutdown-drain accounting wait for the running handler; late
+handler cleanup registrations join that same cleanup list. A handler still running when `stop()`'s
+drain bound expires keeps its cleanup until it settles, which is then after `stop()` returned and
+the close hooks ran. On failure, cleanup follows the error response construction. Each asynchronous
+cleanup is bounded at 5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later
+outcome is ignored. A cleanup's throw or rejection is reported at `warn` through the logger
+capability when one is registered, and never changes the response; a `defer` after completion runs
+at once. The member is optional, so no implementor breaks: the kernel's context implements it,
+`createTestContext` does not. A request that never calls it stays on the synchronous path.
 
 **`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
 value this request holds under `key`, compared by object identity, and on the first call for that

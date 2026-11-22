@@ -87,7 +87,8 @@ export function runDeferred(
  *
  * @param signal - The request's own signal, when the adapter supplied one
  *
- * @param onAbort - Called once when the signal, not the stream, ran the cleanups
+ * @param onAbort - Called once when the signal aborts before the stream ended;
+ *   the cleanups follow the source's `cancel()`
  *
  * @returns The wrapped streaming body
  *

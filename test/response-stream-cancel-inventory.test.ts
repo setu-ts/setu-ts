@@ -3,8 +3,9 @@
  * kernel's abort rule for a streamed response: when the client leaves, the
  * kernel cancels the body and runs the request's `ctx.defer` cleanups once
  * the body's `cancel()` settles (or after 5000 ms). The kernel cannot see a
- * source's `pull`, so a source that does work in `pull` must make `cancel()`
- * wait for it, or that work can outlive the request's resources.
+ * source's `pull` or a pump it started, so a source that does work of its own
+ * must make `cancel()` wait for it, or that work can outlive the request's
+ * resources.
  *
  * The table is the enumeration; the test fails when a source is added,
  * moved or removed without a classification, or when the code a row's
@@ -23,7 +24,7 @@ type Kind =
   | 'cancel-awaits-pull'
   /** Forwards `cancel()` to the stream it wraps and returns its promise. */
   | 'forwards-cancel'
-  /** `cancel()` does not wait for work in `pull`; the work uses only the stream's own source. */
+  /** `cancel()` does not wait for the source's own work (in `pull` or a pump); it uses only the stream's own source. */
   | 'cancel-does-not-await'
   /** The kernel's own wrapper: the reader that applies the rule. */
   | 'kernel-wrapper';
@@ -115,7 +116,9 @@ const ROWS: readonly Row[] = [
     file: 'packages/storage-plugin/src/providers/provider-stream.ts',
     count: 3,
     kind: 'cancel-does-not-await',
-    evidence: /cancel\(\): void \{\s*closed = true;/,
+    // Each of the three cancels sets a flag and returns without awaiting.
+    evidence:
+      /cancel\(\): void \{\s*closed = true;[\s\S]*cancel\(\): void \{\s*closed = true;[\s\S]*cancel\(\): void \{\s*stopped = true;/,
     handOver: 'M143r (Integrations lane)',
   },
   {

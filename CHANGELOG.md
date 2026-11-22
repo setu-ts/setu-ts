@@ -45,10 +45,14 @@ All notable changes to this project are documented here. The format follows
   `Request aborted before completion` (for a request that called `ctx.defer`); a streamed body's
   `ctx.defer` cleanups run when the request's signal aborts, so a client that leaves on workerd
   still runs them, while other cleanups wait for the handler to settle and are never run under it
-  (V13-200). A failed response stream is logged once, `Response stream failed`, with the request id
-  (V13-256). A streamed gRPC, Connect or gRPC-Web reply holds the shutdown drain until it ends
-  (V13-23). A `stop()` during `start()` cancels the start: its close hooks run, a close hook
-  registered later runs at once, and the application never listens (V13-43).
+  (V13-200). On that abort the kernel cancels the body and runs the cleanups once its `cancel()`
+  settles, or after 5000 ms: it cannot see a source's `pull` or a pump it started, so a source that
+  does work of its own must make `cancel()` wait for it, a source with no `cancel()` gets no wait,
+  and past the bound cleanups can run under that work. A failed response stream is logged once,
+  `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or gRPC-Web
+  reply holds the shutdown drain until it ends (V13-23). A `stop()` during `start()` cancels the
+  start: its close hooks run, a close hook registered later runs at once, and the application never
+  listens (V13-43).
 - **`@setu-ts/runtime` (M143i).** Node answers a refused WebSocket upgrade with the framework's
   response (status, reason phrase, headers, body), as Bun and Deno do; `rejectRawUpgrade` takes its
   reason phrases from a status table (V13-53). Bun keeps a quiet response stream open past its 10 s
@@ -80,11 +84,9 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/runtime` (M143i, security).** On Node, a client that resets its connection while a
   WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with an
   unhandled `'error'` event (in 0.13.0 a reset mid-pipeline ended any Node application with a
-  WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed, so a client
-  that never closes its side holds no descriptor, and a status outside 200–599 is answered as 500.
-- **`@setu-ts/kernel` (M143i).** An aborted request's `ctx.defer` cleanups never run under a handler
-  that is still running: a request scope or a concurrency slot released through `defer` is released
-  once the handler settles.
+  WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
+  has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
+  descriptor, and a status outside 200–599 is answered as 500.
 
 ## [0.13.0] — 2026-11-17
 

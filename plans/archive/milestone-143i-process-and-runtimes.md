@@ -350,12 +350,12 @@ workerd a client that leaves mid-response still runs its `ctx.defer` cleanup.
   plain reading ("wait for an in-flight read") cannot be built: measured on Node 24, Bun 1.4.5 and
   Deno 2.9.6, a source with the default high-water mark is inside `pull` with no read pending, and
   `reader.cancel()` resolves when the source's `cancel()` settles, not its `pull`. So the source's
-  `cancel()` is its one hook: a source that does work in `pull` must make `cancel()` wait for it.
-  The 5000 ms bound is the one place cleanups can run under a still-pending `pull`; it exists
-  because a `cancel()` that never settles would otherwise leak the cleanups, the workerd leak
-  V13-200 fixes. The framework's own stream sources are classified in
-  `test/response-stream-cancel-inventory.test.ts`; the storage provider streams and React Router's
-  render stream are handed over to their lanes.
+  `cancel()` is its one hook: a source that does work of its own (in `pull`, or a pump it started
+  from `start`) must make `cancel()` wait for it. The 5000 ms bound is the one place cleanups can
+  run under a still-pending `pull`; it exists because a `cancel()` that never settles would
+  otherwise leak the cleanups, the workerd leak V13-200 fixes. The framework's own stream sources
+  are classified in `test/response-stream-cancel-inventory.test.ts`; the storage provider streams
+  and React Router's render stream are handed over to their lanes.
 
 ### 3.13 Bun idle streams (V13-42)
 

@@ -47,9 +47,10 @@ internal.
 - A request that called `ctx.defer` and whose signal aborts before its response is logged as
   `Request aborted before completion` at once; its `ctx.defer` cleanups wait for the handler to
   settle (a streamed body's run when the signal aborts, once the body's `cancel()` settles or after
-  5000 ms — a source that does work in `pull` must make `cancel()` wait for it), so a handler that
-  never settles keeps what it holds; a failed response stream is logged once as
-  `Response stream failed`.
+  5000 ms — a source that does work of its own, in `pull` or a pump it started, must make `cancel()`
+  wait for it; a source with no `cancel()` gets no wait, and past the bound cleanups can run under
+  that work), so a handler that never settles keeps what it holds; a failed response stream is
+  logged once as `Response stream failed`.
 
 <!-- version:history -->
 
