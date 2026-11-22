@@ -264,7 +264,9 @@ the response is handed back; the request logger reads it only for a 5xx response
 an error the application handles itself is not reported by `onFatalError`: an `unhandledRejection`
 listener handles a rejection, an `uncaughtException` listener a throw (on Node a rejection too; Bun
 never hands it one, so that rejection still ends the process and is reported). Deno cannot tell, and
-reports it. The ceiling and Deno's drain statements go through the adapter's `reportError` channel.
+reports it. On Bun the observer assumes the default `--unhandled-rejections` mode; under `warn` or
+`none` it reports the first rejection as fatal and observes no later one. The ceiling and Deno's
+drain statements go through the adapter's `reportError` channel.
 
 ## Exports
 

@@ -240,12 +240,17 @@ it('keeps a request scope alive under a running handler whose client left, and d
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => {
+    started = resolve;
+  });
   app.router.get('/work', async (ctx) => {
     const conn = ctx.services
       .get<IContainer>(CAPABILITIES.DI_CONTAINER)
       .forRequest(ctx)
       .resolve<{ open: boolean }>('conn');
     events.push('handler started');
+    started();
     await gate;
     events.push(`handler resumed (open=${String(conn.open)})`);
     return ctx.response.text('done');
@@ -254,9 +259,11 @@ it('keeps a request scope alive under a running handler whose client left, and d
   try {
     const client = new AbortController();
     const served = app.dispatch!(new Request('http://test/work', { signal: client.signal }));
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await running;
+    // The scope is resolved and the handler is suspended: abort under it.
     client.abort();
     await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(events).toEqual(['handler started']);
     release();
     await served;
     expect(events).toEqual(['handler started', 'handler resumed (open=true)', 'scope disposed']);

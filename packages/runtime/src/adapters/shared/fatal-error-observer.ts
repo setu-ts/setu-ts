@@ -139,7 +139,10 @@ function nodeObserver(proc: ProcessEventHost): Subscribe {
  * to (measured: such a listener does not keep a rejecting Bun process alive).
  * When the application registered its own rejection listener it chose not to
  * crash, and nothing is reported or raised; nor is a thrown error the
- * application's own `uncaughtException` listener handles.
+ * application's own `uncaughtException` listener handles. This assumes Bun's
+ * default `--unhandled-rejections` mode: under `warn` or `none` the process
+ * survives, so the first rejection is reported as fatal and, the listener
+ * having removed itself, no later one is observed.
  *
  * @param proc - The process
  * @param raise - Raises the reason as a fresh rejection; a seam for tests

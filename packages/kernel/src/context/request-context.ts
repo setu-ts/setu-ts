@@ -298,7 +298,8 @@ class RequestContext implements IRequestContext {
  * @param registry - The application-scoped service registry (a child is created
  *   on first `ctx.services` read)
  * @param runtime - Runtime services for uuid and hrtime
- * @param onAbort - Called once when the request's signal ran pending cleanups
+ * @param onAbort - Called once when the request's signal aborts before the
+ *   response is handed back (it runs no cleanup)
  * @returns The request context handle
  * @since 0.11.0
  * @internal
