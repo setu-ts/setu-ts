@@ -886,11 +886,11 @@ and §3.9.
   (2026-11-22)** with 30 s (Consul's default check interval here is 10 s, `options.ts:182-186`).
 - **OD3, the DNS name server (V13-246).** A: Core adds `createDnsResolver` (§11), the arm takes
   `servers`. B: the arm takes an injected `resolver?: IDnsResolver` and the application builds it,
-  which puts runtime APIs in application code. **Recommend A.**
+  which puts runtime APIs in application code. **DECIDED A by the maintainer (2026-11-22).**
 - **OD4, the breaker rate shape (Q9).** A: percent (`failureRateThreshold` 1 to 100, Resilience4j,
   opossum and Hystrix; the sibling `maxEjectionPercent`) with `minimumCalls`, as a union. B: a ratio
-  (Polly's `FailureRatio`). C: optional fields beside the required `threshold`. **Recommend A.**
-  Cost found in review: the union breaks `@setu-ts/sdk`'s compile (OD4b).
+  (Polly's `FailureRatio`). C: optional fields beside the required `threshold`. **DECIDED A by the
+  maintainer (2026-11-22).** Cost found in review: the union breaks `@setu-ts/sdk`'s compile (OD4b).
 - **OD4b (new), the SDK's breaker under the union.** A: the SDK implements the rate arm with the
   same rule (one rule in both breakers; the SDK cannot import the plugin). B: the SDK refuses a rate
   policy at construction (refusing is allowed: ignoring it would fail silently). C: keep the SDK on
@@ -902,7 +902,7 @@ and §3.9.
 - **OD7, spreading calls (Q7).** A: docs plus the CLI hand-over for per-pod discovery, no new
   option. B: also a `GrpcPluginOptions.sessionMaxAgeMs` that recycles a session so kube-proxy
   re-balances over time (off by default; no compared client ships one). C: several sessions per
-  origin. **Recommend A.**
+  origin. **DECIDED A by the maintainer (2026-11-22).**
 - **OD9 (new, M143i hand-over), a cancelled RPC stream whose handler is blocked (§3.11).** A: abort
   the handler's signal first, then await `return()` with no bound; a handler that ignores the signal
   still holds the stream (as a hung unary handler does). B: race `return()` against a bound (for
