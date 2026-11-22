@@ -226,6 +226,9 @@ export interface ResolvedDiscoveryOptions {
   readonly waitSeconds: number;
 }
 
+/** The largest `cacheTtlMs`: the largest delay a runtime timer accepts. */
+const MAX_CACHE_TTL_MS = 2147483647;
+
 /**
  * Applies every documented default exactly once.
  *
@@ -248,10 +251,14 @@ export function resolveOptions(options: ServiceDiscoveryPluginOptions): Resolved
   for (const [name, value] of [
     ['resolveTimeoutMs', resolveTimeoutMs],
     ['emptyAnswerGraceMs', emptyAnswerGraceMs],
-    ['cacheTtlMs', cacheTtlMs],
   ] as const) {
     const refusal = deadlineRangeError(name, value);
     if (refusal !== null) throw refusal;
+  }
+  if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0 || cacheTtlMs > MAX_CACHE_TTL_MS) {
+    throw new RangeError(
+      `cacheTtlMs must be a finite number from 0 to ${MAX_CACHE_TTL_MS} (0 refreshes on every warm call); got ${String(cacheTtlMs)}.`,
+    );
   }
   const watchIntervalMs =
     'watchIntervalMs' in options && options.watchIntervalMs !== undefined

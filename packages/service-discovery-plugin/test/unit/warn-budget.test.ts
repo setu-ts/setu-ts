@@ -36,7 +36,9 @@ it('caps warn lines per window, notices once, and resets in the next window', ()
   for (let n = 0; n < RESOLVE_WARN_BUDGET + 3; n++) get()!.warn(`w${n}`);
   const warns = lines.filter(([level]) => level === 'warn');
   expect(warns).toHaveLength(RESOLVE_WARN_BUDGET + 1);
-  expect(warns.at(-1)![1]).toContain('further ones log at debug');
+  expect(warns.at(-1)![1]).toContain(
+    `further ones log at debug, starting with: w${RESOLVE_WARN_BUDGET}`,
+  );
   expect(lines.filter(([level]) => level === 'debug').map(([, m]) => m)).toEqual([
     `w${RESOLVE_WARN_BUDGET}`,
     `w${RESOLVE_WARN_BUDGET + 1}`,

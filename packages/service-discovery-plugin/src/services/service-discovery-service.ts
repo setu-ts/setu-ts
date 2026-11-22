@@ -32,6 +32,9 @@ import { EjectionTracker } from './ejection-tracker.ts';
 import { instanceUrl } from '../url/instance-url.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
 
+/** Cached names that have only ever answered empty, before the oldest is evicted. */
+const MAX_EMPTY_ONLY_NAMES = 256;
+
 /** A reporter that drops every report, for a service built without one. */
 const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} };
 
@@ -83,6 +86,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   >();
   readonly #watchSequences = new Map<string, number>();
   readonly #nameWatches = new Map<string, INameWatch>();
+  /** Cached names that have only ever answered empty, oldest first. */
+  readonly #emptyOnly = new Set<string>();
   readonly #emptyTimers = new Map<string, TimerHandle>();
   #closed = false;
   /**
@@ -324,6 +329,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#resolveReporters.clear();
     this.#listenerFailures.clear();
     this.#watchSequences.clear();
+    this.#emptyOnly.clear();
     for (const name of this.#emptyTimers.keys()) this.#clearEmptyTimer(name);
     for (const unsubscribe of [...this.#watches]) {
       unsubscribe();
@@ -432,6 +438,20 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#everResolved = true;
   }
 
+  /**
+   * Keeps at most {@linkcode MAX_EMPTY_ONLY_NAMES} empty-only names cached,
+   * evicting the oldest one nobody watches (never the one just stored).
+   */
+  #evictEmptyOnly(current: string): void {
+    if (this.#emptyOnly.size <= MAX_EMPTY_ONLY_NAMES) return;
+    for (const name of this.#emptyOnly) {
+      if (name === current || this.#nameWatches.has(name)) continue;
+      this.#emptyOnly.delete(name);
+      this.#cache.delete(name);
+      return;
+    }
+  }
+
   /** Store every successful read and watch delivery through the same empty rule. */
   #accept(serviceName: string, instances: readonly ServiceInstance[]): IAcceptedAnswer {
     const old = this.#cache.get(serviceName);
@@ -443,12 +463,16 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       old.instances.length > 0 &&
       now - emptySince < this.#options.emptyAnswerGraceMs;
     const accepted = held ? old.instances : instances;
-    if (old === undefined && instances.length === 0) {
-      // A cold empty answer is not stored: a name nobody has a list for gains
-      // no cache entry, so absent names (NXDOMAIN on the DNS arm) cannot grow
-      // the cache. It is still a successful read.
-      this.#readSucceeded(serviceName);
-      return { instances, changed: false };
+    // Names that have only ever answered empty (absent DNS names, services not
+    // yet registered) are cached like any other, so `cacheTtlMs` still spaces
+    // their reads and watchers still see them. Their number is bounded: past
+    // the cap, the oldest unwatched one is evicted, so names taken from
+    // requests cannot grow the cache without bound.
+    if (accepted.length === 0 && (old === undefined || this.#emptyOnly.has(serviceName))) {
+      this.#emptyOnly.delete(serviceName);
+      this.#emptyOnly.add(serviceName);
+    } else {
+      this.#emptyOnly.delete(serviceName);
     }
     this.#cache.set(serviceName, {
       instances: accepted,
@@ -457,6 +481,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       ...(held ? { emptySince } : {}),
     });
     this.#readSucceeded(serviceName);
+    this.#evictEmptyOnly(serviceName);
     if (held) this.#scheduleEmptyRefresh(serviceName);
     else this.#clearEmptyTimer(serviceName);
     const changed = old === undefined || JSON.stringify(old.instances) !== JSON.stringify(accepted);
@@ -514,7 +539,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     if (this.#closed) return instances;
     if ((this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
       this.#readSucceeded(serviceName);
-      return this.#cache.get(serviceName)!.instances;
+      return this.#cache.get(serviceName)?.instances ?? instances;
     }
     const accepted = this.#accept(serviceName, instances);
     if (accepted.changed) this.#broadcast(serviceName, accepted.instances);

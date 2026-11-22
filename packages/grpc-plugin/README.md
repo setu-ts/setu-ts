@@ -119,15 +119,17 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   than `trailers`) or a control character in a header value on HTTP/1.1. A header name or value that
   `Headers` itself rejects fails the call before any instance is picked. A call whose header list
   (RFC 7541 §4.1 sizes) is over the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` is
-  stopped before the peer processes it, with `GrpcHeaderListTooLargeError` as its error's `cause`;
-  it is not reported or resent. A peer that advertises no limit gets no check: Node's server then
-  refuses an oversized list (about 64 KiB) as a refused stream, which is reported and resent. Peer
-  `Canceled` fails; caller cancellation reports nothing. Wire application/caller codes
-  (`InvalidArgument`, `NotFound`, `AlreadyExists`, `PermissionDenied`, `Unauthenticated`,
-  `FailedPrecondition`, `OutOfRange`, `Aborted`, `ResourceExhausted`) succeed; all other errors
-  fail. Streaming reports success when response headers arrive; later iteration errors report
-  nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
-  discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
+  stopped before the peer processes it, once the session has the peer's SETTINGS; the first call on
+  a new HTTP/2 session (before the peer's SETTINGS arrive) is not checked, because the limit is not
+  known yet, with `GrpcHeaderListTooLargeError` as its error's `cause`; it is not reported or
+  resent. A peer that advertises no limit gets no check: Node's server then refuses an oversized
+  list (about 64 KiB) as a refused stream, which is reported and resent. Peer `Canceled` fails;
+  caller cancellation reports nothing. Wire application/caller codes (`InvalidArgument`, `NotFound`,
+  `AlreadyExists`, `PermissionDenied`, `Unauthenticated`, `FailedPrecondition`, `OutOfRange`,
+  `Aborted`, `ResourceExhausted`) succeed; all other errors fail. Streaming reports success when
+  response headers arrive; later iteration errors report nothing. A deadline tighter than healthy
+  latency can eject a healthy instance, bounded by discovery's defaults (5 failures in 30 s, 50%
+  cap, never the last instance, 30 s ejection).
 - **Connections.** A Service address that balances connections pins every call to one pod. Discover
   pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
   pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every
@@ -259,11 +261,12 @@ are left to Connect's automatic `unimplemented` responder.
 
 ## Errors
 
-| Error                  | Thrown when                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GrpcRuntimeLoadError` | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                         |
-| `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                         |
-| `GrpcUnavailableError` | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true` |
+| Error                         | Thrown when                                                                                                                                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GrpcRuntimeLoadError`        | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                         |
+| `GrpcDescriptorError`         | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                         |
+| `GrpcHeaderListTooLargeError` | The `cause` of a client call whose header list is over the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`; carries `size` and `limit`; not reported against the instance or resent                       |
+| `GrpcUnavailableError`        | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true` |
 
 ## Limitations
 

@@ -658,9 +658,10 @@ describeNode('grpcClient and a peer header-list limit', () => {
     }
     const caller = await startCaller(instances);
     const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
-    // One ordinary call per instance opens its session and reads its settings.
+    // One ordinary call per instance opens its session; a completed call means
+    // the peer's SETTINGS have arrived. The first call on a new session is not
+    // checked (documented), so the guard is exercised from the second on.
     for (let n = 0; n < 2; n++) await billing.echo({ message: 'warm' });
-    await sleep(50);
     const before = { ...served };
     const big = { 'x-big': 'a'.repeat(limit) };
     for (let n = 0; n < 10; n++) {

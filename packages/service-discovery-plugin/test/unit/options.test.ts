@@ -149,3 +149,9 @@ it('keeps a valid cacheTtlMs, including 0 and the largest timer value', () => {
     );
   }
 });
+
+it('names the cacheTtlMs meaning of 0 in its refusal', () => {
+  expect(() =>
+    resolveOptions({ provider: 'static', services: {}, cacheTtlMs: Number.NaN }),
+  ).toThrow(/0 refreshes on every warm call/);
+});

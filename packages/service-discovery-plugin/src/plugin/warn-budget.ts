@@ -52,9 +52,11 @@ export function createWarnBudget(
       }
       if (!noticed) {
         noticed = true;
+        // Names the first line it moves to debug, so a real outage that lands
+        // after the budget is still visible at warn level.
         sink.warn(
           `${source}: more than ${RESOLVE_WARN_BUDGET} resolve failures this minute; ` +
-            'further ones log at debug',
+            `further ones log at debug, starting with: ${message}`,
           { source, budget: RESOLVE_WARN_BUDGET },
         );
       }

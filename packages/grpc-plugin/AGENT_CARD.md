@@ -48,7 +48,7 @@ export function registerRpcService(
 - Registering the same service type name twice throws. Omitting the implementation registers a
   service for reflection only.
 - Wire app answers succeed; other errors fail. Caller abort and pre-send faults (serialization,
-  `writeMaxBytes`, a header Node refuses) report nothing; a bad header rejects before any pick.
+  `writeMaxBytes`, a refused header, a list over the peer's advertised size) report nothing.
 - Drain 503s are not resent. Discover pods to balance calls.
 - Stream cancellation aborts `ctx.signal`, then awaits cleanup unbounded.
 - The health bridge reports serving without a health capability; an aggregate degraded status is not
@@ -58,5 +58,5 @@ export function registerRpcService(
 
 - `interceptors` installs application Connect interceptors.
 - `connectModule` injects an already-loaded runtime; `adaptConnectModule` adapts loaded modules.
-- `GrpcRuntimeLoadError` reports a missing runtime; `GrpcDescriptorError` reports invalid
-  descriptors.
+- `GrpcRuntimeLoadError`: missing runtime; `GrpcDescriptorError`: invalid descriptors;
+  `GrpcHeaderListTooLargeError`: the cause of an over-limit header list.

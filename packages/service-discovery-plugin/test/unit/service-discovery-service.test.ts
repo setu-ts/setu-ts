@@ -874,16 +874,64 @@ it('keeps a failing name reporter while long-recovered names refresh, so its rec
   service.close();
 });
 
-it('does not store a cold empty answer, so absent names never grow the cache', async () => {
+it('caches empty-only names but keeps at most 256, evicting the oldest unwatched one', async () => {
   const provider = createFakeProvider();
   const service = new ServiceDiscoveryService(
     provider,
     createFakeRuntime(),
     resolveOptions({ provider: 'custom', discovery: provider }),
   );
+  await service.watch('absent-0', () => {});
   for (let n = 0; n < 1000; n++) expect(await service.resolve(`absent-${n}`)).toEqual([]);
-  expect(service.cachedServices).toBe(0);
+  expect(service.cachedServices).toBe(256);
   expect(service.degraded).toBe(false);
   expect(service.everResolved).toBe(true);
+  // A recent empty name is served from cache inside its TTL; the watched one survived.
+  const calls = provider.resolveCalls;
+  expect(await service.resolve('absent-999')).toEqual([]);
+  expect(await service.resolve('absent-0')).toEqual([]);
+  expect(provider.resolveCalls).toBe(calls);
+  // An evicted name reads the backend again.
+  await service.resolve('absent-1');
+  expect(provider.resolveCalls).toBe(calls + 1);
+  service.close();
+});
+
+it('answers a read raced by a cold empty watch delivery, and a joiner gets the empty list', async () => {
+  const runtime = createFakeRuntime();
+  const watched = createFakeProvider();
+  let finish!: (list: readonly (typeof a)[]) => void;
+  let fail!: (error: Error) => void;
+  let mode: 'ok' | 'fail' = 'ok';
+  const provider = {
+    ...watched,
+    resolve: () =>
+      new Promise<readonly (typeof a)[]>((resolve, reject) => {
+        if (mode === 'ok') finish = resolve;
+        else fail = reject;
+      }),
+  };
+  const service = new ServiceDiscoveryService(
+    provider,
+    runtime,
+    resolveOptions({ provider: 'custom', discovery: provider, resolveTimeoutMs: 0 }),
+  );
+  const read = service.resolve('billing');
+  await flush();
+  await service.watch('billing', () => {});
+  watched.emit('billing', []);
+  finish([a]);
+  expect(await read).toEqual([]);
+  const joined: string[][] = [];
+  await service.watch('billing', (list) => joined.push(list.map((i) => i.id)));
+  expect(joined).toEqual([[]]);
+  // A failing read raced the same way answers the delivered empty list, not a 503.
+  mode = 'fail';
+  const second = service.resolve('other');
+  await flush();
+  await service.watch('other', () => {});
+  watched.emit('other', []);
+  fail(new Error('down'));
+  expect(await second).toEqual([]);
   service.close();
 });

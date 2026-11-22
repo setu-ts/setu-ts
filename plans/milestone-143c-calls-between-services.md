@@ -329,10 +329,10 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   signal.
 - **Test home:** `test/unit/empty-answer-rule.test.ts` (new; one table driven through BOTH `#read`
   and `watch` on the fake clock: warm then `[]` keeps the list and is degraded; `[]` after the grace
-  replaces; a non-empty answer in between resets; cold `[]` returned and not stored (security audit
-  F4); `0` replaces at once; the watch listener receives the held list during the grace);
-  `test/unit/dns-provider.test.ts` (each classifier input as a table row, in SRV mode and wrapped in
-  mode `'a'`'s `cause`: `ENOTFOUND`, `ENODATA`, Deno `NotFound` resolve `[]`; `ETIMEOUT`,
+  replaces; a non-empty answer in between resets; cold `[]` cached, at most 256 empty-only names
+  (security audit F4); `0` replaces at once; the watch listener receives the held list during the
+  grace); `test/unit/dns-provider.test.ts` (each classifier input as a table row, in SRV mode and
+  wrapped in mode `'a'`'s `cause`: `ENOTFOUND`, `ENODATA`, Deno `NotFound` resolve `[]`; `ETIMEOUT`,
   `ECONNREFUSED`, `ESERVFAIL` reject; a cause chain deeper than the bound rejects).
 
 ### 3.3 A stable default Consul registration id (V13-103)
@@ -678,15 +678,20 @@ because the drain answer is written through the application's error responder wh
   report), and it is not a refused stream (no resend). The accounting was measured on Node 24.22.1
   against a peer advertising 16384: 16384 octets is accepted and 16385 refused, matching the RFC
   formula. The check runs after the pick, because the limit belongs to the picked instance's
-  session; the pick itself records nothing. Not covered: a peer that advertises no limit. Node's own
+  session; the pick itself records nothing. Not covered: the first call on a new HTTP/2 session
+  (connect-node's `gotoReady` waits only for the `connect` event, not the peer's SETTINGS, so the
+  limit still reads 4294967295; found in review), and a peer that advertises no limit. Node's own
   server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`, which no
   client can predict; Core can make Setu's listener advertise its limit (§11). grpc-go's handling of
   an over-limit send is not verified.
-- **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is
-  returned and not stored; a warm name keeps the §3.2 grace rule. The per-name resolve warnings
-  share a budget of 20 `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`,
-  with one `warn` notice per window. The README says discovery names should be chosen by the
-  application, not taken from requests.
+- **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is cached
+  like any other, but at most 256 names that have only ever answered empty stay cached; past that
+  the oldest one nobody watches is evicted (a first version that stored nothing broke the watch
+  race, made every call to an empty name read the backend, and left joiners without the list; caught
+  in review). A warm name keeps the §3.2 grace rule. The per-name resolve warnings share a budget of
+  20 `warn` lines a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn`
+  notice per window. The README says discovery names should be chosen by the application, not taken
+  from requests.
 - **F3, a payload that makes a healthy handler throw (held for the maintainer).** OD10 counts a
   handler's `Internal` as an instance failure, so crafted input can eject healthy replicas.
   `EjectionTracker.record` clears an instance's failure window on any success. Measured with two

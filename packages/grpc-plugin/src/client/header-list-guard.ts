@@ -7,6 +7,9 @@
  */
 import { GrpcHeaderListTooLargeError } from '../errors/grpc-errors.ts';
 
+/** One encoder for every size computation. */
+const ENCODER = new TextEncoder();
+
 /** What Node reports for `maxHeaderListSize` when the peer advertised none. */
 const NO_ADVERTISED_LIMIT = 4294967295;
 
@@ -39,8 +42,7 @@ export function headerListSize(headers: Readonly<Record<string, unknown>>): numb
     const values = Array.isArray(value) ? (value as unknown[]) : [value];
     for (const one of values) {
       if (one === undefined) continue;
-      size +=
-        new TextEncoder().encode(name).length + new TextEncoder().encode(String(one)).length + 32;
+      size += ENCODER.encode(name).length + ENCODER.encode(String(one)).length + 32;
     }
   }
   return size;

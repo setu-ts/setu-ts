@@ -279,9 +279,10 @@ once). Read and watch callers see the same held list, with `degraded: true`. Non
 the grace and clear its timer. A per-name timer starts a background read at the grace deadline,
 coalesced with any active read and subject to normal failure retry spacing. Its empty answer
 replaces the list and reaches every watcher without another backend event. A cold empty answer (a
-name with no list yet, such as an absent DNS name) is returned and not stored, so absent names never
-grow the cache; replacement and close clear the timer. An empty answer succeeded, so it does not
-raise `staleForMs` or incur failure spacing.
+name with no list yet, such as an absent DNS name) is cached like any other, but at most 256 names
+that have only ever answered empty stay cached; past that, the oldest one nobody watches is evicted,
+so names taken from requests cannot grow the cache; replacement and close clear the timer. An empty
+answer succeeded, so it does not raise `staleForMs` or incur failure spacing.
 
 DNS NXDOMAIN/no-record answers (`ENOTFOUND`, `ENODATA`, Deno `NotFound`, including wrapped causes)
 resolve to `[]`. Other DNS errors reject. Use a trusted host resolver: a spoofed absent-name answer
