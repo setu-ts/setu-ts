@@ -13425,9 +13425,9 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   state. A name keeps its reporter while its failure run is open and drops it at recovery; at most
   256 names keep one at once, and a 257th failing name evicts the one whose last failure is oldest.
   Resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a
-  budget of 20 `warn` lines a minute (past it `debug`, with one notice); a name with a non-empty
-  list always warns. Per-name reporters warn on first/changed error, debug on identical repeats,
-  info on recovery, with URL userinfo masked. DNS can also log its probe failure.
+  budget of 20 `warn` lines a minute (past it `debug`, with one notice per minute window); a name
+  with a non-empty list always warns. Per-name reporters warn on first/changed error, debug on
+  identical repeats, info on recovery, with URL userinfo masked. DNS can also log its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through five causes resolve `[]`;
   other failures reject. Use a trusted host resolver. The runtime currently retains only the first
   failed address family, so an absent A record can conceal a timed-out AAAA lookup.

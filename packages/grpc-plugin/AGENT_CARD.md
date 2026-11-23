@@ -3,7 +3,7 @@
 **Add it:** `setu add grpc` adds it with its `@connectrpc/connect` and `@bufbuild/protobuf` peers,
 and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`; an outbound client also needs
 `@connectrpc/connect-node`, and runs on Node and Bun only: on Cloudflare Workers `grpcClient()`
-throws a TypeError, and on Deno the client can crash the process when a peer goes away. It provides
+throws a TypeError, and on Deno the client can crash the process when a peer leaves. It provides
 `CAPABILITIES.GRPC` (`IGrpcService`).
 
 ## Serve generated service descriptors
@@ -41,16 +41,16 @@ export function registerRpcService(
 
 ## Behaviour the types do not show
 
-- `basePath` defaults to `/`; a prefixed deployment needs a matching client URL.
+- `basePath` defaults to `/`; a prefix needs a matching client URL.
 - `reflection` and `health` default to `true`.
 - Native `application/grpc` requests are refused with gRPC status 12 (HTTP 200); Connect and
   gRPC-Web are served.
-- Registering a service type name twice throws; no implementation means reflection only.
+- A duplicate service type name throws; no implementation means reflection only.
 - Server answers succeed, thrown handler errors too; no answer, unavailable, unimplemented, deadline
   and peer cancel fail. Abort and pre-send faults report nothing, as do headers over a peer's
-  advertised limit and 8 KiB, or 64 KiB refused with no known limit; at or under 8 KiB the instance
-  fails.
-- Drain 503s are not resent. Discover pods to balance.
+  advertised limit and 8 KiB, or over 64 KiB refused on an open session with no known limit; at or
+  under 8 KiB the instance fails.
+- Drain 503s aren't resent; discover pods to balance.
 - Stream cancel aborts `ctx.signal`, then awaits cleanup unbounded.
 - The health bridge reports serving with no health capability; aggregate degraded is not serving.
 

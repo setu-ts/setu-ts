@@ -164,8 +164,8 @@ opens a failure run that the next success closes.
 
 Discovery names should be chosen by the application, never taken from a request. As a backstop, the
 resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a budget
-of 20 `warn` lines a minute; past it, further ones log at `debug` and one `warn` says so. A name
-with a non-empty list always warns.
+of 20 `warn` lines a minute; past it, further ones log at `debug` and one `warn` per minute window
+says so. A name with a non-empty list always warns.
 
 ## Self-registration (Consul only)
 
@@ -276,8 +276,8 @@ reject with a branded 503 when it fails, including a Kubernetes API token reject
 provider-thrown `DiscoveryUnavailableError` passes through unbranded and answers 500. The built-in
 providers throw it for a multi-port Kubernetes service with no `portName`, a missing projected token
 file or no runtime `fs` when no explicit token was supplied, or a Kubernetes service-account /
-Consul ACL token holding a character an HTTP header cannot carry. A failed background refresh spaces
-retries by 1, 2, 4, 8, 16, then 30 seconds per name; a successful answer resets the spacing.
+Consul ACL token holding anything but visible ASCII. A failed background refresh spaces retries by
+1, 2, 4, 8, 16, then 30 seconds per name; a successful answer resets the spacing.
 
 An empty answer holds a nonempty list for `emptyAnswerGraceMs` (default 30000 ms; `0` replaces at
 once). Read and watch callers see the same held list, with `degraded: true`. Nonempty answers reset
@@ -320,10 +320,10 @@ Registered as `service-discovery`. Since M70c it composes three facts:
   reports reachable and issues no health lookup of its own. Stopping a DNS watch preserves the prior
   lookup outcome. Every provider's `isHealthy()` result passes through the same 5 s cache.
 
-| Status | Meaning                                                                                                                                                                                                                                         |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable` (in `/health` only with `HealthPlugin({ details: true })`). |
-| `down` | The provider has never resolved and is unreachable.                                                                                                                                                                                             |
+| Status | Meaning                                                                                                                                                                                                                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded`, `data.staleForMs` and `data.reachable` (in `/health` only with `HealthPlugin({ details: true })`). |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                                                                                                |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved, staleForMs }`.
