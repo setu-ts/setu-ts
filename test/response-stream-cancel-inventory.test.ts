@@ -174,18 +174,17 @@ const CONSTRUCTIONS: readonly Row[] = [
   },
   {
     // A pull stream over the GCS read iterator after its first chunk:
-    // `cancel()` destroys the source, then awaits the iterator's `return()`.
-    // The SDK's stream ends a pending read on destroy, so it settles; an
-    // injected stream with no `destroy()` queues `return()` behind a pending
-    // `next()`, as the gRPC rows above do.
+    // `cancel()` destroys the source, then awaits the iterator's `return()`,
+    // so it settles when its source does. The SDK's stream ends a pending
+    // read on destroy; an injected source whose `return()` queues behind a
+    // pending read holds the cancel, and `createReadStream()`'s JSDoc makes
+    // ending that read the source's job.
     file: 'packages/storage-plugin/src/providers/gcs-provider.ts',
     count: 1,
-    cancelSettles: 'may-hang',
+    cancelSettles: 'as-its-source',
     kind: 'cancel-awaits-work',
     evidence:
       /async cancel\(\): Promise<void> \{\s*release\(\);\s*(?:\/\/[^\n]*\n\s*)*await iterator\.return\?\.\(\);/,
-    handOver:
-      'M143r (Integrations lane): an injected createReadStream() with no destroy() holds cancel() until its pending read settles; the SDK stream does not',
   },
   {
     // Node Readable adapter (pull waits for 'readable'), the eager iterable

@@ -261,13 +261,13 @@ and is measured there; the other providers reach the object differently: `AzureB
 as fast as the backend will send regardless of what the consumer is doing, and the memory and local
 providers buffer the whole object.
 
-| Provider                      | Streaming                | Bounded memory for a slow consumer                                                   |
-| ----------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
-| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.                     |
-| `GcsProvider`                 | Native, pulled           | Not measured — read on demand after the first chunk; cancelling destroys the source. |
-| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling releases the upstream stream.                    |
-| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                                      |
-| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.                      |
+| Provider                      | Streaming                | Bounded memory for a slow consumer                                                                                 |
+| ----------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.                                                   |
+| `GcsProvider`                 | Native, pulled           | Not measured — read on demand after the first chunk; cancelling destroys the source and waits for its read to end. |
+| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling releases the upstream stream.                                                  |
+| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                                                                    |
+| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.                                                    |
 
 `GcsProvider` waits for the first chunk before it answers, so a missing object is `null` and a
 refused credential or an outage rejects before a response begins; after that it reads the SDK stream

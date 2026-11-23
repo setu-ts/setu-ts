@@ -47,10 +47,12 @@ export interface GcsFacadeFile {
   getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
   /**
    * The object's bytes as a stream. Cancelling a `getStream` result destroys
-   * it and waits for its iterator to finish, so `destroy()` must end a read
-   * still pending (a Node `Readable` does, unless it never emits `'close'`).
-   * A stream with no `destroy()` holds the cancel until its pending read
-   * settles.
+   * it, then awaits its async iterator's `return()`. A Node `Readable`'s
+   * iterator ends a pending read when the stream is destroyed (unless the
+   * stream never emits `'close'`), so the cancel settles. An async
+   * generator's `return()` queues behind a pending read, so a source built
+   * that way, or one with no `destroy()`, holds the cancel until that read
+   * settles: ending it is the source's job.
    */
   createReadStream(): NodeJS.ReadableStream;
 }
@@ -85,10 +87,12 @@ export interface GcsFile {
   getSignedUrl(config: { action: 'read'; expires: number }): Promise<[string]>;
   /**
    * The object's bytes as a stream. Cancelling a `getStream` result destroys
-   * it and waits for its iterator to finish, so `destroy()` must end a read
-   * still pending (a Node `Readable` does, unless it never emits `'close'`).
-   * A stream with no `destroy()` holds the cancel until its pending read
-   * settles.
+   * it, then awaits its async iterator's `return()`. A Node `Readable`'s
+   * iterator ends a pending read when the stream is destroyed (unless the
+   * stream never emits `'close'`), so the cancel settles. An async
+   * generator's `return()` queues behind a pending read, so a source built
+   * that way, or one with no `destroy()`, holds the cancel until that read
+   * settles: ending it is the source's job.
    */
   createReadStream(): NodeJS.ReadableStream;
 }
@@ -667,10 +671,11 @@ export class GcsProvider implements StorageProvider {
       },
       async cancel(): Promise<void> {
         release();
-        // Waits for the source, as the kernel's cancel contract asks: the real
-        // SDK stream's destroy ends a read in flight, so `return()` settles. An
-        // injected stream must do the same; one whose destroy leaves a read
-        // pending (or that has none) holds this cancel as long as that read.
+        // Waits for the source, as the kernel's cancel contract asks. The SDK
+        // stream's destroy ends a pending read, so `return()` settles; a
+        // source whose `return()` queues behind a pending read (an async
+        // generator, or a stream with no `destroy()`) holds this cancel until
+        // that read settles, as `createReadStream()` documents.
         await iterator.return?.();
       },
     });
