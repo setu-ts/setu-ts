@@ -90,6 +90,7 @@ source; "not verified" where it could not be confirmed):
 | Q8b A 503 without `grpc-status`                 | gRPC maps it to `UNAVAILABLE` ([status mapping](https://github.com/grpc/grpc/blob/master/doc/http-grpc-status-mapping.md)); A6 transparent retry covers refused streams and GOAWAY only, outside `maxAttempts`, and does not address an HTTP status ([A6](https://github.com/grpc/proposal/blob/master/A6-client-retries.md)); Envoy `5xx`/`gateway-error`/`retriable-status-codes` only when configured; Finagle marks a no-work 503 with `finagle-http-nack` (retryable) vs `finagle-http-nonretryable-nack` ([HttpNackFilter](https://github.com/twitter/finagle/blob/develop/finagle-base-http/src/main/scala/com/twitter/finagle/http/filter/HttpNackFilter.scala)), the closest precedent for a server-set "not processed" header; Linkerd documents none; Istio not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Q11 Runtime DNS APIs                            | Node `Resolver` `timeout` (default -1, c-ares default), `tries` (default 4), instance-scoped `setServers` taking IP literals, `resolveSrv` with no TTL, `ENOTFOUND`/`ENODATA` ([nodejs.org dns](https://nodejs.org/api/dns.html)); Deno `resolveDns` `nameServer {ipAddr, port}` and `signal`, `Deno.errors.NotFound` for NXDOMAIN and no records (`ares_code` distinguishes), a signal forces a 1 s one-attempt timeout ([ops.rs](https://github.com/denoland/deno/blob/main/ext/net/ops.rs)); Bun `node:dns` fully implemented except `resolveTlsa`, `Resolver` `maxTimeout` ignored ([compat](https://bun.com/docs/runtime/nodejs-compat))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Q12 Default registration id                     | Consul: defaults to the service name, unique per agent ([agent service API](https://developer.hashicorp.com/consul/api-docs/agent/service)); Spring Cloud Consul: application name plus instance id or port ([ConsulAutoRegistration](https://github.com/spring-cloud/spring-cloud-consul/blob/main/spring-cloud-consul-discovery/src/main/java/org/springframework/cloud/consul/serviceregistry/ConsulAutoRegistration.java)); Micronaut: `appName:<instance id or port>`, with a documented collision warning across hosts ([guide](https://micronaut-projects.github.io/micronaut-discovery-client/latest/guide/)); Go-kit not verified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Q13 Ejection after a client's own reset burst   | grpc-go's outlier balancer counts every `info.Err != nil`, a call failed by a GOAWAY close included ([balancer.go](https://github.com/grpc/grpc-go/blob/master/internal/xds/balancer/outlierdetection/balancer.go)); Envoy counts an upstream reset as `LocalOriginConnectFailed` and exempts only its own circuit-breaker overflow; no client found that exempts a close caused by its own reset burst; servers defend on purpose: Node's `streamResetBurst`/`streamResetRate` default to 1000/33 ([nodejs.org http2](https://nodejs.org/api/http2.html)), Envoy's premature-reset limit is 500 streams (verified 2026-11-23 by the coordinator)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 Where the frameworks split (Q2/Q3 between keep and replace, Q6 between "retry only when configured"
 and "transparent", Q9 between a percentage and a ratio), each choice is DECIDED by the maintainer
@@ -816,17 +817,25 @@ because the drain answer is written through the application's error responder wh
     A8 has the client double its own keepalive on a GOAWAY `ENHANCE_YOUR_CALM` `too_many_pings`;
     only Envoy appears to count it for ejection, and a `router.cc` source comment says an upstream
     reset "should be treated as external origin error". Accepted cost: a server that sends it
-    wrongly is never ejected; its calls still fail visibly. Scope is a stream reset; connect-node
-    already maps a GOAWAY `too_many_pings` to its own `ResourceExhausted`, which this rule does not
-    change. A reset for too many concurrent streams is not driven in a test: a compliant client
-    honours the peer's `SETTINGS_MAX_CONCURRENT_STREAMS`, so only the table rows cover the shape.
-  - **L1 (Low, from F3 option B): DECIDED document only.** On the default `connect` protocol any
-    non-200 JSON body parses as a server answer (`errorFromJson` sets `isWireError` for any JSON
-    object and falls back to the HTTP-derived code), so a wrong service or proxy answering JSON 500
-    or 400 counts as answered and is not ejected; an HTML error page still is. connect does not
-    expose whether the body carried a `code` field (checked in `protocol-connect/error-json.js`: the
-    fallback code is used silently and no flag is kept), so a code-less body cannot be told apart
-    cheaply. The README and PUBLIC_API state it beside the readiness remedy.
+    wrongly is never ejected; its calls still fail visibly. Scope is a stream reset before the
+    response headers. A session-level GOAWAY with `ENHANCE_YOUR_CALM` (`too_many_pings` or not) is
+    unchanged: measured by the third re-audit, calls in flight fail as a non-wire `Internal`
+    ("Session closed with error code 11") and count against the instance, as before this range;
+    connect-node's own `ResourceExhausted` for `too_many_pings` goes only to its session manager
+    (`http2-session-manager.js:513-519`), never to the calls (the first text here said otherwise).
+    The same stream reset also comes from this client's own HTTP/2 session when it is over its
+    memory cap (code review 2026-11-23); both cases are the client's, and the docs say so. A reset
+    for too many concurrent streams is not driven in a test: a compliant client honours the peer's
+    `SETTINGS_MAX_CONCURRENT_STREAMS`, so only the table rows cover the shape.
+  - **L1 (Low, from F3 option B): DECIDED document only.** On the default `connect` protocol a JSON
+    object body on a non-200 parses as a server answer (`errorFromJson` sets `isWireError` for any
+    JSON object and falls back to the HTTP-derived code), so a wrong service or proxy answering JSON
+    500 or 400 counts as answered and is not ejected; a JSON 404, 502 or 503 still fails
+    (`Unimplemented`/`Unavailable`), and so does an HTML error page (docs-claims, 2026-11-23).
+    connect does not expose whether the body carried a `code` field (checked in
+    `protocol-connect/error-json.js`: the fallback code is used silently and no flag is kept), so a
+    code-less body cannot be told apart cheaply. The README and PUBLIC_API state it beside the
+    readiness remedy.
   - **L2 (Low): DECIDED correct the wording.** On Node the refusal of a list over 64 KiB comes from
     the client's own HTTP/2 library before anything is sent, not from the peer. The error message,
     README, JSDoc and this plan now say "the client's HTTP/2 library refused to send it"; the rule
@@ -1158,6 +1167,18 @@ and §3.9.
   of one unary call (§3.9). The maintainer decided on 2026-11-23 that the kernel does not strip it
   (no compared framework strips its marker); the README states the header is reserved and that an
   application setting it makes the claim itself.
+- **O1, a caller's reset burst ejects a healthy replica — ACCEPTED by the maintainer (2026-11-23),
+  option (a), document only; no follow-up and no matcher.** A caller that aborts about 3000
+  in-flight calls at once trips the peer's stream-reset limit; measured on Node 24.22.1 with a raw
+  client (`o1/goaway-code.mjs` in the session scratchpad): 800 cancels pass, 3000 get GOAWAY code 2
+  (`NGHTTP2_INTERNAL_ERROR`, from nghttp2's reset rate limiter; the third re-audit's
+  "PROTOCOL_ERROR" was a mislabel) and the session closes; with `streamResetBurst`/`streamResetRate`
+  raised to 100000 the close disappears, and set explicitly to the defaults 1000/33 it returns. The
+  calls on the closed session fail as non-wire `Internal` and report the instance failed, as every
+  compared client does (Q13). Bounded by ejection (30 s, at most 50 %, never the last instance); the
+  README says so. Before this milestone the same. A GOAWAY `too_many_pings` also stays counted
+  against the instance (maintainer, 2026-11-23): grpc-go fails in-flight calls as `Unavailable` on
+  that close and counts them too.
 - **Bounds.** The per-name reporters and retry state are keyed by service names the application
   resolves (not request input), and are cleared by `close()`; the DNS watch never holds more than
   one lookup per name.

@@ -89,7 +89,8 @@ const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
  * replicas. The same codes without a server answer fail. Caller cancellation
  * and the client faults `isPreSendFault` recognises report nothing, including
  * oversized headers refused on an open session when no header-list limit was
- * known when the call started. A list over an
+ * known when the call started, and a stream reset with `ENHANCE_YOUR_CALM`
+ * (`isExcessiveLoadReset`). A list over an
  * advertised limit but at or under 8 KiB is an instance failure: that peer
  * advertised less than any gRPC default; only lists over 8 KiB are exempt.
  * @param error - The rejected call
@@ -170,9 +171,10 @@ function hasInvalidRequestHeaderCause(error: object): boolean {
 const CONNECT_NODE_CALM = 'http/2 stream closed with error code ENHANCE_YOUR_CALM (0xb)';
 
 /**
- * Whether the server reset the call's stream with HTTP/2 `ENHANCE_YOUR_CALM`
- * (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says
- * for more than 128 header fields or too many concurrent streams). Matched in the
+ * Whether the call's stream was reset with HTTP/2 `ENHANCE_YOUR_CALM`, by the
+ * server or by this client's own HTTP/2 session over its memory cap (RFC 9113 §7:
+ * this client's behaviour looked excessive, as Node's server says for more than 128
+ * header fields). Matched in the
  * cause chain (at most five objects) by Node's own stream error, by connect-node's
  * exact reading of the reset code with no response metadata, or by the client's
  * `GrpcExcessiveLoadError` (by name). The caller passes only errors that are not

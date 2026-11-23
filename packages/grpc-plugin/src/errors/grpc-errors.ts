@@ -97,7 +97,7 @@ export class GrpcHeaderListTooLargeError extends Error {
     super(
       reason === 'unadvertised-refusal'
         ? `The call's header list is ${size} octets, over the client's ${limit}-octet threshold; ` +
-            "no header-list limit was known when the call started and the client's HTTP/2 library refused to send it. Send fewer or smaller headers."
+            "no header-list limit was known when the call started and the stream was refused (on Node, normally by the client's own HTTP/2 library before sending). Send fewer or smaller headers."
         : `The call's header list is ${size} octets, over the ${limit} the peer accepts ` +
             '(HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE); send fewer or smaller headers.',
     );
@@ -108,10 +108,11 @@ export class GrpcHeaderListTooLargeError extends Error {
 }
 
 /**
- * A client call whose stream the server reset with HTTP/2 `ENHANCE_YOUR_CALM`
- * (RFC 9113 §7: the peer judged this client's behaviour as generating excessive
- * load, as Node's server does for more than 128 header fields or too many
- * concurrent streams). The call is never reported against the instance, whatever
+ * A client call whose stream was reset with HTTP/2 `ENHANCE_YOUR_CALM` before the
+ * response headers, by the server or by this client's own HTTP/2 session when it is
+ * over its memory cap (RFC 9113 §7: this client's behaviour looked excessive, as
+ * Node's server says for more than 128 header fields). A reset after the response
+ * headers on a streaming call surfaces while iterating and is not wrapped. The call is never reported against the instance, whatever
  * it sent, and is not sent to another one. It reaches the caller as the `cause`
  * of a `ConnectError` with code `ResourceExhausted` (grpc-go's mapping of the
  * code); the original stream error is its own `cause`.
@@ -121,9 +122,10 @@ export class GrpcExcessiveLoadError extends Error {
   /** @param cause - The stream error the reset produced */
   constructor(cause?: unknown) {
     super(
-      "The server reset the call with HTTP/2 ENHANCE_YOUR_CALM: it judged this client's behaviour " +
-        'excessive (for example too many header fields or concurrent streams). The call was not ' +
-        'resent and is not counted against the instance.',
+      "The call's stream was reset with HTTP/2 ENHANCE_YOUR_CALM, by the server or by this " +
+        "client's own HTTP/2 session over its memory cap: this client's behaviour looked excessive " +
+        '(for example too many header fields or too much buffered data). The call was not resent ' +
+        'and is not counted against the instance.',
       cause === undefined ? undefined : { cause },
     );
     this.name = 'GrpcExcessiveLoadError';

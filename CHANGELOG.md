@@ -76,13 +76,13 @@ All notable changes to this project are documented here. The format follows
   handling; an accepted larger list is unaffected. On Node that refusal comes from the client's own
   HTTP/2 library, which refuses to send a list over 64 KiB. A refusal from a peer shutting down (its
   session closed or destroyed) stays a refused stream and is resent.
-- **`@setu-ts/grpc-plugin`.** `GrpcExcessiveLoadError`: a call whose stream the server reset with
-  HTTP/2 `ENHANCE_YOUR_CALM` (RFC 9113 §7: the server judged this client's behaviour excessive, as
-  Node's server does for more than 128 header fields or too many concurrent streams) is never
-  counted against the instance and is not resent. It fails as `ResourceExhausted` with this error as
-  its `cause`. Before, 12 calls with 130 small headers ejected a healthy replica. On the default
-  `connect` protocol a non-gRPC JSON 500 or 400 is read as a server answer and so is not ejected
-  either (README).
+- **`@setu-ts/grpc-plugin`.** `GrpcExcessiveLoadError`: a call whose stream is reset with HTTP/2
+  `ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's own HTTP/2
+  session when it is over its memory cap) is never counted against the instance and is not resent
+  (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says for more than 128
+  header fields). It fails as `ResourceExhausted` with this error as its `cause`. Before, 12 calls
+  with 130 small headers ejected a healthy replica. On the default `connect` protocol a non-gRPC
+  JSON object body on a 500 or 400 is read as a server answer and so is not ejected either (README).
 - **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
   empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
   watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The resolve

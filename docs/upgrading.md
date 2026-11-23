@@ -41,8 +41,9 @@ own. Every other server answer reports success, including application codes and 
 `Unknown`, `DataLoss`. The same codes without a server answer fail. A request that makes a healthy
 handler throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a
 broken dependency, say) is not ejected by call outcomes. Take it out through readiness (health
-checks) instead; the same holds for a wrong service or proxy answering JSON 500 or 400 on the
-default `connect` protocol. A stream the server resets with HTTP/2 `ENHANCE_YOUR_CALM` is never
+checks) instead; the same holds for a wrong service or proxy answering a JSON object on a 500 or 400
+on the default `connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the
+response headers, by the server or by this client's own session over its memory cap, is never
 counted against the instance or resent; the call fails as `ResourceExhausted` with
 `GrpcExcessiveLoadError` as its `cause`; send fewer headers or fewer concurrent streams. A few
 client-side faults raised before the request leaves (binary serialization, `writeMaxBytes`, a
