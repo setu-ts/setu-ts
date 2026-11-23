@@ -2137,6 +2137,9 @@ importers:
       '@setu-ts/di-plugin':
         specifier: workspace:^
         version: link:../di-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin

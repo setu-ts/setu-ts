@@ -61,6 +61,7 @@
     "@connectrpc/connect-node": "^2.1.2",
     "@setu-ts/decorator-plugin": "workspace:^",
     "@setu-ts/di-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
