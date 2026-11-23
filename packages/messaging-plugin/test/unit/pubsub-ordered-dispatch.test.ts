@@ -242,8 +242,10 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, fail);
     // Touch 'a' (held back), making 'b' the least recently used.
     await gate.run({ orderingKey: 'a', messageId: 'a2', nack: vi.fn() }, fail);
+    // Let 'a' become idle, so only recency (not in-flight work) can protect it.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await gate.run({ orderingKey: 'c', messageId: 'c1', nack: vi.fn() }, fail);
-    // 'a' survived (an existing key evicts nothing): its later message is held back.
+    // 'a' survived because it was used more recently than 'b': its message is held back.
     const aDispatch = vi.fn(() => Promise.resolve(true));
     const aNack = vi.fn();
     await gate.run({ orderingKey: 'a', messageId: 'a3', nack: aNack }, aDispatch);
