@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker).** A circuit breaker
-  can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
+- **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
+  breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
   `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
   beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
   rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
@@ -50,14 +50,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104).**
-  `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads `.threshold` off
-  a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`). The SDK's breaker
-  runs on `createBreakerWindow`: a success no longer empties it, so `threshold` failures within
-  `timeout` trip the circuit however many successes fall between them; a call that succeeds after
-  the circuit tripped no longer closes it (only a half-open probe does); on the rate arm a 4xx
-  counts as a call the origin answered. An invalid policy now throws a `RangeError` naming the
-  field, whether the client comes from `createClient` or `new HttpClient`
+- **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
+  #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
+  `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).
+  The SDK's breaker runs on `createBreakerWindow`: a success no longer empties it, so `threshold`
+  failures within `timeout` trip the circuit however many successes fall between them; a call that
+  succeeds after the circuit tripped no longer closes it (only a half-open probe does); on the rate
+  arm a 4xx counts as a call the origin answered. An invalid policy now throws a `RangeError` naming
+  the field, whether the client comes from `createClient` or `new HttpClient`
   (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
   `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
   non-integer `threshold` or one above `Number.MAX_SAFE_INTEGER`; a missing `threshold` (with no

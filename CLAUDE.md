@@ -880,7 +880,7 @@ here.
 - **Milestone 143 Core follow-up — circuit breaker** (`common` + `sdk`, plus a one-line
   `resilience-plugin` guard — V13-104's Core and SDK halves: the `CircuitBreakerPolicy` union with a
   failure-rate arm, `createBreakerWindow` and `breakerPolicyRangeError` at
-  `@setu-ts/common/breaker-window`, the SDK breaker on them) — complete (PR pending).
+  `@setu-ts/common/breaker-window`, the SDK breaker on them) — complete (PR #612).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
