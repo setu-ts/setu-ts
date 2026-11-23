@@ -90,11 +90,14 @@ export class DistributedLockObjectCore {
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === '/acquire') {
-      const body = (await request.json()) as { token?: unknown; ttlMs?: unknown };
+      const body = ((await request.json()) ?? {}) as { token?: unknown; ttlMs?: unknown };
       // The client refuses the same values; this is defence in depth for a
       // caller that is not DurableObjectLock (a JSON body turns Infinity and
       // NaN into null, and `now + null` would expire at once).
-      if (typeof body.token !== 'string' || !isValidLockTtl(body.ttlMs)) {
+      if (typeof body.token !== 'string') {
+        return new Response('token must be a string', { status: 400 });
+      }
+      if (!isValidLockTtl(body.ttlMs)) {
         return new Response('ttlMs must be a whole number of milliseconds from 1 to 2147483647', {
           status: 400,
         });

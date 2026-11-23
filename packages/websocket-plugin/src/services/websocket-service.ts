@@ -246,10 +246,11 @@ export class WebSocketService implements IWebSocketService {
   /** The cross-replica transport, when one was registered. */
   readonly #backplane: IRealtimeBackplane | undefined;
   /**
-   * Whether the backplane transport has been asked to open.
+   * Whether a backplane connect is in flight.
    *
-   * Reset on failure so a later upgrade retries rather than leaving the replica
-   * permanently deaf — see {@linkcode WebSocketService.#openBackplane}.
+   * Cleared once it settles, either outcome, so a later join calls `connect()`
+   * again (idempotent by contract) and a transport that dropped its socket
+   * reopens — see {@linkcode WebSocketService.#openBackplane}.
    */
   #backplaneOpening = false;
   /**
@@ -728,7 +729,8 @@ export class WebSocketService implements IWebSocketService {
   }
 
   /**
-   * Opens the backplane transport, once, on first local use.
+   * Opens the backplane transport on local use; joins while a connect is in
+   * flight share it.
    *
    * `IRealtimeBackplane.connect()` is contracted as idempotent, and a
    * subscriber cannot receive anything until it has been called — `subscribe()`
@@ -740,7 +742,8 @@ export class WebSocketService implements IWebSocketService {
    *
    * Fire-and-forget: an upgrade must not wait on the transport, and a broadcast
    * this replica cannot yet receive is strictly better than a refused
-   * connection. The flag is cleared on failure so the next upgrade retries.
+   * connection. The flag is cleared when the connect settles, so the next join
+   * asks again.
    */
   #openBackplane(): void {
     if (this.#backplane === undefined || this.#backplaneOpening) {
@@ -952,13 +955,15 @@ export class WebSocketService implements IWebSocketService {
         const closing = conn;
         closing.markClosed();
         stopHeartbeat();
-        this.#requestBound?.close(closing);
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
         realtimeObserverOf(closing)?.observe('close', !errored && event.code !== CLOSE_ABNORMAL);
         dispatch(closing, () => {
           invoke(handlers.onClose, closing, event);
         });
+        // After the handler, so a "member left" broadcast from onClose still
+        // travels over this connection's own link, in order.
+        this.#requestBound?.close(closing);
       },
 
       onError: (error: Error): void => {

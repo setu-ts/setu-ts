@@ -24,7 +24,7 @@ import { instanceToken } from '../instance-token.ts';
 import { WorkersBroker } from '../messaging/workers-broker.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { BindingRegistry } from '../bindings/binding-registry.ts';
-import { CloudflareBindingMissingError } from '../errors.ts';
+import { CloudflareBindingMissingError, CloudflareUnsupportedError } from '../errors.ts';
 import { createCloudflareIndicator } from '../health/indicator.ts';
 import type { CloudflarePluginOptions } from '../options.ts';
 import { WorkersQueue } from '../queues/workers-queue.ts';
@@ -213,12 +213,14 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
             : { maxRetries: queueArm.options.maxRetries }),
           ...(queueArm.options.deadLetterQueue === undefined
             ? {}
-            : {
-                deadLetter:
-                  queueArm.options.deadLetterQueue === false
-                    ? false
-                    : registry.queue(queueArm.options.deadLetterQueue),
-              }),
+            : queueArm.options.deadLetterQueue === queueArm.options.binding
+              ? refuseSelfDeadLetter(queueArm.options.binding)
+              : {
+                  deadLetter:
+                    queueArm.options.deadLetterQueue === false
+                      ? false
+                      : registry.queue(queueArm.options.deadLetterQueue),
+                }),
           ...(queueArm.options.retryDelaySeconds === undefined
             ? {}
             : { retryDelaySeconds: queueArm.options.retryDelaySeconds }),
@@ -313,4 +315,15 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
       );
     },
   };
+}
+
+/**
+ * Refuses a dead-letter target that is the queue it serves: each exhausted job
+ * would be re-enqueued and run again without end.
+ */
+function refuseSelfDeadLetter(binding: string): never {
+  throw new CloudflareUnsupportedError(
+    `The queue arm's deadLetterQueue '${binding}' is the queue it serves; an exhausted job ` +
+      'would be re-enqueued and run again without end. Bind a separate dead-letter queue.',
+  );
 }

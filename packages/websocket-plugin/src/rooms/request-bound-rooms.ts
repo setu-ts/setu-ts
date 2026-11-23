@@ -20,7 +20,7 @@ import type {
   RealtimeFrame,
   RoomBroadcastOptions,
 } from '@setu-ts/common';
-import { decodeFrameData, encodeFrameData } from '@setu-ts/common';
+import { decodeFrameData, describeError, encodeFrameData } from '@setu-ts/common';
 
 import type { Room } from './room-registry.ts';
 
@@ -62,9 +62,19 @@ export class RequestBoundRooms {
    * @param isMember - Membership check, read per arriving frame
    */
   open(conn: IWebSocketConnection, isMember: MembershipCheck): void {
-    const link = this.#backplane.openConnectionLink(conn.id, (frame) => {
-      deliver(conn, frame, isMember);
-    });
+    let link: IRealtimeConnectionLink;
+    try {
+      link = this.#backplane.openConnectionLink(conn.id, (frame) => {
+        deliver(conn, frame, isMember);
+      });
+    } catch (error: unknown) {
+      // The connection still works; it only receives nothing from its rooms,
+      // and its own broadcasts go through the hub. Said, not swallowed.
+      this.#logger?.warn('websocket: backplane link could not open', {
+        error: describeError(error),
+      });
+      return;
+    }
     this.#links.set(conn, link);
   }
 
@@ -152,7 +162,12 @@ export class RequestBoundRooms {
       this.#fallbackLogged = true;
       this.#logger?.debug('websocket: broadcast published through the hub', { room: room.name });
     }
-    void this.#backplane.publishViaHub(frame);
+    void this.#backplane.publishViaHub(frame).catch((error: unknown) => {
+      this.#logger?.warn('websocket: backplane publish failed', {
+        room: room.name,
+        error: describeError(error),
+      });
+    });
   }
 }
 

@@ -2117,7 +2117,9 @@ class Application implements IKernelApplication {
       // A throwing responder must still release the request — its cleanups
       // and its in-flight count — or the shutdown drain stalls until its
       // deadline. The throw itself still surfaces, as it did before M125.
-      void this.#settleRequest(ctx, handle, 'error');
+      const settled = this.#settleRequest(ctx, handle, 'error');
+      // Its asynchronous cleanup outlives the throw: kept alive like any other.
+      if (settled instanceof Promise) keepAlive(this.#registry, settled);
       throw failure;
     }
     return this.#settleRequest(ctx, handle, 'error');

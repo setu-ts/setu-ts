@@ -397,6 +397,15 @@ describe('Workers transport: tracked state and the close reply (V13-195, V13-203
     expect(closes).toHaveLength(1);
   });
 
+  it('stays open when a local close throws, so the peer close is still answered', () => {
+    const { socket, closes } = tracedSocket({ closeThrows: true });
+    const { transport } = openTransport(socket);
+    expect(() => transport.close(1005)).toThrow('already replied');
+    expect(transport.readyState).toBe('open');
+    socket.emit('close', { code: 1000 });
+    expect(closes).toHaveLength(2);
+  });
+
   it('sends through the native socket', () => {
     const { socket } = tracedSocket();
     const { transport } = openTransport(socket);

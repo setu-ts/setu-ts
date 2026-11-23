@@ -407,7 +407,8 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   itself, so a client does not wait for its own timeout on a Worker whose `compatibility_date` is
   before `web_socket_auto_reply_to_close` (2026-04-07).
 - **A message above 32 MiB** is refused by workerd itself (close 1009); a `maxMessageBytes` of `0`
-  or above that is reported once at startup through the runtime's error sink.
+  or above that is reported once, at the first handshake that carries it, through the runtime's
+  error sink.
 
 ## Errors
 

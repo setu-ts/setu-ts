@@ -54,9 +54,10 @@ internal.
   work of its own, in `pull` or a pump it started, must make `cancel()` wait for it; a source with
   no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`;
   with a logger registered, a wait still pending after 30 s logs one `warn` line,
-  `Request cleanup still waiting for the response stream to stop; its resources are still held`), so
-  a handler that never settles keeps what it holds; a failed response stream is logged once as
-  `Response stream failed`.
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`; on
+  Cloudflare Workers, cleanup after the response is kept alive through `runtime.waitUntil` when
+  `RuntimePlugin({ waitUntil })` set it, and the platform cuts it at 30 s), so a handler that never
+  settles keeps what it holds; a failed response stream is logged once as `Response stream failed`.
 
 ## Reserved drain response (since 0.14.0)
 

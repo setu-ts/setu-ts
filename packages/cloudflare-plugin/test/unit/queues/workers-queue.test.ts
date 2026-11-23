@@ -696,6 +696,28 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(dlq.sends.at(1)?.body).toMatchObject({ body: 'not an envelope' });
   });
 
+  it('retries an unroutable message on its last attempt when the queue has no dead-letter target', async () => {
+    // A producer-only queue never called process(); the platform's own
+    // dead_letter_queue still decides, as before.
+    const logger = new RecordingLogger();
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      logger: () => logger,
+    });
+    const message = delivered('unknown', {}, { attempts: 3 });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+    expect(message.disposition).toBe('retried');
+    expect(logger.messages()).toEqual(['cloudflare-queue: message not routable, retried']);
+  });
+
+  it('names the last-attempt forward in the unroutable log line', async () => {
+    const { queue, logger } = build();
+    queue.process('known', () => {});
+    await queue.dispatch(new FakeQueueBatch('q', [delivered('unknown', {}, { attempts: 3 })]));
+    expect(logger.messages()).toContain(
+      'cloudflare-queue: message not routable on its last attempt, dead-lettered',
+    );
+  });
+
   it('discards an unroutable message on its last attempt when deadLetter is false', async () => {
     const { queue } = build({ deadLetter: false });
     queue.process('known', () => {});

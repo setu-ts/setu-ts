@@ -336,4 +336,17 @@ describe('CloudflarePlugin queue arm: exhausted jobs (V13-197)', () => {
     }).toThrow(/deadLetterQueue/);
     await app.stop();
   });
+
+  it('refuses at boot a deadLetterQueue that is the queue it serves', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({
+          env: { JOBS: new FakeQueueProducer() },
+          queue: { binding: 'JOBS', deadLetterQueue: 'JOBS' },
+        }),
+      ],
+    });
+    await expect(app.start()).rejects.toThrow(/the queue it serves/);
+  });
 });

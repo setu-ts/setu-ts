@@ -13,6 +13,7 @@
 
 import type { ILogger, IRequestContext, IResponse, MiddlewareFunction } from '@setu-ts/common';
 import {
+  cacheControlDirectives,
   CAPABILITIES,
   COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
   parseCookie,
@@ -452,9 +453,9 @@ function servableWithCookies(headers: Headers, credentialed: boolean): boolean {
   return cacheControl !== null && !isPrivate(cacheControl) && hasPublic(cacheControl);
 }
 
-/** Whether a readable `Cache-Control` value holds `public`. */
+/** Whether a readable `Cache-Control` value holds `public`, by the shared parser. */
 function hasPublic(cacheControl: string): boolean {
-  return splitDirectives(cacheControl)?.some((d) => directiveName(d) === 'public') ?? false;
+  return cacheControlDirectives(cacheControl)?.includes('public') ?? false;
 }
 
 /**

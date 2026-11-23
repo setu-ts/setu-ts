@@ -297,16 +297,19 @@ export class WorkersQueue implements IQueue {
   /**
    * Dispatches one delivered batch into the registered processors.
    *
-   * Every message is acked or retried exactly once:
+   * Every message is settled exactly once:
    *
-   * - a body that is not a readable envelope → `retry()`, because a message the
-   *   consumer cannot route is a configuration problem and acking would discard
-   *   it permanently and silently;
-   * - a name with no registered processor → `retry()`, same reason;
-   * - `attempts` past the envelope's `maxAttempts` → `ack()` without running
-   *   the processor, since the caller asked for the job to stop;
-   * - a processor that throws → `retry()`, leaving the queue's own
-   *   `max_retries` and dead-letter configuration to decide what happens next;
+   * - a body that is not a readable envelope, or a name with no registered
+   *   processor → `retry()` while it has attempts left, because acking would
+   *   discard it permanently and silently; on its last processor attempt
+   *   (`maxRetries`) it is forwarded to the dead-letter producer, or discarded
+   *   with a warning when the target is `false`, or (no target at all, a
+   *   producer-only queue) retried for the platform's own `dead_letter_queue`;
+   * - `attempts` past the job's budget (`min(maxAttempts, maxRetries)`) →
+   *   forwarded or discarded without running the processor;
+   * - a processor that throws before its last attempt → `retry()` (spaced by
+   *   `retryDelaySeconds`); on its last attempt → `onFailed`, then forwarded
+   *   or discarded;
    * - a processor that resolves → `ack()`.
    *
    * @param batch - The delivered batch
@@ -327,8 +330,9 @@ export class WorkersQueue implements IQueue {
       const registration = envelope === undefined ? undefined : this.#processors.get(envelope.name);
 
       if (envelope === undefined || registration === undefined) {
-        this.#reportUnroutable(batch.queue, message, envelope);
-        if (message.attempts >= this.#maxRetries) {
+        const last = message.attempts >= this.#maxRetries && this.#deadLetter !== undefined;
+        this.#reportUnroutable(batch.queue, message, envelope, last);
+        if (last) {
           // The platform's next exhaustion would delete it: keep it instead.
           const reason =
             envelope === undefined ? 'body is not a job envelope' : 'no processor registered';
@@ -475,7 +479,13 @@ export class WorkersQueue implements IQueue {
     const where =
       envelope === undefined ? { messageId: message.id } : { job: envelope.name, id: envelope.id };
     const target = this.#deadLetter;
-    if (target === false || target === undefined) {
+    if (target === undefined) {
+      // No dead-letter target (only possible for a message nothing here
+      // processes): leave it to the platform's own dead_letter_queue.
+      this.#retry(message);
+      return;
+    }
+    if (target === false) {
       message.ack();
       this.#logger?.()?.warn(
         `cloudflare-queue: job discarded after ${message.attempts} attempts; deadLetterQueue is false`,
@@ -557,15 +567,21 @@ export class WorkersQueue implements IQueue {
     queue: string,
     message: IQueueMessage,
     envelope: JobEnvelope | undefined,
+    last = false,
   ): void {
-    this.#logger?.()?.error('cloudflare-queue: message not routable, retried', {
-      queue,
-      messageId: message.id,
-      ...(envelope === undefined
-        ? { reason: 'body is not a job envelope' }
-        : { reason: 'no processor registered', job: envelope.name }),
-      registered: [...this.#processors.keys()],
-    });
+    this.#logger?.()?.error(
+      last
+        ? 'cloudflare-queue: message not routable on its last attempt, dead-lettered'
+        : 'cloudflare-queue: message not routable, retried',
+      {
+        queue,
+        messageId: message.id,
+        ...(envelope === undefined
+          ? { reason: 'body is not a job envelope' }
+          : { reason: 'no processor registered', job: envelope.name }),
+        registered: [...this.#processors.keys()],
+      },
+    );
   }
 
   /**

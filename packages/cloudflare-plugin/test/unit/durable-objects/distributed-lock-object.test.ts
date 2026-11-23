@@ -154,6 +154,7 @@ describe('DistributedLockObjectCore TTL refusal (V13-204)', () => {
     ['a fraction', { token: 't', ttlMs: 0.5 }],
     ['above the bound', { token: 't', ttlMs: 2_147_483_648 }],
     ['no token', { ttlMs: 1000 }],
+    ['a null body', null],
   ])('answers 400 for %s', async (_label, body) => {
     const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
     const response = await call(core, '/acquire', body);
@@ -165,5 +166,17 @@ describe('DistributedLockObjectCore TTL refusal (V13-204)', () => {
     expect(await acquire(core, 'a', 2_147_483_647)).toBe('a');
     const other = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
     expect(await acquire(other, 'b', 1)).toBe('b');
+  });
+});
+
+describe('DistributedLockObjectCore refusal text', () => {
+  it('names the field that is wrong', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await (await call(core, '/acquire', { ttlMs: 1000 })).text()).toBe(
+      'token must be a string',
+    );
+    expect(await (await call(core, '/acquire', { token: 't', ttlMs: 0 })).text()).toContain(
+      'ttlMs',
+    );
   });
 });

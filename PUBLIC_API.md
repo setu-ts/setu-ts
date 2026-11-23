@@ -983,10 +983,11 @@ may end an invocation with its response. Only the Cloudflare Workers runtime has
 `createCloudflareRuntimeServices({ waitUntil })`) was given `waitUntil` from `cloudflare:workers` —
 the module import, which resolves the current request, never one request's `ctx.waitUntil`. The
 kernel hands it, once per chain, the cleanup that can outlive the handed-back response: the
-cancel-then-cleanup chain when a client leaves a streamed body, a late asynchronous `ctx.defer`, and
-a handler still running after an early response with its cleanups. A missing or throwing `waitUntil`
-loses only the extension, never the cleanup. `CloudflarePlugin` uses it when its own `waitUntil`
-option is omitted; an explicit option wins.
+cancel-then-cleanup chain when a client leaves a streamed body, a late asynchronous `ctx.defer`, a
+handler still running after an early response with its cleanups, and the cleanups of a request whose
+error responder threw. A missing or throwing `waitUntil` loses only the extension, never the
+cleanup. `CloudflarePlugin` uses it when its own `waitUntil` option is omitted; an explicit option
+wins.
 
 `onSignal` registers a process-termination handler so an application can run `app.stop()` — its
 shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
@@ -14047,7 +14048,9 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 `IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
 (queued until open; `false` when closed or called from a request that does not own the link, so the
-caller publishes another way) and `close(): void` (idempotent).
+caller publishes another way) and `close(): void` (idempotent; while the first open is in flight,
+frames already queued are still sent once it opens, kept alive through `waitUntil` where the
+backplane has one; frames queued while a lost link waits to reopen are dropped with one `warn`).
 `IRealtimeLinkBackplane extends IRealtimeBackplane` adds
 `openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
 owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and

@@ -274,4 +274,88 @@ describe('ConnectionLink', () => {
     await setImmediate();
     expect(timers.pending).toEqual([]);
   });
+
+  it('still sends frames queued before it opened when closed early, then closes', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const got: RealtimeFrame[] = [];
+    link(namespace, (f) => got.push(f));
+    await setImmediate();
+    const quick = link(namespace, () => {});
+    quick.publish(frame('said before leaving'));
+    quick.close();
+    expect(quick.publish(frame('after'))).toBe(false);
+    await setImmediate();
+    expect(got.map((f) => f.data)).toEqual(['said before leaving']);
+    expect(namespace.clients.at(-1)?.closed).toBe(true);
+  });
+
+  it('warns once, without content, when a link closed early cannot open', async () => {
+    const logger = new RecordingLogger();
+    const timers = manualTimers();
+    const quick = link(new FakeDurableObjectNamespace(), () => {}, {
+      logger,
+      timers,
+      hub: () => ({ fetch: () => Promise.reject(new Error('down')) }),
+    });
+    quick.publish(frame('secret'));
+    quick.close();
+    await setImmediate();
+    expect(logger.records.map((r) => r.message)).toEqual([
+      'cloudflare: backplane link closed before it opened',
+    ]);
+    expect(logger.records[0]?.meta).toEqual({ topic: 'chat', connection: 'conn-1', dropped: 1 });
+    expect(timers.pending).toEqual([]);
+  });
+
+  it('stops flushing when the socket fails mid-flush', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const quick = link(namespace, () => {}, {
+      hub: () => ({
+        fetch: async () => {
+          const response = await namespace.get('chat').fetch('https://x/link', {
+            headers: { Upgrade: 'websocket' },
+          });
+          (response as unknown as { webSocket: { failSend: boolean } }).webSocket.failSend = true;
+          return response;
+        },
+      }),
+    });
+    quick.publish(frame('a'));
+    quick.publish(frame('b'));
+    quick.close();
+    await setImmediate();
+    expect(namespace.clients[0]?.closed).toBe(true);
+  });
+
+  it('hands an early close flush to waitUntil, and warns when closed while waiting to reopen', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const held: Promise<unknown>[] = [];
+    const quick = new ConnectionLink({
+      hub: () => namespace.get(namespace.idFromName('chat')),
+      binding: 'REALTIME',
+      topic: 'chat',
+      connectionId: 'c',
+      deliver: () => {},
+      timers: manualTimers(),
+      waitUntil: (p) => {
+        held.push(p);
+      },
+    });
+    quick.publish(frame('x'));
+    quick.close();
+    expect(held).toHaveLength(1);
+    await held[0];
+
+    const logger = new RecordingLogger();
+    const timers = manualTimers();
+    const waiting = link(namespace, () => {}, { logger, timers });
+    await setImmediate();
+    namespace.clients.at(-1)?.fire('close', { data: '' });
+    waiting.publish(frame('queued while reopening'));
+    waiting.close();
+    expect(logger.records.map((r) => r.message)).toEqual([
+      'cloudflare: backplane link closed with frames unsent',
+    ]);
+    expect(logger.records[0]?.meta).toMatchObject({ dropped: 1 });
+  });
 });

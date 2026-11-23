@@ -267,10 +267,10 @@ Four things to know before you rely on it:
   in a `producer` span whose `traceparent` rides the envelope's framework `trace` field, and each
   subscriber and responder runs in a `consumer` span parented from it. Your own headers are carried
   as before and never mixed with it.
-- **Subscriptions carry no `fanOut` marker.** A queue has one consumer Worker, so a fan-out
-  subscription has no meaning here, and `RealtimeBackplanePlugin({ transport: 'messaging' })`
-  refuses to start on this broker. The Durable Object backplane below is the Workers answer for
-  realtime fan-out.
+- **No fan-out subscription.** A queue reaches one consumer Worker, so a subscription here is never
+  delivered to every instance, and `RealtimeBackplanePlugin({ transport: 'messaging' })` cannot fan
+  frames out over this broker: a frame would reach one consumer Worker only. The Durable Object
+  backplane below is the Workers answer for realtime fan-out.
 
 Without the `rpc` arm, `request` and `respond` throw `CloudflareUnsupportedError` naming the binding
 to add — `publish` and `subscribe` are unaffected.

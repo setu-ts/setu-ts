@@ -322,10 +322,10 @@ native runtime's own limit.
 On Cloudflare Workers an invocation may end with its response, and work still pending is cancelled.
 `runtime.waitUntil` (present only when `RuntimePlugin({ waitUntil })` was given the module import)
 keeps the kernel's cleanups alive after the response: asynchronous `ctx.defer` cleanups when a
-client leaves mid-stream, a late `defer`, and a handler still running after an early response.
-Without it an asynchronous cleanup after a client leaves may be cut off. The platform caps that
-extra time at 30 seconds, the same as the kernel's 30 s warning for a `cancel()` that does not
-settle, so on Workers that warning may not fire first.
+client leaves mid-stream, a late `defer`, a handler still running after an early response, and the
+cleanups of a request whose error responder threw. Without it an asynchronous cleanup after a client
+leaves may be cut off. The platform caps that extra time at 30 seconds, the same as the kernel's 30
+s warning for a `cancel()` that does not settle, so on Workers that warning may not fire first.
 
 A failed stream is logged once by the kernel, `Response stream failed`, through the application's
 logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (internal); the exported

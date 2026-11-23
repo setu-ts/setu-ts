@@ -270,6 +270,7 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
       deliver,
       timers,
       ...(this.#options.logger === undefined ? {} : { logger: this.#options.logger }),
+      ...(this.#options.waitUntil === undefined ? {} : { waitUntil: this.#options.waitUntil }),
     });
   }
 

@@ -47,11 +47,8 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
 - `IHttpAdapter.listen` and an injected `NodeServeHost.serve` resolve once bound and reject on bind
   failure. The default Node host waits for listening/error.
 - `runtime.hrtime()` and `ctx.startTime` are monotonic milliseconds; `runtime.now()` is epoch time.
-- On Workers, only string entries from `env` populate `runtime.env`; the option is ignored on Node,
-  Deno and Bun. Workers omit `fs`, `workers`, `dns`, `createDnsResolver` and `onSignal`.
-
-## Other options
-
+- Workers: only string `env` entries fill `runtime.env`; `waitUntil` keeps cleanups alive. Workers
+  omit `fs`, `workers`, `dns`, `createDnsResolver`, `onSignal`, `onFatalError`.
 - `platform` selects node, deno, bun or cloudflare-workers explicitly.
 - `createRuntimeServices()` builds standalone services before an application exists.
 - `adapters` and `httpAdapters` inject factories for tests.

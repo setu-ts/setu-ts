@@ -55,6 +55,11 @@ export interface ConnectionLinkOptions {
   readonly timers: Pick<IRuntimeServices, 'setTimeout' | 'clearTimeout'>;
   /** Logger accessor, read when something is reported. */
   readonly logger?: () => ILogger | undefined;
+  /**
+   * Keeps an early close's flush alive after its connection's request ends
+   * (the backplane's `waitUntil`). Absent, the flush runs unprotected.
+   */
+  readonly waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /**
@@ -69,6 +74,14 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   readonly #queue: RealtimeFrame[] = [];
   #socket: IDurableObjectClientSocket | undefined;
   #closed = false;
+  /**
+   * Set by `close()` while frames are still queued for a socket not yet open:
+   * the link opens, sends them, then closes, so a connection that leaves
+   * before its link opened does not lose what it already broadcast.
+   */
+  #flushing = false;
+  /** The open in flight, so an early close can hand it to `waitUntil`. */
+  #opening: Promise<void> | undefined;
   #reopens = 0;
   #timer: TimerHandle | undefined;
   #overflowReported = false;
@@ -114,6 +127,21 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#socket === undefined && this.#queue.length > 0 && this.#timer === undefined) {
+      // Opening now: deliver nothing more, but send what was queued once open,
+      // kept alive past this connection's request where the platform allows.
+      this.#flushing = true;
+      if (this.#opening !== undefined) this.#options.waitUntil?.(this.#opening);
+      return;
+    }
+    if (this.#queue.length > 0) {
+      // Closed while waiting to reopen: nothing can carry these any more.
+      this.#options.logger?.()?.warn('cloudflare: backplane link closed with frames unsent', {
+        topic: this.#options.topic,
+        connection: this.#options.connectionId,
+        dropped: this.#queue.length,
+      });
+    }
     this.#queue.length = 0;
     if (this.#timer !== undefined) {
       this.#options.timers.clearTimeout(this.#timer);
@@ -133,7 +161,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       this.#lost();
       return;
     }
-    pending.then(
+    this.#opening = pending.then(
       (response) => {
         let socket: IDurableObjectClientSocket;
         try {
@@ -153,6 +181,18 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   /** Publishes a live socket, or closes it when the link closed meanwhile. */
   #attach(socket: IDurableObjectClientSocket): void {
+    if (this.#flushing) {
+      this.#flushing = false;
+      for (const frame of this.#queue.splice(0)) {
+        try {
+          socket.send(JSON.stringify(frame));
+        } catch {
+          break;
+        }
+      }
+      closeQuietly(socket);
+      return;
+    }
     if (this.#closed) {
       closeQuietly(socket);
       return;
@@ -182,6 +222,18 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   /** Schedules a reopen, or gives up after the last delay. */
   #lost(): void {
+    if (this.#flushing) {
+      // The link closed before it opened and the open failed: what it had
+      // queued cannot be sent. Said once, without frame content.
+      this.#flushing = false;
+      this.#options.logger?.()?.warn('cloudflare: backplane link closed before it opened', {
+        topic: this.#options.topic,
+        connection: this.#options.connectionId,
+        dropped: this.#queue.length,
+      });
+      this.#queue.length = 0;
+      return;
+    }
     if (this.#closed) return;
     const delay = LINK_REOPEN_DELAYS_MS[this.#reopens];
     if (delay === undefined) {

@@ -229,8 +229,11 @@ export function bindCloudflareSocketToSink(
       socket.send(data);
     },
     close(code?: number, reason?: string): void {
-      if (state === 'open') state = 'closing';
+      // State moves only once the call returned: a close that throws (an
+      // unsendable code, another request's socket) must leave the peer's
+      // close still answered.
       socket.close(code, reason);
+      if (state === 'open') state = 'closing';
     },
   });
 }

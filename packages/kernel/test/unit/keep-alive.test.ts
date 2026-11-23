@@ -67,7 +67,29 @@ describe('keepAlive', () => {
 });
 
 describe('the cleanup paths that outlive the response', () => {
-  it('(a) a late asynchronous ctx.defer is kept alive once, and still runs with a throwing host', async () => {
+  it('(a) still runs a late asynchronous ctx.defer when waitUntil throws', async () => {
+    const registry = new ServiceRegistry();
+    registry.register(
+      CAPABILITIES.RUNTIME,
+      withWaitUntil(() => {
+        throw new Error('no request context');
+      }),
+    );
+    const h = createRequestContext(
+      { method: 'GET', url: 'http://t/', path: '/', headers: new Headers() } as IRequest,
+      registry,
+      createFakeRuntime().runtime,
+    );
+    h.takeDeferred();
+    const ran = vi.fn();
+    h.ctx.defer?.(async () => {
+      await Promise.resolve();
+      ran();
+    });
+    await vi.waitFor(() => expect(ran).toHaveBeenCalledOnce());
+  });
+
+  it('(a) a late asynchronous ctx.defer is kept alive once', async () => {
     const { registry, held } = recording();
     const h = createRequestContext(
       { method: 'GET', url: 'http://t/', path: '/', headers: new Headers() } as IRequest,

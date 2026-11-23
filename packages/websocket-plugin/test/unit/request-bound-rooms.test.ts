@@ -319,6 +319,24 @@ describe('request-bound rooms on Workers', () => {
   });
 });
 
+describe('a broadcast from onClose', () => {
+  it("goes over the leaving member's own link, not the hub", async () => {
+    const ref: { service?: WebSocketService } = {};
+    const h = await rooms({
+      onClose: (conn) => {
+        ref.service?.room('lobby').broadcast('left', { except: conn });
+      },
+    });
+    ref.service = h.service;
+    await h.connect('a');
+    const b = await h.connect('b');
+    h.disconnect('a');
+    expect(b.transport.sent).toEqual(['left']);
+    expect(h.hub.posts).toBe(0);
+    expect(h.hub.links.size).toBe(1);
+  });
+});
+
 describe('Workers without a link backplane', () => {
   it('refuses rooms by name and keeps single-socket routes working', () => {
     const plain: IRealtimeBackplane = {
@@ -394,5 +412,30 @@ describe('RequestBoundRooms', () => {
         .backplane('p')
         .publishViaHub({ kind: 'ws-room', origin: 'p', name: 'lobby', data: 'y' });
     }).not.toThrow();
+  });
+
+  it('logs a link that cannot open, and a hub publish that rejects', async () => {
+    const logger = createFakeLogger();
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const failing = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => {
+        throw new Error('no timers');
+      },
+      publishViaHub: () => Promise.reject(new Error('hub down')),
+    };
+    const rooms = new RequestBoundRooms(failing, logger);
+    const conn = { id: 'c', isOpen: true, send: () => {} } as unknown as IWebSocketConnection;
+    expect(() => {
+      rooms.open(conn, () => true);
+    }).not.toThrow();
+    expect(rooms.linkCount).toBe(0);
+    rooms.broadcast(new Room('lobby'), 'x');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(logger.entries.map((e) => e.message)).toEqual([
+      'websocket: backplane link could not open',
+      'websocket: backplane publish failed',
+    ]);
   });
 });
