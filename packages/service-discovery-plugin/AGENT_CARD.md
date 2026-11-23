@@ -38,16 +38,17 @@ export function registerBillingRoutes(router: IRouterApi): void {
 ## Behaviour
 
 - `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
-  return `null` for an empty pool. Default strategy: round-robin.
+  return `null` when empty. Default: round-robin.
 - Warm reads use cache; a read (watched too) starts background refresh once `cacheTtlMs` old (30000
-  ms; `0` every call; non-finite or out of range refused). Cold reads share `resolveTimeoutMs` (2000
-  ms; `0` unbounded).
+  ms; `0` every call; bad values refused). Cold reads share `resolveTimeoutMs` (2000 ms; `0`
+  unbounded).
 - Failed warm refreshes retry at 1, 2, 4, 8, 16, 30 s; cold failures are unspaced.
 - `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
   at expiry; empty results reach watchers without another event. Nonempty answers/close clear it.
 - One provider watch per name; joiners get the cache at once; lists may repeat.
-- `degraded`: warm failures/held empties. `staleForMs`: failed-list age. All providers cache health
-  for 5 s; DNS uses its last lookup outcome. DNS absent names resolve `[]`; other errors reject.
+- Data `degraded` (status stays `up`): warm failures/held empties. `staleForMs`: failed-list age.
+  All providers cache health for 5 s; DNS uses its last lookup outcome. DNS absent names resolve
+  `[]`; other errors reject.
 - Failing names keep a reporter (max 256; 20 cold warns/min). At most 256 unwatched empty-only names
   stay cached. Listener errors are isolated, warn once. Failed reads older than a watch delivery
   keep its list.

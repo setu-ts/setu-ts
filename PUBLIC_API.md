@@ -13463,11 +13463,14 @@ cause when the failure starts (a Deno `UnknownIssuer` TLS rejection, an HTTP sta
 identical repeats, and one `info` on recovery, under the source `service-discovery-plugin: <kind>`.
 `DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
 service counts a rejection as unreachable. The Kubernetes provider (since 0.13.0) and the DNS
-provider (since 0.14.0) reject this way. A cold-resolve `DiscoveryUnavailableError` message now ends
-with the cause; its public `503` detail is unchanged. A Kubernetes service-account token or Consul
-ACL token holding anything but visible ASCII is refused with a fixed `DiscoveryUnavailableError`
-that never contains the token, before any request is built; as a configuration fault it passes
-through unbranded, so a cold resolve that needs it answers `500`.
+provider (since 0.14.0) reject this way. A cold backend failure is wrapped in a branded
+`DiscoveryUnavailableError` whose message ends with the cause; its public `503` detail is unchanged.
+This includes a Kubernetes API token rejection (`401`/`403`). Every provider-thrown
+`DiscoveryUnavailableError` passes through unbranded, so a cold resolve answers `500`. The built-in
+providers throw it for a multi-port Kubernetes service with no `portName`, a missing projected token
+file or no runtime `fs` when no explicit token was supplied, or a Kubernetes service-account /
+Consul ACL token holding anything but visible ASCII. The token fault has a fixed message that never
+contains the token and is raised before any request is built.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

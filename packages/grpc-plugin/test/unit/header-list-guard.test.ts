@@ -28,14 +28,21 @@ function sessionFor(stream: GuardedStreamLike): { request(): Promise<GuardedStre
   return { request: () => Promise.resolve(stream) };
 }
 
-/** A stream recording what it was destroyed with. */
+type FakeStream = GuardedStreamLike &
+  EventEmitter & {
+    destroyedWith: Error[];
+    rstCode: number;
+    session: GuardedStreamLike['session'];
+  };
+
+/** Records destruction and detaches the session before events, as Node does. */
 function streamWith(
   sentHeaders: Record<string, unknown> | undefined,
   maxHeaderListSize: number | undefined,
   hasSession = true,
-): GuardedStreamLike & EventEmitter & { destroyedWith: Error[]; rstCode: number } {
+): FakeStream {
   const destroyedWith: Error[] = [];
-  return Object.assign(new EventEmitter(), {
+  const stream: FakeStream = Object.assign(new EventEmitter(), {
     destroyedWith,
     rstCode: 0,
     ...(sentHeaders === undefined ? {} : { sentHeaders }),
@@ -46,8 +53,10 @@ function streamWith(
       : null,
     destroy(error?: Error) {
       if (error !== undefined) destroyedWith.push(error);
+      stream.session = undefined;
     },
   });
+  return stream;
 }
 
 describe('guardHeaderList', () => {
@@ -97,6 +106,10 @@ describe('guardHeaderList', () => {
       'error-before-rst-close',
       'close-only',
       'destroy-error-close',
+      'destroy-error-before-rst-close',
+      'detached-error-close',
+      'detached-error-before-rst-close',
+      'detached-close-only',
     ] as const) {
       it(`${JSON.stringify(row)} (${order})`, async () => {
         const runtime = await loadConnectModule();
@@ -134,9 +147,13 @@ describe('guardHeaderList', () => {
         });
         if (stream.destroyedWith.length === 0) {
           if (row.reaction === 'refused') {
-            if (order === 'error-close' || order === 'destroy-error-close') stream.rstCode = 7;
-            if (order === 'destroy-error-close') stream.destroy(nativeRefusal);
-            if (order !== 'close-only')
+            if (!order.includes('before-rst') && !order.endsWith('close-only')) stream.rstCode = 7;
+            if (order.startsWith('destroy-')) {
+              stream.destroy(nativeRefusal);
+              expect(stream.session).toBeUndefined();
+            }
+            if (order.startsWith('detached-')) stream.session = undefined;
+            if (!order.endsWith('close-only'))
               stream.emit('error', stream.destroyedWith[0] ?? nativeRefusal);
             stream.rstCode = 7;
           } else stream.emit('response', { ':status': 200 });
@@ -159,12 +176,11 @@ describe('guardHeaderList', () => {
         );
         if ('sessionState' in row) {
           expect(settled).not.toBeInstanceOf(GrpcHeaderListTooLargeError);
-          if (order !== 'close-only') {
+          if (!order.endsWith('close-only')) {
             expect(settled).toBe(nativeRefusal);
             expect(errors).toEqual([nativeRefusal]);
           }
-          if (order === 'destroy-error-close')
-            expect(stream.destroyedWith).toEqual([nativeRefusal]);
+          if (order.startsWith('destroy-')) expect(stream.destroyedWith).toEqual([nativeRefusal]);
         }
         if (row.result === 'instance') {
           expect(settled).not.toBeInstanceOf(GrpcHeaderListTooLargeError);
@@ -195,6 +211,7 @@ describe('guardHeaderList', () => {
     let writeError: Error | undefined;
     stream.destroy = (error?: Error) => {
       writeError = error;
+      stream.session = undefined;
       stream.emit('error', error);
       stream.emit('close');
     };
@@ -210,6 +227,64 @@ describe('guardHeaderList', () => {
     expect(events).toEqual([writeError]);
     expect(isRefusedStream(ConnectError.from(writeError))).toBe(false);
     expect(callOutcome(ConnectError.from(writeError), undefined, () => false)).toBeUndefined();
+  });
+
+  it.each(['destroy', 'error'] as const)(
+    'keeps the first refusal decision when the session closes after %s',
+    async (first) => {
+      const stream = streamWith({ x: 'a'.repeat(65504) }, 4294967295);
+      const capturedSession = stream.session!;
+      const session = sessionFor(stream);
+      guardHeaderList(session);
+      await session.request();
+      const nativeRefusal = Object.assign(
+        new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'),
+        { code: 'ERR_HTTP2_STREAM_ERROR' },
+      );
+      const events: Error[] = [];
+      stream.on('error', (error: Error) => events.push(error));
+      stream.rstCode = 7;
+      if (first === 'destroy') stream.destroy(nativeRefusal);
+      else stream.emit('error', nativeRefusal);
+      const decidedError = first === 'destroy' ? stream.destroyedWith[0] : events[0];
+      expect(decidedError).toBeInstanceOf(GrpcHeaderListTooLargeError);
+
+      Object.assign(capturedSession, { closed: true, destroyed: true });
+      stream.session = undefined;
+      stream.destroy(nativeRefusal);
+      stream.emit('error', nativeRefusal);
+      stream.emit('close');
+      expect(stream.destroyedWith).toEqual(
+        first === 'destroy' ? [decidedError, decidedError] : [decidedError],
+      );
+      expect(events).toEqual(first === 'destroy' ? [decidedError] : [decidedError, decidedError]);
+      expect(events.every((error) => error === decidedError)).toBe(true);
+      expect(stream.destroyedWith.every((error) => error === decidedError)).toBe(true);
+    },
+  );
+
+  it('waits for a refusal before deciding whether the caller caused it', async () => {
+    const stream = streamWith({ x: 'a'.repeat(65504) }, 4294967295);
+    const capturedSession = stream.session!;
+    const session = sessionFor(stream);
+    guardHeaderList(session);
+    await session.request();
+    const unrelated = new Error('unrelated');
+    const events: Error[] = [];
+    stream.on('error', (error: Error) => events.push(error));
+    stream.destroy(unrelated);
+    stream.emit('error', unrelated);
+    Object.assign(capturedSession, { closed: true });
+    const nativeRefusal = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'),
+      { code: 'ERR_HTTP2_STREAM_ERROR' },
+    );
+    stream.rstCode = 7;
+    stream.destroy(nativeRefusal);
+    stream.emit('error', nativeRefusal);
+    stream.emit('close');
+    expect(stream.destroyedWith).toEqual([unrelated, nativeRefusal]);
+    expect(events).toEqual([unrelated, nativeRefusal]);
   });
 
   it('does not reclassify a different reset, a caller abort, or an unrelated error', async () => {

@@ -740,10 +740,13 @@ because the drain answer is written through the application's error responder wh
     that is shutting down (GOAWAY, so the client session is already closed) stays a refused stream
     and is resent: on Node 24.22.1 `session.closed` is `true` after a GOAWAY refusal and `false`
     after an oversized-header refusal (code review 2026-11-23; the drain cost first stated here was
-    avoidable). Consistent with F3 option B: caller input never ejects a healthy instance.
-    Re-measured after the change: 6 calls with a 70 KiB header against two default Setu servers fail
-    with `GrpcHeaderListTooLargeError` (72,201 octets over the 65,536 threshold), nothing is
-    ejected, and the next 4 calls are served 2 and 2.
+    avoidable). Node detaches `stream.session` before it dispatches the error, so the guard keeps
+    its own reference to the session and decides once, at the first sign of the refusal, for the
+    write callback and every event (a second review found the first version of this fix read
+    `stream.session` too late and changed nothing on Node). Consistent with F3 option B: caller
+    input never ejects a healthy instance. Re-measured after the change: 6 calls with a 70 KiB
+    header against two default Setu servers fail with `GrpcHeaderListTooLargeError` (72,201 octets
+    over the 65,536 threshold), nothing is ejected, and the next 4 calls are served 2 and 2.
   - **F5 — DECIDED A by the maintainer (2026-11-23).** A peer that advertises a limit below normal
     callers' headers fails every call routed to it without being reported, so it is never ejected (1
     of 2 such replicas: 50 % of calls fail; before F2 it was ejected after 5). Options: A, exempt

@@ -65,11 +65,14 @@ export interface GuardedStreamLike {
   /** The headers Node sent, pseudo-headers included. */
   readonly sentHeaders?: Readonly<Record<string, unknown>>;
   /** The stream's session, carrying the peer's settings. */
-  readonly session?: {
-    readonly remoteSettings?: { readonly maxHeaderListSize?: number };
-    readonly closed?: boolean;
-    readonly destroyed?: boolean;
-  } | null;
+  readonly session?:
+    | {
+        readonly remoteSettings?: { readonly maxHeaderListSize?: number | undefined };
+        readonly closed?: boolean;
+        readonly destroyed?: boolean;
+      }
+    | null
+    | undefined;
   /** The peer's stream reset code (REFUSED_STREAM is 7). */
   readonly rstCode?: number;
   /** Dispatches events to connect-node's stream listeners. */
@@ -141,10 +144,20 @@ export function guardHeaderList(session: GuardableSessionLike): void {
 
 /** Replace the refusal before any Connect callback can settle its sentinel. */
 function guardUnadvertisedRefusal(stream: GuardedStreamLike, size: number): void {
+  // Node detaches stream.session during destroy, before error/close dispatch.
+  const session = stream.session;
   const emit = stream.emit;
   const destroy = stream.destroy;
   let replaced = false;
+  let refusedByCaller: boolean | undefined;
   let refusal: GrpcHeaderListTooLargeError | undefined;
+  const isCallerRefusal = (error: unknown): boolean => {
+    // Decide only when a refusal is first seen, then keep write callbacks and
+    // every later event on that decision even if the session changes state.
+    if (refusedByCaller === undefined && isRefusal(stream, error))
+      refusedByCaller = !session?.closed && !session?.destroyed;
+    return refusedByCaller ?? false;
+  };
   const callerError = (): GrpcHeaderListTooLargeError =>
     // Deliberately omit the original cause: isRefusedStream walks the whole
     // cause chain and would otherwise resend this caller fault.
@@ -157,11 +170,11 @@ function guardUnadvertisedRefusal(stream: GuardedStreamLike, size: number): void
     // Node's onStreamClose sets rstCode then calls destroy(). Its _destroy
     // settles pending write callbacks BEFORE emitting error, so replacing only
     // the event would let connect-node's sinkRequest see the native refusal.
-    return destroy.call(this, isRefusal(stream, error) ? callerError() : error);
+    return destroy.call(this, isCallerRefusal(error) ? callerError() : error);
   };
   stream.emit = function (event: string | symbol, ...args: unknown[]): boolean {
-    const refusedError = event === 'error' && isRefusal(stream, args[0]);
-    if (refusedError || (event === 'close' && isRefusal(stream, undefined) && !replaced)) {
+    const refusedError = event === 'error' && isCallerRefusal(args[0]);
+    if (refusedError || (event === 'close' && isCallerRefusal(undefined) && !replaced)) {
       replaced = true;
       if (event === 'error') return emit.call(this, event, callerError(), ...args.slice(1));
       // Node emits error before close; handle close-only runtimes too, before
@@ -172,9 +185,8 @@ function guardUnadvertisedRefusal(stream: GuardedStreamLike, size: number): void
   };
 }
 
-/** Node's REFUSED_STREAM reset or native error on a session that is not shutting down. */
+/** Node's REFUSED_STREAM reset or native error, independent of session state. */
 function isRefusal(stream: GuardedStreamLike, error: unknown): boolean {
-  if (stream.session?.closed || stream.session?.destroyed) return false;
   return (
     stream.rstCode === 7 ||
     (error instanceof Error &&

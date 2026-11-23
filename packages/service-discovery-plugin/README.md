@@ -272,10 +272,12 @@ Warm names always answer from cache immediately. Once a list is `cacheTtlMs` old
 background refresh; concurrent refreshes for one name coalesce. `cacheTtlMs: 0` starts a refresh on
 every warm call, coalesced while one runs. The last good list survives failures indefinitely. Cold
 names await one coalesced read, bounded by `resolveTimeoutMs` (default 2000 ms, `0` unbounded), and
-reject with a branded 503 when it fails, except provider configuration faults (a multi-port
-Kubernetes service with no `portName`, or a rejected token), which pass through unbranded and
-answer 500. A failed background refresh spaces retries by 1, 2, 4, 8, 16, then 30 seconds per name;
-a successful answer resets the spacing.
+reject with a branded 503 when it fails, including a Kubernetes API token rejection (401/403). Every
+provider-thrown `DiscoveryUnavailableError` passes through unbranded and answers 500. The built-in
+providers throw it for a multi-port Kubernetes service with no `portName`, a missing projected token
+file or no runtime `fs` when no explicit token was supplied, or a Kubernetes service-account /
+Consul ACL token holding a character an HTTP header cannot carry. A failed background refresh spaces
+retries by 1, 2, 4, 8, 16, then 30 seconds per name; a successful answer resets the spacing.
 
 An empty answer holds a nonempty list for `emptyAnswerGraceMs` (default 30000 ms; `0` replaces at
 once). Read and watch callers see the same held list, with `degraded: true`. Nonempty answers reset
