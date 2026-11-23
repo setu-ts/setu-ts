@@ -545,6 +545,10 @@ runtime still exits as it would have and prints its own report. The kernel subsc
 application runs and writes one `fatal` line, `Process failed`, through the registered logger. It is
 absent on Cloudflare Workers.
 
+`createDnsResolver` (since 0.14.0) returns a new resolver that asks the given IP-literal name
+servers and settles each lookup within `timeoutMs`; invalid options throw `RangeError`. Node, Bun
+and Deno provide it; it is absent on Cloudflare Workers.
+
 ### Runtime Platform
 
 ```typescript
