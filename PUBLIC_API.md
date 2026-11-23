@@ -16360,38 +16360,38 @@ grpc.addService(AnotherDefinition, anotherImpl);
 ### Client outcomes and cancellation
 
 An instance fails when it did not answer, refused the stream, returned `Unavailable`,
-`Unimplemented` or `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
+`Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
 server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`.
 The same codes without a server answer fail. A request that makes a healthy handler throw must not
 eject replicas. A replica whose handlers fail every call with `Internal` (a broken dependency, say)
 is not ejected by call outcomes. Take it out through readiness (health checks) instead. On the
-default `connect` protocol a JSON object body on any non-200 unary answer is read as a server
-answer, its code taken from the body's `code` field or else from the HTTP status (404
-`Unimplemented`; 429, 502, 503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their auth codes; any
-other status `Unknown`); it fails only when that code is `Unavailable`, `Unimplemented` or
-`DeadlineExceeded`, so a wrong service or proxy answering a JSON 400, 401, 403 or 500 is not ejected
-either; an HTML error page is no answer and fails. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM`
-before the response headers (by the server, or by this client's own HTTP/2 session when it is over
-its memory cap) (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says for
-more than 128 header fields) is never counted against the instance and is not resent, whatever the
-call sent: it fails as `ResourceExhausted` (grpc-go's mapping) with `GrpcExcessiveLoadError` as its
-`cause`. Caller abort reports nothing. A few client-side faults raised before the request leaves
-(serialization, `writeMaxBytes`, a request header Node refuses) report nothing. The serialization
-and write-size exclusions apply only with no response metadata: Connect's binary serialization
-failure (`serialize binary: …`, `Internal`) and its exact `writeMaxBytes` refusal
-(`ResourceExhausted`). A refused-header code (`ERR_HTTP2_INVALID_CONNECTION_HEADERS`,
-`ERR_INVALID_CHAR`) within five cause-chain objects is excluded whatever the metadata: a
-connection-specific header on HTTP/2 (`connection`, `keep-alive`, `proxy-connection`, `upgrade`,
-`transfer-encoding`, `http2-settings`, `te` other than `trailers`) or a control character in a
-header value on HTTP/1.1. A header name or value the WHATWG `Headers` rejects fails the call before
-any instance is picked, so it is never reported. A list over the peer's advertised
-`SETTINGS_MAX_HEADER_LIST_SIZE` is stopped immediately once SETTINGS are known. If it is also over 8
-KiB (8192 octets), it is the caller's fault: `GrpcHeaderListTooLargeError`, no report and no resend.
-At or under 8 KiB it counts as `failure` against the instance; unary calls are resent once to
-another pick within the remaining deadline, like a refused stream: that peer advertised less than
-any gRPC default. If the resend meets the same fault, the caller gets `Unavailable` with a message
-naming the header size and advertised limit. When no header-list limit was known when the call
-started, only a `REFUSED_STREAM` on a sent list over 65536 octets becomes
+default `connect` protocol a well-formed JSON error object (`application/json`) on any non-200 unary
+answer is read as a server answer, its code taken from the body's `code` field or else from the HTTP
+status (404 `Unimplemented`; 429, 502, 503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their
+auth codes; any other status `Unknown`); it fails only when that code is `Unavailable`,
+`Unimplemented`, `DeadlineExceeded` or `Canceled`, so a wrong service or proxy answering a JSON 400,
+401, 403 or 500 is not ejected either; an HTML error page is no answer and fails. A stream reset
+with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's own
+HTTP/2 session when it is over its memory cap) (RFC 9113 §7: this client's behaviour looked
+excessive, as Node's server says for more than 128 header fields) is never counted against the
+instance and is not resent, whatever the call sent: it fails as `ResourceExhausted` (grpc-go's
+mapping) with `GrpcExcessiveLoadError` as its `cause`. Caller abort reports nothing. A few
+client-side faults raised before the request leaves (serialization, `writeMaxBytes`, a request
+header Node refuses) report nothing. The serialization and write-size exclusions apply only with no
+response metadata: Connect's binary serialization failure (`serialize binary: …`, `Internal`) and
+its exact `writeMaxBytes` refusal (`ResourceExhausted`). A refused-header code
+(`ERR_HTTP2_INVALID_CONNECTION_HEADERS`, `ERR_INVALID_CHAR`) within five cause-chain objects is
+excluded whatever the metadata: a connection-specific header on HTTP/2 (`connection`, `keep-alive`,
+`proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`, `te` other than `trailers`) or
+a control character in a header value on HTTP/1.1. A header name or value the WHATWG `Headers`
+rejects fails the call before any instance is picked, so it is never reported. A list over the
+peer's advertised `SETTINGS_MAX_HEADER_LIST_SIZE` is stopped immediately once SETTINGS are known. If
+it is also over 8 KiB (8192 octets), it is the caller's fault: `GrpcHeaderListTooLargeError`, no
+report and no resend. At or under 8 KiB it counts as `failure` against the instance; unary calls are
+resent once to another pick within the remaining deadline, like a refused stream: that peer
+advertised less than any gRPC default. If the resend meets the same fault, the caller gets
+`Unavailable` with a message naming the header size and advertised limit. When no header-list limit
+was known when the call started, only a `REFUSED_STREAM` on a sent list over 65536 octets becomes
 `GrpcHeaderListTooLargeError` (on Node the client's HTTP/2 library refused to send it; another peer
 may refuse it itself), with `size` equal to that RFC 7541 §4.1 list size and `limit` equal to the
 client's 65536-octet threshold. At or under 65536, a refusal still reports failure and is resent; an

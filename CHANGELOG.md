@@ -82,8 +82,9 @@ All notable changes to this project are documented here. The format follows
   (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says for more than 128
   header fields). It fails as `ResourceExhausted` with this error as its `cause`. Before, 12 calls
   with 130 small headers ejected a healthy replica. On the default `connect` protocol a non-gRPC
-  JSON object body on a non-200 is read as a server answer, and so is not ejected unless its code
-  maps to `Unavailable`, `Unimplemented` or `DeadlineExceeded` (README).
+  well-formed `application/json` error object on a non-200 is read as a server answer, and so is not
+  ejected unless its code maps to `Unavailable`, `Unimplemented`, `DeadlineExceeded` or `Canceled`
+  (README).
 - **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
   empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
   watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The resolve

@@ -347,8 +347,8 @@ for (const [label, build, wire, matches, expected] of [
 
 // The README's rule for a JSON object body on a non-200 unary answer (default `connect`
 // protocol), as data: connect reads it as a server answer, its code from the body's `code`
-// field or else from the HTTP status, and only Unavailable, Unimplemented and
-// DeadlineExceeded fail.
+// field or else from the HTTP status, and only Unavailable, Unimplemented,
+// DeadlineExceeded and Canceled fail.
 for (const [status, body, expected] of [
   [400, {}, 'success'],
   [401, {}, 'success'],
@@ -364,6 +364,7 @@ for (const [status, body, expected] of [
   [504, {}, 'failure'],
   [500, { code: 'unavailable' }, 'failure'],
   [503, { code: 'not_found' }, 'success'],
+  [500, { code: 'canceled' }, 'failure'],
 ] as const) {
   it(`reads a JSON object on HTTP ${status} ${JSON.stringify(body)} as a server answer → ${expected}`, async () => {
     const runtime = await loadConnectModule();
