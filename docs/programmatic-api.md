@@ -546,8 +546,9 @@ application runs and writes one `fatal` line, `Process failed`, through the regi
 absent on Cloudflare Workers.
 
 `createDnsResolver` (since 0.14.0) returns a new resolver that asks the given IP-literal name
-servers and settles each lookup within `timeoutMs`; invalid options throw `RangeError`. Node, Bun
-and Deno provide it; it is absent on Cloudflare Workers.
+servers and bounds each whole lookup by a positive `timeoutMs` (zero leaves only the runtime's own
+timeout); invalid options throw `RangeError`. Node, Bun and Deno provide it; it is absent on
+Cloudflare Workers.
 
 ### Runtime Platform
 
