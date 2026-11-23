@@ -17,8 +17,9 @@ describe('real Deno chosen-server resolver', () => {
   it('answers addresses and SRV and exposes NXDOMAIN', async () => {
     const dns = runtime.createDnsResolver!({ servers: [answer.server], timeoutMs: 1000 });
     expect(await dns.resolveHost('ok.test')).toEqual(['10.0.0.1']);
+    // Deno keeps the trailing dot of a fully qualified target; `SrvRecord.host` passes it through.
     expect(await dns.resolveSrv('_svc._tcp.ok.test')).toEqual([
-      { host: 'ok.test', port: 8080, priority: 10, weight: 5 },
+      { host: 'ok.test.', port: 8080, priority: 10, weight: 5 },
     ]);
     await expect(dns.resolveHost('missing.test')).rejects.toMatchObject({
       cause: { errors: [{ name: 'NotFound' }, { name: 'NotFound' }] },
