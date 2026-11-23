@@ -80,16 +80,16 @@ the logger) but still applies the de-duplication id as nats.js's native `msgID`.
 ordered subscription where the broker has one — not the order handlers **finish** in. Measured
 2026-10-07 against real backends:
 
-| Broker          | On a handler failure                                                                                                                                                                                                                                           |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                              |
-| Pub/Sub         | Order kept by blocking, on an ordering subscription (`enableMessageOrdering`)                                                                                                                                                                                  |
-| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07 |
-| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                         |
-| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                  |
-| NATS            | Order lost on retry                                                                                                                                                                                                                                            |
-| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                         |
-| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                 |
+| Broker          | On a handler failure                                                                                                                                                                                                                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                                                                                                      |
+| Pub/Sub         | Order kept on an ordering subscription (`enableMessageOrdering`): since 0.14.0 the broker runs one handler at a time per ordering key, and after a failure nacks the key's later messages without running them until the failed one is redelivered. The client library alone ran 12 handlers of one key at once (emulator, 2026-11-23) |
+| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07                                                                         |
+| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                                                                                                 |
+| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                                                                                          |
+| NATS            | Order lost on retry                                                                                                                                                                                                                                                                                                                    |
+| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                                                                                                 |
+| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                                                                                         |
 
 A consumer that needs order compares the delivered envelope's version and drops or defers a stale
 message.
@@ -487,6 +487,71 @@ subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon t
 not recoverable by splitting. A derived or supplied name over 255 characters is refused at
 `subscribe()`. Topics must already exist; the broker creates none.
 
+### Pub/Sub retries and dead letters
+
+Since 0.14.0 a failing Pub/Sub handler is retried with a delay by default (`consumerRetry`), as on
+RabbitMQ and Redis Streams. Pub/Sub has no per-message delay, so the broker sets the subscription's
+own policies when it creates a subscription:
+
+| Option                      | Default           | Mapping                                                                                                                                                                                                      |
+| --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `consumerRetry.delaysMs`    | `[10000, 600000]` | `retryPolicy`: the first entry is the minimum backoff, the last the maximum; one or two entries, each 0 to 600,000 ms                                                                                        |
+| `consumerRetry.maxAttempts` | `5`               | `deadLetterPolicy.maxDeliveryAttempts`, 5 to 100, used only with `deadLetterTopic`                                                                                                                           |
+| `consumerRetry.isRetryable` | absent            | `false` forwards the message to `deadLetterTopic` with `setu-dead-letter-reason: not-retryable` and acks it once the forward is published (bounded by `publishTimeoutMs`); refused without `deadLetterTopic` |
+| `deadLetterTopic`           | absent            | `deadLetterPolicy.deadLetterTopic`; without it a failing message is redelivered without limit, and `connect()` warns once                                                                                    |
+| `consumerRetry`             | enabled           | `false` restores the immediate nack; a `deadLetterTopic` is then ignored, with one warning                                                                                                                   |
+
+The policies apply only when the broker **creates** the subscription. An existing subscription keeps
+its settings; when they differ from the configured ones, the broker warns once naming it. A
+subscription created before 0.14.0 therefore keeps having no retry policy until the operator changes
+it. Granting the publisher role on `deadLetterTopic` and the subscriber role on the subscription to
+the Pub/Sub service account is the operator's step, as Google documents.
+
+When the broker creates a subscription with a dead-letter policy:
+
+- a `deadLetterTopic` that does not exist makes that `subscribe()` reject with
+  `PubSubDeadLetterTopicMissingError` (Pub/Sub itself refuses the create; the SDK error is the
+  `cause`); for a declared subscription, `app.start()` fails;
+- a `deadLetterTopic` with no subscription is warned about once: Pub/Sub drops what is published to
+  a topic with no subscription;
+- when that check cannot read the topic, a permission refusal is logged once at `info` (the check
+  needs `pubsub.topics.get`, which `roles/pubsub.subscriber` lacks; `roles/pubsub.viewer` on the
+  topic has it) and any other failure warns once; the subscribe continues either way.
+
+Attaching to an existing subscription, a `fanOut` subscription and a service that only publishes run
+no check. A custom `IPubSubTransport` must report `created` from `open` for the check to run.
+
+On a broker with `enableMessageOrdering`, handlers run one at a time per ordering key (see
+[What `orderingKey` promises](#what-orderingkey-promises)). Pub/Sub counts every nack as a delivery
+attempt, so with a `deadLetterTopic` the later messages of a failing key spend attempts too and can
+be dead-lettered with it; `connect()` warns once about this.
+
+**Stream recovery.** When the client library closes a subscription's stream on a non-retryable
+status (a deleted subscription, for example), the broker re-opens it (re-creating it when absent)
+after 1, 2, 5, 10 and then every 30 seconds until it succeeds or the broker disconnects. While any
+subscription is closed, the broker reports unreachable, so the messaging health indicator is `down`.
+The closure and the recovery are each logged once.
+
+### Service Bus retries
+
+Since 0.14.0 a failing Service Bus handler is retried with a delay by default. The broker holds the
+message for the delay while the SDK renews its lock, then abandons it; on the final attempt, or when
+`isRetryable` returns `false`, it dead-letters it with reason `setu-attempts-exhausted` or
+`setu-not-retryable`.
+
+| Option                      | Default                       | Rule                                                                                                |
+| --------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- |
+| `consumerRetry.maxAttempts` | `5`                           | Lowered, with one warning, to the subscription's `maxDeliveryCount` when that is smaller            |
+| `consumerRetry.delaysMs`    | `[1000, 5000, 30000, 120000]` | Later attempts reuse the last; a delay of 240,000 ms or more is refused (the lock renews for 300 s) |
+| `consumerRetry`             | enabled                       | `false` restores the immediate abandon                                                              |
+
+The attempt number is the message's `deliveryCount` plus one (the count starts at 0). A hold never
+outlives the lock budget: when less than the delay remains of 300 s minus a 60 s margin, the message
+is abandoned at once with one warning. `unsubscribe()` and `disconnect()` abandon held messages at
+once. The receiver handles one message at a time, so a failing message holds its subscription for
+the sum of its delays (about 156 s at the defaults). Reading `maxDeliveryCount` needs the admin
+connection.
+
 ### Publish bounds
 
 Every broker arm — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams and NATS — bounds each transport
@@ -619,6 +684,49 @@ disconnected the moment its join settles or fails. Until then the process stays 
 delivered in that window is left uncommitted for the group to redeliver. On a broker with Kafka's
 default `group.initial.rebalance.delay.ms` (3 s), stopping an application moments after it started
 takes a few seconds.
+
+## Fan-out subscriptions
+
+`subscribe(topic, handler, { fanOut: true })` asks for a subscription that receives every message
+published after it subscribed, independently of every other subscriber, including other instances of
+the same service. It is not durable: it is removed on `unsubscribe()`, and messages published while
+it does not exist are not kept for it. A broker that honoured the request returns a subscription
+with `fanOut: true`; check that marker when fan-out matters, because a broker that does not know the
+option ignores it. `fanOut` with `queue` is refused with a `RangeError`.
+
+| Broker            | Consumer created                                                                                                                                     | Left behind by a crash, and who removes it       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `'memory'`        | the in-process subscriber list                                                                                                                       | nothing                                          |
+| `'rabbitmq'`      | an exclusive auto-delete queue                                                                                                                       | nothing                                          |
+| `'nats'`          | an ephemeral consumer delivering new messages only                                                                                                   | the server, after 5 idle minutes                 |
+| `'kafka'`         | a consumer group `<defaultQueue>-fanout-<uuid>` joining at the end of each partition                                                                 | Kafka, after `offsets.retention.minutes`         |
+| `'redis-streams'` | a plain `XREAD` reader with no consumer group, starting after the stream's last entry at `subscribe()`                                               | nothing (no server-side state)                   |
+| `'pubsub'`        | a subscription `<defaultQueue>-fanout-<uuid>` with 600 s retention and a one-day idle expiry, the configured retry backoff and no dead-letter policy | Pub/Sub, after one idle day                      |
+| `'service-bus'`   | a subscription `<defaultQueue cut to 30>-fanout-<12 hex>` (at most 50 characters), auto-deleted after 5 idle minutes                                 | Service Bus, after 5 idle minutes                |
+| `'custom'`        | the injected broker's own `subscribe`, options passed through                                                                                        | the injected broker's; it sets the marker itself |
+
+`WorkersBroker` (Cloudflare) returns no marker, so a caller that needs fan-out there must use
+something else (the realtime backplane uses its Durable Object transport).
+
+Per-broker limits:
+
+- **Redis Streams.** A fan-out reader has no pending list: a handler failure is logged once per
+  failure and the message is not redelivered, and `consumerRetry` does not apply to it. It skips
+  messages only when the stream was trimmed past its last read id (`MAXLEN`). It needs `xread` and
+  `xrevrange` on the client: `ioredis` and `fromNodeRedis` provide both; an injected client
+  implementing `IRedisStreamsClient` without them is refused at the fan-out `subscribe()` with a
+  `TypeError` naming the missing method (add both methods to the client; other subscriptions are
+  unaffected).
+- **Service Bus.** Creating and deleting the subscription needs the `Manage` right; a refusal is
+  logged as such. A failed delete on close is logged and left to the 5-minute idle deletion.
+- **Pub/Sub.** A failed delete on close is logged and left to the one-day idle expiry.
+- **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
+  subject, so a fan-out subscribe there fails.
+
+`respond()` ignores `fanOut` and warns once (a responder fanned out would answer each request once
+per instance). `onIntegrationEvent` with `inbox` refuses `fanOut` with a `RangeError`, because the
+inbox would drop it. A declarative subscription that asked for `fanOut` and got no marker back warns
+once.
 
 ## Request-reply
 
@@ -1377,6 +1485,16 @@ the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-fli
 within its deadline plus, when a pause made it overrun, one `storeTimeoutMs`. A failure caused by
 the application stopping is never counted against `maxAttempts`.
 
+**RabbitMQ: a row is sent only when a queue took it.** Since 0.14.0 the relay publishes with
+`mandatory`, so a message no queue is bound for comes back, the publish rejects with
+`UnroutableMessageError` (naming the topic and routing key, never the payload), and the row is
+retried and, after `maxAttempts`, marked `failed`, instead of being marked `sent`. Bind the queue
+before the rows are relayed, or `release` failed rows once it exists. Ordinary `publish()` calls are
+unchanged. This needs publisher confirms: with an injected connection that has no
+`createConfirmChannel` (with return listeners), the outbox refuses to start with
+`OutboxPublisherConfirmsRequiredError`; a connection from `amqplib`'s `connect()` always has one.
+Consumers never see the internal header the relay uses to match a returned message.
+
 ### Tenancy
 
 **Column isolation:** one `store`; `write(…, { tenantId })` records the tenant in the row, blocking
@@ -1924,11 +2042,13 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `NatsConsumerNameCollisionError`        | class     |
 | `OutboxEnvelopeTooLargeError`           | class     |
 | `OutboxNotReadyError`                   | class     |
+| `OutboxPublisherConfirmsRequiredError`  | class     |
 | `OutboxRelayUnscheduledError`           | class     |
 | `OutboxRowStateError`                   | class     |
 | `OutboxStoreVerifyTimeoutError`         | class     |
 | `OutboxUnknownTenantError`              | class     |
 | `PublishTimeoutError`                   | class     |
+| `PubSubDeadLetterTopicMissingError`     | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |
@@ -1936,6 +2056,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `ReplyInboxUnavailableError`            | class     |
 | `RequestTimeoutError`                   | class     |
 | `ServiceBusBroker`                      | class     |
+| `UnroutableMessageError`                | class     |
 | `ConsumerRetryOptions`                  | interface |
 | `CustomMessagingOptions`                | interface |
 | `EventsMessagingBridgeOptions`          | interface |
@@ -1995,7 +2116,9 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `MessagingPluginOptions`                | type      |
 | `OutboxOptions`                         | type      |
 | `OutboxStoreEntry`                      | type      |
+| `PubSubCreateOptions`                   | type      |
 | `PubSubMessagingOptions`                | type      |
+| `PubSubOpenOptions`                     | type      |
 | `RequestHandler`                        | type      |
 | `ServiceBusMessagingOptions`            | type      |
 | `SubscriptionEntry`                     | type      |

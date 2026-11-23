@@ -43,6 +43,38 @@ can consume only names with a `deadLetterQueues` entry.
 `SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
 `publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
 
+### Fan-out, consumer retries and the RabbitMQ outbox (`@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/common`)
+
+- **BREAKING: the backplane's `'messaging'` transport needs fan-out.** It now refuses to start with
+  `BackplaneFanOutUnsupportedError` when the broker does not confirm a fan-out subscription. Every
+  built-in broker does. You are affected if you run it on Cloudflare's `WorkersBroker` (use the
+  Durable Object backplane), on a `custom` broker (return `fanOut: true` from `subscribe` when the
+  caller passed `fanOut: true` and every instance receives every message), or on Service Bus without
+  the `Manage` right (grant it, or use the `'redis'` transport).
+- **BREAKING: Redis Streams clients you implement yourself.** A fan-out subscription calls `xread`
+  and `xrevrange`. `ioredis` and `fromNodeRedis` provide both; a hand-written `IRedisStreamsClient`
+  without them is refused at that `subscribe()` with a `TypeError` naming the method. Add both
+  methods (positional arguments, as `ioredis` takes them).
+- **BREAKING: Pub/Sub and Service Bus retry by default.** A failing handler is now redelivered with
+  a delay and a limit instead of at once and forever. Set `consumerRetry: false` to keep the old
+  behaviour. On Pub/Sub, give `deadLetterTopic` (an existing topic with a subscription) to bound the
+  attempts; the policies apply only to subscriptions the broker creates, so an existing subscription
+  keeps its settings, with one warning, until you change it in Google Cloud. A `deadLetterTopic`
+  that does not exist fails the subscribe with `PubSubDeadLetterTopicMissingError`. On Service Bus a
+  retry holds the message (and, at the default single concurrent call, the subscription) for its
+  delay.
+- **BREAKING: RabbitMQ outbox rows must be routable.** The relay now marks an unroutable row
+  `failed` after its retries instead of `sent`: bind a queue for every outbox topic before rows are
+  relayed. An outbox on an injected connection without `createConfirmChannel` and return listeners
+  refuses to start with `OutboxPublisherConfirmsRequiredError`; a connection from `amqplib`'s
+  `connect()` always has them.
+- **Pub/Sub ordering.** On a broker with `enableMessageOrdering`, handlers of one ordering key now
+  run one at a time; expect lower throughput per key.
+- **Not breaking: late frames.** The backplane README no longer claims a frame is never late. To
+  drop late frames, set `maxFrameAgeMs` on the `'messaging'` or `'redis'` transport (replicas'
+  clocks must agree); the default delivers them as before.
+- **`QueueSettlementState`** gains `'discarded'`: an exhaustive `switch` over it needs a new arm.
+
 ### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
 
 - **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s

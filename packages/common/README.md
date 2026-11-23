@@ -231,7 +231,6 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
-| `FatalErrorOrigin`                    | type      |
 | `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
@@ -802,6 +801,7 @@ package fits the plugin architecture.
 | `EventDiagnosticsState`               | type      |
 | `EventHandler`                        | type      |
 | `EventObservationOperation`           | type      |
+| `FatalErrorOrigin`                    | type      |
 | `FilterComparison`                    | type      |
 | `FilterExpression`                    | type      |
 | `FilterOperator`                      | type      |

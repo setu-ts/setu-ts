@@ -5367,20 +5367,21 @@ frame kind and name metadata but no frame data. The latest 100 failures are reta
 `IRealtimeHandlerErrorReporter`; omitted, they retain history only. Custom transports are used as
 supplied and own their reporting.
 
-| Option                    | Applies to         | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `transport`               | all                | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `topic`                   | all but `memory`   | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `origin`                  | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `bus`                     | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `url`                     | `'redis'`          | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
-| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
-| `instance`                | `'custom'`         | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `localNotice`             | `'memory'`         | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                                                                                                                                                                            |
-| `diagnostics`             | all but `'custom'` | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source                                                                                                                                                             |
+| Option                    | Applies to               | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------- | ------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`               | all                      | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `topic`                   | all but `memory`         | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `url`                     | `'redis'`                | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
+| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | 0.14.0 opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this by its own clock; `0` delivers every frame. Assumes the replicas' clocks agree. Outside `0`–`2147483647` throws `RangeError` at construction                                                                                                                                                                                                                                         |
+| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
+| `instance`                | `'custom'`               | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                                                                                                                                                                            |
+| `diagnostics`             | all but `'custom'`       | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source                                                                                                                                                             |
 
 Registering the plugin **bare** is not a scaling fix: the default `'memory'` transport is a real bus
 but a single-process one, and before the `localNotice` existed a bare registration also silenced the
@@ -5395,7 +5396,7 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
 | ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
-| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses any registered messaging broker; adds no dependency     |
+| `'messaging'` | Yes               | A plugin providing `messaging` | Any registered broker that confirms `fanOut` (since 0.14.0)    |
 | `'redis'`     | Yes               | `ioredis` (lazy)               | Redis pub/sub, over two connections                            |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
 
@@ -5412,6 +5413,8 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
 | `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                                                                                     |
 | `loadRedisModule`                                                                                                                  | function          | Real lazy `import('ioredis')`                                                                                                                     |
 | `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                                                                              |
+| `BackplaneFanOutUnsupportedError`                                                                                                  | class             | 0.14.0: thrown from `register()` (so `start()` fails) when the `'messaging'` transport's broker returns a subscription without `fanOut: true`     |
+| `BackplaneReporter`                                                                                                                | type              | 0.14.0: the handler-error reporter the transports take, with an optional `warn` sink for frame-age and uncertain-publish warnings                 |
 | `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                                                                              |
 | `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                                                                           |
 | `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client; optional `connect?()` (M117) is called at start for an injected client whose `status` is `'wait'` |
@@ -5439,13 +5442,26 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
   rather than failing at the first publish; the lazy path builds both from `url`.
 - **`transport: 'messaging'` with no messaging capability throws during `register()`**, rather than
   failing silently per request.
+- **`transport: 'messaging'` needs fan-out (0.14.0).** The transport subscribes with
+  `{ fanOut: true }` and, when the returned subscription lacks `fanOut: true`, unsubscribes and
+  throws `BackplaneFanOutUnsupportedError` from `register()`. Every built-in broker of the messaging
+  plugin confirms it; Cloudflare's `WorkersBroker` does not (use the Durable Object backplane
+  there), and a `custom` broker must set the marker itself. Before 0.14.0 a shared consumer group
+  handed each frame to one replica on Kafka, NATS, Redis Streams, Pub/Sub and Service Bus.
+- **Frames carry `sentAtMs` (0.14.0).** `createBackplane`, `MessagingBackplane` and `RedisBackplane`
+  take an optional `now?: () => number` clock (the plugin passes `runtime.now`); with it, every
+  published frame carries the sender's wall-clock `sentAtMs`, removed before a handler sees the
+  frame. A 0.13.0 receiver ignores the member. Without a clock no stamp is written, and
+  `maxFrameAgeMs` above `0` warns once.
 - **A remote frame never creates a room or channel.** It is delivered only to one that already
   exists locally, so a cluster-wide namespace cannot grow a replica's maps without bound.
 - **Binary WebSocket frames are base64-encoded** for the wire (`encodeFrameData` /
   `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
   `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
-  replayed. On `'redis'` a frame published while a connection is down is lost, never delivered late:
+  replayed. A frame can arrive late: a publish already written to a server that then pauses runs
+  when it resumes (measured up to 20 s late on Redis and RabbitMQ); `maxFrameAgeMs` lets a receiver
+  drop such frames. On `'redis'` a frame published while a connection is down is lost, not queued:
   since 0.13.0 the publisher connection the plugin builds has no offline queue
   (`enableOfflineQueue: false`, passed through `IRedisModule.create`'s options), so a publish while
   it reconnects is refused at once (a `503`-class fault, one `warn` per frame in each consumer). A
@@ -7259,6 +7275,19 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
    * `adaptPubSubModule` when building the transport instead.
    */
   enableMessageOrdering?: never;
+  /**
+   * Pub/Sub retry policy set when the broker creates a subscription: `delaysMs` gives the
+   * minimum and maximum backoff (one or two entries, 0–600000), `maxAttempts` the
+   * dead-letter budget (5–100, with `deadLetterTopic`). `false` restores the immediate nack.
+   * @defaultValue enabled, `[10000, 600000]`, 5 attempts @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
+   * failing message is redelivered without limit. A missing topic makes the subscription
+   * create fail with `PubSubDeadLetterTopicMissingError`. @since 0.14.0
+   */
+  deadLetterTopic?: string;
 }
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
@@ -7284,6 +7313,19 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
    * @defaultValue false
    */
   enableMessageOrdering?: boolean;
+  /**
+   * Pub/Sub retry policy set when the broker creates a subscription: `delaysMs` gives the
+   * minimum and maximum backoff (one or two entries, 0–600000), `maxAttempts` the
+   * dead-letter budget (5–100, with `deadLetterTopic`). `false` restores the immediate nack.
+   * @defaultValue enabled, `[10000, 600000]`, 5 attempts @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
+   * failing message is redelivered without limit. A missing topic makes the subscription
+   * create fail with `PubSubDeadLetterTopicMissingError`. @since 0.14.0
+   */
+  deadLetterTopic?: string;
 }
 
 /** GCP Pub/Sub options — exclusive union of injected and production arms. */
@@ -7300,6 +7342,14 @@ interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
   adminConnectionString?: string;
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Service Bus retry: the broker holds a failing message for the delay, then abandons it;
+   * the last attempt (or `isRetryable` false) is dead-lettered. Delays below 240000 ms;
+   * `maxAttempts` is lowered to the subscription's `maxDeliveryCount` when smaller.
+   * `false` restores the immediate abandon.
+   * @defaultValue enabled, 5 attempts, `[1000, 5000, 30000, 120000]` @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
 }
 
 // ── Azure Service Bus — production (connectionString required; client must be omitted) ─
@@ -7315,6 +7365,14 @@ interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
   replyTopic?: string;
   /** SDK retry budget for the data client. Optional on this arm only (M90b / X28-6). */
   retryOptions?: ServiceBusRetryOptions;
+  /**
+   * Service Bus retry: the broker holds a failing message for the delay, then abandons it;
+   * the last attempt (or `isRetryable` false) is dead-lettered. Delays below 240000 ms;
+   * `maxAttempts` is lowered to the subscription's `maxDeliveryCount` when smaller.
+   * `false` restores the immediate abandon.
+   * @defaultValue enabled, 5 attempts, `[1000, 5000, 30000, 120000]` @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
 }
 
 /** Azure Service Bus SDK retry budget — passed ONLY to `ServiceBusClient`, never to the
@@ -7519,7 +7577,28 @@ respond<TReq, TRes>(
 ): Promise<ISubscription>;
 ```
 
-Pass `options.queue` to `respond` to load-balance requests across competing responders.
+Pass `options.queue` to `respond` to load-balance requests across competing responders. `respond`
+ignores `fanOut` and warns once.
+
+**Fan-out subscriptions (0.14.0).** `SubscribeOptions.fanOut: true` (from `@setu-ts/common`) asks
+for a subscription that receives every message published after it subscribed, independently of every
+other subscriber; it is not durable and is removed on `unsubscribe()`. `fanOut` with `queue` throws
+`RangeError`. A broker that honoured it returns `ISubscription.fanOut: true`; a broker that does not
+know the option ignores it, so a caller that needs fan-out checks the marker. Every built-in broker
+honours it (memory, Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub, Service Bus); `custom` passes the
+option to the injected broker; Cloudflare's `WorkersBroker` does not. `onIntegrationEvent` with
+`inbox` refuses `fanOut` with `RangeError`. On Redis Streams a fan-out reader uses `XREAD` without a
+consumer group, needs `IRedisStreamsClient.xread` and `xrevrange` (optional members since 0.14.0; a
+client without them is refused at that `subscribe()` with `TypeError`), and is not retried by
+`consumerRetry`.
+
+Three errors added in 0.14.0:
+
+| Error                                  | Thrown when                                                                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UnroutableMessageError`               | A RabbitMQ publish that required a route (the outbox relay's) came back unroutable. Names the topic and routing key, never the payload. The relay retries the row, then fails it. |
+| `OutboxPublisherConfirmsRequiredError` | The outbox is configured on a RabbitMQ connection without `createConfirmChannel` and return listeners; thrown when the outbox is activated, so `start()` fails.                   |
+| `PubSubDeadLetterTopicMissingError`    | The broker created a subscription with a dead-letter policy and `deadLetterTopic` does not exist. The SDK error is the `cause`.                                                   |
 
 `request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
@@ -7650,11 +7729,14 @@ export {
   KafkaTopicUnavailableError,
   MessagingNotSupportedError,
   NatsConsumerNameCollisionError,
+  OutboxPublisherConfirmsRequiredError, // 0.14.0
+  PubSubDeadLetterTopicMissingError, // 0.14.0
   PubSubSubscriptionBoundElsewhereError,
   PublishTimeoutError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
+  UnroutableMessageError, // 0.14.0
 } from '@setu-ts/messaging-plugin';
 
 // Option types
@@ -7684,6 +7766,8 @@ export type {
 export type {
   IPubSubSubscription,
   IPubSubTransport,
+  PubSubCreateOptions, // 0.14.0: open()/createSubscription() creation policy
+  PubSubOpenOptions, // 0.14.0: open()'s onClosed and create options
   PubSubOptions,
 } from '@setu-ts/messaging-plugin';
 export type {
@@ -8660,20 +8744,23 @@ map; an eviction is counted and gives a later retry a new alias), the attempt nu
 `durationMs`/`ageMs`, the processor `outcome` (`completed` / `retryable-error` / `terminal-error`),
 and the `settlement`: `acknowledged` / `requeued` / `dead-lettered` when the call completed on an
 adapter that confirms it, `failed` when it rejected (the rejection is rethrown exactly as before),
-and `unknown` when it completed on an adapter that cannot confirm it. The queue metrics keep their
-timing — they are recorded before the settlement call — so an outcome is never presented as
-settlement proof. At most 1,024 attempts are retained and 2,048 observed in flight;
-`droppedAttempts` counts an attempt dropped because that bound was reached, because its persisted
-attempt number was not a positive safe integer, or because its runner failed before reporting a
-settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
-limit or thrown value is captured: the observer signatures cannot accept them.
+and `unknown` when it completed on an adapter that cannot confirm it. `discarded` (0.14.0) is
+reported when the adapter deleted an exhausted job because its dead-letter target is explicitly
+disabled (SQS `deadLetterQueues[name]: false`); it records that decision even on an adapter that
+cannot confirm settlements, and is never presented as settlement proof. Since 0.14.0 the queue
+metrics also count an outcome only after its settlement call succeeded. At most 1,024 attempts are
+retained and 2,048 observed in flight; `droppedAttempts` counts an attempt dropped because that
+bound was reached, because its persisted attempt number was not a positive safe integer, or because
+its runner failed before reporting a settlement (which releases the slot). No payload, header, raw
+id, claim token, credential, attempt limit or thrown value is captured: the observer signatures
+cannot accept them.
 
-| Adapter    | Settlement evidence                                                            | Depths                                     |
-| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
-| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable`                              |
-| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged   | `unavailable`                              |
+| Adapter    | Settlement evidence                                                                                                                                             | Depths                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                                                                                                          | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                                                                                                             | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed)                                                                                  | `unavailable`                              |
+| `sqs`      | `unknown` — a delete with a receipt the server already replaced can succeed without deleting; a stale local claim or failed dead-letter send rejects (`failed`) | `unavailable`                              |
 
 `depths` is its own opt-in because counting costs backend work: one cycle at bootstrap and one per
 `intervalMs` (1,000–300,000), never overlapping, at most `concurrency` (1–4) count calls in flight,
@@ -13958,25 +14045,27 @@ never mutates errors. Command errors such as WRONGTYPE remain unclassified.
 wraps a node-redis client (`redis` v5/v6) in one ioredis-shaped adapter that every Redis-backed
 plugin's `client` option accepts (`IRedisClient`, `IRedisQueueClient`, `IRedisStreamsClient`,
 `IRedisBackplaneClient`, `IRedisLockClient`, `IRedisIdempotencyClient`, `IRateLimitRedisClient`).
-`NodeRedisClientLike` is structural — `isOpen`, `isReady`, `connect()`, `sendCommand(args)`,
-`close()`, `destroy()`, `on`/`off`, `subscribe(channel, listener)`, `unsubscribe(channel)` — and no
-package imports `redis`. Commands go through `sendCommand` with ioredis's argument rule (`undefined`
-dropped, arrays spread one level, numbers as strings). `NodeRedisAdapterOptions.commandTimeoutMs`
-(default `15000`; `0` disables; a finite number up to `2147483647`, otherwise `RangeError`) bounds
-every command and the lazy connect, rejecting with `Error('Command timed out')`; the node-redis
-command is not cancelled. `onError(error)` receives the client's `'error'` events through a listener
-the adapter always attaches. RESP3 map replies become RESP2 shapes (`XREADGROUP`/`XREAD` →
-`[key, value]` pairs; other maps → flat arrays). `connect()` resolves at once for an open client and
-connects once otherwise; `quit()` is idempotent, closes with `close()` and falls back to `destroy()`
-past the bound; `disconnect()` destroys; `status` is `'wait'`, `'connecting'`, `'ready'` or `'end'`.
-Pub/sub: `subscribe(channel)` delivers `(channel, message)` to `on('message', …)` listeners. Cluster
-and sentinel clients are not supported. `NodeRedisClientFactory`
-(`() => NodeRedisClientLike | Promise<NodeRedisClientLike>`) may be passed instead of a client: it
-is called once, on the first connect (a rejection is retried on the next), and listeners registered
-with `on`/`off` before then are attached when the client exists. A factory that imports `redis`
-inside it is how a client built at module load is traced: OpenTelemetry patches `@redis/client` as
-Node loads it, after `TelemetryPlugin` has registered. A `quit()` before or during the first connect
-opens no socket, and one issued while a connect is in flight closes the socket that connect opens.
+Since 0.14.0 the adapter also has `xread` and `xrevrange`, which a Redis Streams fan-out
+subscription needs. `NodeRedisClientLike` is structural — `isOpen`, `isReady`, `connect()`,
+`sendCommand(args)`, `close()`, `destroy()`, `on`/`off`, `subscribe(channel, listener)`,
+`unsubscribe(channel)` — and no package imports `redis`. Commands go through `sendCommand` with
+ioredis's argument rule (`undefined` dropped, arrays spread one level, numbers as strings).
+`NodeRedisAdapterOptions.commandTimeoutMs` (default `15000`; `0` disables; a finite number up to
+`2147483647`, otherwise `RangeError`) bounds every command and the lazy connect, rejecting with
+`Error('Command timed out')`; the node-redis command is not cancelled. `onError(error)` receives the
+client's `'error'` events through a listener the adapter always attaches. RESP3 map replies become
+RESP2 shapes (`XREADGROUP`/`XREAD` → `[key, value]` pairs; other maps → flat arrays). `connect()`
+resolves at once for an open client and connects once otherwise; `quit()` is idempotent, closes with
+`close()` and falls back to `destroy()` past the bound; `disconnect()` destroys; `status` is
+`'wait'`, `'connecting'`, `'ready'` or `'end'`. Pub/sub: `subscribe(channel)` delivers
+`(channel, message)` to `on('message', …)` listeners. Cluster and sentinel clients are not
+supported. `NodeRedisClientFactory` (`() => NodeRedisClientLike | Promise<NodeRedisClientLike>`) may
+be passed instead of a client: it is called once, on the first connect (a rejection is retried on
+the next), and listeners registered with `on`/`off` before then are attached when the client exists.
+A factory that imports `redis` inside it is how a client built at module load is traced:
+OpenTelemetry patches `@redis/client` as Node loads it, after `TelemetryPlugin` has registered. A
+`quit()` before or during the first connect opens no socket, and one issued while a connect is in
+flight closes the socket that connect opens.
 
 `isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
