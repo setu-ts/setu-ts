@@ -28,6 +28,13 @@ export interface RealtimeBackplaneObjectCoreOptions {
 }
 
 /**
+ * The largest frame `POST /publish` accepts: workerd's ceiling for one
+ * received WebSocket message (32 MiB), so nothing the hub forwards can exceed
+ * what a link may receive.
+ */
+const MAX_FRAME_BYTES = 33_554_432;
+
+/**
  * Fans one replica's broadcast out to every other connected replica.
  *
  * **This class holds no state.** Not as a simplification — as a correctness
@@ -89,6 +96,9 @@ export class RealtimeBackplaneObjectCore {
    * @throws {Error} When `WebSocketPair` is unavailable and no host was injected
    */
   fetch(request: Request): Promise<Response> {
+    if (request.method === 'POST' && new URL(request.url).pathname === '/publish') {
+      return this.#publish(request);
+    }
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return Promise.resolve(
         new Response(
@@ -109,6 +119,31 @@ export class RealtimeBackplaneObjectCore {
     // runtime reaches this line.
     const init = { status: 101, webSocket: pair.client } as unknown as ResponseInit;
     return Promise.resolve(new Response(null, init));
+  }
+
+  /**
+   * Fans one POSTed frame out to every connected socket, the publisher's own
+   * link included (a POST has no socket to exclude). The body is forwarded
+   * verbatim, never parsed; the receiving side validates it.
+   * @param request - The POST carrying one serialized frame
+   * @returns 204, or 413 above the platform's received-message ceiling
+   */
+  async #publish(request: Request): Promise<Response> {
+    const declared = Number(request.headers.get('content-length') ?? '0');
+    if (declared > MAX_FRAME_BYTES) return new Response(null, { status: 413 });
+    const body = await request.text();
+    if (new TextEncoder().encode(body).byteLength > MAX_FRAME_BYTES) {
+      return new Response(null, { status: 413 });
+    }
+    for (const socket of this.#state.getWebSockets()) {
+      try {
+        socket.send(body);
+      } catch {
+        // One unwritable peer must never cost the rest their frame.
+        continue;
+      }
+    }
+    return new Response(null, { status: 204 });
   }
 
   /**

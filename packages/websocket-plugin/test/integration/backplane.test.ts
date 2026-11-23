@@ -391,6 +391,19 @@ describe('opening the backplane transport on first local member', () => {
     expect(backplane.connects).toEqual([1, 2]);
   });
 
+  it('calls connect again on a join after the previous connect settled', async () => {
+    // A transport that later drops its socket (the Durable Object backplane
+    // does) must be reopened by the next join; connect() is idempotent.
+    const backplane = recordingBackplane();
+    const service = serviceWith(backplane);
+
+    service.room('lobby').add(fakeConnection('a'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    service.room('lobby').add(fakeConnection('b'));
+
+    expect(backplane.connects).toEqual([1, 2]);
+  });
+
   it('reports a non-Error rejection without losing the value', async () => {
     const warnings: unknown[] = [];
     const logger = {

@@ -94,29 +94,63 @@ export class HeartbeatSweeper {
   tick(): void {
     // Monotonic — never the wall clock, which would make the age meaningless.
     const now = this.#runtime.hrtime();
-    const { idleTimeoutMs, heartbeatPayload } = this.#options;
-
     for (const conn of this.#connections()) {
-      if (!conn.isOpen) {
-        continue;
-      }
-      // Skip connections whose route opted out of the shared heartbeat (e.g.
-      // graphql-transport-ws routes that speak their own ping/pong protocol).
-      if (!conn.participatesInHeartbeat) {
-        continue;
-      }
-      try {
-        if (idleTimeoutMs > 0 && now - conn.lastSeenAt >= idleTimeoutMs) {
-          conn.close(CLOSE_GOING_AWAY, 'Idle timeout');
-          continue;
-        }
-        conn.send(heartbeatPayload);
-      } catch {
-        // This runs inside a timer callback, where a throw would escape as an
-        // unhandled error AND skip every remaining connection — one unwritable
-        // peer would stop heartbeats and idle eviction for the whole server.
-        // The peer is left alone; its close event removes it.
-      }
+      sweepOne(conn, now, this.#options);
     }
   }
+}
+
+/**
+ * One connection's share of a sweep: closes it when it has been silent too
+ * long, otherwise sends the heartbeat payload.
+ */
+function sweepOne(conn: WebSocketConnection, now: number, options: HeartbeatOptions): void {
+  if (!conn.isOpen) {
+    return;
+  }
+  // Skip connections whose route opted out of the shared heartbeat (e.g.
+  // graphql-transport-ws routes that speak their own ping/pong protocol).
+  if (!conn.participatesInHeartbeat) {
+    return;
+  }
+  try {
+    if (options.idleTimeoutMs > 0 && now - conn.lastSeenAt >= options.idleTimeoutMs) {
+      conn.close(CLOSE_GOING_AWAY, 'Idle timeout');
+      return;
+    }
+    conn.send(options.heartbeatPayload);
+  } catch {
+    // This runs inside a timer callback, where a throw would escape as an
+    // unhandled error AND skip every remaining connection — one unwritable
+    // peer would stop heartbeats and idle eviction for the whole server.
+    // The peer is left alone; its close event removes it.
+  }
+}
+
+/**
+ * Starts one connection's own heartbeat interval, for request-bound mode
+ * (Cloudflare Workers): created from the connection's own request, so every
+ * tick runs there and touches only its own socket. Same payload and idle rule
+ * as {@linkcode HeartbeatSweeper}.
+ *
+ * @param runtime - Runtime services, for the timer and the monotonic clock
+ * @param options - Heartbeat configuration
+ * @param conn - The connection
+ * @returns Stops the interval; a no-op when no interval was started
+ * @since 0.14.0
+ */
+export function startConnectionHeartbeat(
+  runtime: IRuntimeServices,
+  options: HeartbeatOptions,
+  conn: WebSocketConnection,
+): () => void {
+  if (options.heartbeatMs <= 0 || !conn.participatesInHeartbeat) {
+    return () => {};
+  }
+  const timer = runtime.setInterval(() => {
+    sweepOne(conn, runtime.hrtime(), options);
+  }, options.heartbeatMs);
+  return () => {
+    runtime.clearInterval(timer);
+  };
 }

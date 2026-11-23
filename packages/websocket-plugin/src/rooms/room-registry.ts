@@ -49,6 +49,22 @@ export interface RoomMembershipListener {
 export type RoomPublisher = (name: string, data: string | Uint8Array, exceptId?: string) => void;
 
 /**
+ * Replaces a room's own broadcast delivery. Supplied in request-bound mode
+ * (Cloudflare Workers), where a room must never write to members from a
+ * request other than their own: the broadcaster publishes through the
+ * members' links instead of iterating them.
+ * @param room - The room broadcast to
+ * @param data - The payload, exactly as handed to `broadcast`
+ * @param options - The caller's options
+ * @since 0.14.0
+ */
+export type RoomBroadcaster = (
+  room: Room,
+  data: string | Uint8Array,
+  options?: RoomBroadcastOptions,
+) => void;
+
+/**
  * Options for {@linkcode Room.broadcastLocal}.
  *
  * Extends the committed broadcast options with exclusion by connection ID,
@@ -73,6 +89,7 @@ export class Room implements WebSocketRoom {
   readonly #members = new Set<IWebSocketConnection>();
   readonly #listener: RoomMembershipListener | undefined;
   readonly #publish: RoomPublisher | undefined;
+  readonly #broadcaster: RoomBroadcaster | undefined;
 
   /**
    * Creates a room.
@@ -82,11 +99,19 @@ export class Room implements WebSocketRoom {
    *   {@linkcode RoomRegistry}; omit for a standalone room.
    * @param publish - Forwards broadcasts to other replicas. Omit for a room
    *   that stays in-process.
+   * @param broadcaster - Replaces local delivery and `publish` entirely
+   *   (request-bound mode).
    */
-  constructor(name: string, listener?: RoomMembershipListener, publish?: RoomPublisher) {
+  constructor(
+    name: string,
+    listener?: RoomMembershipListener,
+    publish?: RoomPublisher,
+    broadcaster?: RoomBroadcaster,
+  ) {
     this.#name = name;
     this.#listener = listener;
     this.#publish = publish;
+    this.#broadcaster = broadcaster;
   }
 
   get name(): string {
@@ -122,7 +147,21 @@ export class Room implements WebSocketRoom {
     this.#drop(conn);
   }
 
+  /**
+   * Whether a connection is a member of this room.
+   * @param conn - The connection
+   * @returns `true` when it was added and not removed
+   * @since 0.14.0
+   */
+  has(conn: IWebSocketConnection): boolean {
+    return this.#members.has(conn);
+  }
+
   broadcast(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
+    if (this.#broadcaster !== undefined) {
+      this.#broadcaster(this, data, options);
+      return;
+    }
     this.broadcastLocal(data, options);
     // Published after local delivery so a transport error can never cost local
     // members their message. The excluded connection travels as its ID, which
@@ -211,10 +250,13 @@ export class RoomRegistry {
    *   with a local member has to be able to RECEIVE, and subscribing does not
    *   open a transport.
    */
-  constructor(publish?: RoomPublisher, onMemberJoined?: () => void) {
+  constructor(publish?: RoomPublisher, onMemberJoined?: () => void, broadcaster?: RoomBroadcaster) {
     this.#publish = publish;
     this.#onMemberJoined = onMemberJoined;
+    this.#broadcaster = broadcaster;
   }
+
+  readonly #broadcaster: RoomBroadcaster | undefined;
 
   /** Notified on the first join of every connection. */
   readonly #onMemberJoined: (() => void) | undefined;
@@ -291,6 +333,7 @@ export class RoomRegistry {
         },
       },
       this.#publish,
+      this.#broadcaster,
     );
     this.#rooms.set(name, room);
     this.#neverJoined.add(room);
@@ -356,6 +399,17 @@ export class RoomRegistry {
     // `exactOptionalPropertyTypes` forbids handing through an explicit
     // `undefined`, so the absent case passes no options at all.
     this.#rooms.get(name)?.broadcastLocal(data, exceptId === undefined ? undefined : { exceptId });
+  }
+
+  /**
+   * Whether a connection is a member of the named room, without creating it.
+   * @param name - Room name
+   * @param conn - The connection
+   * @returns `true` when the room exists and holds the connection
+   * @since 0.14.0
+   */
+  isMember(name: string, conn: IWebSocketConnection): boolean {
+    return this.#rooms.get(name)?.has(conn) ?? false;
   }
 
   /** Discards every room. */

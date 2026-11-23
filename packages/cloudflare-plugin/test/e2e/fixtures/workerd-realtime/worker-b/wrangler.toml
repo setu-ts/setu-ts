@@ -1,0 +1,16 @@
+name = "worker-b"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat", "enable_request_signal"]
+
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeHub"
+script_name = "worker-a"
+
+[alias]
+"@setu-ts/common" = "../../../../../../common/src/index.ts"
+"@setu-ts/kernel" = "../../../../../../kernel/src/index.ts"
+"@setu-ts/runtime" = "../../../../../../runtime/src/index.ts"
+"@setu-ts/websocket-plugin" = "../../../../../../websocket-plugin/src/index.ts"
+"@setu-ts/cloudflare-plugin" = "../../../../../../cloudflare-plugin/src/index.ts"

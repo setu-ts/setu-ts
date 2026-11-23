@@ -45,3 +45,36 @@ export class WebSocketUnavailableError extends Error {
     this.name = 'WebSocketUnavailableError';
   }
 }
+
+/**
+ * Thrown by `ws.room()` and `ws.peek()` on Cloudflare Workers when no backplane
+ * that gives each connection its own link is registered.
+ *
+ * workerd ties every client socket to the request that accepted it, so a room
+ * cannot write to its members from another request. Rooms on Workers deliver
+ * through the Durable Object backplane's per-connection links instead;
+ * `ws.route()` keeps working for single-socket routes without it.
+ *
+ * @example
+ * ```typescript
+ * app.register(CloudflarePlugin({ env, waitUntil, durableObject: { binding: 'REALTIME' } }));
+ * ```
+ * @since 0.14.0
+ */
+export class WebSocketRoomsUnavailableError extends Error {
+  /**
+   * Creates the error.
+   *
+   * @param room - The room name the application asked for
+   */
+  constructor(room: string) {
+    super(
+      `WebSocket room '${room}' is unavailable on Cloudflare Workers without a Durable Object ` +
+        'backplane: a client socket belongs to the request that accepted it, so a room cannot ' +
+        'write to its members from another request. Register ' +
+        "CloudflarePlugin({ durableObject: { binding: '<BINDING>' } }) from " +
+        '@setu-ts/cloudflare-plugin, which gives each connection its own link to the hub.',
+    );
+    this.name = 'WebSocketRoomsUnavailableError';
+  }
+}

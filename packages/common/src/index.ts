@@ -704,6 +704,8 @@ export type {
   RealtimeFrameHandler,
   RealtimeFrameKind,
 } from './services/realtime.ts';
+export { hasConnectionLinks } from './services/realtime-links.ts';
+export type { IRealtimeConnectionLink, IRealtimeLinkBackplane } from './services/realtime-links.ts';
 export { decodeFrameData, encodeFrameData } from './realtime-codec.ts';
 export type { EncodedPayload } from './realtime-codec.ts';
 

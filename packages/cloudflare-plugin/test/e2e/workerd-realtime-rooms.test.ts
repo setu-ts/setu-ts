@@ -1,0 +1,268 @@
+/**
+ * Rooms on real workerd: two Workers sharing one Durable Object namespace.
+ *
+ * One `wrangler dev` session runs three configurations from
+ * `fixtures/workerd-realtime`: a framework-free front Worker (the only one
+ * `wrangler dev` exposes), Worker A (the chat app, owning the hub class) and
+ * Worker B (the same app, binding the class by `script_name`). Both apps are
+ * bundled from the workspace sources, at the scaffold's
+ * `compatibility_date = "2025-09-01"`, which predates workerd's automatic
+ * close reply.
+ *
+ * Guarded like the CLI's Workers tests: skipped off CI when the `wrangler`
+ * binary cannot run, failed on CI.
+ *
+ * Not provable here (no Cloudflare account): two isolates of one Worker, the
+ * hub's hibernation on the platform, production connection limits.
+ *
+ * @module
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createServer, connect } from 'node:net';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const fixture = join(here, 'fixtures', 'workerd-realtime');
+const wrangler = join(here, '..', '..', 'node_modules', '.bin', 'wrangler');
+
+const onCi = process.env['CI'] === 'true';
+const hasWrangler = spawnSync(wrangler, ['--version'], { encoding: 'utf8' }).status === 0;
+const skip = !hasWrangler && !onCi;
+
+const CASE_TIMEOUT_MS = 120_000;
+
+let dev: ChildProcess | undefined;
+let output = '';
+let port = 0;
+
+/** A free local port. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (typeof address === 'object' && address !== null) resolve(address.port);
+        else reject(new Error('no port'));
+      });
+    });
+  });
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Waits until `check` holds, or fails after `ms`. */
+async function until(check: () => boolean, ms: number, what: string): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleep(25);
+  }
+}
+
+interface Client {
+  readonly socket: WebSocket;
+  readonly got: string[];
+}
+
+/** Opens a WebSocket client on the front Worker. */
+function client(path: string): Promise<Client> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+    const got: string[] = [];
+    socket.addEventListener('message', (event) => {
+      got.push(String(event.data));
+    });
+    socket.addEventListener('open', () => {
+      resolve({ socket, got });
+    });
+    socket.addEventListener('error', () => {
+      reject(new Error(`could not open ${path}`));
+    });
+  });
+}
+
+/** GETs a front-Worker path as text. */
+async function text(path: string, init?: RequestInit): Promise<{ status: number; body: string }> {
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, init);
+  return { status: response.status, body: await response.text() };
+}
+
+describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V13-203)', () => {
+  beforeAll(async () => {
+    port = await freePort();
+    dev = spawn(
+      wrangler,
+      [
+        'dev',
+        '-c',
+        'front/wrangler.toml',
+        '-c',
+        'worker-a/wrangler.toml',
+        '-c',
+        'worker-b/wrangler.toml',
+        '--ip',
+        '127.0.0.1',
+        '--port',
+        String(port),
+      ],
+      { cwd: fixture, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
+    );
+    dev.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    dev.stderr?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+    });
+    await until(() => output.includes('Ready on'), 90_000, `wrangler dev:\n${output.slice(-3000)}`);
+  }, CASE_TIMEOUT_MS);
+
+  afterAll(() => {
+    if (dev?.pid !== undefined) {
+      try {
+        process.kill(-dev.pid, 'SIGTERM');
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  it(
+    'delivers within a Worker and across Workers, from members and from a route',
+    async () => {
+      const a1 = await client('/a/chat');
+      const a2 = await client('/a/chat');
+      const b1 = await client('/b/chat');
+      await sleep(300);
+
+      a1.socket.send('from a1');
+      await until(
+        () => a2.got.includes('from a1') && b1.got.includes('from a1'),
+        5000,
+        'member broadcast',
+      );
+      const routed = await text('/b/broadcast', { method: 'POST', body: 'from a route' });
+      await until(
+        () => [a1, a2, b1].every((c) => c.got.includes('from a route')),
+        5000,
+        'route broadcast',
+      );
+
+      expect(routed.status).toBe(204);
+      expect(a1.got).not.toContain('from a1');
+      expect((await text('/a/size')).body).toBe('2');
+      expect((await text('/b/size')).body).toBe('1');
+      for (const c of [a1, a2, b1]) c.socket.close(1000);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    'a 200-member room: 100 per Worker, every member hears a member and a route broadcast',
+    async () => {
+      const members: Client[] = [];
+      for (let i = 0; i < 100; i++) members.push(await client('/a/chat'));
+      for (let i = 0; i < 100; i++) members.push(await client('/b/chat'));
+      await sleep(1000);
+
+      members[0]?.socket.send('from member 0');
+      await text('/a/broadcast', { method: 'POST', body: 'from the route' });
+      await until(
+        () =>
+          members.slice(1).every((c) => c.got.includes('from member 0')) &&
+          members.every((c) => c.got.includes('from the route')),
+        20_000,
+        'delivery to 200 members',
+      );
+
+      expect((await text('/a/size')).body).toBe('100');
+      expect((await text('/b/size')).body).toBe('100');
+      for (const c of members) c.socket.close(1000);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps delivering after 25 turnovers, and the hub's sockets follow live members",
+    async () => {
+      await sleep(1500);
+      const listener = await client('/b/chat');
+      let current = await client('/a/chat');
+      for (let i = 0; i < 25; i++) {
+        current.socket.close(1000);
+        current = await client('/a/chat');
+      }
+      await sleep(1500);
+
+      current.socket.send('after turnovers');
+      await until(() => listener.got.includes('after turnovers'), 5000, 'delivery after turnovers');
+      // Request-bound mode opens no isolate socket: one hub socket per live member.
+      await until(hubCountIs(2), 5000, 'hub socket count');
+      listener.socket.close(1000);
+      current.socket.close(1000);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    'answers a clean close at once with 1000, and drops a client that vanished without one',
+    async () => {
+      const c = await client('/a/chat');
+      const started = Date.now();
+      const closed = new Promise<{ code: number; ms: number }>((resolve) => {
+        c.socket.addEventListener('close', (event) => {
+          resolve({ code: event.code, ms: Date.now() - started });
+        });
+      });
+      c.socket.close(1000, 'bye');
+      const result = await closed;
+      expect(result.code).toBe(1000);
+      expect(result.ms).toBeLessThan(1000);
+
+      // A raw handshake whose socket is destroyed: no close frame at all.
+      await sleep(1500);
+      const before = Number((await text('/hub-count')).body);
+      const raw = connect(port, '127.0.0.1');
+      raw.write(
+        'GET /a/chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
+          'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+      );
+      await new Promise<void>((resolve) => raw.once('data', () => resolve()));
+      await until(hubCountIs(before + 1), 5000, 'the raw client link');
+      raw.destroy();
+      await until(hubCountIs(before), 15_000, 'the vanished client link to close');
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    'control: without the Durable Object arm, ws.room() answers the named error',
+    async () => {
+      const bare = await text('/a/rooms-without-arm');
+      expect(bare).toEqual({ status: 500, body: 'WebSocketRoomsUnavailableError' });
+    },
+    CASE_TIMEOUT_MS,
+  );
+});
+
+/** Latest hub count, refreshed by {@linkcode hubCountIs}. */
+let hubCount = -1;
+
+/**
+ * A synchronous check over a hub count refreshed in the background, so
+ * {@linkcode until} can poll it.
+ */
+function hubCountIs(expected: number): () => boolean {
+  void text('/hub-count').then((r) => {
+    hubCount = Number(r.body);
+  });
+  return () => {
+    void text('/hub-count').then((r) => {
+      hubCount = Number(r.body);
+    });
+    return hubCount === expected;
+  };
+}

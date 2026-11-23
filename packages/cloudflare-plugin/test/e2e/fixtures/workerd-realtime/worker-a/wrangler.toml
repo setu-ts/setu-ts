@@ -1,0 +1,20 @@
+name = "worker-a"
+main = "index.ts"
+# The scaffold's date: before web_socket_auto_reply_to_close (2026-04-07).
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat", "enable_request_signal"]
+
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RealtimeHub"]
+
+[alias]
+"@setu-ts/common" = "../../../../../../common/src/index.ts"
+"@setu-ts/kernel" = "../../../../../../kernel/src/index.ts"
+"@setu-ts/runtime" = "../../../../../../runtime/src/index.ts"
+"@setu-ts/websocket-plugin" = "../../../../../../websocket-plugin/src/index.ts"
+"@setu-ts/cloudflare-plugin" = "../../../../../../cloudflare-plugin/src/index.ts"

@@ -183,3 +183,44 @@ describe('RealtimeBackplaneObjectCore close and error handlers', () => {
     expect(pairs[0]?.server.closeCode).toBe(1011);
   });
 });
+
+describe('RealtimeBackplaneObjectCore POST /publish', () => {
+  const post = (body: string, headers?: Record<string, string>): Request =>
+    new Request('https://do/publish', {
+      method: 'POST',
+      body,
+      ...(headers === undefined ? {} : { headers }),
+    });
+
+  it('fans the body out verbatim to every socket, links included, and answers 204', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+    await core.fetch(new Request('https://do/connect', UPGRADE));
+    pairs[0]!.server.failSend = true;
+
+    const response = await core.fetch(post('{"raw":1}'));
+
+    expect(response.status).toBe(204);
+    expect(pairs[1]?.server.sent).toEqual(['{"raw":1}']);
+  });
+
+  it('answers 413 above 32 MiB, by declared length or by the body itself', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+
+    const declared = await core.fetch(post('x', { 'content-length': String(33_554_433) }));
+    const actual = await core.fetch(post('x'.repeat(33_554_433)));
+    const atLimit = await core.fetch(post('x'.repeat(33_554_432)));
+
+    expect([declared.status, actual.status, atLimit.status]).toEqual([413, 413, 204]);
+    expect(pairs[0]?.server.sent).toHaveLength(1);
+  });
+
+  it('treats a POST to another path as a non-upgrade request (426)', async () => {
+    const { core } = build();
+    const response = await core.fetch(
+      new Request('https://do/other', { method: 'POST', body: 'x' }),
+    );
+    expect(response.status).toBe(426);
+  });
+});

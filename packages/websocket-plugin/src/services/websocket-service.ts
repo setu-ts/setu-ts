@@ -35,6 +35,7 @@ import {
   composeBehaviorChain,
   decodeFrameData,
   encodeFrameData,
+  hasConnectionLinks,
   isWebSocketUpgradeRequest,
 } from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
@@ -43,10 +44,14 @@ import {
   realtimeObserverOf,
 } from '../diagnostics/realtime-observations.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
+import { RequestBoundRooms } from '../rooms/request-bound-rooms.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
 import { WsRouteTable } from '../routing/ws-route-table.ts';
-import { HeartbeatSweeper } from '../heartbeat/heartbeat.ts';
-import { WebSocketUnavailableError } from '../errors/websocket-errors.ts';
+import { HeartbeatSweeper, startConnectionHeartbeat } from '../heartbeat/heartbeat.ts';
+import {
+  WebSocketRoomsUnavailableError,
+  WebSocketUnavailableError,
+} from '../errors/websocket-errors.ts';
 import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 
 /** Refused because the server is at its connection limit. */
@@ -248,6 +253,16 @@ export class WebSocketService implements IWebSocketService {
    */
   #backplaneOpening = false;
   /**
+   * Set on Cloudflare Workers, where every socket belongs to the request that
+   * accepted it: no code may write to, read the native state of, or close a
+   * connection from another request. Rooms then deliver through per-connection
+   * links ({@linkcode RequestBoundRooms}) and each connection runs its own
+   * heartbeat; `undefined` with {@linkcode WebSocketService.#requestBoundMode}
+   * set means no link backplane is registered, so rooms are unavailable.
+   */
+  readonly #requestBound: RequestBoundRooms | undefined;
+  readonly #requestBoundMode: boolean;
+  /**
    * Route-scoped upgrade guards, keyed by the exact route path. Kept beside
    * the route table — whose stored `WsRoute` shape predates guards — and safe
    * to key on path because `WsRouteTable.add` refuses a duplicate path.
@@ -299,34 +314,50 @@ export class WebSocketService implements IWebSocketService {
     this.#logger = logger;
     this.#backplane = backplane;
     this.#behaviors = [...(behaviors ?? [])];
-    this.#rooms = new RoomRegistry(
-      backplane === undefined
-        ? undefined
-        : (name, data, exceptId): void => {
-            const payload = encodeFrameData(data);
-            // Assembled rather than spread so `exactOptionalPropertyTypes` never
-            // sees an explicit `undefined` on an optional field.
-            const frame: RealtimeFrame = {
-              kind: 'ws-room',
-              origin: backplane.origin,
-              name,
-              data: payload.data,
-              ...(payload.binary === true ? { binary: true } : {}),
-              ...(exceptId === undefined ? {} : { exceptId }),
-            };
-            // Fire-and-forget: a transport failure must never make a local
-            // broadcast throw for the application that issued it.
-            void backplane.publish(frame).catch((error: unknown) => {
-              this.#logger?.warn('websocket: backplane publish failed', {
-                room: name,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            });
-          },
-      // A local member has just joined, so this replica must be able to
-      // RECEIVE — and `subscribe()` alone does not open a transport.
-      () => this.#openBackplane(),
-    );
+    this.#requestBoundMode = runtime.platform() === 'cloudflare-workers';
+    const requestBound =
+      this.#requestBoundMode && backplane !== undefined && hasConnectionLinks(backplane)
+        ? new RequestBoundRooms(backplane, logger)
+        : undefined;
+    this.#requestBound = requestBound;
+    this.#rooms = this.#requestBoundMode
+      ? new RoomRegistry(
+          undefined,
+          undefined,
+          requestBound === undefined
+            ? undefined
+            : (room, data, roomOptions): void => {
+                requestBound.broadcast(room, data, roomOptions);
+              },
+        )
+      : new RoomRegistry(
+          backplane === undefined
+            ? undefined
+            : (name, data, exceptId): void => {
+                const payload = encodeFrameData(data);
+                // Assembled rather than spread so `exactOptionalPropertyTypes` never
+                // sees an explicit `undefined` on an optional field.
+                const frame: RealtimeFrame = {
+                  kind: 'ws-room',
+                  origin: backplane.origin,
+                  name,
+                  data: payload.data,
+                  ...(payload.binary === true ? { binary: true } : {}),
+                  ...(exceptId === undefined ? {} : { exceptId }),
+                };
+                // Fire-and-forget: a transport failure must never make a local
+                // broadcast throw for the application that issued it.
+                void backplane.publish(frame).catch((error: unknown) => {
+                  this.#logger?.warn('websocket: backplane publish failed', {
+                    room: name,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                });
+              },
+          // A local member has just joined, so this replica must be able to
+          // RECEIVE — and `subscribe()` alone does not open a transport.
+          () => this.#openBackplane(),
+        );
     this.#heartbeat = new HeartbeatSweeper(
       runtime,
       {
@@ -364,8 +395,10 @@ export class WebSocketService implements IWebSocketService {
     if (options?.guards !== undefined) {
       this.#routeGuards.set(path, options.guards);
     }
-    // The first route is what makes the heartbeat worth running.
-    this.#heartbeat.start();
+    // The first route is what makes the heartbeat worth running. In
+    // request-bound mode each connection runs its own instead: one shared
+    // interval would write to every socket from one request.
+    if (!this.#requestBoundMode) this.#heartbeat.start();
   }
 
   /**
@@ -413,7 +446,25 @@ export class WebSocketService implements IWebSocketService {
   }
 
   room(name: string): WebSocketRoom {
+    this.#assertRoomsAvailable(name);
     return this.#rooms.get(name);
+  }
+
+  /**
+   * Whether this service runs in request-bound mode (Cloudflare Workers). The
+   * plugin reads it to skip the isolate-level backplane subscription, which a
+   * request-bound service never uses.
+   * @since 0.14.0
+   */
+  get isRequestBound(): boolean {
+    return this.#requestBoundMode;
+  }
+
+  /** Throws when rooms cannot work here (Workers without a link backplane). */
+  #assertRoomsAvailable(name: string): void {
+    if (this.#requestBoundMode && this.#requestBound === undefined) {
+      throw new WebSocketRoomsUnavailableError(name);
+    }
   }
 
   /**
@@ -429,6 +480,7 @@ export class WebSocketService implements IWebSocketService {
    * @since 0.4.0
    */
   peek(name: string): WebSocketRoom | undefined {
+    this.#assertRoomsAvailable(name);
     return this.#rooms.peek(name);
   }
 
@@ -695,12 +747,20 @@ export class WebSocketService implements IWebSocketService {
       return;
     }
     this.#backplaneOpening = true;
-    void this.#backplane.connect().catch((error: unknown) => {
-      this.#backplaneOpening = false;
-      this.#logger?.warn('websocket: backplane connect failed', {
-        error: error instanceof Error ? error.message : String(error),
+    void this.#backplane
+      .connect()
+      .catch((error: unknown) => {
+        this.#logger?.warn('websocket: backplane connect failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        // Cleared once the connect settles either way: a transport that later
+        // drops its socket (the Durable Object backplane does) reopens on the
+        // next join. `connect()` is idempotent by contract, so a live
+        // transport is not opened twice.
+        this.#backplaneOpening = false;
       });
-    });
   }
 
   /**
@@ -709,6 +769,7 @@ export class WebSocketService implements IWebSocketService {
    */
   closeAll(): void {
     this.#heartbeat.stop();
+    this.#requestBound?.closeAll();
     for (const conn of [...this.#connections]) {
       conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
     }
@@ -780,6 +841,16 @@ export class WebSocketService implements IWebSocketService {
     // this boolean and the close code's 1006 test ever reach the collector —
     // never the error, the code value or the reason.
     let errored = false;
+    // Request-bound mode: the connection's own heartbeat, stopped on close.
+    let stopHeartbeat = (): void => {};
+    /** Runs a handler call with `target` marked as the dispatching connection. */
+    const dispatch = (target: WebSocketConnection, fn: () => void): void => {
+      if (this.#requestBound === undefined) {
+        fn();
+        return;
+      }
+      this.#requestBound.dispatching(target, fn);
+    };
     const settlePending = (): void => {
       if (!settled) {
         settled = true;
@@ -805,7 +876,23 @@ export class WebSocketService implements IWebSocketService {
           attachRealtimeObserver(opened, observer);
           observer.observe('open', true);
         }
-        invoke(handlers.onOpen, opened, context);
+        if (this.#requestBoundMode) {
+          // Opened here, in the connection's own request, so the link's
+          // socket and the heartbeat's timer belong to it.
+          this.#requestBound?.open(opened, (name, member) => this.#rooms.isMember(name, member));
+          stopHeartbeat = startConnectionHeartbeat(
+            this.#runtime,
+            {
+              heartbeatMs: this.#options.heartbeatMs,
+              heartbeatPayload: this.#options.heartbeatPayload,
+              idleTimeoutMs: this.#options.idleTimeoutMs,
+            },
+            opened,
+          );
+        }
+        dispatch(opened, () => {
+          invoke(handlers.onOpen, opened, context);
+        });
       },
 
       onMessage: (data: string | Uint8Array): void => {
@@ -824,7 +911,9 @@ export class WebSocketService implements IWebSocketService {
         if (this.#behaviors.length === 0) {
           // Zero-configuration dispatch — byte-identical to the pre-chain
           // behaviour: a direct, synchronous invoke with no chain allocated.
-          invoke(handlers.onMessage, target, data);
+          dispatch(target, () => {
+            invoke(handlers.onMessage, target, data);
+          });
           return;
         }
 
@@ -837,15 +926,17 @@ export class WebSocketService implements IWebSocketService {
         // keeps its native `(conn, data)` arguments — only the chain sees it.
         const routePath = route.path;
         const behaviors = this.#behaviors;
-        invoke(
-          (messageConn, frame): Promise<void> =>
-            composeBehaviorChain<IngressContext<string | Uint8Array>, void>(
-              { kind: 'websocket', name: routePath, payload: frame },
-              behaviors,
-              () => Promise.resolve(handlers.onMessage?.(messageConn, frame)),
-            ),
-          target,
-          data,
+        dispatch(target, () =>
+          invoke(
+            (messageConn, frame): Promise<void> =>
+              composeBehaviorChain<IngressContext<string | Uint8Array>, void>(
+                { kind: 'websocket', name: routePath, payload: frame },
+                behaviors,
+                () => Promise.resolve(handlers.onMessage?.(messageConn, frame)),
+              ),
+            target,
+            data,
+          ),
         );
       },
 
@@ -860,10 +951,14 @@ export class WebSocketService implements IWebSocketService {
         }
         const closing = conn;
         closing.markClosed();
+        stopHeartbeat();
+        this.#requestBound?.close(closing);
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
         realtimeObserverOf(closing)?.observe('close', !errored && event.code !== CLOSE_ABNORMAL);
-        invoke(handlers.onClose, closing, event);
+        dispatch(closing, () => {
+          invoke(handlers.onClose, closing, event);
+        });
       },
 
       onError: (error: Error): void => {

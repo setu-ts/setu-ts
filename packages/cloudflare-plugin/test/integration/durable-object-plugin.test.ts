@@ -221,8 +221,10 @@ describe('CloudflarePlugin durableObject arm', () => {
 
     const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
     await backplane.connect();
-    // Break the live socket, so the next publish fails on send.
+    // Break the live socket, and the reopen the resend tries, so the publish
+    // fails for good and is reported.
     namespace.clients[0]!.failSend = true;
+    namespace.omitSocket = true;
 
     await backplane.publish({
       kind: 'ws-room',

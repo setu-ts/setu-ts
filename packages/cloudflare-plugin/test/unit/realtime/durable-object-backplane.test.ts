@@ -26,7 +26,7 @@ import type { IDurableObjectNamespace } from '../../../src/bindings/facades.ts';
 import { DurableObjectBackplane } from '../../../src/realtime/durable-object-backplane.ts';
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import type { FakeClientSocket } from '../../do-fakes.ts';
-import { linkedPair } from '../../do-fakes.ts';
+import { FakeDurableObjectNamespace, linkedPair } from '../../do-fakes.ts';
 import { RecordingLogger } from '../../fakes.ts';
 
 const FRAME: RealtimeFrame = {
@@ -224,23 +224,6 @@ describe('DurableObjectBackplane.publish', () => {
     expect(namespace.sockets[0]?.sent).toEqual([JSON.stringify(FRAME)]);
   });
 
-  it('reports a send failure through the logger and reopens on the next publish', async () => {
-    const namespace = new ScriptedNamespace();
-    const logger = new RecordingLogger();
-    const backplane = build(namespace, () => logger);
-
-    await backplane.publish(FRAME);
-    namespace.sockets[0]!.failSend = true;
-    await backplane.publish(FRAME);
-
-    expect(logger.records[0]?.message).toContain('backplane publish failed');
-    // The dead socket was retired, so this publish opens a new one instead of
-    // writing into a connection that will never deliver again.
-    await backplane.publish(FRAME);
-    expect(namespace.opens).toBe(2);
-    expect(namespace.sockets[1]?.sent).toEqual([JSON.stringify(FRAME)]);
-  });
-
   it('reopens after the socket reported itself closed', async () => {
     const namespace = new ScriptedNamespace();
     const backplane = build(namespace);
@@ -268,9 +251,15 @@ describe('DurableObjectBackplane.publish', () => {
     const logger = new RecordingLogger();
     const backplane = build(namespace, () => logger);
     await backplane.publish(FRAME);
-    namespace.sockets[0]!.send = () => {
+    const gone = (): never => {
       // A DOMException-style string throw, which `error.message` would drop.
       throw 'socket gone';
+    };
+    namespace.sockets[0]!.send = gone;
+    // The resend's fresh socket throws the same way, so the failure is logged.
+    namespace.onOpen = (): void => {
+      const latest = namespace.sockets.at(-1);
+      if (latest !== undefined) latest.send = gone;
     };
 
     await backplane.publish(FRAME);
@@ -445,5 +434,134 @@ describe('DurableObjectBackplane.close', () => {
 
   it('exposes the configured origin', () => {
     expect(build(new ScriptedNamespace()).origin).toBe('replica-a');
+  });
+});
+
+describe('DurableObjectBackplane repairs (V13-196)', () => {
+  it('resends the frame once on a fresh socket when the old one throws, without logging', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    const backplane = build(namespace, () => logger);
+    await backplane.publish(FRAME);
+    namespace.sockets[0]!.failSend = true;
+
+    await backplane.publish(FRAME);
+
+    expect(namespace.opens).toBe(2);
+    expect(namespace.sockets[1]?.sent).toEqual([JSON.stringify(FRAME)]);
+    expect(logger.records).toEqual([]);
+  });
+
+  it('logs when the resend fails too, and closes the retired sockets', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    const backplane = build(namespace, () => logger);
+    await backplane.publish(FRAME);
+    namespace.sockets[0]!.failSend = true;
+    namespace.failNext = true;
+
+    await backplane.publish(FRAME);
+
+    expect(logger.records[0]?.message).toBe('cloudflare: backplane publish failed');
+    expect(namespace.sockets[0]?.closed).toBe(true);
+  });
+
+  it('logs and retires when the resent socket throws as well', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    const backplane = build(namespace, () => logger);
+    await backplane.publish(FRAME);
+    namespace.sockets[0]!.failSend = true;
+    namespace.onOpen = (): void => {
+      const latest = namespace.sockets.at(-1);
+      if (latest !== undefined && namespace.sockets.length === 2) latest.failSend = true;
+    };
+
+    await backplane.publish(FRAME);
+
+    expect(logger.records).toHaveLength(1);
+    expect(namespace.sockets[1]?.closed).toBe(true);
+  });
+
+  it('closes a socket retired by its close event, so the hub stops fanning out to it', async () => {
+    const namespace = new ScriptedNamespace();
+    const backplane = build(namespace);
+    await backplane.connect();
+    namespace.sockets[0]?.fire('error', { data: '' });
+    expect(namespace.sockets[0]?.closed).toBe(true);
+  });
+});
+
+describe('DurableObjectBackplane links and hub publish', () => {
+  const timers = {
+    setTimeout: (): unknown => 0,
+    clearTimeout: (): void => {},
+  };
+
+  it('opens one link per connection on the shared hub', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+    });
+    const got: RealtimeFrame[] = [];
+    backplane.openConnectionLink('c1', (f) => got.push(f));
+    const other = backplane.openConnectionLink('c2', () => {});
+    await setImmediate();
+
+    expect(namespace.state('chat').getWebSockets()).toHaveLength(2);
+    other.publish(FRAME);
+    expect(got).toEqual([FRAME]);
+  });
+
+  it('refuses to open a link without timers', () => {
+    const backplane = build(new ScriptedNamespace());
+    expect(() => backplane.openConnectionLink('c', () => {})).toThrow(/timers/);
+  });
+
+  it('POSTs to the hub, hands the promise to waitUntil, and reaches every link', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const held: Promise<unknown>[] = [];
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      waitUntil: (p) => held.push(p),
+    });
+    const got: RealtimeFrame[] = [];
+    backplane.openConnectionLink('c1', (f) => got.push(f));
+    await setImmediate();
+
+    await backplane.publishViaHub(FRAME);
+
+    expect(held).toHaveLength(1);
+    expect(got).toEqual([FRAME]);
+  });
+
+  it('logs a hub that answers an error status or cannot be reached, never throwing', async () => {
+    const logger = new RecordingLogger();
+    let mode: 'status' | 'throw' = 'status';
+    const namespace: IDurableObjectNamespace = {
+      idFromName: (n) => n,
+      get: () => ({
+        fetch: (): Promise<Response> =>
+          mode === 'status'
+            ? Promise.resolve(new Response(null, { status: 413 }))
+            : Promise.reject(new Error('down')),
+      }),
+    };
+    const backplane = build(namespace, () => logger);
+
+    await backplane.publishViaHub(FRAME);
+    mode = 'throw';
+    await backplane.publishViaHub(FRAME);
+
+    expect(logger.records.map((r) => r.meta)).toEqual([
+      { topic: 'realtime', status: 413 },
+      { topic: 'realtime', error: 'down' },
+    ]);
   });
 });

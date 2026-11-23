@@ -11,13 +11,9 @@
  * @since 0.2.0
  */
 
-import type { WebSocketEventSink } from '@setu-ts/common';
+import type { WebSocketEventSink, WebSocketReadyState } from '@setu-ts/common';
 import type { WebSocketLike } from '../shared/web-socket-transport.ts';
-import {
-  createWebSocketTransport,
-  normalizeFrame,
-  toTransportError,
-} from '../shared/web-socket-transport.ts';
+import { normalizeFrame, toTransportError } from '../shared/web-socket-transport.ts';
 
 /**
  * The server half of a Workers `WebSocketPair`. Workers sockets are driven with
@@ -156,11 +152,41 @@ export function createDefaultCloudflareWebSocketHost(): CloudflareWebSocketHost 
 }
 
 /**
+ * workerd's ceiling for one incoming WebSocket message: 32 MiB. A larger
+ * message closes the socket with 1009; there is no setting to raise it.
+ * @since 0.14.0
+ */
+export const WORKERS_WS_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Close codes a peer may send, so the adapter may echo them in its reply.
+ * Every other code (the reserved 1004, 1005, 1006 and 1015, the unassigned
+ * 1016–2999, anything out of range) is answered with 1000: workerd throws for
+ * them, and a swallowed throw would leave the peer waiting for a reply.
+ */
+function replyCode(code: number): number {
+  const sendable =
+    (code >= 1000 && code <= 1003) ||
+    (code >= 1007 && code <= 1014) ||
+    (code >= 3000 && code <= 4999);
+  return sendable ? code : 1000;
+}
+
+/**
  * Binds a Workers server socket's events to a sink.
  *
  * `accept()` is called first — a Workers socket cannot send or receive until it
  * is accepted — and the sink's `onOpen` fires immediately afterwards, because
  * Workers emits no `open` event for the server half of a pair.
+ *
+ * The transport tracks its own state from these events instead of reading the
+ * native `readyState`: workerd ties a socket to the request that accepted it,
+ * and reading or writing it from another request throws, so a room counting
+ * its open members from a route must never touch the native object. The
+ * adapter also answers the peer's close frame itself; without
+ * `web_socket_auto_reply_to_close` (compatibility date 2026-04-07) workerd
+ * leaves that to the Worker, and an unanswered close leaves the client waiting
+ * until its own timeout.
  *
  * @param socket - The server half of the pair
  * @param sink - The sink to drive
@@ -171,6 +197,7 @@ export function bindCloudflareSocketToSink(
   sink: WebSocketEventSink,
 ): void {
   socket.accept();
+  let state: WebSocketReadyState = 'open';
 
   socket.addEventListener('message', (event: never): void => {
     const { data } = event as unknown as { data: unknown };
@@ -178,11 +205,32 @@ export function bindCloudflareSocketToSink(
   });
   socket.addEventListener('close', (event: never): void => {
     const { code, reason } = event as unknown as { code?: number; reason?: string };
-    sink.onClose({ code: code ?? 1006, reason: reason ?? '' });
+    const received = code ?? 1006;
+    if (state === 'open') {
+      try {
+        socket.close(replyCode(received), reason ?? '');
+      } catch {
+        // The runtime replied already (web_socket_auto_reply_to_close).
+      }
+    }
+    state = 'closed';
+    sink.onClose({ code: received, reason: reason ?? '' });
   });
   socket.addEventListener('error', (event: never): void => {
+    state = 'closed';
     sink.onError(toTransportError(event));
   });
 
-  sink.onOpen(createWebSocketTransport(socket));
+  sink.onOpen({
+    get readyState(): WebSocketReadyState {
+      return state;
+    },
+    send(data: string | Uint8Array): void {
+      socket.send(data);
+    },
+    close(code?: number, reason?: string): void {
+      if (state === 'open') state = 'closing';
+      socket.close(code, reason);
+    },
+  });
 }

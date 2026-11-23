@@ -245,6 +245,12 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
             topic: durableObjectArm.options.topic ?? DEFAULT_REALTIME_TOPIC,
             // A thunk, matching the waitUntil and queue seams above.
             logger: () => ctx.logger,
+            // Links reopen on the runtime's timers; a hub publish from a route
+            // is kept alive past the response through the registry's sink.
+            timers: ctx.runtime,
+            ...(options.waitUntil === undefined
+              ? {}
+              : { waitUntil: (promise: Promise<unknown>): void => registry.waitUntil(promise) }),
           },
         );
         ctx.services.register<IRealtimeBackplane>(durableObjectArm.token, backplane);

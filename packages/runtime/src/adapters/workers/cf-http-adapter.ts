@@ -27,10 +27,12 @@ import {
 import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
+import { WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
 import {
   bindCloudflareSocketToSink,
   createDefaultCloudflareWebSocketHost,
+  WORKERS_WS_MAX_MESSAGE_BYTES,
 } from './cf-ws-upgrader.ts';
 
 /**
@@ -43,10 +45,20 @@ export class CloudflareWorkersServerHandle {
   readonly #upgrades = new UpgradeRouterStore();
   #wsHost: CloudflareWebSocketHost | null;
   readonly #maxBodyBytes: number | undefined;
+  readonly #ceiling: WebSocketCeilingReport;
 
-  constructor(wsHost?: CloudflareWebSocketHost, maxBodyBytes?: number) {
+  constructor(
+    wsHost?: CloudflareWebSocketHost,
+    maxBodyBytes?: number,
+    reportError?: (record: Readonly<Record<string, unknown>>) => void,
+  ) {
     this.#wsHost = wsHost ?? null;
     this.#maxBodyBytes = maxBodyBytes;
+    this.#ceiling = new WebSocketCeilingReport(
+      WORKERS_WS_MAX_MESSAGE_BYTES,
+      'cloudflare-workers',
+      reportError,
+    );
   }
 
   /**
@@ -117,6 +129,7 @@ export class CloudflareWorkersServerHandle {
       this.#wsHost ??= createDefaultCloudflareWebSocketHost();
 
       const { client, server } = this.#wsHost.createPair();
+      this.#ceiling.check(intent.sink);
       bindCloudflareSocketToSink(server, intent.sink);
       return this.#wsHost.createUpgradeResponse(client, intent.protocol);
     } catch (cause) {
@@ -142,7 +155,11 @@ export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
   #handle: CloudflareWorkersServerHandle;
 
   constructor(wsHost?: CloudflareWebSocketHost, options?: HttpAdapterOptions) {
-    this.#handle = new CloudflareWorkersServerHandle(wsHost, options?.maxBodyBytes);
+    this.#handle = new CloudflareWorkersServerHandle(
+      wsHost,
+      options?.maxBodyBytes,
+      options?.reportError,
+    );
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
