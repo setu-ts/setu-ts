@@ -98,11 +98,12 @@ release whose `SendEmailCommand` accepts `Content.Simple.Attachments`.
 - A SendGrid refusal's message carries SendGrid's own first error text after the status, for the
   log; the response stays a masked `500`.
 - `smtp` takes `connectionTimeoutMs`, `greetingTimeoutMs` and `socketTimeoutMs`, passed to
-  nodemailer only when set. nodemailer caches a host's DNS answer for 5 minutes, so a server that
-  moves to a new address stays unreachable until then; `dnsTtlMs` makes the provider resolve the
-  host through the runtime's DNS at most that often and connect to the address found, still
-  verifying the host as the TLS server name. It is refused with an injected `transport` and on a
-  runtime without DNS.
+  nodemailer only when set; each must be a whole number of milliseconds from `1` to `2147483647`
+  (`0` and anything else outside that throw `RangeError` at construction). nodemailer caches a
+  host's DNS answer for 5 minutes, so a server that moves to a new address stays unreachable until
+  then; `dnsTtlMs` makes the provider resolve the host through the runtime's DNS at most that often
+  and connect to the address found, still verifying the host as the TLS server name. It is refused
+  with an injected `transport` and on a runtime without DNS.
 
 SES v2 has no local stand-in the project's runs could use (LocalStack community answers `501`), so
 the `ses` arm was proved only against an in-test capture server: what it sends and where, not that
