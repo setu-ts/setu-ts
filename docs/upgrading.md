@@ -150,7 +150,7 @@ may send that request again.
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
 
-### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`)
+### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`, `@setu-ts/resilience-plugin`)
 
 - **Reading a policy.** `CircuitBreakerPolicy` is now a union of the count arm
   (`{ threshold, timeout, resetTimeout }`) and the rate arm

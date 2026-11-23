@@ -13672,12 +13672,13 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   health. Use a trusted resolver. On Deno SERVFAIL also reads as absence after the grace rule.
 - DNS `servers` accepts `127.0.0.1`, `127.0.0.1:7853`, `::1`, `[::1]:53`; ports are decimal 1–65535,
   default 53. Host names, empty lists/entries, malformed addresses and IPv6 zones are refused at
-  construction with `RangeError` naming the entry. Bare `::1:5353` is an IPv6 address on port 53; a
-  port suffix needs brackets. The option requires `runtime.createDnsResolver` (Node, Bun, Deno; not
-  Workers); otherwise startup refuses naming `servers`. Without it, `runtime.dns` is used.
-  `resolveTimeoutMs` bounds the whole lookup across all servers, one attempt each; fractional values
-  round up for the runtime's integer bound. On Deno the underlying lookup may end about 2 s past the
-  bound. Record TTLs are not read: `cacheTtlMs` stays the freshness bound.
+  construction with `RangeError` naming the entry (an empty list:
+  `servers must be a non-empty array`). Bare `::1:5353` is an IPv6 address on port 53; a port suffix
+  needs brackets. The option requires `runtime.createDnsResolver` (Node, Bun, Deno; not Workers);
+  otherwise startup refuses naming `servers`. Without it, `runtime.dns` is used. `resolveTimeoutMs`
+  bounds the whole lookup across all servers, one attempt each; fractional values round up for the
+  runtime's integer bound. On Deno the underlying lookup may end about 2 s past the bound. Record
+  TTLs are not read: `cacheTtlMs` stays the freshness bound.
 - `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
   Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
   bounded, never overlap, and arm the interval before the first lookup. An abandoned lookup may keep
@@ -16705,21 +16706,21 @@ was known when the call started, only a `REFUSED_STREAM` on a sent list over 655
 may refuse it itself), with `size` equal to that RFC 7541 §4.1 list size and `limit` equal to the
 client's 65536-octet threshold. At or under 65536, a refusal still reports failure and is resent; an
 accepted larger list passes through. A refusal from a peer shutting down (its session closed or
-destroyed) stays a refused stream and is resent. All other errors fail. Streaming reports success at
-headers; later iteration errors report nothing. Aborting thousands of in-flight calls at once can
-trip a Node peer's stream-reset limit (GOAWAY `INTERNAL_ERROR`), which fails the session's calls and
-reports the instance failed, with the same ejection bounds. Tight caller deadlines can eject healthy
-instances under discovery's ejection limits. Unary refused streams and `Unavailable` errors whose
-metadata carries exactly `x-setu-unprocessed: shutdown` are resent once on a new pick within the
-remaining deadline, regardless of wire status. The kernel's pre-pipeline drain answer carries this
-marker even with a custom error responder; over HTTP/2 a draining Setu server on Node refuses the
-new stream instead, so the marked 503 reaches a client over HTTP/1.1 or through a proxy. Streaming
-calls, unmarked errors, other marker values and other codes are not resent; the second refusal
-surfaces. Caller abort prevents resend. The instance still reports failure. The header is reserved:
-an application setting it on its own `Unavailable` claims no processing and gets one resend of that
-unary call; the kernel does not strip it. The plugin's own post-close 503 is unmarked. Discover
-per-pod addresses (headless DNS mode `'a'` or Kubernetes) to balance calls: one Service address pins
-the session to one pod.
+destroyed) stays a refused stream and is resent. All other unmarked errors fail. Streaming reports
+success at headers; later iteration errors report nothing. Aborting thousands of in-flight calls at
+once can trip a Node peer's stream-reset limit (GOAWAY `INTERNAL_ERROR`), which fails the session's
+calls and reports the instance failed, with the same ejection bounds. Tight caller deadlines can
+eject healthy instances under discovery's ejection limits. Unary refused streams and `Unavailable`
+errors whose metadata carries exactly `x-setu-unprocessed: shutdown` are resent once on a new pick
+within the remaining deadline, regardless of wire status. The kernel's pre-pipeline drain answer
+carries this marker even with a custom error responder; over HTTP/2 a draining Setu server on Node
+refuses the new stream instead, so the marked 503 reaches a client over HTTP/1.1 or through a proxy.
+Streaming calls, unmarked errors, other marker values and other codes are not resent; the second
+refusal surfaces. Caller abort prevents resend. The instance still reports failure. The header is
+reserved: an application setting it on its own `Unavailable` claims no processing and gets one
+resend of that unary call; the kernel does not strip it. The plugin's own post-close 503 is
+unmarked. Discover per-pod addresses (headless DNS mode `'a'` or Kubernetes) to balance calls: one
+Service address pins the session to one pod.
 
 Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals

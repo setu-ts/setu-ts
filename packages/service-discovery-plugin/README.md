@@ -300,15 +300,15 @@ the same grace rule.
 The DNS arm accepts `servers?: readonly string[]`, for example `['127.0.0.1:7853', '[::1]:53']`.
 Accepted entries are IPv4 (`127.0.0.1`), IPv4 with port (`127.0.0.1:7853`), bare IPv6 (`::1`), and
 IPv6 with a bracketed port (`[::1]:53`). Ports are decimal 1–65535; omitted ports use 53. An empty
-list, host names, empty strings, whitespace, malformed IPs and IPv6 zones are refused with
-`RangeError` naming the entry at `ServiceDiscoveryPlugin()` construction. A valid bare IPv6 literal
-such as `::1:5353` is an address on port 53; to specify a port use brackets. `servers` requires
-`runtime.createDnsResolver` (Node, Bun, Deno; not Workers); without it startup throws
-`DiscoveryUnavailableError` naming `servers`. Omitting `servers` uses `runtime.dns`.
-`resolveTimeoutMs` bounds the whole lookup across all servers, one attempt each; fractions are
-rounded up with `Math.ceil` for the runtime's integer bound. `0` adds no lookup timer. On Deno a
-lookup may run about 2 s past the bound before its underlying operation ends. DNS record TTLs are
-not read: `cacheTtlMs` stays the freshness bound.
+list, host names, empty strings, whitespace, malformed IPs and IPv6 zones are refused with a
+`RangeError` (naming the entry; an empty list reads `servers must be a non-empty array`) at
+`ServiceDiscoveryPlugin()` construction. A valid bare IPv6 literal such as `::1:5353` is an address
+on port 53; to specify a port use brackets. `servers` requires `runtime.createDnsResolver` (Node,
+Bun, Deno; not Workers); without it startup throws `DiscoveryUnavailableError` naming `servers`.
+Omitting `servers` uses `runtime.dns`. `resolveTimeoutMs` bounds the whole lookup across all
+servers, one attempt each; fractions are rounded up with `Math.ceil` for the runtime's integer
+bound. `0` adds no lookup timer. On Deno a lookup may run about 2 s past the bound before its
+underlying operation ends. DNS record TTLs are not read: `cacheTtlMs` stays the freshness bound.
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name

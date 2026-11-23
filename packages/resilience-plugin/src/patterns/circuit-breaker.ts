@@ -41,8 +41,17 @@ export class CircuitBreaker implements ICircuitBreaker {
    * @throws {RangeError} When the policy fails breakerPolicyRangeError
    */
   constructor(policy: CircuitBreakerPolicy, hrtime: () => number) {
-    this.#window = createBreakerWindow(policy, hrtime);
-    this.#resetTimeout = policy.resetTimeout;
+    // One read of each field: the checked copy is the one used, so a getter
+    // cannot pass the check and then hand the cooldown something else.
+    const snapshot = {
+      threshold: policy.threshold,
+      failureRateThreshold: policy.failureRateThreshold,
+      minimumCalls: policy.minimumCalls,
+      timeout: policy.timeout,
+      resetTimeout: policy.resetTimeout,
+    } as CircuitBreakerPolicy;
+    this.#window = createBreakerWindow(snapshot, hrtime);
+    this.#resetTimeout = snapshot.resetTimeout;
     this.#hrtime = hrtime;
   }
 

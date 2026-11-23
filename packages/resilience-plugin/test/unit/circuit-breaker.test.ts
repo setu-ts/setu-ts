@@ -24,6 +24,25 @@ async function expectReject(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('CircuitBreaker', () => {
+  it('reads each policy field once, so a getter cannot change the checked cooldown', async () => {
+    const c = clock();
+    let reads = 0;
+    const policy = {
+      threshold: 1,
+      timeout: 1000,
+      get resetTimeout() {
+        reads++;
+        return reads === 1 ? 500 : Number.NaN;
+      },
+    } as CircuitBreakerPolicy;
+    const breaker = new CircuitBreaker(policy, c.hrtime);
+    expect(reads).toBe(1);
+    await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('open');
+    c.now = 500;
+    expect(breaker.state).toBe('half-open');
+  });
+
   it('trips closed → open once threshold failures fall inside the window', async () => {
     const c = clock();
     const breaker = new CircuitBreaker(POLICY, c.hrtime);
