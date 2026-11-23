@@ -1,4 +1,5 @@
 /** Classification of a call that failed before its response settled. @module */
+import { findPeerHeaderListLimitError } from './header-list-guard.ts';
 
 /**
  * Canonical gRPC status numbers. Connect's Code enum cannot be imported here at
@@ -44,16 +45,13 @@ export const GRPC_CODE: Readonly<
   Unauthenticated: 16,
 } as const);
 
-const SERVER_FAULT_CODES: ReadonlySet<number> = new Set([
+const FAILURE_CODES: ReadonlySet<number> = new Set([
   GRPC_CODE.Unavailable,
   GRPC_CODE.Unimplemented,
-  GRPC_CODE.Internal,
-  GRPC_CODE.Unknown,
-  GRPC_CODE.DataLoss,
   GRPC_CODE.DeadlineExceeded,
 ]);
 
-const ANSWER_CODES: ReadonlySet<number> = new Set([
+const WIRE_SUCCESS_CODES: ReadonlySet<number> = new Set([
   GRPC_CODE.InvalidArgument,
   GRPC_CODE.NotFound,
   GRPC_CODE.AlreadyExists,
@@ -63,6 +61,9 @@ const ANSWER_CODES: ReadonlySet<number> = new Set([
   GRPC_CODE.OutOfRange,
   GRPC_CODE.Aborted,
   GRPC_CODE.ResourceExhausted,
+  GRPC_CODE.Internal,
+  GRPC_CODE.Unknown,
+  GRPC_CODE.DataLoss,
 ]);
 
 /**
@@ -81,12 +82,19 @@ const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Reports every failed call against the selected instance, except caller
- * cancellation and the pre-send client faults `isPreSendFault` recognises.
+ * Reports failure for no server answer, a refused stream, `Unavailable`,
+ * `Unimplemented`, `DeadlineExceeded` (wire or not), or the peer's own `Canceled`.
+ * Every other server answer reports success, including `Internal`, `Unknown`
+ * and `DataLoss`: a request that makes a healthy handler throw must not eject
+ * replicas. The same codes without a server answer fail. Caller cancellation
+ * and the client faults `isPreSendFault` recognises report nothing, including
+ * oversized headers refused by a peer advertising no limit. A list over an
+ * advertised limit but at or under 8 KiB is an instance failure: that peer
+ * advertised less than any gRPC default; only lists over 8 KiB are exempt.
  * @param error - The rejected call
  * @param signal - The caller's signal
  * @param isWireError - Whether Connect decoded this error from a server answer
- * @returns The discovery outcome, or no report for caller cancellation or a pre-send client fault
+ * @returns The discovery outcome, or no report for caller cancellation or a client fault
  */
 export function callOutcome(
   error: unknown,
@@ -99,16 +107,16 @@ export function callOutcome(
     typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   const wire = isWireError(error);
   if (!wire && isPreSendFault(error, code)) return undefined;
-  if (typeof code === 'number' && SERVER_FAULT_CODES.has(code)) return 'failure';
+  if (typeof code === 'number' && FAILURE_CODES.has(code)) return 'failure';
   if (code === GRPC_CODE.Canceled) return 'failure';
-  if (typeof code === 'number' && wire && ANSWER_CODES.has(code)) return 'success';
+  if (typeof code === 'number' && wire && WIRE_SUCCESS_CODES.has(code)) return 'success';
   return 'failure';
 }
 
 /**
- * Connect's and Node's errors raised before the request is sent: a refused
- * request header (whatever the metadata), and, with no response metadata,
- * Connect's binary serialization failure and its `writeMaxBytes` refusal.
+ * Caller header faults (including an oversized unadvertised-limit refusal),
+ * and Connect's pre-send binary serialization and `writeMaxBytes` refusals
+ * with no response metadata.
  */
 function isPreSendFault(error: unknown, code: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -168,11 +176,15 @@ const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREA
  * `Internal`; the cause chain names it either way. A stream that could not be
  * opened because the session had already received `GOAWAY`
  * (`ERR_HTTP2_GOAWAY_SESSION`) is the same case: the request never left.
+ * The guard's local `PeerHeaderListLimitError` also qualifies: a list
+ * at or under 8 KiB exceeded a peer's advertised limit, below every gRPC default.
+ * It reports failure; unary calls use the same once-only resend within the deadline.
  *
  * @param error - The call's error
  * @returns `true` when some error in the cause chain is that refusal
  */
 export function isRefusedStream(error: unknown): boolean {
+  if (findPeerHeaderListLimitError(error) !== undefined) return true;
   let current: unknown = error;
   for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
     const { message, code, cause } = current as {

@@ -40,7 +40,8 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
   return `null` for an empty pool. Default strategy: round-robin.
 - Warm reads use cache; a read (watched too) starts background refresh once `cacheTtlMs` old (30000
-  ms; `0` every call; `NaN` refused). Cold reads share `resolveTimeoutMs` (2000 ms; `0` unbounded).
+  ms; `0` every call; non-finite or out of range refused). Cold reads share `resolveTimeoutMs` (2000
+  ms; `0` unbounded).
 - Failed warm refreshes retry at 1, 2, 4, 8, 16, 30 s; cold failures are unspaced.
 - `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
   at expiry; empty results reach watchers without another event. Nonempty answers/close clear it.

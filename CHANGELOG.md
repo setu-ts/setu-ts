@@ -52,19 +52,29 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/service-discovery-plugin`.** Consul ids default to
   `<serviceName>-<address>-<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
   an existing identity; `address` must be the instance's own address, never a shared hostname.
-- **BREAKING — `@setu-ts/grpc-plugin`.** Instance outcomes now distinguish wire application answers,
-  server faults and unclassified transport faults. Caller aborts and pre-send faults (binary
-  serialization, `writeMaxBytes`, a request header Node refuses) report nothing; a header name or
-  value `Headers` rejects now fails the call before any instance is picked. No option restores the
-  old outcome mapping; `ejection: false` on discovery disables automatic ejection if the changed
-  classifications are unsuitable, without restoring old reports. A response-stream cancel now aborts
-  the handler's signal before awaiting cleanup without a bound.
+- **BREAKING — `@setu-ts/grpc-plugin`.** Instance outcomes now distinguish server answers from
+  transport faults. A server's `Internal`, `Unknown` or `DataLoss` answer counts as success, so a
+  throwing handler does not eject replicas. The same codes without a server answer fail. Take a
+  replica whose handlers fail every call out through readiness (health checks). No answer, a refused
+  stream, `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), and the peer's own
+  `Canceled` still fail. Every other server answer reports success. Caller aborts and pre-send
+  faults (binary serialization, `writeMaxBytes`, a request header Node refuses) report nothing; a
+  header name or value `Headers` rejects now fails the call before any instance is picked. No option
+  restores the old outcome mapping; `ejection: false` on discovery disables automatic ejection if
+  the changed classifications are unsuitable, without restoring old reports. A response-stream
+  cancel now aborts the handler's signal before awaiting cleanup without a bound.
 - **`@setu-ts/grpc-plugin`.** `GrpcHeaderListTooLargeError`: a client call whose header list is over
   the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` (RFC 7541 §4.1 sizes) is stopped
-  before the peer processes it, with this error as the call error's `cause`; it is never counted
-  against the instance or resent. A peer that advertises no limit gets no check, nor do calls
-  started before the session holds the peer's SETTINGS (the first on each new session, and after a
-  reconnect).
+  before the peer processes it. Only a list also over 8 KiB (8192 octets) is the caller's fault,
+  with this error as the call error's `cause`: no report or resend. At or under 8 KiB, exceeding the
+  advertised limit counts as `failure` against the instance; unary calls are resent once to another
+  pick within the remaining deadline, like a refused stream: the peer advertised less than any gRPC
+  default. Calls started before peer SETTINGS skip that advertised-limit check. When the peer
+  advertises no limit, a `REFUSED_STREAM` on a sent list over 65536 octets instead fails with this
+  same error: `size` is the RFC list size, `limit` is the client's 65536 threshold, no outcome is
+  reported, and no resend occurs. Smaller or equal lists retain refused stream handling; an accepted
+  larger list is unaffected. Cost: a draining peer's refusal after GOAWAY of a list over 65536 is
+  not resent either.
 - **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
   empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
   watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The resolve

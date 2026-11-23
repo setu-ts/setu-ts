@@ -2,7 +2,38 @@ import { expect, it } from 'vitest';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
-import { callOutcome, GRPC_CODE } from '../../src/client/call-outcome.ts';
+import { callOutcome, GRPC_CODE, isRefusedStream } from '../../src/client/call-outcome.ts';
+import { PeerHeaderListLimitError } from '../../src/client/header-list-guard.ts';
+import { GrpcHeaderListTooLargeError } from '../../src/errors/grpc-errors.ts';
+
+it('counts an undersized advertised limit as a refused instance fault, but exempts oversized caller headers', async () => {
+  const runtime = await loadConnectModule();
+  for (const [error, refused, outcome] of [
+    [new PeerHeaderListLimitError(8192, 1024), true, 'failure'],
+    [new GrpcHeaderListTooLargeError(8193, 1024), false, undefined],
+  ] as const) {
+    for (const wrapped of [error, ConnectError.from(error)]) {
+      expect(isRefusedStream(wrapped)).toBe(refused);
+      expect(callOutcome(wrapped, undefined, runtime.isWireError)).toBe(outcome);
+    }
+  }
+});
+
+it('does not resend a server message or an error name imitating the local header-limit refusal', () => {
+  const local = new PeerHeaderListLimitError(8192, 1024);
+  const server = new ConnectError(local.message, Code.Internal, {
+    'content-type': 'application/grpc',
+  });
+  server.isWireError = true;
+  const imitation = Object.assign(new Error(local.message), { name: local.name });
+  expect(isRefusedStream(server)).toBe(false);
+  expect(isRefusedStream(imitation)).toBe(false);
+  expect(callOutcome(server, undefined, () => true)).toBe('success');
+  let deep: Error = local;
+  for (let n = 0; n < 4; n++) deep = new Error('wrapper', { cause: deep });
+  expect(isRefusedStream(deep)).toBe(true);
+  expect(isRefusedStream(new Error('too deep', { cause: deep }))).toBe(false);
+});
 
 it('keeps the frozen canonical code table equal to the real Connect enum', () => {
   expect(Object.isFrozen(GRPC_CODE)).toBe(true);
@@ -13,7 +44,7 @@ it('keeps the frozen canonical code table equal to the real Connect enum', () =>
 
 const rows = [
   [Code.Canceled, 'failure'],
-  [Code.Unknown, 'failure'],
+  [Code.Unknown, 'success'],
   [Code.InvalidArgument, 'success'],
   [Code.DeadlineExceeded, 'failure'],
   [Code.NotFound, 'success'],
@@ -24,9 +55,9 @@ const rows = [
   [Code.Aborted, 'success'],
   [Code.OutOfRange, 'success'],
   [Code.Unimplemented, 'failure'],
-  [Code.Internal, 'failure'],
+  [Code.Internal, 'success'],
   [Code.Unavailable, 'failure'],
-  [Code.DataLoss, 'failure'],
+  [Code.DataLoss, 'success'],
   [Code.Unauthenticated, 'success'],
 ] as const;
 
@@ -56,6 +87,15 @@ for (const [code, wireOutcome] of rows) {
     });
   }
 }
+it('counts Internal "internal error" as success only when it is a server answer', async () => {
+  const runtime = await loadConnectModule();
+  const error = new ConnectError('internal error', Code.Internal);
+  error.isWireError = true;
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
+  error.isWireError = false;
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
+});
+
 it('gives caller abort first priority, refused streams second, and defaults unknown errors to failure', () => {
   const abort = new AbortController();
   abort.abort();

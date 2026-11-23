@@ -469,13 +469,17 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 ### 3.8 `grpcClient` reports every fault that is the instance's as an instance failure (V13-25)
 
 **DECIDED by the maintainer on 2026-11-22: OD5 (a `DeadlineExceeded` with no response is a
-`failure`) and OD10 (widened server-fault set).** Rejected in one line each: OD5 "no change"
-(`success` for a deadline), because a hung instance that accepts connections is then never ejected
-and each timeout erases its real failures; OD10 A (only `Unavailable`/`Unimplemented` fail), because
-a replica whose handler fails every call answers `Internal`, which A reported as success. The reason
-both matter: `EjectionTracker.record` treats `'success'` as "clear this instance's failure window
-and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.report` JSDoc in
-`common`), so a wrong `success` actively protects a broken instance.
+`failure`) and OD10 (widened server-fault set). OD10 partly reversed by the maintainer on 2026-11-23
+(F3 option B): `Internal`, `Unknown` and `DataLoss` count as a failure only without a server answer;
+a server's own answer with one of them reports `success`.** Rejected in one line each: OD5 "no
+change" (`success` for a deadline), because a hung instance that accepts connections is then never
+ejected and each timeout erases its real failures; OD10 A (only `Unavailable`/`Unimplemented` fail),
+because a fault with no server answer that connect reports as `Internal` or `Unknown` (a missing
+output message, a NO_ERROR close) and a hung instance's `DeadlineExceeded` would have counted as
+success. The reason both matter: `EjectionTracker.record` treats `'success'` as "clear this
+instance's failure window and un-eject it at once" (`ejection-tracker.ts:69-101`; the
+`IServiceDiscovery.report` JSDoc in `common`), so a wrong `success` actively protects a broken
+instance.
 
 - **Where `callOutcome` sits, and what "no response" means (from source).** `#attempt` reports once,
   when `run(transport)` settles (`grpc-client.ts:513-531`). For a unary call `run` settles only with
@@ -502,13 +506,16 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
      the response, connection and PING timeouts). This refines OD10, which did not consider faults
      raised before the call left the client (code review, 2026-11-23);
   2. a refused stream (`isRefusedStream`): `failure` (unchanged);
-  3. server-fault codes, wire or not: `Unavailable`, `Unimplemented`, `Internal`, `Unknown`,
-     `DataLoss`, `DeadlineExceeded`: `failure`;
+  3. server-fault codes, wire or not: `Unavailable`, `Unimplemented`, `DeadlineExceeded`: `failure`
+     (`Internal`, `Unknown` and `DataLoss` left this row on 2026-11-23, F3 option B);
   4. `Canceled` that is not the caller's (a peer reset or killed mid-call, V13-25): `failure`;
   5. caller-fault and application codes that are a server's answer (`isWireError`, through a new
      `ConnectRuntime.isWireError` member): `InvalidArgument`, `NotFound`, `AlreadyExists`,
      `PermissionDenied`, `Unauthenticated`, `FailedPrecondition`, `OutOfRange`, `Aborted`,
-     `ResourceExhausted`: `success`;
+     `ResourceExhausted`, and `Internal`, `Unknown`, `DataLoss`: `success`. A handler that throws
+     answers `Internal`, so a request crafted to make a healthy handler throw does not eject
+     replicas (security audit F3); a replica whose every handler fails is taken out by readiness,
+     not by call outcomes, and the README says so;
   6. anything else, including those same codes without a server answer (connect-node maps
      `ECONNRESET` to a non-wire `Aborted`, `node-error.js:20-57`): `failure`. The README rule
      becomes: an instance is reported failed when it did not answer, or answered with a server-fault
@@ -519,7 +526,8 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
   ("internal error") for any non-`ConnectError` thrown by a handler, on the gRPC protocol
   (`protocol-grpc/handler-factory.js:107-113`) and the Connect protocol
   (`protocol-connect/handler-factory.js:138-146`); `grpc-plugin` adds no mapping of its own
-  (`src/errors/grpc-errors.ts` holds load and descriptor errors only). `Internal` is in row 3.
+  (`src/errors/grpc-errors.ts` holds load and descriptor errors only). That `Internal` is a server
+  answer, so it is in row 5 (`success`) since F3 option B.
 - **Why the wire flag alone is not enough:** on the client's default protocol, `'connect'`
   (`grpc-client.ts:30-35`), connect parses ANY non-200 unary reply whose content type is JSON as a
   Connect error body (`protocol-connect/validate-response.js:32-37`,
@@ -529,13 +537,14 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
   JSON 429/502/503 from a proxy, is a "wire" error with code `Unimplemented` or `Unavailable`; the
   server-fault rows therefore ignore the flag. A proxy's JSON 429 becomes `Unavailable` (connect's
   HTTP mapping), so it is a failure, as today.
-- **Why these codes:** Envoy's outlier detection uses "the HTTP status mapped from the grpc-status
-  response header" and counts 5xx; Envoy's own mapping (`source/common/grpc/status.cc`,
-  `grpcToHttpStatus`) sends `Unknown`, `Internal`, `DataLoss` to 500, `Unimplemented` to 501,
-  `Unavailable` to 503, `DeadlineExceeded` to 504, and every row-5 code to a 4xx (`Canceled` 499),
-  which is this table exactly (Q4c). The repo's own README example for HTTP callers counts a thrown
-  timeout and every non-2xx as `'failure'`. gRFC A50 implementations count every non-OK status but
-  eject on a statistic over a request volume, not on one failure.
+- **Why these codes (as first decided; F3 option B then moved `Internal`, `Unknown` and `DataLoss`
+  answers to `success`, see §3.12):** Envoy's outlier detection uses "the HTTP status mapped from
+  the grpc-status response header" and counts 5xx; Envoy's own mapping
+  (`source/common/grpc/status.cc`, `grpcToHttpStatus`) sends `Unknown`, `Internal`, `DataLoss` to
+  500, `Unimplemented` to 501, `Unavailable` to 503, `DeadlineExceeded` to 504, and every row-5 code
+  to a 4xx (`Canceled` 499), which is this table exactly (Q4c). The repo's own README example for
+  HTTP callers counts a thrown timeout and every non-2xx as `'failure'`. gRFC A50 implementations
+  count every non-OK status but eject on a statistic over a request volume, not on one failure.
 - **Test home:** `test/unit/call-outcome.test.ts` (new; ONE table iterated as data with every gRPC
   code from connect's `Code` enum, each as a wire and a non-wire error, plus the caller-aborted,
   refused-stream and peer-`Canceled` rows, each with its outcome; a test fails if a code of the enum
@@ -543,11 +552,12 @@ and un-eject it at once" (`ejection-tracker.ts:69-101`; the `IServiceDiscovery.r
   `failure`; a streaming call whose iteration later fails reports only the header-time `success`);
   `test/e2e/grpc-client-scenarios-e2e.test.ts` (the report's four "dead port" cases as rows on real
   sockets: nothing listening, an HTTP/1.1 listener, an HTTP/2 server without the service, a listener
-  that accepts and closes; plus a Setu server whose handler throws a plain `Error` (`Internal`) and
-  one that never answers within the deadline; with `failureThreshold: 1` and two instances, every
-  row is ejected after one call and the next five succeed; each row run on the `connect`, `grpc` and
-  `grpc-web` protocols, and the "server without the service" row also against a Setu app answering
-  its JSON 404).
+  that accepts and closes; plus one that never answers within the deadline; with
+  `failureThreshold: 1` and two instances, every row is ejected after one call and the next five
+  succeed; a Setu server whose handler throws a plain `Error` answers `Internal` and is NOT ejected
+  under the default policy (F3 option B); each row run on the `connect`, `grpc` and `grpc-web`
+  protocols, and the "server without the service" row also against a Setu app answering its JSON
+  404).
 
 ### 3.9 A unary call a draining peer turned away goes to another replica (V13-23, `grpc-plugin` half)
 
@@ -683,9 +693,8 @@ because the drain answer is written through the application's error responder wh
   peer's SETTINGS (the first on each new HTTP/2 session, and after a reconnect or GOAWAY)
   (connect-node's `gotoReady` waits only for the `connect` event, not the peer's SETTINGS, so the
   limit still reads 4294967295; found in review), and a peer that advertises no limit. Node's own
-  server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`, which no
-  client can predict; Core can make Setu's listener advertise its limit (§11). grpc-go's handling of
-  an over-limit send is not verified.
+  server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`; the F2
+  residual entry below covers that case. grpc-go's handling of an over-limit send is not verified.
 - **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is cached
   like any other, but at most 256 unwatched names that have only ever answered empty stay cached;
   past that the oldest is evicted (a failing one last, its retry spacing and reporter with it), and
@@ -696,36 +705,66 @@ because the drain answer is written through the application's error responder wh
   a minute (`plugin/warn-budget.ts`); past it they log at `debug`, with one `warn` notice per
   window. The README says discovery names should be chosen by the application, not taken from
   requests.
-- **F3, a payload that makes a healthy handler throw (held for the maintainer).** OD10 counts a
-  handler's `Internal` as an instance failure, so crafted input can eject healthy replicas.
-  `EjectionTracker.record` clears an instance's failure window on any success. Measured with two
-  healthy Setu servers, default ejection (5 failures in 30 s, 50 % cap), on Node 24.22.1: with no
-  other traffic, 9 sequential bad calls eject one instance; with background successful traffic at
-  20, 100 or 400 calls/s, 400 sequential bad calls (or bursts of 5) eject nothing; bursts of 20
-  concurrent bad calls eject one instance after 20–40 bad calls at every background rate. Options
-  are in the coordinator report; the outcome rule is unchanged until the maintainer decides.
+- **F3, a payload that makes a healthy handler throw — DECIDED B by the maintainer (2026-11-23).**
+  OD10 counted a handler's `Internal` as an instance failure, so crafted input could eject healthy
+  replicas. `EjectionTracker.record` clears an instance's failure window on any success. Measured
+  with two healthy Setu servers, default ejection (5 failures in 30 s, 50 % cap), on Node 24.22.1:
+  with no other traffic, 9 sequential bad calls eject one instance; with background successful
+  traffic at 20, 100 or 400 calls/s, 400 sequential bad calls (or bursts of 5) eject nothing; bursts
+  of 20 concurrent bad calls eject one instance after 20–40 bad calls at every background rate.
+  Options were A (keep OD10 and document the burst cost), A' (A plus a burst or rate mitigation) and
+  B (a server's `Internal`, `Unknown` or `DataLoss` answer reports `success`, no option). The
+  maintainer chose B with no option: of Envoy, Istio, Linkerd, Finagle and gRFC A50, every one that
+  counts a handler's `Internal` makes ejection opt-in; Finagle ejects by default and its default
+  classifier treats a 500 or an application exception as success, and Setu ejects by default, so it
+  takes Finagle's rule. The same codes without a server answer still fail. Re-measured after the
+  change: the same two servers with bursts of 1, 5 and 20 concurrent bad calls at 0, 20, 100 and 400
+  background calls/s, 400 bad calls each: no instance ejected in any of the 12 runs.
 
 - **Re-audit of 8fd05553c (2026-11-23).** F1 and F4 closed; F2 closed for peers that advertise a
   limit. Fixed after it: F6 (the `cacheTtlMs` refusal no longer echoes the value) and F7 (only names
-  with no non-empty list share the warning budget; a warm name's outage always warns). Held for the
-  maintainer with F3:
-  - **F2 residual.** Setu's and Node's default HTTP/2 servers advertise no limit, so the guard never
-    runs and an oversized header still ejects a healthy Setu replica (6 calls of 70 KiB). Deferral
-    **proposed by the coordinator, pending the maintainer**, to the Core follow-up that starts after
-    M143i (#611) merges: Setu's Node HTTP/2 listener advertises its real `maxHeaderListSize` (§11).
-  - **F5.** A peer that advertises a limit below normal callers' headers fails every call routed to
-    it without being reported, so it is never ejected (1 of 2 such replicas: 50 % of calls fail;
-    before F2 it was ejected after 5). Options: A, exempt only a call over the peer's limit AND over
-    a floor; B, resend once without reporting; C, document only; D, revert the F2 guard and defer
-    the whole case to the Core follow-up. Facts for A's floor: gRPC core documents
-    `GRPC_ARG_MAX_METADATA_SIZE` as "Defaults to maximum of 8 KB and" 0.8 × the absolute limit, and
-    `GRPC_ARG_ABSOLUTE_MAX_METADATA_SIZE` as 16 KB by default
+  with no non-empty list share the warning budget; a warm name's outage always warns). Then held for
+  the maintainer, with F3:
+  - **F2 residual — DECIDED (a), a client fix in this letter, by the maintainer (2026-11-23); not
+    deferred to Core.** Setu's and Node's default HTTP/2 servers advertise no limit, so the guard
+    never ran and an oversized header still ejected a healthy Setu replica (6 calls of 70 KiB). The
+    rule: when the peer advertised no limit (`remoteSettings.maxHeaderListSize` reads 4294967295)
+    and the call's sent header list (RFC 7541 §4.1 size, from `stream.sentHeaders`) is over 64 KiB,
+    a `REFUSED_STREAM` on that call is the caller's fault: no outcome is reported, no resend, and
+    the call fails with `GrpcHeaderListTooLargeError` (the F2 guard's error and `callOutcome`
+    exemption). A `REFUSED_STREAM` on a call at or under 64 KiB stays a refused stream (`failure`
+    and a resend). The 64 KiB threshold is one named constant citing the measurement: Node's server
+    refused 65,620 octets without advertising a limit, and grpc-go's server advertises one only when
+    configured (`internal/transport/http2_server.go:205`, read 2026-11-23) while enforcing its own
+    default (`:173-178`), so the client does not rely on the peer advertising. Cost, stated in the
+    README: a call over 64 KiB that a draining peer refuses is not resent. Consistent with F3 option
+    B: caller input never ejects a healthy instance. Re-measured after the change: 6 calls with a 70
+    KiB header against two default Setu servers fail with `GrpcHeaderListTooLargeError` (72,201
+    octets over the 65,536 threshold), nothing is ejected, and the next 4 calls are served 2 and 2.
+  - **F5 — DECIDED A by the maintainer (2026-11-23).** A peer that advertises a limit below normal
+    callers' headers fails every call routed to it without being reported, so it is never ejected (1
+    of 2 such replicas: 50 % of calls fail; before F2 it was ejected after 5). Options: A, exempt
+    only a call over the peer's limit AND over a floor; B, resend once without reporting; C,
+    document only; D, revert the F2 guard and defer the whole case to the Core follow-up. Facts for
+    A's floor: gRPC core documents `GRPC_ARG_MAX_METADATA_SIZE` as "Defaults to maximum of 8 KB and"
+    0.8 × the absolute limit, and `GRPC_ARG_ABSOLUTE_MAX_METADATA_SIZE` as 16 KB by default
     (`include/grpc/impl/channel_arg_names.h`; the numeric constant in `src/core` not verified);
     grpc-go defaults to 16 MiB with an 8 KiB default behind
     `GRPC_GO_EXPERIMENTAL_ENABLE_8KB_DEFAULT_HEADER_LIST_SIZE`, and fails an over-limit send locally
     with `Internal`, no transparent retry (`internal/transport/http2_client.go`, `defaults.go`);
     grpc-java's `NettyChannelBuilder.maxInboundMetadataSize(int)` javadoc says "The default is 8
-    KiB" (`GrpcUtil` constant not verified).
+    KiB" (`GrpcUtil` constant not verified). The rule (A): a call over the peer's advertised limit
+    stays exempt (no report, no resend, `GrpcHeaderListTooLargeError`) only when its header list is
+    also over 8 KiB, one named constant beside the 64 KiB one. A call at or under 8 KiB that is over
+    the advertised limit is the instance's fault: reported as `failure` and resent once to another
+    pick, like a refused stream (the call never left the client, so the resend is safe and lands on
+    a replica that accepts it). Such an instance advertised less than every gRPC default, and
+    grpc-go counts that call too: its outlier balancer counts any non-nil `info.Err`
+    (`internal/xds/balancer/outlierdetection/balancer.go:470-473`, read 2026-11-23). Re-measured
+    after the change: one replica advertising `maxHeaderListSize: 1` beside one advertising none, 40
+    ordinary calls: all 40 succeed, the small-limit replica is ejected and receives no stream; two
+    replicas advertising 16384 still exempt 12 calls with a 17 KiB header (nothing ejected, no
+    stream reaches a peer).
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -958,9 +997,6 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   README, `PUBLIC_API.md` SDK section and a CHANGELOG line for that behaviour change." Owning
   letter: the CLI-lane letter that holds `sdk` (M143k per the lane table), to be confirmed by the
   maintainer.
-- **Core lane (security audit F2, small):** `packages/runtime` Node HTTP/2 listener: "advertise the
-  server's real `maxHeaderListSize` in its SETTINGS, so a Setu client can stop an over-limit call
-  before it is sent instead of the peer refusing it as a stream it never processed."
 - **CLI lane (V13-24; M143d, whose ROADMAP section lists "Half of a row owned elsewhere: V13-24
   (owned by M143c)"):** `packages/cli/src/workspace/k8s.ts` and
   `packages/cli/src/workspace/discovery-module.ts`: "for a member whose transport is gRPC, emit a
@@ -1009,11 +1045,13 @@ and §3.9.
   run, which M143i's audit rejected (P15). C: document only. **DECIDED A by the maintainer
   (2026-11-22)**: no compared framework interrupts or bounds a blocked handler (Q5b), and A releases
   everything a cooperating handler holds.
-- **OD10 — DECIDED by the maintainer (2026-11-22):** the widened server-fault set of §3.8, wire or
-  not; application codes count as success only as a server's answer. Rejected: A (only
-  `Unavailable`/`Unimplemented`), which reports a replica failing every call with `Internal` as
-  healthy; B (non-wire only), a regression on the `connect` protocol; C (every non-OK), which ejects
-  instances for application answers such as `NotFound`.
+- **OD10 — DECIDED by the maintainer (2026-11-22), partly reversed by the maintainer 2026-11-23, F3
+  option B:** the widened server-fault set of §3.8, wire or not; application codes count as success
+  only as a server's answer. Since F3 option B, `Internal`, `Unknown` and `DataLoss` that are a
+  server's answer also count as success (§3.12); without a server answer they still fail. Rejected:
+  A (only `Unavailable`/`Unimplemented`), which reports a no-answer `Internal`/`Unknown` and a hung
+  instance's `DeadlineExceeded` as healthy; B (non-wire only), a regression on the `connect`
+  protocol; C (every non-OK), which ejects instances for application answers such as `NotFound`.
 - **OD8 (new, from OD1's decision), whether a stale list's age changes readiness.** With background
   refresh the last good list is served for as long as the registry is down. A: the indicator stays
   `up` at any age and reports `staleForMs` (§3.1), keeping the M113o rule that a warm cache keeps a

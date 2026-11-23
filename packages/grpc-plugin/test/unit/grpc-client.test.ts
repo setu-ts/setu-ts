@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Code, ConnectError } from '@connectrpc/connect';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   GrpcClientOptions,
@@ -24,6 +25,8 @@ import {
 } from '../../src/client/grpc-client.ts';
 import type { GrpcClientDeps } from '../../src/client/grpc-client.ts';
 import { isRefusedStream } from '../../src/client/call-outcome.ts';
+import { PeerHeaderListLimitError } from '../../src/client/header-list-guard.ts';
+import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
 import {
   CONNECT_NODE_SPECIFIER,
@@ -838,6 +841,41 @@ function connectNodeReading(
 }
 
 describe('refused streams (REFUSED_STREAM)', () => {
+  it('resends an undersized header-limit refusal once and preserves size and limit if both picks refuse', async () => {
+    const real = await loadConnectModule();
+    for (const succeeds of [true, false]) {
+      const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+      const local = new PeerHeaderListLimitError(8192, 1024);
+      const wrapped = ConnectError.from(local, Code.Internal);
+      expect(wrapped.cause).toBe(local);
+      let attempts = 0;
+      const node = fakeNode(() => {
+        attempts++;
+        return succeeds && attempts === 2 ? Promise.resolve('ok') : Promise.reject(wrapped);
+      });
+      const { clients: c } = clients(
+        {
+          discovery: () => discovery,
+          runtime: { ...createFakeConnectRuntime(), unavailable: real.unavailable },
+        },
+        node,
+      );
+      const result: unknown = await call(c.client(BILLING, 'billing')).catch((e: unknown) => e);
+      expect(attempts).toBe(2);
+      expect(discovery.reports).toEqual([
+        ['a', 'failure'],
+        ['b', succeeds ? 'success' : 'failure'],
+      ]);
+      if (succeeds) expect(result).toBe('ok');
+      else {
+        expect(result).toBeInstanceOf(ConnectError);
+        expect((result as ConnectError).code).toBe(Code.Unavailable);
+        expect((result as ConnectError).rawMessage).toBe(local.message);
+        expect((result as Error).cause).toBe(wrapped);
+      }
+    }
+  });
+
   it.each([
     ['Node stream error in the cause chain', nodeRefusal(), true],
     ["connect-node's reset-code reading", connectNodeReading(), true],

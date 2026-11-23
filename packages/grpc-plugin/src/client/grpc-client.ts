@@ -23,7 +23,7 @@ import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
 import { callOutcome, isRefusedStream } from './call-outcome.ts';
-import { guardHeaderList } from './header-list-guard.ts';
+import { findPeerHeaderListLimitError, guardHeaderList } from './header-list-guard.ts';
 
 /** Every option, resolved. */
 type ResolvedClientOptions = Required<GrpcClientOptions>;
@@ -497,7 +497,8 @@ export class GrpcClients {
             : // A URL target is named by its origin only: its path is the
               // application's, never echoed (a service name is not secret).
               runtime.unavailable(
-                `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
+                findPeerHeaderListLimitError(error)?.message ??
+                  `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
                 error,
               ),
         );
