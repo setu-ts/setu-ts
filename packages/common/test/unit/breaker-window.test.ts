@@ -177,6 +177,14 @@ const CONFORMANCE: readonly ConformanceRow[] = [
     trips: [false, false, false],
   },
   {
+    name: 'rate: a fractional threshold compares in the documented divided form',
+    // 1 failure in 11 calls is exactly 100 / 11 percent; cross-multiplying
+    // (100 >= (100 / 11) * 11) rounds to false, dividing rounds to true.
+    policy: { failureRateThreshold: 100 / 11, minimumCalls: 11, timeout: 1000, resetTimeout: 0 },
+    steps: [...new Array<[number, 'S']>(10).fill([0, 'S']), [0, 'F']],
+    trips: [true],
+  },
+  {
     name: 'rate: one failing call in three at high volume stays under 50 %',
     policy: { failureRateThreshold: 50, minimumCalls: 10, timeout: 1000, resetTimeout: 0 },
     steps: oneInThree(30),

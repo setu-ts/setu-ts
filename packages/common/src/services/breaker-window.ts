@@ -248,8 +248,11 @@ function rateWindow(policy: CircuitBreakerRatePolicy, now: () => number): IBreak
       calls[index]! += 1;
       failed[index]! += 1;
       const window = totals(key);
+      // The documented form, divided rather than cross-multiplied: with a
+      // fractional threshold (100 / 11) the two round differently.
       return (
-        window.calls >= minimumCalls && window.failures * 100 >= failureRateThreshold * window.calls
+        window.calls >= minimumCalls &&
+        (window.failures * 100) / window.calls >= failureRateThreshold
       );
     },
     reset(): void {

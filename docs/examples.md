@@ -707,7 +707,9 @@ A server with SSE and WebSocket routes, driven by the `@setu-ts/sdk` realtime cl
 (with and without type stripping), Bun and workerd: SSE reconnection resumes from the last event id,
 authenticated streams send their credentials, and a WebSocket stays alive across the server's
 keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
-use); a missing one fails the check rather than skipping it.
+use); a missing one fails the check rather than skipping it. It builds `@setu-ts/common` first: the
+SDK's circuit breaker imports `@setu-ts/common/breaker-window`, which resolves to common's compiled
+output on every runtime the driver runs on.
 
 ```bash
 pnpm --dir apps/realtime-clients run start 3400
