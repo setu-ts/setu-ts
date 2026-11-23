@@ -41,11 +41,11 @@ await callApi();
 
 ## Options
 
-| Option                  | Type                   | Description                                         |
-| ----------------------- | ---------------------- | --------------------------------------------------- |
-| `defaultCircuitBreaker` | `CircuitBreakerPolicy` | Consumed when a `wrap` sets `circuitBreaker: true`. |
-| `defaultRetry`          | `RetryPolicy`          | Consumed when a `wrap` sets `retry: true`.          |
-| `defaultBulkhead`       | `BulkheadPolicy`       | Consumed when a `wrap` sets `bulkhead: true`.       |
+| Option                  | Type                   | Description                                                                                                                                                                                                                            |
+| ----------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultCircuitBreaker` | `CircuitBreakerPolicy` | Consumed when a `wrap` sets `circuitBreaker: true`. Count arm only in this release: a rate policy (`failureRateThreshold`) throws a `RangeError` when `wrap()` builds the breaker, and rate fields set beside `threshold` are ignored. |
+| `defaultRetry`          | `RetryPolicy`          | Consumed when a `wrap` sets `retry: true`.                                                                                                                                                                                             |
+| `defaultBulkhead`       | `BulkheadPolicy`       | Consumed when a `wrap` sets `bulkhead: true`.                                                                                                                                                                                          |
 
 Setting a pattern to `true` with **no matching plugin default throws** — an unconfigured policy is a
 mistake, not a silent no-op. A retry `limit` must be a safe integer at least 1 and `delay` must be

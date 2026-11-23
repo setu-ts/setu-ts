@@ -17425,6 +17425,13 @@ eight letters and M143d, the second CLI letter, hold all 23 High rows.
 | **M143q** | Data         | design | databases off PostgreSQL                                 | V13-230, V13-231, V13-236, V13-238, V13-239, V13-240, V13-241, V13-242, V13-243, V13-244, V13-249, V13-251                                                                                                                                                         |
 | **M143r** | Integrations | fix    | provider arms and their options                          | V13-232, V13-233, V13-234, V13-235, V13-216, V13-217, V13-245, V13-248, V13-4, V13-119, V13-131, V12-132, V13-193, V13-228, V13-255, V13-257                                                                                                                       |
 
+#### Core follow-ups (after M143i)
+
+- **Circuit breaker** (`common` + `sdk`; V13-104's Core and SDK halves, the row stays M143c's) — the
+  `CircuitBreakerPolicy` union with a failure-rate arm, the shared trip rule `createBreakerWindow`
+  (also at `@setu-ts/common/breaker-window`) and `breakerPolicyRangeError`, and the SDK breaker
+  moved onto it, which stops it clearing on a closed-state success (PR #612). ✅
+
 ### Milestone 143a: Sessions and Shared Caches
 
 **Lane:** Web (first in its lane). **Kind:** design. **Rows:** 8. Ships in `0.14.0`. A signed-in

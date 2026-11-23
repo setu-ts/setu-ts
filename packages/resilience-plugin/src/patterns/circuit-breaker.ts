@@ -5,6 +5,7 @@
  * @module
  */
 import type {
+  CircuitBreakerCountPolicy,
   CircuitBreakerPolicy,
   CircuitState,
   ICircuitBreaker,
@@ -22,7 +23,7 @@ import { throwIfAborted } from './abort.ts';
  * time (never `Date.now()`).
  */
 export class CircuitBreaker implements ICircuitBreaker {
-  readonly #policy: CircuitBreakerPolicy;
+  readonly #policy: CircuitBreakerCountPolicy;
   readonly #hrtime: () => number;
 
   /** Monotonic timestamps of recent failures, oldest first. */
@@ -37,8 +38,15 @@ export class CircuitBreaker implements ICircuitBreaker {
   /**
    * @param policy - The breaker thresholds and windows
    * @param hrtime - A monotonic clock (`runtime.hrtime()`)
+   * @throws {RangeError} When `policy` is the rate arm (`failureRateThreshold`),
+   * which this version of the plugin does not support yet
    */
   constructor(policy: CircuitBreakerPolicy, hrtime: () => number) {
+    if (policy.threshold === undefined) {
+      throw new RangeError(
+        'circuitBreaker: the rate arm (failureRateThreshold) is not supported by this version of @setu-ts/resilience-plugin',
+      );
+    }
     this.#policy = policy;
     this.#hrtime = hrtime;
   }

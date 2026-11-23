@@ -16,6 +16,11 @@ describe('realtime-clients example', () => {
   let baseUrl: string;
 
   before(async () => {
+    // The SDK's one runtime import of `common`, `@setu-ts/common/breaker-window`,
+    // resolves through common's package exports to `dist/`, as it does for an
+    // installed SDK. Plain Node, Bun and Wrangler below map no workspace source,
+    // so build common first.
+    await runOrFail('pnpm', ['--filter', '@setu-ts/common', 'run', 'build']);
     const port = await freePort();
     baseUrl = `http://127.0.0.1:${port}`;
     server = startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(port)]);

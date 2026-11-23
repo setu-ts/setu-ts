@@ -977,3 +977,20 @@ it('exports connection fault classification', () => {
   expect(common.isConnectionFaultCode('ECONNREFUSED')).toBe(true);
   expect(common).not.toHaveProperty('CONNECTION_FAULT_CODES');
 });
+
+it('exports the breaker window from the barrel and the subpath as the same functions', async () => {
+  const subpath = await import('@setu-ts/common/breaker-window');
+  expect(typeof common.createBreakerWindow).toBe('function');
+  expect(common.createBreakerWindow).toBe(subpath.createBreakerWindow);
+  expect(common.breakerPolicyRangeError).toBe(subpath.breakerPolicyRangeError);
+  const rate: common.CircuitBreakerRatePolicy = {
+    failureRateThreshold: 50,
+    minimumCalls: 2,
+    timeout: 1000,
+    resetTimeout: 500,
+  };
+  const count: common.CircuitBreakerCountPolicy = { threshold: 1, timeout: 1000, resetTimeout: 0 };
+  const window: common.IBreakerWindow = common.createBreakerWindow(rate, () => 0);
+  expect(window.failures).toBe(0);
+  expect(common.createBreakerWindow(count, () => 0).recordFailure()).toBe(true);
+});
