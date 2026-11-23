@@ -10,7 +10,16 @@ import {
 } from '@setu-ts/common';
 
 describe('Prisma conditional translation', () => {
-  for (const provider of ['postgresql', 'postgres', 'mysql', 'sqlserver', 'cockroachdb', 'sqlite', 'mongodb', 'unknown'] as const) {
+  for (const provider of [
+    'postgresql',
+    'postgres',
+    'mysql',
+    'sqlserver',
+    'cockroachdb',
+    'sqlite',
+    'mongodb',
+    'unknown',
+  ] as const) {
     it(`selects the conditional strategy once for ${provider}`, async () => {
       const client = createFakePrismaClient({ activeProvider: provider });
       const adapter = new PrismaAdapter({ prismaClient: client, transactionTimeout: 4567 });
@@ -18,7 +27,10 @@ describe('Prisma conditional translation', () => {
       const source = adapter.createDataSource('User');
       await source.create({ id: 'a', name: 'old' });
       client._activeProvider = 'changed-after-connect';
-      expect(await source.updateWhere!('a', { name: 'old' }, { name: 'new' })).toEqual({ id: 'a', name: 'new' });
+      expect(await source.updateWhere!('a', { name: 'old' }, { name: 'new' })).toEqual({
+        id: 'a',
+        name: 'new',
+      });
       expect(await source.updateWhere!('a', { name: 'old' }, { name: 'bad' })).toBeNull();
       expect(await source.deleteWhere!('missing', { name: 'new' })).toBe(false);
       expect(await source.deleteWhere!('a', { name: 'new' })).toBe(true);
@@ -40,7 +52,9 @@ describe('Prisma conditional translation', () => {
     const adapter = new PrismaAdapter({ prismaClient: root });
     await adapter.connect();
     await tx.user.create({ data: { id: 'a', name: 'old' } });
-    expect(await adapter.createDataSource('User').updateWhere!('a', { name: 'old' }, { name: 'new' })).toEqual({ id: 'a', name: 'new' });
+    expect(
+      await adapter.createDataSource('User').updateWhere!('a', { name: 'old' }, { name: 'new' }),
+    ).toEqual({ id: 'a', name: 'new' });
     expect(root.recordedCalls).toEqual([]);
     const handle = await adapter.beginTransaction();
     expect(await handle.createDataSource('User').deleteWhere!('a', { name: 'new' })).toBe(true);
@@ -51,16 +65,23 @@ describe('Prisma conditional translation', () => {
   for (const operation of ['updateWhere', 'deleteWhere'] as const) {
     it(`rolls back ${operation} if configured key columns match multiple rows`, async () => {
       const client = createFakePrismaClient({ activeProvider: 'mysql' });
-      const adapter = new PrismaAdapter({ prismaClient: client, entities: { User: { keyColumns: ['role'] } } });
+      const adapter = new PrismaAdapter({
+        prismaClient: client,
+        entities: { User: { keyColumns: ['role'] } },
+      });
       await adapter.connect();
       const source = adapter.createDataSource('User');
       await source.create({ id: 'a', role: 'owner', name: 'old' });
       await source.create({ id: 'b', role: 'owner', name: 'old' });
-      const result = operation === 'updateWhere'
-        ? source.updateWhere!('owner', { name: 'old' }, { name: 'bad' })
-        : source.deleteWhere!('owner', { name: 'old' });
+      const result =
+        operation === 'updateWhere'
+          ? source.updateWhere!('owner', { name: 'old' }, { name: 'bad' })
+          : source.deleteWhere!('owner', { name: 'old' });
       await expect(result).rejects.toThrow(/matched 2 rows.*keyColumns/);
-      expect([...client.stores.user!.records.values()].map((row) => row.name)).toEqual(['old', 'old']);
+      expect([...client.stores.user!.records.values()].map((row) => row.name)).toEqual([
+        'old',
+        'old',
+      ]);
       await adapter.disconnect();
     });
   }

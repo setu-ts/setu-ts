@@ -252,7 +252,14 @@ function applyFilter(row: MutableRow, filter: BigtableFilter): MutableRow {
   if ('column' in filter) {
     if (!Array.isArray(filter.column)) {
       const limit = (filter.column as { readonly cellLimit: number }).cellLimit;
-      return new Map([...row].map(([family, qualifiers]) => [family, new Map([...qualifiers].map(([qualifier, versions]) => [qualifier, versions.slice(0, limit)]))]));
+      return new Map(
+        [...row].map(([family, qualifiers]) => [
+          family,
+          new Map(
+            [...qualifiers].map(([qualifier, versions]) => [qualifier, versions.slice(0, limit)]),
+          ),
+        ]),
+      );
     }
     const wanted = new Set(filter.column);
     const kept: MutableRow = new Map();

@@ -74,10 +74,17 @@ export function dynamoFixture() {
         const operation = write.Put ?? write.Update ?? write.Delete;
         if (operation === undefined) return { Code: 'None' };
         const existing = rows.get(key(write.Put?.Item ?? write.Update?.Key ?? write.Delete!.Key));
-        const failed = write.Put !== undefined ? existing !== undefined : operation.ConditionExpression !== undefined && !matches(existing, operation);
+        const failed =
+          write.Put !== undefined
+            ? existing !== undefined
+            : operation.ConditionExpression !== undefined && !matches(existing, operation);
         return { Code: failed ? 'ConditionalCheckFailed' : 'None' };
       });
-      if (reasons.some((reason) => reason.Code !== 'None')) throw Object.assign(new Error('transaction cancelled'), { name: 'TransactionCanceledException', CancellationReasons: reasons });
+      if (reasons.some((reason) => reason.Code !== 'None'))
+        throw Object.assign(new Error('transaction cancelled'), {
+          name: 'TransactionCanceledException',
+          CancellationReasons: reasons,
+        });
       for (const write of TransactItems) {
         if (write.Put) await client.putItem(write.Put);
         if (write.Update) await client.updateItem({ ...write.Update, ReturnValues: 'ALL_NEW' });

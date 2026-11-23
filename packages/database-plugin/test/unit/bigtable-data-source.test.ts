@@ -326,7 +326,9 @@ describe('count', () => {
     await source.create({ id: 'u2' });
     store.reads.length = 0;
     expect(await source.count({})).toBe(2);
-    expect(store.reads[0].options.filter).toEqual({ chain: [{ column: { cellLimit: 1 } }, { value: { strip: true } }] });
+    expect(store.reads[0].options.filter).toEqual({
+      chain: [{ column: { cellLimit: 1 } }, { value: { strip: true } }],
+    });
   });
 
   it('reads only the columns its predicate needs, never every column', async () => {

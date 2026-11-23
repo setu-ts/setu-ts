@@ -32,5 +32,8 @@
  * ```
  */
 export function escapeLikePattern(value: string, escape: '\\' | '!' = '\\'): string {
-  return value.replaceAll(escape, escape + escape).replaceAll('%', escape + '%').replaceAll('_', escape + '_');
+  return value
+    .replaceAll(escape, escape + escape)
+    .replaceAll('%', escape + '%')
+    .replaceAll('_', escape + '_');
 }

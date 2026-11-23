@@ -104,6 +104,51 @@ describe('Real ORM imports (guarded)', () => {
     },
   );
 
+  it('the Bigtable lazy loader with clientOptions performs the real npm import and constructs a client', async () => {
+    // Constructing the SDK client opens no connection, so this needs no
+    // emulator: the facade's handles are built from the real module.
+    const loader = createLazyBigtableLoader({
+      projectId: 'setu-client-options',
+      clientOptions: { apiEndpoint: '127.0.0.1:1', metricsEnabled: false },
+    });
+    const client = await loader.load();
+    try {
+      const table = client.instance('probe-instance').table('probe-table');
+      expect(typeof table.readRows).toBe('function');
+      expect(typeof table.row('probe-row').conditionalMutate).toBe('function');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it(
+    'the Bigtable lazy loader takes its endpoint from clientOptions and reaches the emulator',
+    {
+      skip: bigtableEndpoint === undefined,
+    },
+    async () => {
+      // No top-level apiEndpoint: the only route to the emulator is the
+      // clientOptions key, so an answer from it proves the options reached the
+      // SDK constructor.
+      const loader = createLazyBigtableLoader({
+        projectId: 'setu-m82',
+        clientOptions: { apiEndpoint: bigtableEndpoint as string },
+      });
+      const client = await loader.load();
+      try {
+        const rows = await client
+          .instance('setu-m82-instance')
+          .table(`options_probe_${crypto.randomUUID().replaceAll('-', '').slice(0, 8)}`)
+          .readRows({ limit: 1 });
+        expect(rows).toEqual([]);
+      } catch (error) {
+        expect(String((error as Error).message)).toMatch(/NOT_FOUND|not found/i);
+      } finally {
+        await client.close();
+      }
+    },
+  );
+
   it('drizzle-orm import either succeeds or throws descriptive error', async () => {
     let imported: unknown = undefined;
     let error: Error | null = null;

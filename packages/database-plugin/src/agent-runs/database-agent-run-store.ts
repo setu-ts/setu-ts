@@ -150,10 +150,20 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       for (const [kind, query] of probes) await this.#repo(kind).findAll(query);
     } catch (cause) {
       if (cause instanceof AgentRunStoreUnavailableError) throw cause;
-      const refusal = causeChain(cause).find((error) => error instanceof UnsupportedQueryFeatureError && (error.adapter === 'dynamodb' || error.adapter === 'bigtable'));
-      const detail = refusal instanceof UnsupportedQueryFeatureError
-        ? new UnsupportedQueryFeatureError('agent-runs', refusal.adapter, `The agent-run store needs ordered multi-field queries, which the ${refusal.adapter} adapter cannot serve. Use PostgreSQL, SQLite or MongoDB for agent runs.`, { cause })
-        : cause;
+      const refusal = causeChain(cause).find(
+        (error) =>
+          error instanceof UnsupportedQueryFeatureError &&
+          (error.adapter === 'dynamodb' || error.adapter === 'bigtable'),
+      );
+      const detail =
+        refusal instanceof UnsupportedQueryFeatureError
+          ? new UnsupportedQueryFeatureError(
+              'agent-runs',
+              refusal.adapter,
+              `The agent-run store needs ordered multi-field queries, which the ${refusal.adapter} adapter cannot serve. Use PostgreSQL, SQLite or MongoDB for agent runs.`,
+              { cause },
+            )
+          : cause;
       throw new AgentRunStoreUnavailableError('query-unsupported', { cause: detail });
     }
   }

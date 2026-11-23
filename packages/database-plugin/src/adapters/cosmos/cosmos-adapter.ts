@@ -24,6 +24,7 @@ import { serializeError } from '@setu-ts/common';
 import { requestTimeout } from '../request-bound.ts';
 import { boundCosmosDatabase } from './cosmos-client.ts';
 import { classifyDriverError } from '../../errors/classify.ts';
+import { isDatabaseTimeout } from '../request-bound.ts';
 import type {
   IAdapterTransaction,
   IDatabaseAdapter,
@@ -183,6 +184,8 @@ export class CosmosAdapter implements IDatabaseAdapter {
     try {
       await database.read();
     } catch (error) {
+      // A bounded read that expired stays a 504 rather than an unnamed connect failure.
+      if (isDatabaseTimeout(error)) throw error;
       throw new Error(
         `CosmosAdapter could not reach database '${this.#options.database}': ${
           serializeError(error).message
@@ -232,8 +235,17 @@ export class CosmosAdapter implements IDatabaseAdapter {
       await boundCosmosDatabase(this.#rawDatabase!, Math.min(this.#timeout || 2000, 2000)).read();
       return true;
     } catch (error) {
-      const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
-      if (code === 401 || code === 403 || code === 404 || classifyDriverError(error, 'cosmos') === 'unavailable') return false;
+      const code =
+        typeof error === 'object' && error !== null
+          ? (error as { code?: unknown }).code
+          : undefined;
+      if (
+        code === 401 ||
+        code === 403 ||
+        code === 404 ||
+        classifyDriverError(error, 'cosmos') === 'unavailable'
+      )
+        return false;
       throw error;
     }
   }

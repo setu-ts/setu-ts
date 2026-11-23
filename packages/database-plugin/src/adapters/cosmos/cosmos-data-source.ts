@@ -401,12 +401,25 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
       if (buffer !== undefined) {
         if (data === undefined) {
-          buffer.add({ container: target.container, partitionKey: address.partitionKey, operation: { operationType: 'Delete', id: address.id, ifMatch: etag } });
+          buffer.add({
+            container: target.container,
+            partitionKey: address.partitionKey,
+            operation: { operationType: 'Delete', id: address.id, ifMatch: etag },
+          });
           return fromDocument(existing, target);
         }
         const resolved = await partitionKeys.resolve(target);
         const merged = { ...existing, ...updatePayload(address, resolved, data) };
-        buffer.add({ container: target.container, partitionKey: address.partitionKey, operation: { operationType: 'Replace', id: address.id, resourceBody: merged, ifMatch: etag } });
+        buffer.add({
+          container: target.container,
+          partitionKey: address.partitionKey,
+          operation: {
+            operationType: 'Replace',
+            id: address.id,
+            resourceBody: merged,
+            ifMatch: etag,
+          },
+        });
         return fromDocument(merged, target);
       }
       const item = container().item(address.id, address.partitionKey);
@@ -584,33 +597,24 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
     },
 
-
-          async updateWhere(id, where, data) {
-            const checked = checkWritePrecondition(where, data);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                'cosmos',
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            data = checked.data;
-            assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
-            return await guardedWrite(id, where, data);
-          },
-          async deleteWhere(id, where) {
-            const checked = checkWritePrecondition(where);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                'cosmos',
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            return (await guardedWrite(id, where)) !== null;
-          },
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
+      return await guardedWrite(id, where, data);
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
+      }
+      where = checked.where;
+      return (await guardedWrite(id, where)) !== null;
+    },
 
     count: async (where: Record<string, unknown>, filter?: FilterExpression): Promise<number> => {
       const spec = buildCountQuery(where, filter, target);
@@ -942,7 +946,11 @@ export class CosmosTransaction implements IAdapterTransaction {
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
           `(per-operation: ${statuses}). The batch is atomic, so no operation was applied.`,
       );
-      if (failureCode === 412) throw new SerializationConflictError('Cosmos transaction lost a write precondition; all writes were rolled back.', { cause: error });
+      if (failureCode === 412)
+        throw new SerializationConflictError(
+          'Cosmos transaction lost a write precondition; all writes were rolled back.',
+          { cause: error },
+        );
       throw error;
     }
   }

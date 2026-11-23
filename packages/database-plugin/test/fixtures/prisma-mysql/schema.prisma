@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client"
-  output = "../prisma-client-generated/mysql"
+  output = "../prisma-client-generated-mysql"
   runtime = "nodejs"
   moduleFormat = "esm"
   generatedFileExtension = "ts"

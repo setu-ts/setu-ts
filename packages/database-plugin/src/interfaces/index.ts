@@ -757,15 +757,21 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
   readonly drizzleInstance: DrizzleDatabaseIdentity;
 
   /**
-   * The SQL dialect, used to translate MySQL LIKE escapes, offset-only limits and a **nested JSON filter path**
-   * (`field: ['profile', 'city']`). No two dialects spell JSON extraction
-   * alike: PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
-   * SQLite `json_extract`.
+   * The SQL dialect. It translates a **nested JSON filter path**
+   * (`field: ['profile', 'city']`): no two dialects spell JSON extraction
+   * alike, PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
+   * SQLite `json_extract`. Since 0.14.0 `'mysql'` also selects two MySQL
+   * forms: a `contains` filter is emitted as `LIKE … ESCAPE '!'` with the
+   * pattern escaped by `!` (a backslash escape does not parse under MySQL's
+   * default `sql_mode`), and a `findAll` with an `offset` and no `limit`
+   * carries `LIMIT 18446744073709551615`, because MySQL has no `OFFSET`
+   * outside `LIMIT`.
    *
    * Absent, the adapter reads the dialect off the Drizzle instance, which
    * covers every instance Drizzle ships. Set it when that detection cannot
    * name the dialect — a nested-path filter is then refused by name rather
-   * than emitted in a guessed syntax that would return wrong rows.
+   * than emitted in a guessed syntax that would return wrong rows, and a
+   * MySQL `contains` keeps the backslash form.
    *
    * @since 0.2.0
    */
@@ -969,11 +975,42 @@ export type MongoAdapterOptions =
  * @since 0.2.0
  */
 export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
-  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  /**
+   * A bound on every call this adapter makes to DynamoDB: the whole call,
+   * retries included, unlike the SDK's own per-HTTP-request
+   * `requestTimeout`. It is passed to `send` as an `abortSignal`, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
+   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   *
+   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
   readonly requestTimeoutMs?: number;
-  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `region`, `endpoint` and `credentials` win over the same keys here when set. Use it for the SDK's own
+   * settings, a per-request handler or connection policy among them; those
+   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
   readonly clientOptions?: Readonly<Record<string, unknown>>;
-  /** Entity whose mapped table readiness reads; defaults to the first mapping. @since 0.14.0 */
+  /**
+   * The entity whose mapped table the readiness probe reads: a point read of
+   * the absent key `'__setu_readiness__'` under the table's own key attribute
+   * names. `true` when the service answers (a found or absent row, or a
+   * `ValidationException` for a non-string key), `false` on a refusal (table
+   * missing, access denied, unreachable). Defaults to the first entry of
+   * `entities`; with neither, the adapter has no probe and logs one `warn`
+   * at `connect()` naming this option.
+   *
+   * @since 0.14.0
+   */
   readonly readinessEntity?: string;
 
   /**
@@ -1147,9 +1184,30 @@ export interface CosmosDatabaseOptions extends DatabaseConnectionOptions {
  * @since 0.2.0
  */
 export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
-  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  /**
+   * A bound on every call this adapter makes to Cosmos DB: the whole call,
+   * retries included, unlike the SDK's own per-HTTP-request
+   * `requestTimeout`. It is passed as an `abortSignal` in the request options of every call, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
+   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   *
+   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
   readonly requestTimeoutMs?: number;
-  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `endpoint` and `key` win over the same keys here when set. Use it for the SDK's own
+   * settings, a per-request handler or connection policy among them; those
+   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
   readonly clientOptions?: Readonly<Record<string, unknown>>;
 
   /**
@@ -1275,11 +1333,48 @@ export interface BigtableDatabaseOptions extends DatabaseConnectionOptions {
  * @since 0.2.0
  */
 export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
-  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  /**
+   * A bound on every call this adapter makes to Bigtable: the whole call,
+   * retries included, unlike the SDK's own per-HTTP-request
+   * `requestTimeout`. It is mapped to `gaxOptions.timeout` on each read and conditional write, and a read is also ended at the deadline as a whole, since the SDK retries a streaming read with a fresh deadline per attempt; an injected facade receives it as `{ timeoutMs }`. A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
+   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   *
+   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
   readonly requestTimeoutMs?: number;
-  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `projectId` and `apiEndpoint` win over the same keys here when set. Use it for the SDK's own
+   * settings, a per-request handler or connection policy among them; those
+   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * When an endpoint is set (`apiEndpoint`, `clientOptions.apiEndpoint`, or
+   * `BIGTABLE_EMULATOR_HOST` read by the plugin) and this does not set
+   * `metricsEnabled`, the arm passes `metricsEnabled: false`, because the
+   * SDK's client-side metrics exporter needs Google credentials; set
+   * `metricsEnabled: true` here to keep them.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
   readonly clientOptions?: Readonly<Record<string, unknown>>;
-  /** Entity whose mapped table readiness reads; defaults to the first mapping. @since 0.14.0 */
+  /**
+   * The entity whose mapped table the readiness probe reads: a point read of
+   * the absent row `'__setu_readiness__'`, latest cell only. `true` when the
+   * service answers, `false` on gRPC `NOT_FOUND`, `PERMISSION_DENIED`,
+   * `UNAVAILABLE` or `UNAUTHENTICATED`. Defaults to the first entry of
+   * `tables`; with neither, the adapter has no probe and logs one `warn` at
+   * `connect()` naming this option. `connect()` also reads that row once as
+   * a warm-up, bounded by the smaller of `requestTimeoutMs` and 2000 ms, and
+   * ignores its result.
+   *
+   * @since 0.14.0
+   */
   readonly readinessEntity?: string;
 
   /**

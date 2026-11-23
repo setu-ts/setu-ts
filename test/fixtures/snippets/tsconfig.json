@@ -67,6 +67,8 @@
       "bun:test": ["./shims/bun-test.ts"],
       "cloudflare:workers": ["./shims/cloudflare-workers.ts"],
       "pg": ["../../../packages/database-plugin/node_modules/@types/pg/index.d.ts"],
+      "mysql2": ["../../../packages/database-plugin/node_modules/mysql2/index.d.ts"],
+      "mysql2/promise": ["../../../packages/database-plugin/node_modules/mysql2/promise.d.ts"],
       "@prisma/adapter-pg": [
         "../../../packages/database-plugin/node_modules/@prisma/adapter-pg/dist/index.d.ts"
       ],

@@ -80,35 +80,9 @@ describe('conditional adapter native error paths', () => {
     expect(await source.findById('b')).toBeNull();
   });
 });
+// DynamoDB, Cosmos and Bigtable accept them: nosql-transactional-conditional.test.ts.
 describe('deferred transaction refuses conditional writes', () => {
-  const adapters = [
-    { name: 'memory', make: () => new MemoryAdapter() },
-    {
-      name: 'dynamodb',
-      make: () =>
-        new DynamoAdapter({
-          client: dynamoFixture().client,
-          entities: { User: { partitionKey: 'id' } },
-        }),
-    },
-    {
-      name: 'cosmos',
-      make: () =>
-        new CosmosAdapter({
-          database: 'db',
-          client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
-            .client,
-        }),
-    },
-    {
-      name: 'bigtable',
-      make: () =>
-        new BigtableAdapter({
-          client: createFakeBigtableClient(new FakeBigtableStore()),
-          instance: 'i',
-        }),
-    },
-  ];
+  const adapters = [{ name: 'memory', make: () => new MemoryAdapter() }];
   for (const { name, make } of adapters) {
     it(name, async () => {
       const adapter = make();
@@ -291,8 +265,12 @@ describe('updateVersioned / deleteVersioned at every public data source (M128)',
  * a source moving between them fails here, not in prose.
  */
 const TRANSACTION_OUTCOMES: Readonly<Record<'applies' | 'refuses', readonly string[]>> = {
-  applies: sources.filter((source) => source.transactionalConditional === true).map((source) => source.name),
-  refuses: sources.filter((source) => source.transactionalConditional === 'refused').map((source) => source.name),
+  applies: sources
+    .filter((source) => source.transactionalConditional === true)
+    .map((source) => source.name),
+  refuses: sources
+    .filter((source) => source.transactionalConditional === 'refused')
+    .map((source) => source.name),
 };
 
 describe('updateVersioned inside a transaction (M128)', () => {
@@ -351,8 +329,12 @@ async function applyingTransactionSources(): Promise<
       drizzleInstance: createDrizzleDatabase(mysql.db, (db, work) => db.transaction(work)),
       drizzleTables: { User: mysql.table },
     }),
-    'prisma-mysql': new PrismaAdapter({ prismaClient: createFakePrismaClient({ activeProvider: 'mysql' }) }),
-    'prisma-undetermined': new PrismaAdapter({ prismaClient: createFakePrismaClient({ activeProvider: 'unknown' }) }),
+    'prisma-mysql': new PrismaAdapter({
+      prismaClient: createFakePrismaClient({ activeProvider: 'mysql' }),
+    }),
+    'prisma-undetermined': new PrismaAdapter({
+      prismaClient: createFakePrismaClient({ activeProvider: 'unknown' }),
+    }),
     dynamodb: new DynamoAdapter({
       client: dynamoFixture().client,
       entities: { User: { partitionKey: 'id' } },
@@ -407,7 +389,6 @@ async function refusingTransactionSources(): Promise<
   > = {};
   const adapters = {
     memory: new MemoryAdapter(),
-
   };
   for (const [name, adapter] of Object.entries(adapters)) {
     await adapter.connect();

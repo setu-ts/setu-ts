@@ -35,7 +35,12 @@ describe('M143q MySQL driver signals', () => {
     ['mysql', '1213', null],
   ] as const) {
     it(`classifies Prisma P2010 ${kind}/${originalCode}`, () => {
-      expect(classifyDriverError({ code: 'P2010', meta: { driverAdapterError: { cause: { kind, originalCode } } } }, 'prisma')).toBe(expected);
+      expect(
+        classifyDriverError(
+          { code: 'P2010', meta: { driverAdapterError: { cause: { kind, originalCode } } } },
+          'prisma',
+        ),
+      ).toBe(expected);
     });
   }
   it('classifies a deadlock and a command refused by a closed mysql2 connection', () => {

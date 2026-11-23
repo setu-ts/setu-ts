@@ -135,10 +135,13 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const logger = resolveLogger(ctx);
-      const runtimeOptions = adapterType === 'bigtable' && ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
-        ? { ...adapterOptions, emulatorFromEnvironment: true }
-        : adapterOptions;
-      const adapter = await createAdapter(options, adapterType, runtimeOptions, (message) => logger?.warn(message));
+      const runtimeOptions =
+        adapterType === 'bigtable' && ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
+          ? { ...adapterOptions, emulatorFromEnvironment: true }
+          : adapterOptions;
+      const adapter = await createAdapter(options, adapterType, runtimeOptions, (message) =>
+        logger?.warn(message),
+      );
 
       // Connect the adapter.
       await adapter.connect();

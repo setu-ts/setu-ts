@@ -58,7 +58,10 @@ export interface DynamoSdkCommand<TInput, TOutput> {
 /** The native DynamoDB SDK client operations driven by the facade. */
 export interface DynamoSdkClient {
   /** Sends one DynamoDB command to the configured AWS endpoint. */
-  send<TInput, TOutput>(command: DynamoSdkCommand<TInput, TOutput>, options?: { readonly abortSignal?: AbortSignal }): Promise<TOutput>;
+  send<TInput, TOutput>(
+    command: DynamoSdkCommand<TInput, TOutput>,
+    options?: { readonly abortSignal?: AbortSignal },
+  ): Promise<TOutput>;
   /** Releases resources owned by the AWS SDK client. */
   destroy(): void;
 }
@@ -235,9 +238,15 @@ export function adaptDynamoSdkModule(
       client.send(new module.GetItemCommand(input), options),
     putItem: (input: DynamoPutItemCommandInput, options): Promise<DynamoPutItemCommandOutput> =>
       client.send(new module.PutItemCommand(input), options),
-    updateItem: (input: DynamoUpdateItemCommandInput, options): Promise<DynamoUpdateItemCommandOutput> =>
+    updateItem: (
+      input: DynamoUpdateItemCommandInput,
+      options,
+    ): Promise<DynamoUpdateItemCommandOutput> =>
       client.send(new module.UpdateItemCommand(input), options),
-    deleteItem: (input: DynamoDeleteItemCommandInput, options): Promise<DynamoDeleteItemCommandOutput> =>
+    deleteItem: (
+      input: DynamoDeleteItemCommandInput,
+      options,
+    ): Promise<DynamoDeleteItemCommandOutput> =>
       client.send(new module.DeleteItemCommand(input), options),
     transactWriteItems: (
       input: DynamoTransactWriteItemsCommandInput,
@@ -249,7 +258,9 @@ export function adaptDynamoSdkModule(
 }
 
 /** Resolves SDK options before the transport check, including clientOptions.endpoint. */
-function effectiveConfiguration(configuration: DynamoClientConfiguration): DynamoClientConfiguration {
+function effectiveConfiguration(
+  configuration: DynamoClientConfiguration,
+): DynamoClientConfiguration {
   const { clientOptions, ...top } = configuration;
   return { ...clientOptions, ...top };
 }
@@ -257,13 +268,22 @@ function effectiveConfiguration(configuration: DynamoClientConfiguration): Dynam
 /** Adds a cancelling deadline to every facade call, including a transaction commit. @internal */
 export function boundDynamoClient(client: IDynamoClient, timeout: number): IDynamoClient {
   return {
-    query: (input, options) => requestBound(timeout, (signal) => client.query(input, { ...options, ...signal })),
-    scan: (input, options) => requestBound(timeout, (signal) => client.scan(input, { ...options, ...signal })),
-    getItem: (input, options) => requestBound(timeout, (signal) => client.getItem(input, { ...options, ...signal })),
-    putItem: (input, options) => requestBound(timeout, (signal) => client.putItem(input, { ...options, ...signal })),
-    updateItem: (input, options) => requestBound(timeout, (signal) => client.updateItem(input, { ...options, ...signal })),
-    deleteItem: (input, options) => requestBound(timeout, (signal) => client.deleteItem(input, { ...options, ...signal })),
-    transactWriteItems: (input, options) => requestBound(timeout, (signal) => client.transactWriteItems(input, { ...options, ...signal })),
+    query: (input, options) =>
+      requestBound(timeout, (signal) => client.query(input, { ...options, ...signal })),
+    scan: (input, options) =>
+      requestBound(timeout, (signal) => client.scan(input, { ...options, ...signal })),
+    getItem: (input, options) =>
+      requestBound(timeout, (signal) => client.getItem(input, { ...options, ...signal })),
+    putItem: (input, options) =>
+      requestBound(timeout, (signal) => client.putItem(input, { ...options, ...signal })),
+    updateItem: (input, options) =>
+      requestBound(timeout, (signal) => client.updateItem(input, { ...options, ...signal })),
+    deleteItem: (input, options) =>
+      requestBound(timeout, (signal) => client.deleteItem(input, { ...options, ...signal })),
+    transactWriteItems: (input, options) =>
+      requestBound(timeout, (signal) =>
+        client.transactWriteItems(input, { ...options, ...signal }),
+      ),
     destroy: () => client.destroy(),
   };
 }

@@ -31,8 +31,17 @@
 import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import type { FilterExpression, IDataSource, NormalizedQuery } from '@setu-ts/common';
-import { decodeCursor, DuplicateKeyError } from '@setu-ts/common';
+import { decodeCursor, DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
+import { NODE_SOURCE_ARGS, run as runProcess, tempDir } from '../../../../test/node-helpers.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
+import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { DatabaseTimeoutError } from '../../src/errors.ts';
+import {
+  readinessAcrossFreeze,
+  relayTarget,
+  startFrozenRelay,
+  timed,
+} from '../fixtures/frozen-relay.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { createLazyBigtableLoader } from '../../src/adapters/bigtable/bigtable-client.ts';
@@ -75,8 +84,10 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the native SDK is untyped at this boundary
 async function rawClient(): Promise<any> {
   const { Bigtable } = await import('@google-cloud/bigtable');
+  // Client-side metrics off: their exporter needs Google credentials and throws
+  // unhandled on a host without them about a minute after the client is built.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ditto
-  return new (Bigtable as any)({ projectId, apiEndpoint: endpoint });
+  return new (Bigtable as any)({ projectId, apiEndpoint: endpoint, metricsEnabled: false });
 }
 
 /**
@@ -956,6 +967,223 @@ describe('BigtableAdapter against a real emulator — duplicate key', () => {
       } finally {
         await service.close();
       }
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// A frozen store: the adapter talks to the emulator through a TCP relay that
+// stops forwarding while keeping every socket open, so a call hangs exactly as
+// it would on a hung backend. The container itself is never touched.
+// ---------------------------------------------------------------------------
+
+/** The bound every outage cell configures, in milliseconds. */
+const OUTAGE_BOUND_MS = 1000;
+/** Allowed slack past the bound for the SDK to unwind the expired call. */
+const OUTAGE_SLACK_MS = 1000;
+
+describe('BigtableAdapter behind a frozen relay (guarded)', () => {
+  it(
+    'ends a point read, a page, a write and a unit of work with 504 within requestTimeoutMs',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const tableId = await provision(`outage_${suffix}`, ['cf']);
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      const adapter = new BigtableAdapter({
+        projectId,
+        instance: instanceId,
+        apiEndpoint: `${relay.host}:${relay.port}`,
+        requestTimeoutMs: OUTAGE_BOUND_MS,
+        tables: { Outage: { table: tableId } },
+      });
+      await adapter.connect();
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'bigtable');
+      try {
+        const repository = service.getRepository<{ id: string; value: number }>('Outage');
+        await repository.create({ id: 'before', value: 1 });
+        await expect(adapter.isHealthy!()).resolves.toBe(true);
+
+        relay.freeze();
+        const calls: Readonly<Record<string, () => Promise<unknown>>> = {
+          'point read': () => repository.findById('before'),
+          page: () => repository.findPage({ limit: 2 }),
+          write: () => repository.create({ id: 'during', value: 2 }),
+          'unit of work': () =>
+            service.transaction(async (uow) => {
+              await uow.getRepository<{ id: string; value: number }>('Outage').create({
+                id: 'in-unit',
+                value: 3,
+              });
+            }),
+        };
+        for (const [name, call] of Object.entries(calls)) {
+          const settled = await timed(call);
+          expect({ name, outcome: settled.outcome }).toEqual({ name, outcome: 'rejected' });
+          if (settled.outcome !== 'rejected') continue;
+          expect(settled.error, name).toBeInstanceOf(DatabaseTimeoutError);
+          expect(httpStatusHintOf(settled.error)?.status, name).toBe(504);
+          expect(settled.elapsedMs, name).toBeLessThan(OUTAGE_BOUND_MS + OUTAGE_SLACK_MS);
+        }
+
+        // The probe's own bound is min(requestTimeoutMs, 2000): it rejects
+        // (unknown) or answers false, never true, and does not outlive it.
+        const probe = await timed(() => adapter.isHealthy!());
+        expect(probe.outcome === 'resolved' ? probe.value : 'rejected').not.toBe(true);
+        expect(probe.elapsedMs).toBeLessThan(OUTAGE_BOUND_MS + 500);
+
+        relay.thaw();
+        await expect(repository.findById('before')).resolves.toMatchObject({ value: 1 });
+        await expect(adapter.isHealthy!()).resolves.toBe(true);
+      } finally {
+        relay.thaw();
+        await service.close();
+        await relay.close();
+      }
+    },
+  );
+
+  it(
+    'reports /ready as not ready within the indicator bound, and ready again once thawed',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const tableId = await provision(`ready_${suffix}`, ['cf']);
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      try {
+        const result = await readinessAcrossFreeze(
+          relay,
+          DatabasePlugin({
+            type: 'bigtable',
+            options: {
+              projectId,
+              instance: instanceId,
+              apiEndpoint: `${relay.host}:${relay.port}`,
+              requestTimeoutMs: OUTAGE_BOUND_MS,
+              tables: { Ready: { table: tableId } },
+            },
+          }),
+        );
+        expect(result.baseline).toBe(200);
+        expect(result.frozen.status).toBe(503);
+        expect(result.frozen.elapsedMs).toBeLessThan(2000 + 500);
+        expect(['down', 'degraded']).toContain(result.frozenCheck);
+        expect(result.recovered).toBe(200);
+      } finally {
+        await relay.close();
+      }
+    },
+  );
+});
+
+/**
+ * The median wall time of `samples` reads of one row.
+ *
+ * @param read - One read
+ * @param samples - How many reads to time
+ * @returns The median, in milliseconds
+ */
+async function medianReadMs(read: () => Promise<unknown>, samples: number): Promise<number> {
+  const times: number[] = [];
+  for (let index = 0; index < samples; index += 1) {
+    const start = performance.now();
+    await read();
+    times.push(performance.now() - start);
+  }
+  times.sort((a, b) => a - b);
+  return times[Math.floor(times.length / 2)] as number;
+}
+
+describe('BigtableAdapter reads and first call on the emulator (guarded)', () => {
+  it(
+    "reads a row updated 2,000 times in under three times a new row's read",
+    { skip: skipReal, timeout: 120_000 },
+    async () => {
+      const tableId = await provision(`versions_${suffix}`, ['cf']);
+      const adapter = await connect({ Row: { table: tableId } });
+      const raw = await rawClient();
+      try {
+        const source = adapter.createDataSource('Row');
+        await source.create({ id: 'hot', n: 0 });
+        for (let n = 1; n <= 2000; n += 1) await source.update('hot', { n });
+        await source.create({ id: 'fresh', n: 0 });
+        // The emulator keeps every version, so the row really carries them:
+        // only the read's latest-cell filter keeps its cost flat.
+        const [native] = await raw.instance(instanceId).table(tableId).row('hot').get();
+        expect(native.data.cf.n.length).toBeGreaterThan(1000);
+        await expect(source.findById('hot')).resolves.toMatchObject({ n: 2000 });
+
+        const freshMs = await medianReadMs(() => source.findById('fresh'), 41);
+        const hotMs = await medianReadMs(() => source.findById('hot'), 41);
+        expect(hotMs).toBeLessThan(3 * freshMs);
+      } finally {
+        await raw.close();
+        await adapter.disconnect();
+      }
+    },
+  );
+
+  it(
+    'answers the first findById after connect() in under 500 ms and keeps serving past 90 s without Google credentials',
+    { skip: skipReal, timeout: 180_000 },
+    async () => {
+      const tableId = await provision(`fresh_process_${suffix}`, ['cf']);
+      // A fresh process: the SDK's first-use cost is per process, so it cannot
+      // be observed after the cases above have already paid it here.
+      const child = `
+        import { BigtableAdapter } from ${JSON.stringify(
+          new URL('../../src/adapters/bigtable/bigtable-adapter.ts', import.meta.url).href,
+        )};
+        const adapter = new BigtableAdapter({
+          projectId: ${JSON.stringify(projectId)},
+          instance: ${JSON.stringify(instanceId)},
+          apiEndpoint: process.env.SETU_BIGTABLE_ENDPOINT,
+          tables: { Row: { table: process.env.SETU_BIGTABLE_TABLE } },
+        });
+        await adapter.connect();
+        const source = adapter.createDataSource('Row');
+        const first = performance.now();
+        await source.findById('absent');
+        const firstCallMs = performance.now() - first;
+        const start = performance.now();
+        let reads = 0;
+        while (performance.now() - start < 92000) {
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          await source.findById('absent');
+          reads += 1;
+        }
+        console.log(JSON.stringify({ firstCallMs, servingMs: performance.now() - start, reads }));
+        await adapter.disconnect();
+      `;
+      const home = await tempDir({ prefix: 'setu-bigtable-no-adc-' });
+      const env: Record<string, string> = {};
+      for (const [name, value] of Object.entries(process.env)) {
+        if (value !== undefined) env[name] = value;
+      }
+      // No credentials of any kind: no ADC variable, no gcloud user file (a
+      // fresh HOME), no emulator variable and no metadata-detection switch.
+      delete env['GOOGLE_APPLICATION_CREDENTIALS'];
+      delete env['BIGTABLE_EMULATOR_HOST'];
+      delete env['METADATA_SERVER_DETECTION'];
+      delete env['CLOUDSDK_CONFIG'];
+      env['HOME'] = home;
+      env['SETU_BIGTABLE_ENDPOINT'] = endpoint as string;
+      env['SETU_BIGTABLE_TABLE'] = tableId;
+      const output = await runProcess(process.execPath, {
+        args: [...NODE_SOURCE_ARGS, '--input-type=module', '-e', child],
+        env,
+        clearEnv: true,
+      });
+      const stdout = new TextDecoder().decode(output.stdout);
+      const stderr = new TextDecoder().decode(output.stderr);
+      expect({ code: output.code, stderr }).toMatchObject({ code: 0 });
+      expect(stderr).not.toMatch(/default credentials/i);
+      const report = JSON.parse(stdout.trim().split('\n').at(-1) as string) as {
+        firstCallMs: number;
+        servingMs: number;
+        reads: number;
+      };
+      expect(report.servingMs).toBeGreaterThanOrEqual(90_000);
+      expect(report.reads).toBeGreaterThanOrEqual(9);
+      expect(report.firstCallMs).toBeLessThan(500);
     },
   );
 });

@@ -1,5 +1,14 @@
 /** MySQL table mappings shared by both real adapter cells. */
-import { mysqlTable, varchar, text, int, bigint, json, boolean, primaryKey } from 'drizzle-orm/mysql-core';
+import {
+  mysqlTable,
+  varchar,
+  text,
+  int,
+  bigint,
+  json,
+  boolean,
+  primaryKey,
+} from 'drizzle-orm/mysql-core';
 
 const Row = mysqlTable('rows', {
   id: varchar('id', { length: 191 }).primaryKey(),
@@ -9,13 +18,17 @@ const Row = mysqlTable('rows', {
   balance: int('balance').notNull(),
   profile: json('profile'),
 });
-const Compound = mysqlTable('compound_rows', {
-  tenantId: varchar('tenantId', { length: 191 }).notNull(),
-  id: varchar('id', { length: 191 }).notNull(),
-  name: varchar('name', { length: 191 }),
-  version: int('version').notNull(),
-  balance: int('balance').notNull(),
-}, (table) => [primaryKey({ columns: [table.tenantId, table.id] })]);
+const Compound = mysqlTable(
+  'compound_rows',
+  {
+    tenantId: varchar('tenantId', { length: 191 }).notNull(),
+    id: varchar('id', { length: 191 }).notNull(),
+    name: varchar('name', { length: 191 }),
+    version: int('version').notNull(),
+    balance: int('balance').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.tenantId, table.id] })],
+);
 const Outbox = mysqlTable('setu_outbox', {
   id: varchar('id', { length: 191 }).primaryKey(),
   kind: varchar('kind', { length: 191 }).notNull(),
@@ -133,4 +146,17 @@ const Business = mysqlTable('business', {
   id: varchar('id', { length: 191 }).primaryKey(),
   name: varchar('name', { length: 191 }),
 });
-export const mysqlTables = { Row, Compound, Outbox, Inbox, Idempotency, Grant, Role, AgentRun, AgentRunEntry, AgentRunChunks, AgentRunApproval, Business };
+export const mysqlTables = {
+  Row,
+  Compound,
+  Outbox,
+  Inbox,
+  Idempotency,
+  Grant,
+  Role,
+  AgentRun,
+  AgentRunEntry,
+  AgentRunChunks,
+  AgentRunApproval,
+  Business,
+};

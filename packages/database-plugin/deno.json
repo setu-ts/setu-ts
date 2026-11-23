@@ -4,7 +4,8 @@
   "license": "MIT",
   "exports": "./src/index.ts",
   "exclude": [
-    "test/fixtures/prisma-client-generated"
+    "test/fixtures/prisma-client-generated",
+    "test/fixtures/prisma-client-generated-mysql"
   ],
   "test": {
     "permissions": {

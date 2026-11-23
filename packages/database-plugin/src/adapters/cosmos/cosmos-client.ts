@@ -249,8 +249,16 @@ export async function createLazyClientLoader(
   clientOptions?: Readonly<Record<string, unknown>>,
 ): Promise<CosmosClientLoader> {
   const url = new URL(endpoint);
-  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname) && !url.hostname.endsWith('.localhost')) {
-    throw new UnsupportedQueryFeatureError('endpoint', 'cosmos', `CosmosAdapter refuses a plaintext HTTP endpoint on remote host '${url.hostname}'; use HTTPS for credentialed requests.`);
+  if (
+    url.protocol === 'http:' &&
+    !['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname) &&
+    !url.hostname.endsWith('.localhost')
+  ) {
+    throw new UnsupportedQueryFeatureError(
+      'endpoint',
+      'cosmos',
+      `CosmosAdapter refuses a plaintext HTTP endpoint on remote host '${url.hostname}'; use HTTPS for credentialed requests.`,
+    );
   }
   let mod: CosmosSdkModule;
   try {
@@ -274,20 +282,36 @@ export function boundCosmosDatabase(database: ICosmosDatabase, timeout: number):
     container: (name) => {
       const container = database.container(name);
       return {
-        read: (options) => requestBound(timeout, (signal) => container.read({ ...options, ...signal })),
+        read: (options) =>
+          requestBound(timeout, (signal) => container.read({ ...options, ...signal })),
         item: (id, key) => {
           const item = container.item(id, key);
           return {
-            read: (options) => requestBound(timeout, (signal) => item.read({ ...options, ...signal })),
-            replace: (body, options) => requestBound(timeout, (signal) => item.replace(body, { ...options, ...signal })),
-            patch: (ops, options) => requestBound(timeout, (signal) => item.patch(ops, { ...options, ...signal })),
-            delete: (options) => requestBound(timeout, (signal) => item.delete({ ...options, ...signal })),
+            read: (options) =>
+              requestBound(timeout, (signal) => item.read({ ...options, ...signal })),
+            replace: (body, options) =>
+              requestBound(timeout, (signal) => item.replace(body, { ...options, ...signal })),
+            patch: (ops, options) =>
+              requestBound(timeout, (signal) => item.patch(ops, { ...options, ...signal })),
+            delete: (options) =>
+              requestBound(timeout, (signal) => item.delete({ ...options, ...signal })),
           };
         },
         items: {
-          create: (body, options) => requestBound(timeout, (signal) => container.items.create(body, { ...options, ...signal })),
-          batch: (ops, key, options) => requestBound(timeout, (signal) => container.items.batch(ops, key, { ...options, ...signal })),
-          query: (spec, options) => ({ fetchAll: () => requestBound(timeout, (signal) => container.items.query(spec, { ...options, ...signal }).fetchAll()) }),
+          create: (body, options) =>
+            requestBound(timeout, (signal) =>
+              container.items.create(body, { ...options, ...signal }),
+            ),
+          batch: (ops, key, options) =>
+            requestBound(timeout, (signal) =>
+              container.items.batch(ops, key, { ...options, ...signal }),
+            ),
+          query: (spec, options) => ({
+            fetchAll: () =>
+              requestBound(timeout, (signal) =>
+                container.items.query(spec, { ...options, ...signal }).fetchAll(),
+              ),
+          }),
         },
       };
     },

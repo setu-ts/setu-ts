@@ -113,7 +113,11 @@ export class BigtableAdapter implements IDatabaseAdapter {
    *   `instance` is absent or blank, or when `maxPageFetches` is not a
    *   positive integer
    */
-  constructor(options: BigtableAdapterOptions, loader?: BigtableClientLoader, warn?: (message: string) => void) {
+  constructor(
+    options: BigtableAdapterOptions,
+    loader?: BigtableClientLoader,
+    warn?: (message: string) => void,
+  ) {
     if (options.client === undefined && (options.projectId ?? '').trim() === '') {
       throw new Error('BigtableAdapter requires either options.client or options.projectId');
     }
@@ -146,20 +150,31 @@ export class BigtableAdapter implements IDatabaseAdapter {
         : createLazyBigtableLoader({
             projectId: options.projectId as string,
             ...(options.apiEndpoint === undefined ? {} : { apiEndpoint: options.apiEndpoint }),
-            ...(options.clientOptions === undefined ? {} : { clientOptions: options.clientOptions }),
-            ...((options as BigtableAdapterOptions & { emulatorFromEnvironment?: boolean }).emulatorFromEnvironment ? { emulatorFromEnvironment: true } : {}),
+            ...(options.clientOptions === undefined
+              ? {}
+              : { clientOptions: options.clientOptions }),
+            ...((options as BigtableAdapterOptions & { emulatorFromEnvironment?: boolean })
+              .emulatorFromEnvironment
+              ? { emulatorFromEnvironment: true }
+              : {}),
           }));
     const entity = options.readinessEntity ?? Object.keys(options.tables ?? {})[0];
     if (entity !== undefined) {
-      const target = this.#target(entity);
       this.isHealthy = async () => {
         if (!this.#connected) return false;
         try {
+          // Resolved per probe: a mapping error is the probe's, never the constructor's.
+          const target = this.#target(entity);
           await boundBigtableClient(this.#rawClient!, Math.min(this.#timeout || 2000, 2000))
-            .instance(options.instance).table(target.table).readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
+            .instance(options.instance)
+            .table(target.table)
+            .readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
           return true;
         } catch (error) {
-          const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+          const code =
+            typeof error === 'object' && error !== null
+              ? (error as { code?: unknown }).code
+              : undefined;
           if (code === 5 || code === 7 || code === 14 || code === 16) return false;
           throw error;
         }
@@ -213,10 +228,13 @@ export class BigtableAdapter implements IDatabaseAdapter {
       return;
     }
     const entity = this.#options.readinessEntity ?? Object.keys(this.#mapping ?? {})[0];
-    const warmTable = entity === undefined ? '__setu_readiness__' : this.#target(entity).table;
     try {
+      // Inside the try: a mapping error is reported by the call that uses it, never at boot.
+      const warmTable = entity === undefined ? '__setu_readiness__' : this.#target(entity).table;
       await boundBigtableClient(client, Math.min(this.#timeout || 2000, 2000))
-        .instance(this.#options.instance).table(warmTable).readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
+        .instance(this.#options.instance)
+        .table(warmTable)
+        .readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
     } catch {
       // A failed warm-up is deliberately handled by the bounded readiness probe.
     }

@@ -247,7 +247,10 @@ export interface ICosmosItems {
    * @param body - The document to insert
    * @returns The created document envelope
    */
-  create(body: Record<string, unknown>, options?: CosmosRequestOptions): Promise<CosmosItemResponse<Record<string, unknown>>>;
+  create(
+    body: Record<string, unknown>,
+    options?: CosmosRequestOptions,
+  ): Promise<CosmosItemResponse<Record<string, unknown>>>;
 
   /**
    * Runs a parameterized SQL query across the container.
@@ -255,7 +258,10 @@ export interface ICosmosItems {
    * @param spec - The query text and its bound parameters
    * @returns An iterator over the matching rows
    */
-  query(spec: CosmosQuerySpec, options?: CosmosRequestOptions): ICosmosQueryIterator<Record<string, unknown>>;
+  query(
+    spec: CosmosQuerySpec,
+    options?: CosmosRequestOptions,
+  ): ICosmosQueryIterator<Record<string, unknown>>;
 
   /**
    * Runs a transactional batch, atomic within one partition-key value.

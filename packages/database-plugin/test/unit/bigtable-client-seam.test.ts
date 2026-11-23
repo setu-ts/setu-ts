@@ -105,56 +105,101 @@ describe('loaders', () => {
 describe('adaptBigtableSdkModule', () => {
   for (const [configuration, expected] of [
     [{ projectId: 'p' }, { projectId: 'p' }],
-    [{ projectId: 'p', emulatorFromEnvironment: true }, { projectId: 'p', metricsEnabled: false }],
-    [{ projectId: 'p', clientOptions: { apiEndpoint: 'localhost:8086', projectId: 'ignored', custom: 'kept' } }, { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: false, custom: 'kept' }],
-    [{ projectId: 'p', apiEndpoint: 'localhost:8086', clientOptions: { metricsEnabled: true } }, { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: true }],
-    [{ projectId: 'p', clientOptions: { metricsEnabled: false } }, { projectId: 'p', metricsEnabled: false }],
+    [
+      { projectId: 'p', emulatorFromEnvironment: true },
+      { projectId: 'p', metricsEnabled: false },
+    ],
+    [
+      {
+        projectId: 'p',
+        clientOptions: { apiEndpoint: 'localhost:8086', projectId: 'ignored', custom: 'kept' },
+      },
+      { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: false, custom: 'kept' },
+    ],
+    [
+      { projectId: 'p', apiEndpoint: 'localhost:8086', clientOptions: { metricsEnabled: true } },
+      { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: true },
+    ],
+    [
+      { projectId: 'p', clientOptions: { metricsEnabled: false } },
+      { projectId: 'p', metricsEnabled: false },
+    ],
   ] satisfies readonly [BigtableClientConfiguration, object][]) {
     it(`resolves client options and emulator metrics ${JSON.stringify(configuration)}`, () => {
-      const log = newLog(); adaptBigtableSdkModule(fakeModule(log), configuration);
+      const log = newLog();
+      adaptBigtableSdkModule(fakeModule(log), configuration);
       expect(log.configuration).toEqual(expected);
     });
   }
   it('passes gax deadlines and the latest-column filter to SDK calls', async () => {
-    const log = newLog(); const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
+    const log = newLog();
+    const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
     const table = client.instance('i').table('t');
     await table.readRows({ filter: { column: { cellLimit: 1 } } }, { timeoutMs: 123 });
     await table.row('a').conditionalMutate([{ all: true }], {}, { timeoutMs: 456 });
-    expect(log.reads[0]).toEqual({ filter: { column: { cellLimit: 1 } }, gaxOptions: { timeout: 123 } });
+    expect(log.reads[0]).toEqual({
+      filter: { column: { cellLimit: 1 } },
+      gaxOptions: { timeout: 123 },
+    });
     expect(log.branches[0]).toEqual({ gaxOptions: { timeout: 456 } });
   });
-  for (const mode of ['rows','error','hanging'] as const) it(`bounds the whole ReadRows stream: ${mode}`, async () => {
-    let ended = 0;
-    const fault = new Error('stream failed');
-    const module: BigtableSdkModule = {
-      Bigtable: class {
-        instance() { return { table: () => ({
-          getRows: () => Promise.resolve([[]] as [readonly { id: string }[]]),
-          createReadStream: () => {
-            const stream = Object.assign(new EventEmitter(), { end: () => { ended += 1; stream.emit('end'); } });
-            queueMicrotask(() => {
-              if (mode === 'rows') { stream.emit('data', { id: 'a' }); stream.emit('end'); }
-              if (mode === 'error') { stream.emit('error', fault); stream.emit('end'); }
-              // In hanging mode the SDK may retry internally; no new stream gets a fresh timer.
-            });
-            return stream;
-          },
-          row: () => ({ filter: () => Promise.resolve([true] as [boolean]) }),
-        }) }; }
-        close() { return Promise.resolve(); }
-      },
-    };
-    const client = adaptBigtableSdkModule(module, { projectId: 'p' });
-    const call = client.instance('i').table('t').readRows({}, { timeoutMs: 20 });
-    if (mode === 'rows') expect(await call).toEqual([{ key: 'a', data: {} }]);
-    else if (mode === 'error') await expect(call).rejects.toBe(fault);
-    else { await expect(call).rejects.toMatchObject({ code: 4 }); expect(ended).toBe(1); }
-    await client.close();
-  });
+  for (const mode of ['rows', 'error', 'hanging'] as const)
+    it(`bounds the whole ReadRows stream: ${mode}`, async () => {
+      let ended = 0;
+      const fault = new Error('stream failed');
+      const module: BigtableSdkModule = {
+        Bigtable: class {
+          instance() {
+            return {
+              table: () => ({
+                getRows: () => Promise.resolve([[]] as [readonly { id: string }[]]),
+                createReadStream: () => {
+                  const stream = Object.assign(new EventEmitter(), {
+                    end: () => {
+                      ended += 1;
+                      stream.emit('end');
+                    },
+                  });
+                  queueMicrotask(() => {
+                    if (mode === 'rows') {
+                      stream.emit('data', { id: 'a' });
+                      stream.emit('end');
+                    }
+                    if (mode === 'error') {
+                      stream.emit('error', fault);
+                      stream.emit('end');
+                    }
+                    // In hanging mode the SDK may retry internally; no new stream gets a fresh timer.
+                  });
+                  return stream;
+                },
+                row: () => ({ filter: () => Promise.resolve([true] as [boolean]) }),
+              }),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+      };
+      const client = adaptBigtableSdkModule(module, { projectId: 'p' });
+      const call = client.instance('i').table('t').readRows({}, { timeoutMs: 20 });
+      if (mode === 'rows') expect(await call).toEqual([{ key: 'a', data: {} }]);
+      else if (mode === 'error') await expect(call).rejects.toBe(fault);
+      else {
+        await expect(call).rejects.toMatchObject({ code: 4 });
+        expect(ended).toBe(1);
+      }
+      await client.close();
+    });
   it('passes the configuration to the native constructor', () => {
     const log = newLog();
     adaptBigtableSdkModule(fakeModule(log), { projectId: 'p', apiEndpoint: '127.0.0.1:8086' });
-    expect(log.configuration).toEqual({ projectId: 'p', apiEndpoint: '127.0.0.1:8086', metricsEnabled: false });
+    expect(log.configuration).toEqual({
+      projectId: 'p',
+      apiEndpoint: '127.0.0.1:8086',
+      metricsEnabled: false,
+    });
   });
 
   it('unwraps the SDK read tuple and normalises the row shape', async () => {

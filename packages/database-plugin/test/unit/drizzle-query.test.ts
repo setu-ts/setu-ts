@@ -41,25 +41,57 @@ describe('MySQL portable query SQL', () => {
   it('renders literal scalar and JSON contains and exact offset-only limits', async () => {
     const calls: { text: string; params: unknown[] }[] = [];
     const warnings: string[] = [];
-    const db = mysqlProxy(async (text, params) => { calls.push({ text, params }); return { rows: [] }; });
-    const table = mysqlTable('rows', { id: varchar('id', { length: 191 }).primaryKey(), name: varchar('name', { length: 191 }), profile: json('profile') });
-    const adapter = new DrizzleAdapter({ drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)), drizzleTables: { Row: table }, dialect: 'mysql' }, (message) => warnings.push(message));
+    const db = mysqlProxy(async (text, params) => {
+      calls.push({ text, params });
+      return { rows: [] };
+    });
+    const table = mysqlTable('rows', {
+      id: varchar('id', { length: 191 }).primaryKey(),
+      name: varchar('name', { length: 191 }),
+      profile: json('profile'),
+    });
+    const adapter = new DrizzleAdapter(
+      {
+        drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+        drizzleTables: { Row: table },
+        dialect: 'mysql',
+      },
+      (message) => warnings.push(message),
+    );
     await adapter.connect();
     await adapter.connect();
     expect(warnings).toHaveLength(1);
     try {
       const source = adapter.createDataSource('Row');
       for (const field of ['name', ['profile', 'name']]) {
-        await source.findAll({ where: {}, orderBy: {}, limit: 0, offset: 2, select: [], filter: { type: 'comparison', field, operator: 'contains', value: '%_!' } });
+        await source.findAll({
+          where: {},
+          orderBy: {},
+          limit: 0,
+          offset: 2,
+          select: [],
+          filter: { type: 'comparison', field, operator: 'contains', value: '%_!' },
+        });
         const call = calls.at(-1)!;
         expect(call.text).toContain("escape '!'");
         expect(call.text).toContain('limit 18446744073709551615 offset ?');
         expect(call.params).toContain('%!%!_!!%');
       }
-      await source.findAll({ where: {}, orderBy: {}, limit: -1, offset: 1, select: [], filter: { type: 'comparison', field: 'name', operator: 'contains', value: '\\' } });
+      await source.findAll({
+        where: {},
+        orderBy: {},
+        limit: -1,
+        offset: 1,
+        select: [],
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: '\\' },
+      });
       expect(calls.at(-1)!.text).toContain('char(92)');
-      expect(calls.at(-1)!.params.some((value) => typeof value === 'string' && value.includes('\\'))).toBe(false);
-    } finally { await adapter.disconnect(); }
+      expect(
+        calls.at(-1)!.params.some((value) => typeof value === 'string' && value.includes('\\')),
+      ).toBe(false);
+    } finally {
+      await adapter.disconnect();
+    }
   });
 });
 

@@ -169,7 +169,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/cli/README.md': 4,
   'packages/cloudflare-plugin/README.md': 10,
   'packages/cqrs-plugin/README.md': 2,
-  'packages/database-plugin/README.md': 19,
+  'packages/database-plugin/README.md': 20,
   'packages/notification-plugin/README.md': 3,
   'packages/openapi-plugin/README.md': 7,
   'packages/secrets-plugin/README.md': 6,

@@ -242,16 +242,33 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
         const pending = new Map(documents);
         for (const [index, operation] of operations.entries()) {
           const body = 'resourceBody' in operation ? operation.resourceBody : {};
-          const id = 'id' in operation ? operation.id : String((body as Record<string, unknown>).id);
+          const id =
+            'id' in operation ? operation.id : String((body as Record<string, unknown>).id);
           const key = documentKey(container, partitionKey, id);
           const found = pending.get(key);
-          const status = operation.ifMatch !== undefined && operation.ifMatch !== found?.['_etag'] ? 412
-            : operation.operationType === 'Create' && found !== undefined ? 409
-            : ['Replace', 'Patch', 'Delete'].includes(operation.operationType) && found === undefined ? 404 : 200;
-          if (status !== 200) return Promise.resolve({ code: 207, result: operations.map((_, i) => ({ statusCode: i === index ? status : 424 })) });
-          if (operation.operationType === 'Delete') { pending.delete(key); continue; }
-          const document: Record<string, unknown> = operation.operationType === 'Patch' ? { ...found } : { ...body };
-          if (operation.operationType === 'Patch') for (const patch of operation.resourceBody.operations) document[patch.path.slice(1)] = patch.value;
+          const status =
+            operation.ifMatch !== undefined && operation.ifMatch !== found?.['_etag']
+              ? 412
+              : operation.operationType === 'Create' && found !== undefined
+                ? 409
+                : ['Replace', 'Patch', 'Delete'].includes(operation.operationType) &&
+                    found === undefined
+                  ? 404
+                  : 200;
+          if (status !== 200)
+            return Promise.resolve({
+              code: 207,
+              result: operations.map((_, i) => ({ statusCode: i === index ? status : 424 })),
+            });
+          if (operation.operationType === 'Delete') {
+            pending.delete(key);
+            continue;
+          }
+          const document: Record<string, unknown> =
+            operation.operationType === 'Patch' ? { ...found } : { ...body };
+          if (operation.operationType === 'Patch')
+            for (const patch of operation.resourceBody.operations)
+              document[patch.path.slice(1)] = patch.value;
           document['_etag'] = `etag-${++etagCounter}`;
           pending.set(key, document);
         }

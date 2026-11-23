@@ -234,7 +234,10 @@ function createDelegate(
     data: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>>;
-  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<{ count: number }>;
   deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
 } {
@@ -474,7 +477,9 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
       options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
       transactionOptions = options;
-      const snapshots = Object.fromEntries(Object.entries(stores).map(([name, store]) => [name, new Map(store.records)]));
+      const snapshots = Object.fromEntries(
+        Object.entries(stores).map(([name, store]) => [name, new Map(store.records)]),
+      );
       try {
         return await fn(client);
       } catch (error) {

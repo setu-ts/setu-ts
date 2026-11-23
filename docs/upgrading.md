@@ -210,6 +210,61 @@ The Swagger UI page, the spec and the self-hosted assets no longer commit a sess
 session is not refreshed by them. The plugin adds `GET <docs endpoint>/csrf-token`, which Swagger
 UI's Try-it-out calls read; an application route at that path now conflicts with it.
 
+### Databases off PostgreSQL (`@setu-ts/database-plugin`)
+
+- **A bound on every DynamoDB, Cosmos DB and Bigtable call.** A call still running after 15 s now
+  rejects with `DatabaseTimeoutError` (`504`, outcome unknown) where it used to wait. A long scan or
+  a large Bigtable read needs more: raise `requestTimeoutMs` on that arm, or set `0` to restore the
+  SDK's own behaviour.
+- **Bigtable client-side metrics are off whenever an endpoint is set**: `apiEndpoint` (a real
+  private endpoint included), `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST`. To keep
+  them, pass `clientOptions: { metricsEnabled: true }`.
+- **A NoSQL unit of work whose commit loses a precondition answers `409`.** A DynamoDB, Cosmos DB or
+  Bigtable commit that fails a conditional write's precondition, or a buffered plain update of a row
+  deleted meanwhile, now throws `SerializationConflictError` (`409`, rolled back, safe to retry)
+  where it was a masked `500`; so does a DynamoDB `TransactionCanceledException` with a
+  `TransactionConflict` reason, the same rule as a PostgreSQL serialization failure. A retry loop
+  keyed on `409` now retries these; stop it on the conflict if retrying is wrong for the work.
+- **One write per row in a NoSQL unit of work that writes it conditionally.** A conditional write to
+  a row the unit of work has already written, or any write to the row after one, is refused at the
+  call (`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, DynamoDB's existing
+  one-write-per-key refusal), and on Bigtable a conditional write must be the unit of work's only
+  write. Write the row once per unit of work, merging the changes.
+- **`/ready` can now report the three stores down.** The probe reads `readinessEntity` (DynamoDB and
+  Bigtable; default the first mapped entity) or the database (Cosmos DB). An application with no
+  entity mapped gets one `warn` at `connect()` and no probe. Set `readinessEntity` to a table the
+  application's role can read.
+- **The probe costs one read per uncached health check**, billed by the provider: a DynamoDB or
+  Bigtable point read, or a Cosmos `database.read()`. The probe is cached for 5 s, so it costs at
+  most one read per 5 s per connection; poll `/ready` less often to read less.
+- **An injected Bigtable facade must accept the new filter variant and call options.**
+  `BigtableFilter` gains `{ column: { cellLimit: number } }`, and `readRows` and `conditionalMutate`
+  take an optional `{ timeoutMs }` (which a facade may ignore, leaving the call unbounded). Every
+  read now asks for the latest cell only: handle the variant in a facade that switches over the
+  union.
+- **Bigtable `connect()` waits up to 2 s for a warm-up read**, whose result it ignores. To shorten
+  it, lower `requestTimeoutMs` (the wait is the smaller of it and 2 s).
+- **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
+  connector except `postgresql` / `postgres` (and when the connector cannot be determined),
+  `updateWhere`, `deleteWhere`, `updateVersioned` and `deleteVersioned` run `updateMany` /
+  `deleteMany` with the key and the predicate, then a `findUnique` read-back. A lost race on MySQL
+  now answers `409` / `404` instead of reporting success. A `keyColumns` that matches several rows
+  throws and rolls back: make `keyColumns` name the table's key.
+- **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
+  query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
+  conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.
+- **Such a write holds a pool connection.** On the root client it runs in a `$transaction` with the
+  unit of work's own `maxWait` of 2 s, so pool exhaustion answers `503` (`P2028`) as a unit of work
+  already does. Size the pool for the concurrent writes.
+- **Drizzle with MySQL writes through the repository** (it was a masked `500`), and its `contains`
+  filter escapes with `!`. On mysql-proxy a write's read-back runs outside a transaction and the
+  adapter logs one `warn`; use mysql2 when the read-back must be the row this write produced. Pass
+  `dialect: 'mysql'` when the instance's class name does not reveal MySQL.
+- **Errors through `query()` on MySQL.** A Prisma `P2010` carrying a duplicate key or a write
+  conflict now answers `409` where it was `500`, mysql2 `ER_LOCK_DEADLOCK` answers `409`, and a
+  closed mysql2 connection answers `503`. Code that caught the `500` should catch
+  `DuplicateKeyError`, `SerializationConflictError` or `DatabaseUnavailableError`.
+
 ## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)

@@ -1,1 +1,1 @@
-export default { schema: "./schema.prisma" };
+export default { schema: './schema.prisma' };

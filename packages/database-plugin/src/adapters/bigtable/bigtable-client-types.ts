@@ -213,7 +213,10 @@ export interface IBigtableTable {
    * @param options - What to read
    * @returns The matching rows, in row-key order
    */
-  readRows(options: BigtableReadOptions, callOptions?: { readonly timeoutMs?: number }): Promise<BigtableReadRow[]>;
+  readRows(
+    options: BigtableReadOptions,
+    callOptions?: { readonly timeoutMs?: number },
+  ): Promise<BigtableReadRow[]>;
   /**
    * Returns the row-scoped write surface for one key.
    *

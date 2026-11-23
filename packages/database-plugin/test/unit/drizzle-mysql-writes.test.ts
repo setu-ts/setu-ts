@@ -8,10 +8,21 @@ describe('Drizzle MySQL affected-row writes', () => {
   for (const shape of ['tuple', 'bare'] as const) {
     it(`reads every ${shape} write back and reports conditional misses`, async () => {
       const fixture = mysqlDrizzle(shape);
-      const source = createDrizzleDataSource(fixture.db, 'user', { user: fixture.table }, operators);
-      expect(await source.create({ id: 'a', name: 'old', version: 1 })).toEqual({ id: 'a', name: 'old', version: 1 });
+      const source = createDrizzleDataSource(
+        fixture.db,
+        'user',
+        { user: fixture.table },
+        operators,
+      );
+      expect(await source.create({ id: 'a', name: 'old', version: 1 })).toEqual({
+        id: 'a',
+        name: 'old',
+        version: 1,
+      });
       expect(await source.update('a', { name: 'new' })).toMatchObject({ name: 'new' });
-      expect(await source.updateWhere!('a', { version: 1 }, { version: 2 })).toMatchObject({ version: 2 });
+      expect(await source.updateWhere!('a', { version: 1 }, { version: 2 })).toMatchObject({
+        version: 2,
+      });
       expect(await source.findById('a')).toMatchObject({ version: 2 });
       expect(await source.updateWhere!('a', { version: 1 }, { name: 'bad' })).toBeNull();
       expect(await source.deleteWhere!('a', { version: 1 })).toBe(false);
@@ -32,7 +43,9 @@ describe('Drizzle MySQL affected-row writes', () => {
   it('rejects unknown counts inside the transaction and rolls the write back', async () => {
     const fixture = mysqlDrizzle('unknown');
     const source = createDrizzleDataSource(fixture.db, 'user', { user: fixture.table }, operators);
-    await expect(source.create({ id: 'a', name: 'old' })).rejects.toBeInstanceOf(UnsupportedQueryFeatureError);
+    await expect(source.create({ id: 'a', name: 'old' })).rejects.toBeInstanceOf(
+      UnsupportedQueryFeatureError,
+    );
     expect(await source.findById('a')).toBeNull();
   });
   it('uses generated column-primary keys, refuses unknown defaults before sending, and propagates transaction failures', async () => {
@@ -50,7 +63,12 @@ describe('Drizzle MySQL affected-row writes', () => {
   });
   it('runs proxy read-backs unwrapped and refuses a generated-key create', async () => {
     const fixture = mysqlDrizzle();
-    const source = createDrizzleDataSource(fixture.db, 'user', { user: fixture.table }, { ...operators, mysqlProxy: true });
+    const source = createDrizzleDataSource(
+      fixture.db,
+      'user',
+      { user: fixture.table },
+      { ...operators, mysqlProxy: true },
+    );
     await source.create({ id: 'a', name: 'old' });
     await source.update('a', { name: 'new' });
     expect(fixture.transactions).toBe(0);

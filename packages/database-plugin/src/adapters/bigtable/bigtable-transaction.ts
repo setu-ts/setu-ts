@@ -169,7 +169,9 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
       return;
     }
     if (state.condition !== null || operation === 'updateWhere' || operation === 'deleteWhere') {
-      throw new BigtableTransactionScopeError('A Bigtable conditional write must be the only write in its unit of work. Write the row once per unit of work.');
+      throw new BigtableTransactionScopeError(
+        'A Bigtable conditional write must be the only write in its unit of work. Write the row once per unit of work.',
+      );
     }
     if (state.table === table && state.rowKey === rowKey) return;
     throw new BigtableTransactionScopeError(
@@ -245,7 +247,11 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     const row = this.#instance.table(state.table).row(state.rowKey);
     if (state.condition !== null) {
       const matched = await row.conditionalMutate(state.condition, { onMatch: mutations });
-      if (!matched) throw new SerializationConflictError('Bigtable transaction lost a write precondition; all writes were rolled back.', { cause: new Error('CheckAndMutateRow reported no match') });
+      if (!matched)
+        throw new SerializationConflictError(
+          'Bigtable transaction lost a write precondition; all writes were rolled back.',
+          { cause: new Error('CheckAndMutateRow reported no match') },
+        );
       return;
     }
     // The predicate is not decoration: it is what carries each operation's own

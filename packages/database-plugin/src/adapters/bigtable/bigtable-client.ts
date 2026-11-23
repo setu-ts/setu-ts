@@ -51,7 +51,11 @@ interface BigtableSdkRow {
   /** CheckAndMutateRow. Resolves to a one-element `[matched]` tuple. */
   filter(
     test: readonly unknown[],
-    branches: { onMatch?: readonly unknown[]; onNoMatch?: readonly unknown[]; gaxOptions?: { timeout: number } },
+    branches: {
+      onMatch?: readonly unknown[];
+      onNoMatch?: readonly unknown[];
+      gaxOptions?: { timeout: number };
+    },
   ): Promise<[boolean, ...unknown[]]>;
 }
 
@@ -277,7 +281,12 @@ export function adaptBigtableSdkModule(
   const { clientOptions, emulatorFromEnvironment, ...top } = configuration;
   const effective = { ...clientOptions, ...top };
   const emulator = effective.apiEndpoint !== undefined || emulatorFromEnvironment === true;
-  const client = new module.Bigtable({ ...effective, ...(emulator && clientOptions?.['metricsEnabled'] === undefined ? { metricsEnabled: false } : {}) });
+  const client = new module.Bigtable({
+    ...effective,
+    ...(emulator && clientOptions?.['metricsEnabled'] === undefined
+      ? { metricsEnabled: false }
+      : {}),
+  });
   return {
     instance: (id: string): IBigtableInstance => {
       const instance = client.instance(id);
@@ -285,20 +294,32 @@ export function adaptBigtableSdkModule(
         table: (tableId: string): IBigtableTable => {
           const table = instance.table(tableId);
           return {
-            readRows: async (options: BigtableReadOptions, callOptions): Promise<BigtableReadRow[]> => {
+            readRows: async (
+              options: BigtableReadOptions,
+              callOptions,
+            ): Promise<BigtableReadRow[]> => {
               const timeout = callOptions?.timeoutMs;
-              const readOptions = { ...adaptReadOptions(options), ...(timeout === undefined ? {} : { gaxOptions: { timeout } }) };
-              const rows = timeout !== undefined && table.createReadStream !== undefined
-                ? await readStream(table.createReadStream(readOptions), timeout)
-                : (await table.getRows(readOptions))[0];
+              const readOptions = {
+                ...adaptReadOptions(options),
+                ...(timeout === undefined ? {} : { gaxOptions: { timeout } }),
+              };
+              const rows =
+                timeout !== undefined && table.createReadStream !== undefined
+                  ? await readStream(table.createReadStream(readOptions), timeout)
+                  : (await table.getRows(readOptions))[0];
               return rows.map(adaptReadRow);
             },
             row: (key: string): IBigtableRow => {
               const row = table.row(key);
               return {
                 conditionalMutate: async (test, branches, options): Promise<boolean> => {
-                  const sdkBranches: { onMatch?: unknown[]; onNoMatch?: unknown[]; gaxOptions?: { timeout: number } } = {};
-                  if (options?.timeoutMs !== undefined) sdkBranches.gaxOptions = { timeout: options.timeoutMs };
+                  const sdkBranches: {
+                    onMatch?: unknown[];
+                    onNoMatch?: unknown[];
+                    gaxOptions?: { timeout: number };
+                  } = {};
+                  if (options?.timeoutMs !== undefined)
+                    sdkBranches.gaxOptions = { timeout: options.timeoutMs };
                   if (branches.onMatch !== undefined) {
                     sdkBranches.onMatch = branches.onMatch.map(adaptMutation);
                   }
@@ -321,7 +342,10 @@ export function adaptBigtableSdkModule(
 }
 
 /** Ends a whole streaming call at its deadline, including SDK resumption retries. */
-function readStream(stream: BigtableReadStream, timeout: number): Promise<readonly BigtableSdkReadRow[]> {
+function readStream(
+  stream: BigtableReadStream,
+  timeout: number,
+): Promise<readonly BigtableSdkReadRow[]> {
   return new Promise((resolve, reject) => {
     const signal = AbortSignal.timeout(Math.ceil(timeout));
     const rows: BigtableSdkReadRow[] = [];
@@ -329,11 +353,18 @@ function readStream(stream: BigtableReadStream, timeout: number): Promise<readon
     const abort = (): void => {
       if (settled) return;
       settled = true;
-      reject(Object.assign(new Error('Bigtable ReadRows whole-call deadline exceeded'), { code: 4, cause: signal.reason }));
+      reject(
+        Object.assign(new Error('Bigtable ReadRows whole-call deadline exceeded'), {
+          code: 4,
+          cause: signal.reason,
+        }),
+      );
       stream.end();
     };
     signal.addEventListener('abort', abort, { once: true });
-    stream.on('data', (row) => { if (!settled) rows.push(row as BigtableSdkReadRow); });
+    stream.on('data', (row) => {
+      if (!settled) rows.push(row as BigtableSdkReadRow);
+    });
     stream.on('error', (error) => {
       if (settled) return;
       settled = true;
@@ -354,12 +385,22 @@ export function boundBigtableClient(client: IBigtableClient, timeout: number): I
   const callOptions = timeout === 0 ? {} : { timeoutMs: timeout };
   return {
     close: () => client.close(),
-    instance: (id) => ({ table: (name) => {
-      const table = client.instance(id).table(name);
-      return {
-        readRows: (options) => requestBound(timeout, () => table.readRows(options, callOptions), true),
-        row: (key) => ({ conditionalMutate: (test, branches) => requestBound(timeout, () => table.row(key).conditionalMutate(test, branches, callOptions), true) }),
-      };
-    } }),
+    instance: (id) => ({
+      table: (name) => {
+        const table = client.instance(id).table(name);
+        return {
+          readRows: (options) =>
+            requestBound(timeout, () => table.readRows(options, callOptions), true),
+          row: (key) => ({
+            conditionalMutate: (test, branches) =>
+              requestBound(
+                timeout,
+                () => table.row(key).conditionalMutate(test, branches, callOptions),
+                true,
+              ),
+          }),
+        };
+      },
+    }),
   };
 }

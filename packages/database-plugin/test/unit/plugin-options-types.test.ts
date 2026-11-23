@@ -44,7 +44,7 @@ function createPluginContext(registered: Map<string, unknown>): IPluginContext {
     },
     health: { register: () => {} },
     lifecycle: { onClose: () => {} },
-    runtime: { hrtime: () => 0 },
+    runtime: { hrtime: () => 0, env: {} },
   } as unknown as IPluginContext;
 }
 
@@ -242,6 +242,67 @@ function assertOptionArms(): void {
     options: { instance: 'app' },
   };
   void bigtableNoClientForm;
+
+  // --- the call bound, readiness table and SDK constructor options ----------
+  // `requestTimeoutMs` and `clientOptions` ride all three NoSQL arms;
+  // `readinessEntity` names the probed table on the two arms whose probe reads
+  // an application table (DynamoDB, Bigtable). Cosmos probes its database.
+  const dynamoBounded: DatabasePluginOptions = {
+    type: 'dynamodb',
+    options: {
+      region: 'us-east-1',
+      requestTimeoutMs: 1500.5,
+      readinessEntity: 'Order',
+      clientOptions: { maxAttempts: 2 },
+    },
+  };
+  void dynamoBounded;
+  const cosmosBounded: DatabasePluginOptions = {
+    type: 'cosmos',
+    options: {
+      endpoint: 'https://acct.documents.azure.com:443/',
+      key: 'k',
+      database: 'app',
+      requestTimeoutMs: 0,
+      clientOptions: { connectionPolicy: { requestTimeout: 5000 } },
+    },
+  };
+  void cosmosBounded;
+  const bigtableBounded: DatabasePluginOptions = {
+    type: 'bigtable',
+    options: {
+      projectId: 'p',
+      instance: 'app',
+      requestTimeoutMs: 15_000,
+      readinessEntity: 'Order',
+      clientOptions: { metricsEnabled: false },
+    },
+  };
+  void bigtableBounded;
+
+  const dynamoTextBound: DatabasePluginOptions = {
+    type: 'dynamodb',
+    // @ts-expect-error -- `requestTimeoutMs` is a number of milliseconds.
+    options: { region: 'us-east-1', requestTimeoutMs: '1500' },
+  };
+  void dynamoTextBound;
+  const cosmosReadinessEntity: DatabasePluginOptions = {
+    type: 'cosmos',
+    options: {
+      endpoint: 'https://acct.documents.azure.com:443/',
+      key: 'k',
+      database: 'app',
+      // @ts-expect-error -- the Cosmos probe reads its database, not a table.
+      readinessEntity: 'Order',
+    },
+  };
+  void cosmosReadinessEntity;
+  const bigtableClientOptionsArray: DatabasePluginOptions = {
+    type: 'bigtable',
+    // @ts-expect-error -- `clientOptions` is a record of constructor options.
+    options: { projectId: 'p', instance: 'app', clientOptions: ['metricsEnabled'] },
+  };
+  void bigtableClientOptionsArray;
 }
 void assertOptionArms;
 

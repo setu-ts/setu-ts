@@ -851,19 +851,26 @@ function createPrismaDataSourceInner(
     data?: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null | boolean> => {
     const values = keyValues(id, keyColumns, `${operation} on '${entity}'`);
-    const columnsWhere = Object.fromEntries(keyColumns.map((column, index) => [column, values[index]]));
+    const columnsWhere = Object.fromEntries(
+      keyColumns.map((column, index) => [column, values[index]]),
+    );
     const args = { where: { ...columnsWhere, AND: [where] } };
     const run = async (tx: PrismaClient): Promise<Record<string, unknown> | null | boolean> => {
       const model = (tx as unknown as Record<string, ModelDelegate>)[delegateKey]!;
-      const { count } = operation === 'updateWhere'
-        ? await model.updateMany({ ...args, data: data! })
-        : await model.deleteMany(args);
+      const { count } =
+        operation === 'updateWhere'
+          ? await model.updateMany({ ...args, data: data! })
+          : await model.deleteMany(args);
       if (count > 1) {
-        throw new Error(`Prisma ${operation} on '${entity}' matched ${count} rows for one key; keyColumns do not name the table's key`);
+        throw new Error(
+          `Prisma ${operation} on '${entity}' matched ${count} rows for one key; keyColumns do not name the table's key`,
+        );
       }
       if (operation === 'deleteWhere') return count === 1;
       if (count === 0) return null;
-      return await model.findUnique({ where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation) });
+      return await model.findUnique({
+        where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation),
+      });
     };
     return scope === 'transaction'
       ? await run(client)
@@ -958,7 +965,10 @@ function createPrismaDataSourceInner(
       assertPreconditionFields(where);
       try {
         if (conditionalPath === 'count') {
-          return await countedWrite('updateWhere', id, where, data) as Record<string, unknown> | null;
+          return (await countedWrite('updateWhere', id, where, data)) as Record<
+            string,
+            unknown
+          > | null;
         }
         return await delegate.update({
           where: {
@@ -982,7 +992,8 @@ function createPrismaDataSourceInner(
       where = checked.where;
       assertPreconditionFields(where);
       try {
-        if (conditionalPath === 'count') return await countedWrite('deleteWhere', id, where) as boolean;
+        if (conditionalPath === 'count')
+          return (await countedWrite('deleteWhere', id, where)) as boolean;
         await delegate.delete({
           where: {
             ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'deleteWhere'),
