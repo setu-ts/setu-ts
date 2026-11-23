@@ -223,16 +223,36 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
       Promise.resolve(false),
     );
-    const order: string[] = [];
-    const next = gate.run({ orderingKey: 'a', messageId: 'a2', nack: vi.fn() }, () => {
-      order.push('a2');
-      return Promise.resolve(true);
-    });
-    order.push('a1-pending');
+    const second = vi.fn(() => Promise.resolve(true));
+    const next = gate.run({ orderingKey: 'a', messageId: 'a2', nack: vi.fn() }, second);
+    // Let every queued microtask and timer run: a2 must still wait for a1.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(second).not.toHaveBeenCalled();
     held.resolve(true);
     await busy;
     await next;
-    expect(order).toEqual(['a1-pending', 'a2']);
+    expect(second).toHaveBeenCalledOnce();
+    gate.clear();
+  });
+
+  it('evicts by recent use, not by first insertion', async () => {
+    const gate = new PubSubOrdering(2);
+    const fail = (): Promise<boolean> => Promise.resolve(false);
+    await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, fail);
+    await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, fail);
+    // Touch 'a' (held back), making 'b' the least recently used.
+    await gate.run({ orderingKey: 'a', messageId: 'a2', nack: vi.fn() }, fail);
+    await gate.run({ orderingKey: 'c', messageId: 'c1', nack: vi.fn() }, fail);
+    // 'a' survived (an existing key evicts nothing): its later message is held back.
+    const aDispatch = vi.fn(() => Promise.resolve(true));
+    const aNack = vi.fn();
+    await gate.run({ orderingKey: 'a', messageId: 'a3', nack: aNack }, aDispatch);
+    expect(aDispatch).not.toHaveBeenCalled();
+    expect(aNack).toHaveBeenCalledOnce();
+    // 'b' was evicted for 'c': it starts fresh.
+    const bDispatch = vi.fn(() => Promise.resolve(true));
+    await gate.run({ orderingKey: 'b', messageId: 'b2', nack: vi.fn() }, bDispatch);
+    expect(bDispatch).toHaveBeenCalledOnce();
     gate.clear();
   });
 });
