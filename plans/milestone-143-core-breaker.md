@@ -198,7 +198,7 @@ Read on 2026-11-23 from the docs and source named; "not verified" where the sour
 
 ### 3.4 What a non-failure error counts as in the SDK (OD-B)
 
-- **Decision (recommended, OD-B A):** the classifier becomes three-valued,
+- **Decision (OD-B A, decided by the maintainer 2026-11-23):** the classifier becomes three-valued,
   `classify(error): 'failure' | 'success' | 'ignore'`, internal to the SDK:
   - `HttpClientError` with `status >= 500` → `'failure'`; with `status < 500` → `'success'` (the
     origin answered);
@@ -219,7 +219,7 @@ Read on 2026-11-23 from the docs and source named; "not verified" where the sour
 
 ### 3.5 One policy check, in `common` (OD-C)
 
-- **Decision (recommended, OD-C A):** export
+- **Decision (OD-C A, decided by the maintainer 2026-11-23):** export
   `breakerPolicyRangeError(policy: CircuitBreakerPolicy): RangeError | null` from
   `breaker-window.ts` (the `deadlineRangeError` shape). Rules, each refusal naming the field and the
   received value:
@@ -259,17 +259,20 @@ Read on 2026-11-23 from the docs and source named; "not verified" where the sour
   closed-state success, and refuses an invalid policy at construction with the new message), both
   naming V13-104. `docs/upgrading.md` `## Unreleased` gets one subsection covering both. Ships in
   `0.14.0`.
-- **Recording (OD-D, recommended A):** this follow-up has no ROADMAP letter. A: a CLAUDE.md "Current
-  status" line "Milestone 143 Core follow-up — circuit breaker" naming V13-104's Core and SDK halves
-  and the PR, and one sentence in ROADMAP.md's M143 section beside the M143c row ("V13-104's Core
-  and SDK halves ship in the Core breaker follow-up"); no row flip, since V13-104 stays M143c's. B:
-  a new ROADMAP letter (M143s) — rejected, the lane table already assigns the row.
+- **Recording (OD-D A in a shared form, decided by the maintainer 2026-11-23):** this follow-up has
+  no ROADMAP letter. ROADMAP.md's M143 section gets a heading `#### Core follow-ups (after M143i)`
+  with one line for this follow-up ("V13-104's Core and SDK halves: the `CircuitBreakerPolicy`
+  union, `createBreakerWindow` and the SDK breaker on it"); the DNS/drain Core session adds its own
+  line under the same heading. CLAUDE.md "Current status" gets a line "Milestone 143 Core follow-up
+  — circuit breaker" naming the packages, V13-104's two halves and the PR. No row flip: V13-104
+  stays M143c's. Rejected: a new ROADMAP letter (M143s), since the lane table already assigns the
+  row.
 - **Test home:** `packages/common/test/unit/barrel-exports.test.ts`; `check:docs` and the fence gate
   for README examples.
 
 ### 3.7 `resilience-plugin` keeps compiling until M143c (OD-A)
 
-- **Decision (recommended, OD-A A):** a narrowing guard in
+- **Decision (OD-A A, decided by the maintainer 2026-11-23):** a narrowing guard in
   `packages/resilience-plugin/src/patterns/circuit-breaker.ts`'s constructor: a policy with
   `policy.threshold === undefined` throws
   `RangeError('circuitBreaker: the rate arm (failureRateThreshold) is not supported by this version of @setu-ts/resilience-plugin')`,
@@ -286,20 +289,20 @@ Read on 2026-11-23 from the docs and source named; "not verified" where the sour
 
 ### 3.8 The SDK's first runtime edge into `common` (OD-E)
 
-- **Decision (recommended, OD-E A):** `breaker-window.ts` is a leaf module — its only imports are
-  `import type` from `./resilience.ts` — published as a new subpath `@setu-ts/common/breaker-window`
-  (`package.json` `exports["./breaker-window"]` → `dist/services/breaker-window.{js,d.ts}`;
-  `deno.json` `exports` becomes a map with `"."` and `"./breaker-window"`), and also re-exported
-  from the barrel (the same module, so one implementation). The SDK value-imports
-  `createBreakerWindow` and `breakerPolicyRangeError` from the subpath only.
-  `type-only-common.test.ts` becomes: every SDK import of `common` is `import type` **except** value
-  imports from `@setu-ts/common/breaker-window` (an allowlist of exactly that specifier, with a
-  positive control that the scan sees it), and the `deno info` check asserts that the only runtime
-  edge into `common` resolves to `breaker-window.ts` and that this module has no runtime dependency
-  of its own. Doc deliverables: `sdk/README.md:10` and `:331-332`, `ARCHITECTURE.md:1624` (the SDK
-  row), `PUBLIC_API.md:13981`, and the three source comments in the §1 type-only row, each restated
-  as "type-only except the dependency-free breaker window"; the M137c subpath checklist (snippets
-  `tsconfig` alias, fence-compiler and api-docs target counts).
+- **Decision (OD-E A, decided by the maintainer 2026-11-23):** `breaker-window.ts` is a leaf module
+  — its only imports are `import type` from `./resilience.ts` — published as a new subpath
+  `@setu-ts/common/breaker-window` (`package.json` `exports["./breaker-window"]` →
+  `dist/services/breaker-window.{js,d.ts}`; `deno.json` `exports` becomes a map with `"."` and
+  `"./breaker-window"`), and also re-exported from the barrel (the same module, so one
+  implementation). The SDK value-imports `createBreakerWindow` and `breakerPolicyRangeError` from
+  the subpath only. `type-only-common.test.ts` becomes: every SDK import of `common` is
+  `import type` **except** value imports from `@setu-ts/common/breaker-window` (an allowlist of
+  exactly that specifier, with a positive control that the scan sees it), and the `deno info` check
+  asserts that the only runtime edge into `common` resolves to `breaker-window.ts` and that this
+  module has no runtime dependency of its own. Doc deliverables: `sdk/README.md:10` and `:331-332`,
+  `ARCHITECTURE.md:1624` (the SDK row), `PUBLIC_API.md:13981`, and the three source comments in the
+  §1 type-only row, each restated as "type-only except the dependency-free breaker window"; the
+  M137c subpath checklist (snippets `tsconfig` alias, fence-compiler and api-docs target counts).
 - **Why:** OD4b A requires the rule written once in `common`; a leaf subpath keeps what the
   type-only rule protects — the browser SDK loads no other `common` code, bundled or not (`common`
   is `sideEffects: false`, but an unbundled ESM import of the barrel would load its whole graph).
