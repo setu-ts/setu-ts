@@ -52,6 +52,27 @@ export interface TaskPoolConfig {
 }
 
 /**
+ * Reads `signal.aborted`. An `AbortSignal` Proxy can throw from it; that
+ * counts as aborted, so the throw cannot escape a timer or listener callback.
+ */
+function abortedOf(signal: AbortSignal): boolean {
+  try {
+    return signal.aborted;
+  } catch {
+    return true;
+  }
+}
+
+/** Reads `signal.reason`; a throwing accessor yields what it threw. */
+function reasonOf(signal: AbortSignal): unknown {
+  try {
+    return signal.reason;
+  } catch (error) {
+    return error;
+  }
+}
+
+/**
  * A task tracked from enqueue to settlement. The same object flows from the
  * pending queue onto a worker slot; its timeout timer is armed at ENQUEUE (so
  * a task that never reaches a worker — e.g. a module that never signals ready
@@ -192,9 +213,9 @@ export class TaskPool {
       this.collector?.taskRejected(this.config.label, 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
     }
-    if (signal?.aborted) {
+    if (signal !== undefined && abortedOf(signal)) {
       this.collector?.taskRejected(this.config.label, 'aborted');
-      return Promise.reject(signal.reason);
+      return Promise.reject(reasonOf(signal));
     }
     if (this.pending.length >= this.config.maxQueue) {
       // Counted as a REJECTION, not a failure: no `Task` exists yet, so this
@@ -209,7 +230,7 @@ export class TaskPool {
         resolve,
         reject,
         signal,
-        onAbort: signal === undefined ? null : () => this.onAbort(task, signal.reason),
+        onAbort: signal === undefined ? null : () => this.onAbort(task, reasonOf(signal)),
         id: 0,
         settled: false,
         timer: null,
@@ -559,9 +580,11 @@ export class TaskPool {
     this.rejectTask(task, reason, 'aborted');
     // One signal shared by several calls (a request's) aborts them in turn;
     // withdraw the queued ones now, so pump() starts no worker for them.
-    for (const queued of this.pending.filter((candidate) => candidate.signal?.aborted)) {
+    for (const queued of this.pending.filter(
+      (candidate) => candidate.signal !== undefined && abortedOf(candidate.signal),
+    )) {
       this.withdrawTask(queued);
-      this.rejectTask(queued, queued.signal!.reason, 'aborted');
+      this.rejectTask(queued, reasonOf(queued.signal!), 'aborted');
     }
     this.pump();
     this.syncMetrics();
@@ -655,7 +678,14 @@ export class TaskPool {
   /** Every admitted task settles through here, releasing timers and listeners. */
   private cleanupTask(task: Task): void {
     task.settled = true;
-    if (task.onAbort !== null) task.signal!.removeEventListener('abort', task.onAbort);
+    if (task.onAbort !== null) {
+      try {
+        task.signal!.removeEventListener('abort', task.onAbort);
+      } catch {
+        // An `AbortSignal` Proxy's throwing accessor must not keep the caller's
+        // promise from settling; `settled` already guards a late listener call.
+      }
+    }
     if (task.timer !== null) {
       this.runtime.clearTimeout(task.timer);
       task.timer = null;

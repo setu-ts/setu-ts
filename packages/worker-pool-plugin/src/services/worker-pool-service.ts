@@ -228,16 +228,11 @@ export class WorkerPoolService implements IWorkerPool {
     }
     // The worker protocol erases types across the thread boundary; the cast
     // re-attaches the caller's declared output type.
-    try {
-      return pool.run(
-        input,
-        timeoutMs as number | undefined,
-        signal as AbortSignal | undefined,
-      ) as Promise<TOutput>;
-    } catch (error) {
-      // A signal-shaped object whose `aborted` or `reason` getter throws.
-      return Promise.reject(error);
-    }
+    return pool.run(
+      input,
+      timeoutMs as number | undefined,
+      signal as AbortSignal | undefined,
+    ) as Promise<TOutput>;
   }
 
   /**

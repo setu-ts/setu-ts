@@ -152,11 +152,12 @@ export function assertTaskTimeout(value: unknown, name: string): void {
 }
 
 /**
- * Refuses a per-call `signal` that is not an `AbortSignal` instance (a `null`
- * from JavaScript, a cast object). Checked before admission: the pool reads
- * the signal again in timer and listener callbacks, where a signal-shaped
- * object's throwing getter or missing method would escape as an uncaught
- * error. A real signal's accessors cannot throw.
+ * Refuses a per-call `signal` that is not an `AbortSignal` instance of this
+ * realm (a `null` from JavaScript, a cast or signal-shaped object, a signal
+ * from a `vm` context or jsdom). Checked before admission: the pool attaches
+ * its listener with the instance's own methods. The pool also guards its later
+ * reads, so even an `AbortSignal` Proxy whose accessors throw cannot escape a
+ * timer or listener callback.
  *
  * @param value - The per-call `signal`; `undefined` is allowed
  * @throws {TypeError} Unless `value` is `undefined` or an `AbortSignal`

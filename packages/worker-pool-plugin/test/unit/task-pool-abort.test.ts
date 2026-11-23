@@ -302,6 +302,39 @@ describe('TaskPool cancellation', () => {
     await pool.shutdown();
   });
 
+  it('a signal Proxy whose accessors throw late cannot strand a call or escape', async () => {
+    const { pool, host, metrics } = setup();
+    const real = new AbortController();
+    let armed = false;
+    const hostile = new Proxy(new AbortController().signal, {
+      get(target, key) {
+        if (armed && (key === 'aborted' || key === 'reason' || key === 'removeEventListener')) {
+          throw new Error('late getter');
+        }
+        const value: unknown = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const first = pool.run('first', 0, real.signal);
+    const firstAborted = expect(first).rejects.toBe('stop');
+    const second = pool.run('second', 0, hostile);
+    host.handles[0].emitReady();
+    armed = true;
+    // The sweep reads the queued call's throwing `aborted`: counted as aborted.
+    real.abort('stop');
+    await firstAborted;
+    await expect(second).rejects.toThrow('late getter');
+    expectAborted(metrics, 2);
+    // A throwing removeEventListener does not stop a success from settling.
+    armed = false;
+    const third = pool.run('third', 0, hostile);
+    host.handles[1].emitReady();
+    armed = true;
+    host.handles[1].replyOk('done');
+    await expect(third).resolves.toBe('done');
+    await pool.shutdown();
+  });
+
   it('one signal shared by several calls starts no replacement worker for them', async () => {
     const host = new FakeHost(4, undefined, true);
     const timers = new FakeTimers();
