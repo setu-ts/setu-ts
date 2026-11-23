@@ -155,7 +155,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M140e: the Installation bash fence is skipped, so the compilable count stays 4.
   'packages/mail-plugin/README.md': 4,
   'packages/metrics-plugin/README.md': 2,
-  'packages/runtime/README.md': 4,
+  // +1 for the chosen-name-server resolver example.
+  'packages/runtime/README.md': 5,
   // M98n: +1 for the devtool-gated observed-fetch composition.
   // Circuit breaker follow-up: +1 for the rate-arm circuitBreaker example.
   'packages/sdk/README.md': 16,

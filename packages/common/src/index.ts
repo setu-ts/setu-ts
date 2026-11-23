@@ -254,7 +254,9 @@ export type { FormFileMetadata } from './form/form-file-metadata.ts';
 export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding.ts';
 
 // Runtime abstraction
+export { UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from './unprocessed-response.ts';
 export type {
+  DnsResolverOptions,
   FatalErrorOrigin,
   IDnsResolver,
   IFileSystem,

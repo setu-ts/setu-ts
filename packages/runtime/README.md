@@ -196,6 +196,56 @@ permissions or real runtime globals, not as application configuration.
 empty and `ConfigPlugin` reads nothing. Object bindings (KV, R2, D1, …) are filtered out here and
 published separately by `CloudflarePlugin`.
 
+## Chosen DNS servers (since 0.14.0)
+
+`IRuntimeServices.createDnsResolver(options)` returns a new `IDnsResolver` on Node, Bun and Deno;
+Workers omits the member. `DnsResolverOptions` has readonly `servers: readonly string[]` and
+`timeoutMs: number` fields. Invalid options throw `RangeError` at creation.
+
+```typescript
+import type { IRuntimeServices } from '@setu-ts/common';
+
+declare const runtime: IRuntimeServices;
+
+const resolver = runtime.createDnsResolver?.({
+  servers: ['127.0.0.1:5353', '[::1]:5353'],
+  timeoutMs: 3000,
+});
+const addresses = await resolver?.resolveHost('billing.internal');
+```
+
+Servers must be a nonempty list of IPv4 literals, IPv4 with a port, bare IPv6 literals, or bracketed
+IPv6 with a port. Ports are plain decimal digits from 1 to 65535, defaulting to 53. Hostnames,
+whitespace, empty strings and IPv6 zone indices (`%eth0`) are refused; duplicates are accepted. An
+unbracketed `::1:5353` is itself an IPv6 address on port 53, not a port suffix.
+
+`timeoutMs` is an integer from 0 to 2_147_483_647. A positive value bounds a whole `resolveSrv` call
+or a whole `resolveHost` call covering both A and AAAA, using an independent timer and cancellation
+per call. Each server attempt gets `max(1, ceil(timeoutMs / servers.length))` ms. An event loop
+stalled by application work can delay timers. A timeout from the resolver's own timers carries
+`code: 'ETIMEOUT'`: on the error `resolveSrv` throws, and on each member of `error.cause.errors` for
+`resolveHost` (an attempt Deno ends itself is `TimedOut`, with no `code`); already answered address
+families are still returned. The default `runtime.dns` continues using the host resolver without
+this added bound.
+
+Node and Bun try the servers in order, one attempt per server, each through its own
+`node:dns/promises` `Resolver` with `tries: 1` and one server. The resolver ends each attempt at its
+share with its own timer (c-ares itself never ends an attempt before about 250 ms, and Bun rounds
+attempts up to whole seconds), then moves to the next server after any error except `ENOTFOUND` or
+`ENODATA`, which are the zone's own answer. With zero, no own timer is installed: each attempt runs
+to the runtime's default attempt timeout (on Node about 2 s per server, about 3 s for the first
+lookup in a process).
+
+Deno takes one name server per call, so it tries servers in order, rotating on any error except
+`NotFound`. Each attempt is aborted at its share when the bound is positive. Deno 2.9.6 itself ends
+a signalled attempt at about 2 s even if the share is longer; that earlier timeout is `TimedOut`. It
+reports NXDOMAIN, no records and SERVFAIL alike as `NotFound`, so SERVFAIL does not rotate. With
+zero, no signal is passed and Deno's own timeout is about 15 s per server.
+
+On all four resolver implementations (default and chosen-server), `resolveHost` concatenates A then
+AAAA. When both fail, the outer error has an `AggregateError` cause with `errors` in A-then-AAAA
+order. A single successful family still wins, even if it returns an empty list.
+
 ## Architecture
 
 Cross-runtime operations (UUID, random bytes, SubtleCrypto, `now`, `hrtime`, timers) are identical
@@ -203,10 +253,21 @@ across Node 22+, Deno, and Bun because they rely on web-standard APIs on `global
 framework's floor is Node 22; `globalThis.crypto` alone would have put it at 19). They are
 implemented once in `src/services/cross-runtime.ts`.
 
-Divergent operations (platform, version, hostname, env, exit, fs, workers, dns) are implemented
-per-adapter via dependency injection: each factory accepts a `*Host` interface describing only what
-it needs, defaulting to the real runtime global via a single boundary cast. This makes every adapter
-fully unit-testable on Deno by passing a fake host — no real Node/Bun, no OS permissions.
+Divergent operations (platform, version, hostname, env, exit, fs, workers, dns, createDnsResolver)
+are implemented per-adapter via dependency injection: each factory accepts a `*Host` interface
+describing only what it needs, defaulting to the real runtime global via a single boundary cast.
+This makes every adapter fully unit-testable on Deno by passing a fake host — no real Node/Bun, no
+OS permissions.
+
+## Reserved drain response
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
 
 ## Scope
 
@@ -215,8 +276,8 @@ adapter implements `IHttpAdapter` and is registered under `CAPABILITIES.HTTP_ADA
 `RuntimePlugin`; `app.start({ port })` throws when none is registered for the detected platform.
 
 Platform coverage is not uniform, and the gaps are deliberate rather than pending: on Cloudflare
-Workers `fs` is `undefined` (no edge filesystem), `workers` and `dns` are omitted, and `exit()`
-throws — there is no process to end.
+Workers `fs` is `undefined` (no edge filesystem), `workers`, `dns` and `createDnsResolver` are
+omitted, and `exit()` throws — there is no process to end.
 
 See the repository's
 [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#runtimeplugin-setu-tsruntime)

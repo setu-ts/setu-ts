@@ -266,6 +266,14 @@ run the hooks. The generated entry does not pass it yet, so such a project drain
 Change any one of the grace period, the pre-stop sleep or `drainTimeoutMs`, and recheck the other
 two.
 
+The kernel's pre-pipeline drain answer sets `UNPROCESSED_HEADER: UNPROCESSED_SHUTDOWN`
+(`x-setu-unprocessed: shutdown`), after the error responder, independent of its status. The header
+is reserved: no request lifecycle hook, middleware or handler ran (an error responder may format the
+answer), and the claim covers the Setu server, not work done by a proxy. Compare the value exactly;
+other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
+
 ### Usage
 
 ```typescript
@@ -903,6 +911,7 @@ interface IRuntimeServices {
   fs?: IFileSystem;
   workers?: IWorkerHost;
   dns?: IDnsResolver;
+  createDnsResolver?(options: DnsResolverOptions): IDnsResolver; // since 0.14.0
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
 }
@@ -957,13 +966,14 @@ that resolves names internally and exposes no lookup surface. Callers must degra
 it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
 `DiscoveryUnavailableError` during `register()`, naming the alternatives.
 
-| Member         | Node | Deno           | Bun | Workers |
-| -------------- | ---- | -------------- | --- | ------- |
-| `fs`           | ✅   | ✅             | ✅  | ❌      |
-| `workers`      | ✅   | ✅             | ✅  | ❌      |
-| `dns`          | ✅   | ✅             | ✅  | ❌      |
-| `onSignal`     | ✅   | ✅ (not Win32) | ✅  | ❌      |
-| `onFatalError` | ✅   | ✅             | ✅  | ❌      |
+| Member              | Node | Deno           | Bun | Workers |
+| ------------------- | ---- | -------------- | --- | ------- |
+| `fs`                | ✅   | ✅             | ✅  | ❌      |
+| `workers`           | ✅   | ✅             | ✅  | ❌      |
+| `dns`               | ✅   | ✅             | ✅  | ❌      |
+| `createDnsResolver` | ✅   | ✅             | ✅  | ❌      |
+| `onSignal`          | ✅   | ✅ (not Win32) | ✅  | ❌      |
+| `onFatalError`      | ✅   | ✅             | ✅  | ❌      |
 
 `onSignal` registers a process-termination handler so an application can run `app.stop()` — its
 shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
@@ -992,6 +1002,11 @@ Bun survives a rejection, it reports the first one as fatal and observes no late
 process listener per mechanism exists while any handler is subscribed.
 
 ```typescript
+interface DnsResolverOptions { // since 0.14.0
+  readonly servers: readonly string[];
+  readonly timeoutMs: number;
+}
+
 interface IDnsResolver {
   resolveSrv(hostname: string): Promise<readonly SrvRecord[]>;
   resolveHost(hostname: string): Promise<readonly string[]>;
@@ -1005,13 +1020,60 @@ interface SrvRecord {
 }
 ```
 
+#### Chosen DNS servers (since 0.14.0)
+
+`IRuntimeServices.createDnsResolver(options)` returns a new `IDnsResolver` on Node, Bun and Deno;
+Workers omits the member. `DnsResolverOptions` has readonly `servers: readonly string[]` and
+`timeoutMs: number` fields. Invalid options throw `RangeError` at creation.
+
+```typescript
+const resolver = runtime.createDnsResolver?.({
+  servers: ['127.0.0.1:5353', '[::1]:5353'],
+  timeoutMs: 3000,
+});
+const addresses = await resolver?.resolveHost('billing.internal');
+```
+
+Servers must be a nonempty list of IPv4 literals, IPv4 with a port, bare IPv6 literals, or bracketed
+IPv6 with a port. Ports are plain decimal digits from 1 to 65535, defaulting to 53. Hostnames,
+whitespace, empty strings and IPv6 zone indices (`%eth0`) are refused; duplicates are accepted. An
+unbracketed `::1:5353` is itself an IPv6 address on port 53, not a port suffix.
+
+`timeoutMs` is an integer from 0 to 2_147_483_647. A positive value bounds a whole `resolveSrv` call
+or a whole `resolveHost` call covering both A and AAAA, using an independent timer and cancellation
+per call. Each server attempt gets `max(1, ceil(timeoutMs / servers.length))` ms. An event loop
+stalled by application work can delay timers. A timeout from the resolver's own timers carries
+`code: 'ETIMEOUT'`: on the error `resolveSrv` throws, and on each member of `error.cause.errors` for
+`resolveHost` (an attempt Deno ends itself is `TimedOut`, with no `code`); already answered address
+families are still returned. The default `runtime.dns` continues using the host resolver without
+this added bound.
+
+Node and Bun try the servers in order, one attempt per server, each through its own
+`node:dns/promises` `Resolver` with `tries: 1` and one server. The resolver ends each attempt at its
+share with its own timer (c-ares itself never ends an attempt before about 250 ms, and Bun rounds
+attempts up to whole seconds), then moves to the next server after any error except `ENOTFOUND` or
+`ENODATA`, which are the zone's own answer. With zero, no own timer is installed: each attempt runs
+to the runtime's default attempt timeout (on Node about 2 s per server, about 3 s for the first
+lookup in a process).
+
+Deno takes one name server per call, so it tries servers in order, rotating on any error except
+`NotFound`. Each attempt is aborted at its share when the bound is positive. Deno 2.9.6 itself ends
+a signalled attempt at about 2 s even if the share is longer; that earlier timeout is `TimedOut`. It
+reports NXDOMAIN, no records and SERVFAIL alike as `NotFound`, so SERVFAIL does not rotate. With
+zero, no signal is passed and Deno's own timeout is about 15 s per server.
+
+On all four resolver implementations (default and chosen-server), `resolveHost` concatenates A then
+AAAA. When both fail, the outer error has an `AggregateError` cause with `errors` in A-then-AAAA
+order. A single successful family still wins, even if it returns an empty list.
+
 `SrvRecord.host` is deliberately named that rather than reusing a runtime's own spelling: Deno calls
 the field `target` and Node calls it `name`, and passing either through unchanged would type-check
 on both runtimes while producing `undefined` hostnames on one. `resolveHost` concatenates `A` and
 `AAAA` results and rejects only when **both** families fail, because an IPv4-only host has no `AAAA`
-record at all. The runtime package exports both resolver factories: `createNodeDnsResolver(dns?)`
-(shared by the Node and Bun adapters, over `node:dns/promises`) and `createDenoDnsResolver(host)`
-(over `Deno.resolveDns`).
+record at all. Since 0.14.0 the outer error's cause is an `AggregateError` whose `errors` are in
+A-then-AAAA order, retaining both runtime failures. One successful family wins. The runtime package
+exports both resolver factories: `createNodeDnsResolver(dns?)` (shared by the Node and Bun adapters,
+over `node:dns/promises`) and `createDenoDnsResolver(host)` (over `Deno.resolveDns`).
 
 The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
 (Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
@@ -14121,6 +14183,8 @@ reaches `redactors[<string>]`):
 | `CREDENTIAL_SOURCE_STATE_KEY`                          | const     | `auth-plugin:credential-source`, the `ctx.state` key under which `auth-plugin`'s authentication middleware records the `credential` of the strategy that authenticated the request ('header' or 'cookie'), unset when nothing authenticated it; `session-plugin`'s form CSRF reads it and exempts only a request a header-credential strategy authenticated, so a junk bearer header beside a session cookie stays verified (M113e)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `CSRF_EXEMPT_STATE_KEY`                                | const     | `session-plugin:csrf-exempt` (0.13.0), the `ctx.state` flag an in-process middleware sets to boolean `true` before form CSRF (priority 325) for an exact route that enforces its own cross-site rule; `session-plugin` skips form CSRF and commits no session for it. `McpPlugin` sets it for `POST` on its own path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `CSRF_TOKEN_ACCESS_STATE_KEY`                          | const     | `session-plugin:csrf-token-access` (0.14.0), the `ctx.state` key under which `session-plugin`'s form-CSRF middleware publishes a frozen `ICsrfTokenAccess` per request; `openapi-plugin`'s Swagger UI token route reads it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `UNPROCESSED_HEADER`                                   | const     | `'x-setu-unprocessed'` (0.14.0), the reserved response header the kernel sets on its pre-pipeline drain answer; an application that sets it claims the request was not processed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `UNPROCESSED_SHUTDOWN`                                 | const     | `'shutdown'` (0.14.0), the value of `UNPROCESSED_HEADER` on the kernel's drain answer; readers compare it exactly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `PER_VISITOR_RESPONSE_STATE_KEY`                       | const     | `session-plugin:per-visitor-response` (0.14.0), the `ctx.state` key a component sets to `true` once the response belongs to one visitor whatever its headers say; `session-plugin` sets it at a request's first application write, a CSRF token read and a read of a restored session holding application data, and `cache-plugin`'s `cacheMiddleware` never stores a response captured with it set                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `COOKIE_DEPENDENT_RESPONSE_STATE_KEY`                  | const     | `session-plugin:cookie-dependent-response` (0.14.0), the `ctx.state` key a component sets to `true` once the response depends on the request's cookies whatever its `Vary` says; `session-plugin` sets it at a request's first application read, and `cache-plugin`'s `cacheMiddleware` stores such a response only for a request carrying no cookie and no `Authorization`, with `Cookie` added to the stored `Vary`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `ICsrfTokenAccess`                                     | interface | `{ headerName, tokenForExistingSession(): string \| undefined }` (0.14.0): the token of a session the request restored, minted if absent; `undefined` for a new session, so it never starts one                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -14182,7 +14246,7 @@ reaches `redactors[<string>]`):
 | Authorization policies | `IAuthorizationPolicyService`, `PolicyDefinition`, `PolicyAbility`, `PolicyCheck`, `AnonymousPolicyCheck`, `PolicyRef`, `PolicyAbilityInfo`, `PolicyTarget` — the asynchronous, target-aware check (M110a) served under `CAPABILITIES.AUTHORIZATION_POLICIES` (`can` / `authorize` / `describe` / `define`). The bare `PolicyDefinition` (`A = string`, `T = never`, `before` a METHOD signature) is the type-erased form a registry stores, which is what makes every typed policy assignable to it under `strictFunctionTypes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Scoped RBAC            | `SCOPED_RBAC_POLICY`, `scopedPermissionAbility`, `scopedRoleAbility`, `isScopeType`, `MAX_SCOPE_ID_LENGTH`, `ScopeRef`, `ScopedGrant`, `GrantQuery`, `IGrantSource`, `IScopedRoleSource`, `ScopedRoleDefinition`, `ScopedRbacTarget`, `ScopeSource`, `scopeFromTenant`, `scopeFromParam` — the M110b contracts AuthPlugin's built-in `scoped-rbac` policy evaluates and DecoratorPlugin/DatabasePlugin name without importing AuthPlugin. A scope type is lowercase kebab-case (`isScopeType`); an id is non-empty and at most `MAX_SCOPE_ID_LENGTH` (256) UTF-16 code units, refused rather than truncated. `GrantQuery` is `{ kind: 'chain', scopes }` (the check's scope and those it inherits from, plus global grants) or `{ kind: 'all' }` (sign-in timing only). `scopeFromParam` and `scopeFromTenant` resolve `undefined` for an absent, empty or over-long id, which leaves the scope unresolved and the check DENIES (never a global check)                                                                                                                                                                                                                                              |
 | Service discovery      | `IServiceDiscovery`, `ServiceInstance`, `PickOptions`, `LoadBalanceStrategy`, `ServiceOutcome`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| DNS                    | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| DNS                    | `IDnsResolver`, `SrvRecord`, `DnsResolverOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | gRPC                   | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `GrpcClientOptions`, `RpcFetchHandler`, `RpcTransport`, `RpcCall`, `RpcReply`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Cloudflare             | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | View rendering         | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -15000,6 +15064,28 @@ Cloudflare Workers.
 > const result = this.handler(frameworkRequest);
 > return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
 > ```
+
+The injected factory signatures (since 0.14.0 for the creator parameter) are:
+
+```typescript
+createNodeRuntimeServices(host?: NodeHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createBunRuntimeServices(host?: BunHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createDenoRuntimeServices(host?: DenoHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  globalEvents?: GlobalEventHost | null,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+```
+
+Both exported `DenoDnsHost` and `DenoHost` accept an optional trailing options parameter on both
+`resolveDns` overloads (since 0.14.0). Hosts with only two parameters remain assignable:
+
+```typescript
+resolveDns(query: string, recordType: 'SRV',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<DenoSrvRecord[]>;
+resolveDns(query: string, recordType: 'A' | 'AAAA',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<string[]>;
+```
 
 ### Values (runtime exports)
 

@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import {
   CAPABILITIES,
   createRedactionService,
@@ -1405,6 +1406,7 @@ class Application implements IKernelApplication {
         { state, response: builder, ...this.#safeRequestTarget(request) },
         { status: 503, title: 'Service Unavailable' },
       );
+      builder.header(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN);
       return builder;
     }
 
