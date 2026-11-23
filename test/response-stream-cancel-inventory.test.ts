@@ -60,8 +60,11 @@ interface Row {
   /**
    * Whether this source's `cancel()` always settles. The kernel waits for it
    * with no time limit, so one that hangs keeps the request's resources:
-   * `always`; `as-its-source` (it forwards to the stream it wraps);
-   * `may-hang` (named case); `unknown` (another library's stream).
+   * `always`; `as-its-source` (it forwards to the stream it wraps, or
+   * destroys that stream and awaits it, so it settles when a source that
+   * honours `destroy()` does); `may-hang` (named case: the gRPC rows await
+   * a handler generator they never end first); `unknown` (another
+   * library's stream).
    */
   readonly cancelSettles: 'always' | 'as-its-source' | 'may-hang' | 'unknown';
   /** The lane that owns a site outside Core that does not, or may not, meet the contract. */
