@@ -34,6 +34,11 @@ const rows: readonly {
   {
     name: 'a plain update',
     write: (source) => source.update('a', { version: 2 }),
+    conflict: true,
+  },
+  {
+    name: 'a plain delete',
+    write: (source) => source.delete('a'),
     conflict: false,
   },
 ];

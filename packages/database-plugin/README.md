@@ -307,9 +307,11 @@ export async function editArticle(
   (`409`, rolled back, safe to retry), with the driver's failure as `cause`; so `updateVersioned` in
   a unit of work returns the row at the call, and the unit of work fails at commit when it lost. A
   conditional write must be the row's only write in that unit of work: a conditional write to a row
-  already written there, or any write to the row after one, is refused at the call, before any read
-  (`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, and on DynamoDB the existing
-  one-write-per-key refusal). A Bigtable conditional write must be the unit of work's only write.
+  already written there, or any write to the row after one, is refused before it is buffered (before
+  any read when the calls run one after another; two concurrent calls on one row may both read, and
+  the second is refused when it buffers) (`CosmosTransactionScopeError`,
+  `BigtableTransactionScopeError`, and on DynamoDB the existing one-write-per-key refusal). A
+  Bigtable conditional write must be the unit of work's only write.
 - On a miss the record is read once to choose the error, so a delete that lands in between is
   reported as not found.
 - An invalid expected version (a missing `?version` read with `Number(...)` is `NaN`) or a payload
@@ -1153,16 +1155,16 @@ app.register(
 );
 ```
 
-| `options` field    | Type                                  | Default | Read by                                                                                                                          |
-| ------------------ | ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`         | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
-| `key`              | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
-| `client`           | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.   |
-| `database`         | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to. |
-| `containers`       | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                        |
-| `requestTimeoutMs` | `number` (ms)                         | `15000` | Every call, the commit's batch and the readiness probe; `0` disables. See [Bounding a call](#bounding-a-call).                   |
-| `clientOptions`    | `Record<string, unknown>`             | —       | The lazy client path: spread into `new CosmosClient(…)` first; `endpoint` and `key` win. Unread with `client`.                   |
-| `logQueries`       | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                            |
+| `options` field    | Type                                  | Default | Read by                                                                                                                                              |
+| ------------------ | ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`         | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                                          |
+| `key`              | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                                          |
+| `client`           | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.                       |
+| `database`         | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to.                     |
+| `containers`       | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                                            |
+| `requestTimeoutMs` | `number` (ms)                         | `15000` | Every call, the commit's batch and the readiness probe; `0` disables it on calls (the probe keeps 2000 ms). See [Bounding a call](#bounding-a-call). |
+| `clientOptions`    | `Record<string, unknown>`             | —       | The lazy client path: spread into `new CosmosClient(…)` first; `endpoint` and `key` win. Unread with `client`.                                       |
+| `logQueries`       | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                                                |
 
 **Containers must already exist.** The adapter creates no database and no container: throughput,
 partition-key and indexing choices belong to the application's provisioning. A missing container is
@@ -1319,11 +1321,13 @@ caught at construction instead, by name.
 
 **The emulator's first call does not wait on a credentials lookup (since 0.14.0).** Without a
 universe domain the SDK looks one up from Google credentials on its first call, which on a host
-outside Google Cloud cost about a second. Against an emulator — `BIGTABLE_EMULATOR_HOST` set, or an
+outside Google Cloud cost about 3 s. Against an emulator — `BIGTABLE_EMULATOR_HOST` set, or an
 endpoint with no `sslCreds` in `clientOptions` — the lazy arm passes
 `universeDomain: 'googleapis.com'`, unless a universe is configured in `clientOptions`
-(`universeDomain`, passed unchanged) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`. `connect()` sends no
-request: a store that is down at boot is reported by `/ready`, not by a failed start.
+(`universeDomain` or `universe_domain`, passed unchanged) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`. The
+plugin reads both environment variables through the runtime; an adapter built directly, outside the
+plugin, decides from its options alone. `connect()` sends no request: a store that is down at boot
+is reported by `/ready`, not by a failed start.
 
 **Client-side metrics are off on an emulator (since 0.14.0).** `@google-cloud/bigtable` 6 exports
 client-side metrics unless `metricsEnabled: false`, and its exporter needs Google credentials: on a
@@ -1730,9 +1734,10 @@ gRPC deadline. Bigtable's SDK gives each attempt of a streaming read its own dea
 failed attempt, so the lazy arm also ends the read as a whole when `requestTimeoutMs` passes; its
 conditional write is not retried by the SDK, so its gRPC deadline already bounds the whole call.
 Inside a unit of work the bound applies to each call, the commit's single batch included. `0`
-disables it, leaving the SDK's own defaults; a non-finite or negative value, or one above
-2147483647, is refused when the adapter is constructed. An injected facade receives the signal
-(DynamoDB, Cosmos DB) or `{ timeoutMs }` (Bigtable); one that ignores it is unbounded.
+disables it on calls, leaving the SDK's own defaults (the readiness probe keeps its 2000 ms bound);
+a non-finite or negative value, or one above 2147483647, is refused when the adapter is constructed.
+An injected facade receives the signal (DynamoDB, Cosmos DB) or `{ timeoutMs }` (Bigtable); one that
+ignores it is unbounded.
 
 This is not the SDKs' own per-request setting, which `clientOptions` can still carry — a DynamoDB
 `requestHandler` with its `requestTimeout`, a Cosmos `connectionPolicy` with its `requestTimeout`.

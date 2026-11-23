@@ -204,7 +204,7 @@ describe('database indicator mapping (M101a)', () => {
 /** How the store answers the readiness probe once the adapter is connected. */
 type ProbeAnswer = 'answered' | 'refused' | 'unknown';
 
-/** A NoSQL adapter whose probe answer is switched after connect (the warm-up and connect read stay healthy). */
+/** A NoSQL adapter whose probe answer is switched after connect (the connect read stays healthy). */
 interface NoSqlBackend {
   readonly name: string;
   readonly make: (answer: () => ProbeAnswer) => IDatabaseAdapter;
