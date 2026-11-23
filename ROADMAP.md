@@ -17679,6 +17679,16 @@ still runs its `ctx.defer` cleanup.
 
 Half of a row owned elsewhere: V13-110 (owned by M143j).
 
+#### Core follow-ups (after M143i)
+
+Hand-overs from other letters that land in the Core lane, one PR each.
+
+- **DNS resolver and drain marker** (`common` + `runtime` + `kernel`) —
+  `IRuntimeServices.createDnsResolver` with chosen name servers and a whole-lookup bound,
+  `resolveHost` rejecting with every failed lookup, and `x-setu-unprocessed: shutdown` on the
+  kernel's drain 503. Core halves of V13-246 (server half) and V13-23 (the marker), consumed by
+  M143c.
+
 ### Milestone 143j: The Full-Stack and Workers Templates
 
 **Lane:** CLI (after M143k). **Kind:** fix. **Rows:** 7. Ships in `0.14.0`. Template rows, and the
