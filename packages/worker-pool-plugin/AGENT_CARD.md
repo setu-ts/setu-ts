@@ -5,8 +5,7 @@ functional or full-stack `setu.config.ts`. It provides `CAPABILITIES.WORKER_POOL
 
 ## Submit an existing task from a route
 
-The application-owned task module must register its worker handler through the worker-side helper
-from `@setu-ts/runtime/worker` before it can receive work.
+The task module registers its handler with `@setu-ts/runtime/worker` before it receives work.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -40,15 +39,13 @@ ctx.response.json(pools);
 ## Behaviour the types do not show
 
 - A pool is created on first use of each task-module specifier.
-- Payloads cross by structured clone; functions cannot be sent. Shared memory remains shared.
+- Payloads cross by structured clone (no functions); shared memory stays shared.
 - `taskTimeoutMs` defaults to 30000 ms; `0` disables it; per-call `timeoutMs` overrides it.
-- Per-call `signal` rejects with `signal.reason` unchanged: pre-aborted work is not queued, queued
-  work is withdrawn, and running work's worker is terminated and replaced as on timeout.
-  Cancellation increments only `worker_pool_tasks_rejected_total{reason="aborted"}`; the other
-  rejection reasons are `queue_full`, `pool_closed` and `unavailable`.
+- Per-call `signal` rejects with `signal.reason`: queued work is withdrawn, a running worker
+  terminated; counted as rejected, reason `aborted`.
 - `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 ms and cannot be disabled.
-- Without runtime worker support, registration succeeds but `run` rejects with
-  `WorkerPoolUnavailableError`; the health indicator reports up with `available: false`.
+- Without worker support, `run` rejects with `WorkerPoolUnavailableError`; health is up with
+  `available: false`.
 - Shutdown terminates workers and rejects pending tasks.
 
 ## Other options
@@ -56,8 +53,8 @@ ctx.response.json(pools);
 - `maxWorkers` caps all pools' slots (`Infinity`: no cap); threads may briefly exceed it.
 - `defaultPoolSize` sets per-module sizing; `pools` overrides `size`, `maxQueue` and `taskTimeoutMs`
   by specifier.
-- `host` injects a worker host; `WorkerQueueFullError` and `WorkerTaskTimeoutError` identify
-  overload and deadlines.
+- `host` injects a worker host; `WorkerQueueFullError`/`WorkerTaskTimeoutError` mark overload and
+  deadlines.
 
 <!-- card-allow: Infinity -->
 

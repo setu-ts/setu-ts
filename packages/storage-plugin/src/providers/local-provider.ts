@@ -27,8 +27,8 @@ export class LocalStorageProvider implements StorageProvider {
   readonly #platform: (() => string) | undefined;
   /**
    * Whether the root proved writable at `connect()`. Read by
-   * {@linkcode isHealthy}, so a root that stops being writable later is
-   * reported rather than assumed good for the life of the process.
+   * {@linkcode isHealthy}; the probe itself only `stat`s the root, so a root
+   * that loses write permission after `connect()` still reads healthy.
    */
   #writable = false;
 
@@ -130,7 +130,8 @@ export class LocalStorageProvider implements StorageProvider {
    * write, which is exactly the state X8-9 found: uploads failing while health
    * said everything was fine.
    *
-   * @returns `true` when the root directory is reachable and writable
+   * @returns `true` when the root directory is reachable and proved writable
+   *   at `connect()`
    * @since 0.1.0
    */
   async isHealthy(): Promise<boolean> {

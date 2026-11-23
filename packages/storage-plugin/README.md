@@ -302,13 +302,13 @@ lifecycle (`isReady()`) and its reachability (`isHealthy()`).
 `data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the provider has no liveness check. The probe is cached for 5 s and bounded at 2 s.
 
-| Provider | Probe                      | Reachable when                                                                                     |
-| -------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
-| S3 / B2  | `HEAD` on the bucket       | the bucket answers `200`; a refused credential reads **down**                                      |
-| GCS      | `bucket.exists()`          | the backend answers at all (status below `500`); a refused credential or a missing bucket reads up |
-| Azure    | the container's `exists()` | the backend answers at all (status below `500`); a refused credential reads up                     |
-| Local    | write probe on the root    | the root is writable                                                                               |
-| Memory   | none needed                | always                                                                                             |
+| Provider | Probe                                            | Reachable when                                                                                     |
+| -------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| S3 / B2  | `HEAD` on the bucket                             | the bucket answers `200`; a refused credential reads **down**                                      |
+| GCS      | `bucket.exists()`                                | the backend answers at all (status below `500`); a refused credential or a missing bucket reads up |
+| Azure    | the container's `exists()`                       | the backend answers at all (status below `500`); a refused credential reads up                     |
+| Local    | `stat` of the root, after a write at `connect()` | the root still exists and proved writable at `connect()`                                           |
+| Memory   | none needed                                      | always                                                                                             |
 
 The GCS and Azure probes read reachability, not authorization, because a least-privilege credential
 may lack the bucket or container permission the probe needs; a revoked credential shows as failing

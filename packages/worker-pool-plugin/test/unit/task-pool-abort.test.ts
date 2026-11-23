@@ -358,6 +358,7 @@ describe('WorkerPoolService cancellation', () => {
     { aborted: false },
     'signal',
     { aborted: 1, addEventListener: () => undefined, removeEventListener: () => undefined },
+    { aborted: false, addEventListener: () => undefined, removeEventListener: () => undefined },
   ])(
     'refuses a signal that is not an AbortSignal (%j) before admission, uncounted',
     async (signal) => {
@@ -406,19 +407,17 @@ describe('WorkerPoolService cancellation', () => {
         {},
         createFakeRuntime(new FakeTimers(), new FakeHost(1, undefined, true)),
       );
-      let reads = 0;
-      const signal = {
-        get aborted(): boolean {
-          // The check reads it once; the pool reads it again.
-          if (prop === 'aborted' && ++reads > 1) throw new Error('getter');
-          return prop === 'reason';
+      // A Proxy over a real signal passes `instanceof`; the guard around
+      // pool.run still turns its throwing accessor into a rejection.
+      const controller = new AbortController();
+      if (prop === 'reason') controller.abort();
+      const signal = new Proxy(controller.signal, {
+        get(target, key) {
+          if (key === prop) throw new Error('getter');
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === 'function' ? value.bind(target) : value;
         },
-        get reason(): unknown {
-          throw new Error('getter');
-        },
-        addEventListener: () => undefined,
-        removeEventListener: () => undefined,
-      } as unknown as AbortSignal;
+      });
       let pending: Promise<unknown> | undefined;
       expect(() => {
         pending = service.run(SPEC, 1, { signal });

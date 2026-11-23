@@ -152,28 +152,17 @@ export function assertTaskTimeout(value: unknown, name: string): void {
 }
 
 /**
- * Refuses a per-call `signal` that is not an `AbortSignal` (a `null` from
- * JavaScript, a cast object). Checked before admission: the pool attaches a
- * listener to it, and a value without one would fail inside a timer callback.
+ * Refuses a per-call `signal` that is not an `AbortSignal` instance (a `null`
+ * from JavaScript, a cast object). Checked before admission: the pool reads
+ * the signal again in timer and listener callbacks, where a signal-shaped
+ * object's throwing getter or missing method would escape as an uncaught
+ * error. A real signal's accessors cannot throw.
  *
  * @param value - The per-call `signal`; `undefined` is allowed
- * @throws {TypeError} Unless `value` is `undefined` or has a boolean `aborted`,
- * `addEventListener` and `removeEventListener`
+ * @throws {TypeError} Unless `value` is `undefined` or an `AbortSignal`
  */
 export function assertAbortSignal(value: unknown): void {
-  if (value === undefined) return;
-  const candidate = value as {
-    aborted?: unknown;
-    addEventListener?: unknown;
-    removeEventListener?: unknown;
-  } | null;
-  if (
-    typeof candidate !== 'object' ||
-    candidate === null ||
-    typeof candidate.aborted !== 'boolean' ||
-    typeof candidate.addEventListener !== 'function' ||
-    typeof candidate.removeEventListener !== 'function'
-  ) {
+  if (value !== undefined && !(value instanceof AbortSignal)) {
     throw new TypeError(`signal must be an AbortSignal; received ${describe(value)}`);
   }
 }
