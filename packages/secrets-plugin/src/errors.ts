@@ -69,14 +69,13 @@ export class ReadOnlySecretProviderError extends Error {
 
 /**
  * Thrown when a secrets provider cannot be reached: the request failed on the
- * network, or it did not answer within the provider's bound (M101a V8-4).
+ * network, it answered HTTP 5xx, or it did not answer within the provider's bound.
  *
  * Branded with a `503 Service Unavailable` status hint, so `errorHandler`
  * answers a retryable status with a fixed, caller-safe sentence instead of
  * masking an outage into a `500`. The transport error rides as `cause` for
  * the log and never reaches the response body (the M89b rule). An HTTP
- * error status from a provider that DID answer is not this error: the
- * provider was reachable.
+ * 4xx error status keeps the provider's existing refusal or not-found handling.
  *
  * @example
  * ```typescript

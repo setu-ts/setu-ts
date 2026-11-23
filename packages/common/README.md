@@ -62,6 +62,9 @@ exactly; other values are reserved. The kernel does not remove the header from o
 application that sets it claims the request was not processed, and a client that honours the marker
 may send that request again.
 
+`uploadMetadataOf` treats throwing brand or metadata getters as absent and returns valid metadata by
+identity.
+
 ## Usage
 
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.

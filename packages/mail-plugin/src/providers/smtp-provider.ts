@@ -6,8 +6,8 @@
  *
  * @module
  */
-import type { IDnsResolver } from '@setu-ts/common';
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import type { DeadlineOptions, IDnsResolver } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError, withDeadline } from '@setu-ts/common';
 import type { ISmtpTransport, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 import { toBase64 } from './encoding.ts';
@@ -41,7 +41,8 @@ export interface SmtpProviderOptions {
   transport?: ISmtpTransport | undefined;
   /**
    * How long to wait for the TCP connection, in milliseconds (nodemailer
-   * `connectionTimeout`). nodemailer's default applies when absent.
+   * `connectionTimeout`). Also bounds each DNS refresh under `dnsTtlMs`.
+   * nodemailer's default (120000 ms) applies when absent.
    *
    * @since 0.14.0
    */
@@ -78,6 +79,8 @@ export interface SmtpRuntime {
   readonly dns?: IDnsResolver | undefined;
   /** Monotonic clock in milliseconds (`IRuntimeServices.hrtime`). */
   readonly hrtime: () => number;
+  /** Runtime timers for bounding DNS refreshes; ambient timers when absent. */
+  readonly timing?: DeadlineOptions['timing'];
 }
 
 /**
@@ -228,8 +231,13 @@ export class SmtpProvider implements MailProvider {
   #module: NodemailerModule | null = null;
   /** The address the current transport connects to, under `dnsTtlMs`. */
   #address: string | undefined;
-  /** When `#address` was resolved (monotonic ms), under `dnsTtlMs`. */
-  #resolvedAt = Number.NEGATIVE_INFINITY;
+  /** Last DNS attempt (including failed/empty lookups), monotonic ms. */
+  #triedAt = Number.NEGATIVE_INFINITY;
+  /** A generation shares one lookup, including with concurrent sends. */
+  #refresh: { generation: number; promise: Promise<ISmtpTransport> } | null = null;
+  readonly #users = new Map<ISmtpTransport, number>();
+  readonly #retired = new Set<ISmtpTransport>();
+  readonly #closed = new WeakSet<ISmtpTransport>();
   /** Bumped by `disconnect()`, so a refresh still in flight cannot reconnect. */
   #generation = 0;
   /**
@@ -301,9 +309,15 @@ export class SmtpProvider implements MailProvider {
       // A disconnect while the module loaded wins: the provider stays closed.
       if (generation !== this.#generation) throw notConnected();
       this.#module = module;
-      this.#transport = this.#usesDnsTtl()
+      const transport = this.#usesDnsTtl()
         ? await this.#refreshTransport()
         : adaptNodemailerModule(this.#module, this.#options);
+      if (generation !== this.#generation) {
+        this.#retire(transport);
+        if (this.#transport === transport) this.#transport = null;
+        throw notConnected();
+      }
+      this.#transport = transport;
     }
     this.#installProbe();
   }
@@ -319,20 +333,40 @@ export class SmtpProvider implements MailProvider {
    * TTL, and replaces the transport when the address changed. Returns the
    * transport to use.
    */
-  async #refreshTransport(): Promise<ISmtpTransport> {
+  #refreshTransport(): Promise<ISmtpTransport> {
+    const generation = this.#generation;
+    if (this.#refresh?.generation === generation) return this.#refresh.promise;
+    const refresh = { generation, promise: this.#resolveTransport(generation) };
+    this.#refresh = refresh;
+    void refresh.promise
+      .finally(() => {
+        if (this.#refresh === refresh) this.#refresh = null;
+      })
+      .catch(() => {});
+    return refresh.promise;
+  }
+
+  async #resolveTransport(generation: number): Promise<ISmtpTransport> {
     const runtime = this.#runtime!;
     const now = runtime.hrtime();
-    if (this.#transport !== null && now - this.#resolvedAt < this.#options.dnsTtlMs!) {
+    if (this.#transport !== null && now - this.#triedAt < this.#options.dnsTtlMs!) {
       return this.#transport;
     }
+    this.#triedAt = now;
     const host = this.#options.host!;
-    const generation = this.#generation;
     let address: string | undefined;
     try {
-      address = (await runtime.dns!.resolveHost(host))[0];
+      address = (
+        await withDeadline(() => runtime.dns!.resolveHost(host), {
+          timeoutMs: this.#options.connectionTimeoutMs ?? 120_000,
+          onTimeout: () => new Error(`SmtpProvider: DNS lookup for '${host}' timed out`),
+          ...(runtime.timing === undefined ? {} : { timing: runtime.timing }),
+        })
+      )[0];
     } catch (error) {
-      // A failed lookup keeps the last good address, as nodemailer's own
-      // resolver does; with none yet, nodemailer resolves the name itself.
+      // A failed or timed-out refresh keeps the last good transport; with none
+      // yet, nodemailer resolves the name itself (the runtime resolver reads
+      // DNS only, so a name only `/etc/hosts` knows still connects).
       if (generation !== this.#generation) throw notConnected();
       if (this.#transport !== null) return this.#transport;
       if (this.#module === null) throw error;
@@ -344,14 +378,25 @@ export class SmtpProvider implements MailProvider {
       if (this.#transport !== null) return this.#transport;
       throw new Error(`SmtpProvider: '${host}' resolved to no address`);
     }
-    this.#resolvedAt = now;
     if (this.#transport !== null && address === this.#address) {
       return this.#transport;
     }
-    this.#transport?.close?.();
+    if (this.#transport !== null) this.#retire(this.#transport);
     this.#address = address;
     this.#transport = adaptNodemailerModule(this.#module!, this.#options, address);
     return this.#transport;
+  }
+
+  /** A refresh must not close a transport while an earlier send still uses it. */
+  #retire(transport: ISmtpTransport): void {
+    if ((this.#users.get(transport) ?? 0) > 0) this.#retired.add(transport);
+    else this.#close(transport);
+  }
+
+  #close(transport: ISmtpTransport): void {
+    if (this.#closed.has(transport)) return;
+    this.#closed.add(transport);
+    transport.close?.();
   }
 
   /** The transport for the next call, refreshed first under `dnsTtlMs`. */
@@ -372,8 +417,7 @@ export class SmtpProvider implements MailProvider {
     if (transport !== null && typeof transport.verify === 'function') {
       this.isHealthy = async (): Promise<boolean> => {
         try {
-          const current = await this.#currentTransport();
-          await current.verify!();
+          await this.#useTransport((current) => current.verify!());
           return true;
         } catch {
           return false;
@@ -386,11 +430,14 @@ export class SmtpProvider implements MailProvider {
 
   disconnect(): Promise<void> {
     this.#generation++;
+    const transport = this.#transport;
     this.#transport = null;
     this.#address = undefined;
-    this.#resolvedAt = Number.NEGATIVE_INFINITY;
+    this.#triedAt = Number.NEGATIVE_INFINITY;
     delete this.isHealthy;
-    return Promise.resolve();
+    return Promise.resolve().then(() => {
+      if (transport !== null) this.#retire(transport);
+    });
   }
 
   isReady(): boolean {
@@ -404,7 +451,22 @@ export class SmtpProvider implements MailProvider {
    * @throws {Error} If the provider is not connected or the transport rejects
    */
   async send(message: OutgoingMail): Promise<void> {
+    await this.#useTransport((transport) => transport.sendMail(toNodemailerMessage(message)));
+  }
+
+  /** Pins a transport for a send or probe until that operation settles. */
+  async #useTransport(run: (transport: ISmtpTransport) => Promise<unknown>): Promise<void> {
     const transport = await this.#currentTransport();
-    await transport.sendMail(toNodemailerMessage(message));
+    this.#users.set(transport, (this.#users.get(transport) ?? 0) + 1);
+    try {
+      await run(transport);
+    } finally {
+      const remaining = this.#users.get(transport)! - 1;
+      if (remaining > 0) this.#users.set(transport, remaining);
+      else {
+        this.#users.delete(transport);
+        if (this.#retired.delete(transport)) this.#close(transport);
+      }
+    }
   }
 }

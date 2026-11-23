@@ -2,6 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { UPLOAD_METADATA, uploadMetadataOf, withUploadMetadata } from '../../src/index.ts';
 
 describe('upload metadata', () => {
+  it('treats throwing brand and metadata getters as absent', () => {
+    const carrier = Object.defineProperty({}, UPLOAD_METADATA, {
+      get() {
+        throw new Error('getter');
+      },
+    });
+    expect(uploadMetadataOf(carrier)).toBeUndefined();
+    const metadata = Object.defineProperty({}, 'fieldname', {
+      get() {
+        throw new Error('field');
+      },
+    });
+    expect(uploadMetadataOf({ [UPLOAD_METADATA]: metadata })).toBeUndefined();
+  });
   it('brands a middleware in place, hidden, under a global symbol', () => {
     const middleware = (): Promise<void> => Promise.resolve();
     const metadata = { fieldname: 'file', maxBytes: 1024, maxFiles: 2, mimeTypes: ['image/png'] };

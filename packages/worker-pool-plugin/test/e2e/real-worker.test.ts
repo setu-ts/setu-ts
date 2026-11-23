@@ -30,7 +30,20 @@ const lateThrowTaskUrl = new URL('../fixtures/late-throw-task.ts', import.meta.u
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
   it('aborts a running real task by terminating its worker, then serves the module again', async () => {
-    const runtime = createRuntimeServices();
+    const base = createRuntimeServices();
+    const exits: Promise<number | null>[] = [];
+    const runtime = {
+      ...base,
+      workers: {
+        ...base.workers!,
+        spawn(specifier: string) {
+          const handle = base.workers!.spawn(specifier);
+          expect(handle.onExit).toBeTypeOf('function');
+          exits.push(new Promise((resolve) => handle.onExit!(resolve)));
+          return handle;
+        },
+      },
+    };
     const service = new WorkerPoolService({ maxWorkers: 1, taskTimeoutMs: 0 }, runtime);
     const taskUrl = new URL('../fixtures/wait-task.ts', import.meta.url).href;
     const flags = new Int32Array(new SharedArrayBuffer(12));
@@ -52,7 +65,8 @@ describe('WorkerPoolPlugin — e2e on real worker threads', () => {
       controller.abort(reason);
       await assertion;
       // A worker left running would finish its wait and set flag 2.
-      await new Promise<void>((resolve) => runtime.setTimeout(resolve, WAIT_MS + 1_000));
+      expect(exits).toHaveLength(1);
+      await exits[0];
       expect(Atomics.load(flags, 2)).toBe(0);
       expect(service.stats()[0]).toMatchObject({ completed: 0, failed: 0, busy: 0 });
       await expect(

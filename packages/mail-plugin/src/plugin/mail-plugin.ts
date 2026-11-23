@@ -63,7 +63,11 @@ export function createProvider(
           socketTimeoutMs: options.socketTimeoutMs,
           dnsTtlMs: options.dnsTtlMs,
         },
-        { dns: ctx.runtime.dns, hrtime: () => ctx.runtime.hrtime() },
+        {
+          dns: ctx.runtime.dns,
+          hrtime: () => ctx.runtime.hrtime(),
+          timing: resolveProbeTiming(ctx.runtime),
+        },
       );
     case 'ses':
       return new SesProvider({

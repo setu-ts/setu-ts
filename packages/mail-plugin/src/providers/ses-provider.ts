@@ -246,7 +246,8 @@ export class SesProvider implements MailProvider {
     const client = this.#client;
     if (client !== null && typeof client.isHealthy === 'function') {
       const probe = client.isHealthy;
-      this.isHealthy = (): Promise<boolean> => probe.call(client);
+      this.isHealthy = (): Promise<boolean> =>
+        runMailCall(this.#deadline, 'ses', () => probe.call(client)).catch(() => false);
     } else {
       delete this.isHealthy;
     }

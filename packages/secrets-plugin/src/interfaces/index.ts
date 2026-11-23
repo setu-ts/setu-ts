@@ -188,7 +188,8 @@ export interface SecretsProviderOptions {
    * (`vault` | `aws-kms` | `gcp` | `azure`) Bound on one backend call, in
    * milliseconds, including an SDK's own retries. A call that fails on the
    * network, gets a `5xx` (or a gRPC `UNAVAILABLE`/`DEADLINE_EXCEEDED`), or does
-   * not answer in time rejects with `SecretProviderUnavailableError` (`503`).
+   * not answer in time rejects with `SecretProviderUnavailableError` (`503`),
+   * including Vault HTTP 5xx reads and writes; 4xx handling is unchanged.
    * `0` disables the bound. Default `5000`. Read by `vault` since 0.9.0 and by
    * the other three since 0.14.0.
    *

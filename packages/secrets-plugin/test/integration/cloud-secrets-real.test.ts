@@ -27,7 +27,7 @@ import type { AzureSdkModule } from '../../src/providers/azure-key-vault.ts';
 import { adaptAzureModule } from '../../src/providers/azure-key-vault.ts';
 
 const BOUND_MS = 300;
-const SLACK_MS = 6000;
+const SLACK_MS = 2000;
 let blackHole: Server;
 let port = 0;
 const sockets = new Set<Socket>();

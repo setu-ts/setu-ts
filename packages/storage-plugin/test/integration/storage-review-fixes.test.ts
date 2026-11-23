@@ -130,15 +130,24 @@ describe('b2 with only an endpoint (V13-248)', () => {
     }
   });
 
-  it('reads the region from a Backblaze endpoint', () => {
+  it('reads the region from a Backblaze endpoint', async () => {
     // Built, not sent: the Backblaze host is not reachable from the test.
     const provider = createProvider(
       {
         provider: 'b2',
-        options: { bucket: 'b', endpoint: 'https://s3.us-west-004.backblazeb2.com' },
+        options: {
+          bucket: 'b',
+          endpoint: 'https://s3.us-west-004.backblazeb2.com',
+          accessKeyId: 'k',
+          secretAccessKey: 's',
+        },
       },
       runtime,
     );
     expect(provider).toBeInstanceOf(S3Provider);
+    await provider.connect();
+    const url = new URL(await provider.getSignedUrl('k', { expiresIn: 60 }));
+    expect(url.searchParams.get('X-Amz-Credential')).toContain('/us-west-004/s3/aws4_request');
+    await provider.disconnect();
   });
 });

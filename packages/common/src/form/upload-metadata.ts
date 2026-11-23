@@ -65,20 +65,25 @@ export function uploadMetadataOf(value: unknown): UploadMetadata | undefined {
   if ((typeof value !== 'object' && typeof value !== 'function') || value === null) {
     return undefined;
   }
-  const metadata: unknown = (value as { readonly [UPLOAD_METADATA]?: unknown })[UPLOAD_METADATA];
-  if (typeof metadata !== 'object' || metadata === null) return undefined;
-  const record = metadata as Record<string, unknown>;
-  if (typeof record.fieldname !== 'string' || record.fieldname === '') return undefined;
-  if (!isPositiveInteger(record.maxBytes)) return undefined;
-  if ('maxFiles' in record && !isPositiveInteger(record.maxFiles)) return undefined;
-  if (
-    'mimeTypes' in record &&
-    (!Array.isArray(record.mimeTypes) ||
-      !record.mimeTypes.every((entry: unknown) => typeof entry === 'string'))
-  ) {
+  // A throwing accessor (a getter or a Proxy) reads as absent, like a malformed value.
+  try {
+    const metadata: unknown = (value as { readonly [UPLOAD_METADATA]?: unknown })[UPLOAD_METADATA];
+    if (typeof metadata !== 'object' || metadata === null) return undefined;
+    const record = metadata as Record<string, unknown>;
+    if (typeof record.fieldname !== 'string' || record.fieldname === '') return undefined;
+    if (!isPositiveInteger(record.maxBytes)) return undefined;
+    if ('maxFiles' in record && !isPositiveInteger(record.maxFiles)) return undefined;
+    if (
+      'mimeTypes' in record &&
+      (!Array.isArray(record.mimeTypes) ||
+        !record.mimeTypes.every((entry: unknown) => typeof entry === 'string'))
+    ) {
+      return undefined;
+    }
+    return metadata as UploadMetadata;
+  } catch {
     return undefined;
   }
-  return metadata as UploadMetadata;
 }
 
 /** Reports whether a value is a positive safe integer. */

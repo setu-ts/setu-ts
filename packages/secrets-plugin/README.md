@@ -146,11 +146,11 @@ request that fails on the network or does not answer in time — the response bo
 server that sends headers and then stalls counts as not answering — rejects with
 `SecretProviderUnavailableError`, which carries a `503 Service Unavailable` status hint, so an
 application running `errorHandler` answers an outage with a retryable `503` instead of a masked
-`500`. The transport error is kept as `cause` for the log and never reaches the response body. A
-Vault that answers with an HTTP error or a body that is not JSON is reachable, so it keeps the
-existing handling (a plain `Error`; an unparseable body is one too): `404` reads as `null`, any
-other error status rejects with a plain `Error`. A value outside `0`–`2147483647` is refused with a
-`RangeError` when the application starts.
+`500`. The transport error is kept as `cause` for the log and never reaches the response body. HTTP
+5xx reads and writes also reject with `SecretProviderUnavailableError`. For 4xx, `404` reads as
+`null` and other statuses reject with a plain `Error`; an unparseable successful body remains a
+plain error. A value outside `0`–`2147483647` is refused with a `RangeError` when the application
+starts.
 
 **The cloud arms are bounded too (since 0.14.0).** `aws-kms`, `gcp` and `azure` read the same
 `options.requestTimeoutMs` (default `5000`), which covers the SDK's own retries. A call that fails
@@ -216,6 +216,9 @@ SecretsPlugin({
   },
 });
 ```
+
+Vault read/write HTTP 5xx responses reject with `SecretProviderUnavailableError` (503), like
+cloud-provider outages; 4xx handling is unchanged (404 reads return null).
 
 ## Options
 

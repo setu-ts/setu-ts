@@ -273,7 +273,8 @@ default `Cache-Control` is `private, max-age=3600`: browser-cached, never shared
 with `rolling` or `idleTimeoutMs` refreshes its cookie on every response and a shared cache must not
 store that. Set `cacheControl: 'public, max-age=3600'` when no session cookie reaches the route.
 
-`keyPrefixes` limits what the route serves to the keys a browser page needs:
+`keyPrefixes` must be dense: sparse arrays throw `TypeError`. The route validates and freezes a
+copy. `keyPrefixes` limits what the route serves to the keys a browser page needs:
 `exposeCatalogues: { basePath: '/i18n', keyPrefixes: ['page.', 'form.'] }` serves only keys that
 start with one of the prefixes, so server-only text stays on the server. It must be a non-empty
 array of non-empty strings; anything else throws when the plugin is created.

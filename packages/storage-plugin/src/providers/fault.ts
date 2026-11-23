@@ -118,8 +118,8 @@ export function answeredStatus(error: unknown): number | undefined {
  *   (`toBackendFault`'s table), or the backend answered `500`, `502`, `503` or
  *   `504`: a read becomes `BackendUnavailableError` (`503`); a write becomes
  *   `BackendUnavailableError` when the request was refused before it was sent
- *   or answered `502`/`503`, and `BackendOutcomeUnknownError` (`504`) when it
- *   may have been applied (an expired bound, a lost connection, `500`, `504`).
+ *   or answered `503`, and `BackendOutcomeUnknownError` (`504`) when it
+ *   may have been applied (an expired bound, a lost connection, `500`, `502`, `504`).
  * - Anything else (a refused credential, a missing bucket) becomes a plain
  *   `Error` whose message names the plugin, the provider and the call, with the
  *   original as `cause`: the response stays a masked `500`, and the log says
@@ -149,8 +149,8 @@ export function toStorageError(
     else if (classified instanceof BackendOutcomeUnknownError) fault = 'outcome-unknown';
     else {
       const status = answeredStatus(error);
-      if (status === 502 || status === 503) fault = 'unavailable';
-      else if (status === 500 || status === 504) fault = 'outcome-unknown';
+      if (status === 503) fault = 'unavailable';
+      else if (status === 500 || status === 502 || status === 504) fault = 'outcome-unknown';
     }
   }
   if (fault === 'unavailable' || (fault === 'outcome-unknown' && !write)) {

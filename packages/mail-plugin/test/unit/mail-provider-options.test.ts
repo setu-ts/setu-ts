@@ -9,6 +9,7 @@ import { createServer as createHttpServer } from 'node:http';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import type { Server as NetServer, Socket } from 'node:net';
+import * as tls from 'node:tls';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import type { ISmtpTransport } from '../../src/interfaces/index.ts';
@@ -87,9 +88,10 @@ describe('SMTP timeouts (V13-119)', () => {
 async function smtpServer(
   host: string,
   port: number,
+  credentials?: tls.TlsOptions,
 ): Promise<{ server: NetServer; port: number; received: string[] }> {
   const received: string[] = [];
-  const server = createNetServer((socket) => {
+  const connection = (socket: Socket): void => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
     let buffer = '';
@@ -118,7 +120,11 @@ async function smtpServer(
         else socket.write('250 ok\r\n');
       }
     });
-  });
+  };
+  const server =
+    credentials === undefined
+      ? createNetServer(connection)
+      : tls.createServer(credentials, connection);
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
@@ -129,24 +135,25 @@ async function smtpServer(
 describe('SMTP dnsTtlMs on real nodemailer (V13-119)', () => {
   it('re-resolves after the TTL and moves to the new address', async () => {
     const first = await smtpServer('127.0.0.1', 0);
-    const second = await smtpServer('127.0.0.2', first.port);
-    let clock = 0;
-    let answer = ['127.0.0.1'];
-    let lookups = 0;
-    const provider = new SmtpProvider(
-      { host: 'smtp.x.test', port: first.port, dnsTtlMs: 1000 },
-      {
-        dns: {
-          resolveHost: () => {
-            lookups++;
-            return Promise.resolve(answer);
-          },
-          resolveSrv: () => Promise.resolve([]),
-        },
-        hrtime: () => clock,
-      },
-    );
+    let second: Awaited<ReturnType<typeof smtpServer>> | undefined;
     try {
+      second = await smtpServer('127.0.0.2', first.port);
+      let clock = 0;
+      let answer = ['127.0.0.1'];
+      let lookups = 0;
+      const provider = new SmtpProvider(
+        { host: 'smtp.x.test', port: first.port, dnsTtlMs: 1000 },
+        {
+          dns: {
+            resolveHost: () => {
+              lookups++;
+              return Promise.resolve(answer);
+            },
+            resolveSrv: () => Promise.resolve([]),
+          },
+          hrtime: () => clock,
+        },
+      );
       await provider.connect();
       await provider.send(mail);
       expect(first.received).toHaveLength(1);
@@ -175,8 +182,9 @@ describe('SMTP dnsTtlMs on real nodemailer (V13-119)', () => {
       await provider.disconnect();
       await expect(provider.send(mail)).rejects.toThrow(/not connected/);
     } finally {
-      first.server.close();
-      second.server.close();
+      await new Promise<void>((resolve) => first.server.close(() => resolve()));
+      if (second !== undefined)
+        await new Promise<void>((resolve) => second!.server.close(() => resolve()));
     }
   }, 20_000);
 
@@ -197,11 +205,15 @@ describe('SMTP dnsTtlMs on real nodemailer (V13-119)', () => {
 
   it('an IP-literal host is left to nodemailer', async () => {
     const server = await smtpServer('127.0.0.1', 0);
+    let lookups = 0;
     const provider = new SmtpProvider(
       { host: '127.0.0.1', port: server.port, dnsTtlMs: 1000 },
       {
         dns: {
-          resolveHost: () => Promise.reject(new Error('must not resolve')),
+          resolveHost: () => {
+            lookups++;
+            return Promise.reject(new Error('must not resolve'));
+          },
           resolveSrv: () => Promise.resolve([]),
         },
         hrtime: () => 0,
@@ -211,8 +223,9 @@ describe('SMTP dnsTtlMs on real nodemailer (V13-119)', () => {
       await provider.connect();
       await provider.send(mail);
       expect(server.received).toEqual(['127.0.0.1']);
+      expect(lookups).toBe(0);
     } finally {
-      server.server.close();
+      await new Promise<void>((resolve) => server.server.close(() => resolve()));
     }
   }, 20_000);
 });
@@ -406,7 +419,8 @@ describe('MailPlugin wiring for the new options', () => {
       expect(server.received).toEqual(['127.0.0.1']);
       expect(ticks).toBeGreaterThan(0);
     } finally {
-      server.server.close();
+      await provider.disconnect();
+      await new Promise<void>((resolve) => server.server.close(() => resolve()));
     }
   }, 20_000);
 });
@@ -481,6 +495,8 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
       // DNS down at boot: connect still succeeds (nodemailer would resolve the name itself).
       await provider.connect();
       failing = false;
+      // The failed attempt holds for the TTL; the first send after it resolves.
+      clock = 1500;
       await provider.send(mail);
       expect(server.received).toEqual(['127.0.0.1']);
       failing = true;
@@ -489,7 +505,8 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
       await provider.send(mail);
       expect(server.received).toEqual(['127.0.0.1', '127.0.0.1']);
     } finally {
-      server.server.close();
+      await provider.disconnect();
+      await new Promise<void>((resolve) => server.server.close(() => resolve()));
     }
   }, 20_000);
 
@@ -521,44 +538,58 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
     expect(provider.isReady()).toBe(false);
   });
 
-  it('connecting by address presents the host as the TLS server name', async () => {
+  it('connecting by address verifies the target name with a trusted certificate', async () => {
     const { readFileSync } = await import('node:fs');
-    const { createServer: createTlsServer } = await import('node:tls');
-    const names: (string | false | null)[] = [];
-    const { createSecureContext } = await import('node:tls');
-    const credentials = {
-      key: readFileSync(new URL('../fixtures/tls/other-test.key', import.meta.url)),
-      cert: readFileSync(new URL('../fixtures/tls/other-test.crt', import.meta.url)),
-    };
-    // The client refuses the certificate, so the name is recorded where the
-    // server first sees it: the SNI of the ClientHello.
-    const tlsServer = createTlsServer({
-      ...credentials,
-      SNICallback: (servername, callback) => {
-        names.push(servername);
-        callback(null, createSecureContext(credentials));
-      },
+    const defaults = tls.getCACertificates('default');
+    const credentials = (name: string) => ({
+      key: readFileSync(new URL(`../fixtures/tls/${name}.key`, import.meta.url)),
+      cert: readFileSync(new URL(`../fixtures/tls/${name}.crt`, import.meta.url)),
     });
-    await new Promise<void>((resolve) => tlsServer.listen(0, '127.0.0.1', resolve));
-    const port = (tlsServer.address() as { port: number }).port;
-    const provider = new SmtpProvider(
-      { host: 'smtp.x.test', port, secure: true, dnsTtlMs: 1000 },
-      {
-        dns: {
-          resolveHost: () => Promise.resolve(['127.0.0.1']),
-          resolveSrv: () => Promise.resolve([]),
-        },
-        hrtime: () => 0,
-      },
-    );
+    const other = credentials('other-test');
+    const valid = credentials('smtp-x-test');
+    tls.setDefaultCACertificates([...defaults, other.cert.toString(), valid.cert.toString()]);
     try {
-      await provider.connect();
-      // The certificate is for other.test (and self-signed): the send is
-      // refused, never sent to a server that cannot prove it is the host.
-      await expect(provider.send(mail)).rejects.toThrow();
-      expect(names).toContain('smtp.x.test');
+      for (const [cert, matches] of [
+        [other, false],
+        [valid, true],
+      ] as const) {
+        const names: string[] = [];
+        const server = await smtpServer('127.0.0.1', 0, {
+          ...cert,
+          SNICallback: (name, callback) => {
+            names.push(name);
+            callback(null, tls.createSecureContext(cert));
+          },
+        });
+        const provider = new SmtpProvider(
+          { host: 'smtp.x.test', port: server.port, secure: true, dnsTtlMs: 1000 },
+          {
+            dns: {
+              resolveHost: () => Promise.resolve(['127.0.0.1']),
+              resolveSrv: () => Promise.resolve([]),
+            },
+            hrtime: () => 0,
+          },
+        );
+        try {
+          await provider.connect();
+          if (matches) {
+            await provider.send(mail);
+            expect(server.received).toEqual(['127.0.0.1']);
+          } else {
+            await expect(provider.send(mail)).rejects.toMatchObject({
+              originalCode: 'ERR_TLS_CERT_ALTNAME_INVALID',
+            });
+            expect(server.received).toEqual([]);
+          }
+          expect(names).toContain('smtp.x.test');
+        } finally {
+          await provider.disconnect();
+          await new Promise<void>((resolve) => server.server.close(() => resolve()));
+        }
+      }
     } finally {
-      await new Promise<void>((resolve) => tlsServer.close(() => resolve()));
+      tls.setDefaultCACertificates(defaults);
     }
   }, 20_000);
 
@@ -567,14 +598,17 @@ describe('review fixes: SMTP options, DNS refresh and SendGrid refusals', () => 
     const provider = new SendGridProvider({
       apiKey: 'k',
       requestTimeoutMs: 300,
-      http: () => Promise.resolve(new Response(slowBody, { status: 400 })),
+      http: () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(new Response(slowBody, { status: 400 })), 200),
+        ),
     });
     await provider.connect();
     const started = performance.now();
     const error = await provider.send(mail).catch((e: unknown) => e);
     // One bound covers the send and the error text.
-    // Two bounds would take 600 ms; one takes about 300.
-    expect(performance.now() - started).toBeLessThan(560);
+    // A fresh body budget would take 500 ms; one takes about 300.
+    expect(performance.now() - started).toBeLessThan(450);
     expect(error).not.toBeInstanceOf(BackendOutcomeUnknownError);
     expect((error as Error).message).toBe('SendGrid send failed: HTTP 400');
   });

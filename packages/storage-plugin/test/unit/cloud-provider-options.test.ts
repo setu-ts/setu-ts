@@ -271,7 +271,7 @@ describe('GcsProvider.getStream waits for the first chunk (V13-235)', () => {
 describe('isGcsNotFound', () => {
   it('reads the numeric code only, never the message', () => {
     expect(isGcsNotFound({ code: 404 })).toBe(true);
-    expect(isGcsNotFound({ code: 'ENOENT' })).toBe(true);
+    expect(isGcsNotFound({ code: 'ENOENT' })).toBe(false);
     expect(isGcsNotFound(new Error('Not Found'))).toBe(false);
     expect(isGcsNotFound({ code: 403, message: 'Not Found' })).toBe(false);
     expect(isGcsNotFound(null)).toBe(false);
@@ -521,9 +521,10 @@ describe('the adapted Azure client (V13-216, V13-215)', () => {
     const blob = {
       uploadData: (_d: Uint8Array, options?: { abortSignal?: AbortSignal }) => record(options),
       download: (_o?: number, _l?: number, options?: { abortSignal?: AbortSignal }) =>
-        record(options),
+        record(options).then(() => ({ deleted: true })),
       delete: record,
       exists: (options?: { abortSignal?: AbortSignal }) => record(options).then(() => true),
+      getProperties: record,
       generateSasUrl: (o: { permissions: string }) => Promise.resolve(`sas:${o.permissions}`),
     };
     const { mod } = azureModule(blob);

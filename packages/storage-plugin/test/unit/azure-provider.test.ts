@@ -157,6 +157,11 @@ describe('adaptAzureModule', () => {
                   delete() {
                     store.delete(key);
                   },
+                  getProperties() {
+                    if (!store.has(key))
+                      return Promise.reject({ statusCode: 404, code: 'BlobNotFound' });
+                    return Promise.resolve({});
+                  },
                   exists() {
                     return store.has(key);
                   },

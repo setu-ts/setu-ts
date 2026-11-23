@@ -323,7 +323,8 @@ describe('TaskPool cancellation', () => {
     // The sweep reads the queued call's throwing `aborted`: counted as aborted.
     real.abort('stop');
     await firstAborted;
-    await expect(second).rejects.toThrow('late getter');
+    await expect(second).rejects.toBeInstanceOf(Error);
+    await expect(second).rejects.toMatchObject({ message: 'late getter' });
     expectAborted(metrics, 2);
     // A throwing removeEventListener does not stop a success from settling.
     armed = false;
@@ -428,7 +429,8 @@ describe('WorkerPoolService cancellation', () => {
     expect(() => {
       pending = service.run(SPEC, 1, options);
     }).not.toThrow();
-    await expect(pending).rejects.toThrow('getter');
+    await expect(pending).rejects.toBeInstanceOf(Error);
+    await expect(pending).rejects.toMatchObject({ message: 'getter' });
     expect(service.stats()).toEqual([]);
     await service.shutdown();
   });
@@ -455,7 +457,8 @@ describe('WorkerPoolService cancellation', () => {
       expect(() => {
         pending = service.run(SPEC, 1, { signal });
       }).not.toThrow();
-      await expect(pending).rejects.toThrow('getter');
+      await expect(pending).rejects.toBeInstanceOf(Error);
+      await expect(pending).rejects.toMatchObject({ message: 'getter' });
       await service.shutdown();
     },
   );

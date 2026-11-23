@@ -110,6 +110,13 @@ SES v2 has no local stand-in the project's runs could use (LocalStack community 
 the `ses` arm was proved only against an in-test capture server: what it sends and where, not that
 SES accepts it. No live AWS or SendGrid account was used.
 
+SMTP DNS refreshes share one in-flight lookup per generation. Failed and empty lookups retain the
+last good transport for the TTL from the attempt (`dnsTtlMs: 0` retries each time); with no
+transport yet, a failed or timed-out lookup lets nodemailer resolve the host itself.
+`connectionTimeoutMs` also bounds DNS refreshes (default 120000 ms). Disconnect wins an in-flight
+connect, and replaced transports close after active sends settle. Injected SES readiness probes are
+bounded by `requestTimeoutMs`, retain their boolean results and return false on failure or timeout.
+
 ## Options
 
 | Option      | Type                                     | Default | Description                                                                                                                                  |

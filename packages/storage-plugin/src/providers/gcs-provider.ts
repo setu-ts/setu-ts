@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { PutObjectOptions } from '@setu-ts/common';
+import type { IRuntimeServices, PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
 import {
@@ -16,7 +16,13 @@ import {
 } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 import type { StorageDeadline, StorageOperation } from './fault.ts';
-import { answeredBelow500, resolveRequestTimeout, runBounded, toStorageError } from './fault.ts';
+import {
+  answeredBelow500,
+  destroyOnAbort,
+  resolveRequestTimeout,
+  runBounded,
+  toStorageError,
+} from './fault.ts';
 import { storageKeyRefusal } from '../services/storage-key.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -41,7 +47,7 @@ export interface GcsBucket {
  */
 export interface GcsFacadeFile {
   getMetadata(): Promise<[Record<string, unknown>]>;
-  download(): Promise<{ body: Uint8Array | ArrayLike<number> }>;
+  download(signal?: AbortSignal): Promise<{ body: Uint8Array | ArrayLike<number> }>;
   save(data: Uint8Array, options: Record<string, unknown>, cb: (error: Error | null) => void): void;
   delete(): Promise<boolean>;
   getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
@@ -112,8 +118,9 @@ export interface GcsProviderOptions {
   /**
    * API endpoint, such as a private endpoint or an emulator
    * (`http://127.0.0.1:4443`). Passed to the SDK as `apiEndpoint`; the SDK adds
-   * `/storage/v1` itself. `STORAGE_EMULATOR_HOST`, when set, overrides it, and credentials
-   * follow it: set `endpointAuth: false` with an emulator.
+   * `/storage/v1` itself. A differing `STORAGE_EMULATOR_HOST` is refused with
+   * `RangeError` to prevent splitting JSON requests and uploads between hosts.
+   * Set `endpointAuth: false` with an emulator.
    *
    * @since 0.14.0
    */
@@ -165,7 +172,7 @@ export function validateGcsClient(client: unknown): boolean {
 export function isGcsNotFound(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const code = (error as { code?: unknown }).code;
-  return code === 404 || code === 'ENOENT';
+  return code === 404;
 }
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
@@ -217,20 +224,23 @@ export function adaptGcsModule(
                 });
               });
             },
-            download() {
-              return new Promise<{ body: Uint8Array | NodeJS.ReadableStream }>(
-                (resolve, reject) => {
-                  const fileHandle = b.file(name);
-                  (
-                    fileHandle as {
-                      download: (cb: (err: Error | null, data: Uint8Array) => void) => void;
-                    }
-                  ).download((err: Error | null, data: Uint8Array) => {
-                    if (err) reject(err);
-                    else resolve({ body: data });
-                  });
-                },
-              );
+            async download(signal?: AbortSignal) {
+              const readable = b.file(name).createReadStream();
+              if (signal !== undefined) destroyOnAbort(readable, signal);
+              const chunks: Uint8Array[] = [];
+              let size = 0;
+              for await (const chunk of readable as AsyncIterable<unknown>) {
+                const bytes = toBytes(chunk);
+                chunks.push(bytes);
+                size += bytes.length;
+              }
+              const body = new Uint8Array(size);
+              let offset = 0;
+              for (const chunk of chunks) {
+                body.set(chunk, offset);
+                offset += chunk.length;
+              }
+              return { body };
             },
             save(
               data: Uint8Array,
@@ -331,8 +341,8 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
 /**
  * Google Cloud Storage provider.
  *
- * Every call runs under `requestTimeoutMs` (the SDK takes no abort signal, so
- * the bound races the call) and every failure other than GCS's not-found
+ * Every call runs under `requestTimeoutMs`; buffered downloads destroy their
+ * SDK stream when the deadline signal aborts. Every failure other than GCS's not-found
  * answer is classified by `toStorageError`. `getStream` waits for the first
  * chunk before it answers, so an absent object, a refused credential or an
  * outage surfaces before a response is sent; the stream after that is pulled,
@@ -345,6 +355,7 @@ export class GcsProvider implements StorageProvider {
   readonly #options: GcsProviderOptions;
   readonly #now: (() => number) | undefined;
   readonly #deadline: StorageDeadline;
+  readonly #env: IRuntimeServices['env'] | undefined;
   /**
    * Delegates to the client's optional `isHealthy?()` — the lazily adapted
    * client's probe calls `bucket.exists()`. Assigned in `connect()` only when
@@ -362,15 +373,20 @@ export class GcsProvider implements StorageProvider {
    *   `packages/runtime`). Without one, `getSignedUrl` rejects by name.
    * @param timing - The runtime timer surface for the bound (ambient timers
    *   when absent)
-   * @throws {RangeError} When `requestTimeoutMs` is out of range
+   * @param env - Runtime environment for checking `STORAGE_EMULATOR_HOST`
+   * @throws {RangeError} When `requestTimeoutMs` is out of range or the
+   *   runtime's `STORAGE_EMULATOR_HOST` differs from `endpoint`
    */
   constructor(
     options?: GcsProviderOptions,
     now?: () => number,
     timing?: StorageDeadline['timing'],
+    env?: IRuntimeServices['env'],
   ) {
     this.#options = options ?? { bucket: '' };
     this.#now = now;
+    this.#env = env;
+    this.#checkEndpoint();
     this.#deadline = {
       timeoutMs: resolveRequestTimeout(this.#options.requestTimeoutMs),
       ...(timing !== undefined && { timing }),
@@ -382,6 +398,7 @@ export class GcsProvider implements StorageProvider {
    */
   async connect(): Promise<void> {
     if (this.#client !== null) return;
+    this.#checkEndpoint();
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateGcsClient(injected)) {
@@ -392,6 +409,16 @@ export class GcsProvider implements StorageProvider {
       this.#client = adaptGcsModule(await loadGcsModule(), this.#options, this.#deadline);
     }
     this.#installProbe();
+  }
+
+  #checkEndpoint(): void {
+    const endpoint = this.#options.endpoint;
+    const emulator = this.#env?.STORAGE_EMULATOR_HOST;
+    if (endpoint && emulator && normalizeEndpoint(endpoint) !== normalizeEndpoint(emulator)) {
+      throw new RangeError(
+        'GcsProvider: endpoint and STORAGE_EMULATOR_HOST must name the same endpoint',
+      );
+    }
   }
 
   /**
@@ -438,7 +465,7 @@ export class GcsProvider implements StorageProvider {
    */
   async #call<T>(
     operation: StorageOperation,
-    run: () => Promise<T>,
+    run: (signal: AbortSignal) => Promise<T>,
     notFound?: { readonly value: T },
   ): Promise<T> {
     this.#assertConnected();
@@ -477,6 +504,14 @@ export class GcsProvider implements StorageProvider {
     const saveOptions: Record<string, unknown> = {
       ...(options?.contentType === undefined ? {} : { contentType: options.contentType }),
       ...(options?.metadata === undefined ? {} : { metadata: { metadata: options.metadata } }),
+      // An authenticated custom endpoint uploads in one multipart request: the
+      // SDK's resumable path (`File#startResumableUpload_`) never passes
+      // `useAuthWithCustomEndpoint`, so it drops the credential for a host
+      // outside Google's domain (measured on 7.22.0). The object is already in
+      // memory, so one request costs nothing.
+      ...(this.#options.endpoint !== undefined && this.#options.endpointAuth !== false
+        ? { resumable: false }
+        : {}),
     };
     return this.#call(
       'put',
@@ -503,8 +538,8 @@ export class GcsProvider implements StorageProvider {
 
     return this.#call<Uint8Array | null>(
       'get',
-      async () => {
-        const { body } = await this.#getFile(path).download();
+      async (signal) => {
+        const { body } = await this.#getFile(path).download(signal);
         // The facade body is normally a Uint8Array, but a Buffer-like ArrayLike
         // is converted defensively.
         return body instanceof Uint8Array ? body : new Uint8Array(body);
@@ -651,6 +686,9 @@ export class GcsProvider implements StorageProvider {
       first = await runBounded(this.#deadline, 'gcs', 'getStream', () => iterator.next());
     } catch (error) {
       release();
+      if (typeof (readable as { destroy?: unknown }).destroy !== 'function') {
+        void Promise.resolve(iterator.return?.()).catch(() => {});
+      }
       if (isGcsNotFound(error)) return null;
       throw toStorageError(error, 'gcs', 'getStream');
     }
@@ -680,6 +718,11 @@ export class GcsProvider implements StorageProvider {
       },
     });
   }
+}
+
+/** Matches the SDK's scheme default and trailing-slash normalization. */
+function normalizeEndpoint(endpoint: string): string {
+  return (/^https?:\/\//.test(endpoint) ? endpoint : `https://${endpoint}`).replace(/\/+$/, '');
 }
 
 /** Converts a stream chunk to bytes (a node `Buffer` already is one). */

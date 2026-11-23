@@ -42,7 +42,8 @@ ctx.response.json(pools);
 - Payloads cross by structured clone (no functions); shared memory stays shared.
 - `taskTimeoutMs` defaults to 30000 ms; `0` disables it; per-call `timeoutMs` overrides it.
 - Per-call `signal` rejects with `signal.reason`: queued work is withdrawn, a running worker
-  terminated; counted as rejected, reason `aborted`.
+  terminated; counted as rejected, reason `aborted`. Throwing signal getters reject with their
+  error.
 - `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 ms and cannot be disabled.
 - Without worker support, `run` rejects with `WorkerPoolUnavailableError`; health is up with
   `available: false`.

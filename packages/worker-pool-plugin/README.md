@@ -137,7 +137,8 @@ Pass `WorkerRunOptions.signal` to withdraw a call. A pre-aborted signal rejects 
 unchanged without queuing work; a queued call is removed; a running call's worker is terminated and
 replaced as on a timeout. Each cancellation counts once as `aborted` in
 `worker_pool_tasks_rejected_total`, without incrementing `completed` or `failed`. Aborting after
-settlement does nothing. Shutdown and abort races keep whichever result settles first.
+settlement does nothing. Shutdown and abort races keep whichever result settles first. If the
+signal's `aborted` or `reason` getter throws, that error is the rejection reason.
 
 ```typescript
 import type { IWorkerPool } from '@setu-ts/common';

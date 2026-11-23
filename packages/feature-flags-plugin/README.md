@@ -49,6 +49,9 @@ app.router.get('/beta', {
 });
 ```
 
+A startup snapshot timeout leaves LaunchDarkly `status().healthy` false with a detail until a
+successful snapshot refill clears the failure, even if SDK initialization succeeded.
+
 ## Options
 
 `FeatureFlagsPluginOptions` is a union discriminated on `provider`, so a missing per-arm field is a

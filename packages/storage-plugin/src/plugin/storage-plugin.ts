@@ -145,6 +145,7 @@ export function createProvider(
         },
         now,
         timing(),
+        runtime.env,
       );
 
     case 'azure':

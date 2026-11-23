@@ -208,7 +208,8 @@ export interface MailProviderOptions {
   transport?: ISmtpTransport;
   /**
    * (`smtp`) How long to wait for the TCP connection, in milliseconds
-   * (nodemailer `connectionTimeout`; nodemailer's default when absent).
+   * (nodemailer `connectionTimeout`; default 120000 ms). Also bounds each
+   * DNS refresh when `dnsTtlMs` is set.
    *
    * @since 0.14.0
    */

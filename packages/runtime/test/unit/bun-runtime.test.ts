@@ -66,6 +66,65 @@ function createFakeBunHost(overrides: Partial<BunHost> = {}): BunHost {
 }
 
 describe('createBunRuntimeServices', () => {
+  for (const code of ['ENOENT', 'EACCES']) {
+    it(`preserves ${code} from injected host and filesystem modules`, async () => {
+      const error = { code };
+      const fail = (): never => {
+        throw error;
+      };
+      const host = createFakeBunHost({
+        readFile: fail,
+        realPath: fail,
+        writeFile: fail,
+        stat: fail,
+        readdir: fail,
+        mkdir: fail,
+        rm: fail,
+        createReadStream: fail,
+      });
+      const fs = createBunRuntimeServices(host).fs!;
+      for (const run of [
+        () => fs.readFile('/x'),
+        () => fs.realPath!('/x'),
+        () => fs.writeFile('/x', new Uint8Array()),
+        () => fs.stat('/x'),
+        () => fs.readdir('/x'),
+        () => fs.mkdir('/x'),
+        () => fs.rm('/x'),
+        () => fs.readStream!('/x'),
+      ]) {
+        await expect(run()).rejects.toBe(error);
+      }
+      const built = buildBunHost({
+        fs: {
+          readFileSync: fail,
+          realpathSync: fail,
+          writeFileSync: fail,
+          statSync: fail,
+          readdirSync: fail,
+          mkdirSync: fail,
+          rmSync: fail,
+          createReadStream: fail,
+        },
+        proc: { version: '', versions: {}, env: {}, exit: fail, on: () => {} },
+        hostname: () => '',
+        bunGlobal: undefined,
+      });
+      const builtFs = createBunRuntimeServices(built).fs!;
+      for (const run of [
+        () => builtFs.readFile('/x'),
+        () => builtFs.realPath!('/x'),
+        () => builtFs.writeFile('/x', new Uint8Array()),
+        () => builtFs.stat('/x'),
+        () => builtFs.readdir('/x'),
+        () => builtFs.mkdir('/x'),
+        () => builtFs.rm('/x'),
+        () => builtFs.readStream!('/x'),
+      ]) {
+        await expect(run()).rejects.toBe(error);
+      }
+    });
+  }
   it('returns platform "bun"', () => {
     const services = createBunRuntimeServices(createFakeBunHost());
     expect(services.platform()).toBe('bun');
@@ -310,16 +369,16 @@ describe('buildBunHost — the default host', () => {
     expect(calls).toEqual(['write:/tmp/a.bin:3', 'mkdir:/tmp/deep:true', 'rm:/tmp/deep:true']);
   });
 
-  it('reports null / false instead of throwing for missing paths', () => {
+  it('preserves ENOENT for missing paths', () => {
     const host = buildBunHost();
-    expect(host.readFile('/definitely/not/here')).toBeNull();
-    expect(host.realPath('/definitely/not/here')).toBeNull();
-    expect(host.stat('/definitely/not/here')).toBeNull();
-    expect(host.readdir('/definitely/not/here')).toBeNull();
-    expect(host.rm('/definitely/not/here')).toBe(false);
+    expect(() => host.readFile('/definitely/not/here')).toThrow(/ENOENT/);
+    expect(() => host.realPath('/definitely/not/here')).toThrow(/ENOENT/);
+    expect(() => host.stat('/definitely/not/here')).toThrow(/ENOENT/);
+    expect(() => host.readdir('/definitely/not/here')).toThrow(/ENOENT/);
+    expect(() => host.rm('/definitely/not/here')).toThrow(/ENOENT/);
   });
 
-  it('mkdir reports false when the underlying call fails', () => {
+  it('mkdir preserves the underlying failure', () => {
     const mods: BunModules = {
       fs: {
         readFileSync: () => new Uint8Array(),
@@ -350,7 +409,7 @@ describe('buildBunHost — the default host', () => {
       bunGlobal: undefined,
     };
     const host = buildBunHost(mods);
-    expect(host.mkdir('/anywhere')).toBe(false);
+    expect(() => host.mkdir('/anywhere')).toThrow('EEXIST');
     // Version comes from process.versions.bun when the Bun global is absent.
     expect(host.version).toBe('1.1.0');
     expect(host.hostname).toBe('fake-host');
@@ -483,7 +542,7 @@ describe('buildBunHost createReadStream wiring', () => {
     expect(buildBunHost(mods).createReadStream!('/tmp/x')).toBe(null);
   });
 
-  it('returns null when the underlying createReadStream throws', () => {
+  it('preserves the underlying createReadStream error', () => {
     const mods: BunModules = {
       fs: {
         readFileSync: () => new Uint8Array(),
@@ -507,7 +566,7 @@ describe('buildBunHost createReadStream wiring', () => {
       bunGlobal: { version: '1.1.0' },
     };
 
-    expect(buildBunHost(mods).createReadStream!('/tmp/x')).toBe(null);
+    expect(() => buildBunHost(mods).createReadStream!('/tmp/x')).toThrow('ENOENT');
   });
   // V6: Bun was the one adapter whose `onSignal` delegation nothing asserted.
   // Deno and Node each had this test; here the fixture supplied `onSignal: () =>

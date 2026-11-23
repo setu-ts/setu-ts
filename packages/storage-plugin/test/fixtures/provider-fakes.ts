@@ -113,6 +113,10 @@ export function azure(): StorageProvider {
           objects.set(name, data);
           return Promise.resolve({});
         },
+        getProperties: () =>
+          objects.has(name)
+            ? Promise.resolve({})
+            : Promise.reject({ statusCode: 404, code: 'BlobNotFound' }),
         exists: () => Promise.resolve(objects.has(name)),
         delete: () =>
           objects.delete(name)

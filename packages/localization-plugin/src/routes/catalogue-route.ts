@@ -107,16 +107,16 @@ export function validateKeyPrefixes(keyPrefixes: unknown): readonly string[] | u
   if (keyPrefixes === undefined) {
     return undefined;
   }
-  if (
-    !Array.isArray(keyPrefixes) ||
-    keyPrefixes.length === 0 ||
-    !keyPrefixes.every((prefix: unknown) => typeof prefix === 'string' && prefix !== '')
-  ) {
-    throw new TypeError(
-      'localization-plugin: exposeCatalogues.keyPrefixes must be a non-empty array of non-empty strings.',
-    );
+  const copy: unknown[] = Array.isArray(keyPrefixes) ? keyPrefixes.slice() : [];
+  const refusal =
+    'localization-plugin: exposeCatalogues.keyPrefixes must be a non-empty array of non-empty strings.';
+  if (copy.length === 0) throw new TypeError(refusal);
+  for (let index = 0; index < copy.length; index++) {
+    if (typeof copy[index] !== 'string' || copy[index] === '') {
+      throw new TypeError(refusal);
+    }
   }
-  return Object.freeze([...(keyPrefixes as readonly string[])]);
+  return Object.freeze(copy as string[]);
 }
 
 /**

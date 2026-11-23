@@ -62,12 +62,12 @@ describe('adaptGcsModule', () => {
               file(name: string) {
                 return {
                   getMetadata() {
-                    if (!store.has(name)) throw new Error('ENOENT');
+                    if (!store.has(name)) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     return Promise.resolve([{}]);
                   },
                   download() {
                     const data = store.get(name);
-                    if (data === undefined) throw new Error('ENOENT');
+                    if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     return Promise.resolve({ body: data });
                   },
                   save(
@@ -95,7 +95,7 @@ describe('adaptGcsModule', () => {
                   },
                   createReadStream() {
                     const data = store.get(name);
-                    if (data === undefined) throw new Error('ENOENT');
+                    if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     let emitted = false;
                     return {
                       on(event: string, fn: (...args: unknown[]) => void) {
@@ -954,7 +954,7 @@ describe('GcsProvider', () => {
                     return;
                   }
                   if (!store.has(nameStr)) {
-                    cb(new Error('ENOENT'));
+                    cb(Object.assign(new Error('ENOENT'), { code: 404 }));
                     return;
                   }
                   cb(null, { size: store.get(nameStr)!.length });
@@ -966,7 +966,7 @@ describe('GcsProvider', () => {
                   }
                   const data = store.get(nameStr);
                   if (data === undefined) {
-                    cb(new Error('ENOENT'));
+                    cb(Object.assign(new Error('ENOENT'), { code: 404 }));
                     return;
                   }
                   cb(null, data);
@@ -995,16 +995,14 @@ describe('GcsProvider', () => {
                   cb(null, `https://signed.url/${nameStr}?${params.toString()}`);
                 },
                 createReadStream() {
-                  const data = store.get(nameStr);
-                  if (data === undefined) throw new Error('ENOENT');
-                  let emitted = false;
+                  const data = onDownloadData ?? store.get(nameStr);
+                  if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                   return {
-                    on(event: string, fn: (...args: unknown[]) => void) {
-                      if (!emitted && event === 'data') {
-                        emitted = true;
-                        setTimeout(() => fn(data), 0);
-                        setTimeout(() => fn(), 2);
-                      }
+                    on() {
+                      return this;
+                    },
+                    async *[Symbol.asyncIterator]() {
+                      yield data;
                     },
                   } as unknown as NodeJS.ReadableStream;
                 },

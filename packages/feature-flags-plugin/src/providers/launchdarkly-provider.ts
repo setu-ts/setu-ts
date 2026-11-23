@@ -115,6 +115,7 @@ export class LaunchDarklyProvider implements FlagProvider {
   readonly #initTimeoutSeconds: number;
   /** Set when `start()` could not reach LaunchDarkly; surfaced by `status()`. */
   #startError: string | undefined;
+  #snapshotError: string | undefined;
 
   /**
    * @param config - The provider configuration
@@ -266,6 +267,7 @@ export class LaunchDarklyProvider implements FlagProvider {
     this.#snapshots.clear();
     this.#refilling.clear();
     this.#started = false;
+    this.#snapshotError = undefined;
     return Promise.resolve();
   }
 
@@ -273,7 +275,8 @@ export class LaunchDarklyProvider implements FlagProvider {
    * Reports whether the client is connected.
    *
    * @returns `healthy: false` with a detail when the client is absent or has
-   * not completed initialization
+   * not completed initialization, or the startup snapshot failed and no
+   * successful refill has cleared that failure
    */
   status(): FlagProviderStatus {
     const client = this.#client;
@@ -286,6 +289,7 @@ export class LaunchDarklyProvider implements FlagProvider {
         detail: this.#startError ?? 'launchdarkly client has not completed initialization',
       };
     }
+    if (this.#snapshotError !== undefined) return { healthy: false, detail: this.#snapshotError };
     return { healthy: true };
   }
 
@@ -346,6 +350,7 @@ export class LaunchDarklyProvider implements FlagProvider {
       // context); caching it would pin every flag to the fallback until the
       // next update event.
       if (state.valid) {
+        this.#snapshotError = undefined;
         this.#snapshots.delete(key);
         this.#snapshots.set(key, state);
         if (this.#snapshots.size > this.#maxCachedContexts) {
@@ -355,6 +360,7 @@ export class LaunchDarklyProvider implements FlagProvider {
         }
       }
     } catch (error) {
+      if (bounded) this.#snapshotError = error instanceof Error ? error.message : String(error);
       this.#logger?.warn('launchdarkly: snapshot refresh failed', {
         contextKey: key,
         error: error instanceof Error ? error.message : String(error),

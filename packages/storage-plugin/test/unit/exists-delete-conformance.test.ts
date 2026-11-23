@@ -101,12 +101,8 @@ function gcsProvider(c: Case): StorageProvider {
 
 function azureProvider(c: Case): StorageProvider {
   const blob = {
-    exists: () =>
-      c === 'present'
-        ? Promise.resolve(true)
-        : c === 'absent'
-          ? Promise.resolve(false)
-          : Promise.reject(AZURE_FAULTS[c]()),
+    getProperties: () =>
+      c === 'present' ? Promise.resolve({}) : Promise.reject(AZURE_FAULTS[c]()),
     delete: () => (c === 'present' ? Promise.resolve({}) : Promise.reject(AZURE_FAULTS[c]())),
   };
   const service = {

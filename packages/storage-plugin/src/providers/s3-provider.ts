@@ -40,8 +40,11 @@ export interface AwsSdkModule {
 
 /** Shape of the presigner SDK module. */
 export interface PresignerSdkModule {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  getSignedUrl(client: any, command: any, options?: Record<string, unknown>): Promise<string>;
+  getSignedUrl(
+    client: unknown,
+    command: unknown,
+    options?: Record<string, unknown>,
+  ): Promise<string>;
 }
 
 /** Combined S3 SDK module shape. */
@@ -102,10 +105,14 @@ export function validateAwsS3Client(client: unknown): boolean {
 
 /** Reports whether an error indicates a missing S3 object. */
 function isS3NotFound(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
+  if (typeof error !== 'object' || error === null) return false;
   const n = (error as { name?: string }).name;
   const status = (error as { $metadata?: { httpStatusCode?: unknown } }).$metadata?.httpStatusCode;
-  return n === 'NoSuchKey' || n === 'NotFound' || status === 404;
+  // A 404 the SDK parsed into another S3 code (`NoSuchBucket`) is not a miss;
+  // one with no S3 code (an unnamed or plain `Error`) is.
+  return (
+    n === 'NoSuchKey' || n === 'NotFound' || (status === 404 && (n === undefined || n === 'Error'))
+  );
 }
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
@@ -174,7 +181,12 @@ export function adaptAwsS3Module(
     bounded(operation, signal, (abortSignal) => client.send(command, { abortSignal }));
 
   return {
-    async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    async put(
+      path: string,
+      data: Uint8Array,
+      options?: PutObjectOptions,
+      signal?: AbortSignal,
+    ): Promise<void> {
       // `ContentType`/`Metadata` are omitted rather than sent as `undefined`:
       // the SDK serializes a present-but-undefined key differently from an
       // absent one on some commands, and an object stored with no explicit
@@ -188,6 +200,7 @@ export function adaptAwsS3Module(
           ...(options?.contentType === undefined ? {} : { ContentType: options.contentType }),
           ...(options?.metadata === undefined ? {} : { Metadata: options.metadata }),
         }),
+        signal,
       );
     },
     get(path: string, signal?: AbortSignal): Promise<Uint8Array | null> {
@@ -195,18 +208,18 @@ export function adaptAwsS3Module(
       // when the bound expires, so a stalled body releases its connection.
       return bounded('get', signal, async (abortSignal) => {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const res: any = await client.send(
+          const res = (await client.send(
             new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
             { abortSignal },
-          );
-          destroyOnAbort(res.Body, abortSignal);
+          )) as { Body?: unknown };
+          const body = res.Body;
+          destroyOnAbort(body, abortSignal);
           // Real SDK v3 Body is an SdkStreamMixin with transformToByteArray().
-          if (res.Body && typeof res.Body.transformToByteArray === 'function') {
-            return (await res.Body.transformToByteArray()) as Uint8Array;
+          if (hasMethods(body, ['transformToByteArray'])) {
+            return (body as { transformToByteArray(): Promise<Uint8Array> }).transformToByteArray();
           }
           // Fallback: already a Uint8Array or translatable.
-          return res.Body instanceof Uint8Array ? res.Body : new Uint8Array(res.Body);
+          return body instanceof Uint8Array ? body : new Uint8Array(body as ArrayLike<number>);
         } catch (error) {
           if (isS3NotFound(error)) return null;
           throw error;
@@ -215,15 +228,15 @@ export function adaptAwsS3Module(
     },
     // S3's DeleteObject answers 204 whether or not the key existed; `S3Provider`
     // checks presence with `head` first so an absent key answers `false`.
-    async delete(path: string): Promise<boolean> {
-      await send('delete', new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }));
+    async delete(path: string, signal?: AbortSignal): Promise<boolean> {
+      await send('delete', new s3Mod.DeleteObjectCommand({ Bucket: bucket, Key: path }), signal);
       return true;
     },
     // `false` only for a definite not-found answer; an outage or a refused
     // credential rejects, so a caller never reads it as "not there".
-    async head(path: string): Promise<boolean> {
+    async head(path: string, signal?: AbortSignal): Promise<boolean> {
       try {
-        await send('exists', new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }));
+        await send('exists', new s3Mod.HeadObjectCommand({ Bucket: bucket, Key: path }), signal);
         return true;
       } catch (error) {
         if (isS3NotFound(error)) return false;
@@ -246,14 +259,14 @@ export function adaptAwsS3Module(
       signal?: AbortSignal,
     ): Promise<ReadableStream<Uint8Array> | null> {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const res: any = await send(
+        const res = (await send(
           'getStream',
           new s3Mod.GetObjectCommand({ Bucket: bucket, Key: path }),
           signal,
-        );
+        )) as { Body?: unknown };
+        const body = res.Body;
         // Real SDK v3 Body is an SdkStreamMixin with transformToWebStream().
-        if (res.Body && typeof res.Body.transformToWebStream === 'function') {
+        if (hasMethods(body, ['transformToWebStream'])) {
           // When the body is the SDK's node stream (Deno/Node/Bun), wrap it
           // ourselves: the adapter stream `transformToWebStream()` produces
           // crashes the PROCESS when a consumer cancels while the origin
@@ -264,20 +277,22 @@ export function adaptAwsS3Module(
           // destroys it on cancel, and keeps the measured ~3.2 MiB
           // read-ahead this suite pins (stream-backpressure-real.test.ts).
           // Non-node-shaped bodies (injected fakes) keep the historical path.
-          if (looksLikeNodeReadable(res.Body)) {
-            return createBoundedNodeStream(res.Body);
+          if (looksLikeNodeReadable(body)) {
+            return createBoundedNodeStream(body);
           }
-          return res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+          return (
+            body as { transformToWebStream(): ReadableStream<Uint8Array> }
+          ).transformToWebStream();
         }
         // Fallback: Body is already a Web ReadableStream (injected fake).
-        if (res.Body && typeof (res.Body as unknown as ReadableStream).getReader === 'function') {
-          return res.Body as ReadableStream<Uint8Array>;
+        if (hasMethods(body, ['getReader'])) {
+          return body as ReadableStream<Uint8Array>;
         }
         // Fake path: wrap raw bytes in a one-chunk stream.
-        if (res.Body instanceof Uint8Array) {
+        if (body instanceof Uint8Array) {
           return new ReadableStream({
             start(controller) {
-              controller.enqueue(res.Body);
+              controller.enqueue(body);
               controller.close();
             },
           });
@@ -452,9 +467,7 @@ export class S3Provider implements StorageProvider {
     const refusal = storageKeyRefusal(path);
     if (refusal !== undefined) throw refusal;
 
-    await this.#call('put', (client) =>
-      options === undefined ? client.put(path, data) : client.put(path, data, options),
-    );
+    await this.#call('put', (client, signal) => client.put(path, data, options, signal));
   }
 
   /**
@@ -491,13 +504,13 @@ export class S3Provider implements StorageProvider {
     // without `s3:ListBucket`), so presence is unknown and the delete goes on.
     let present: boolean;
     try {
-      present = await this.#call('exists', (client) => client.head(path));
+      present = await this.#call('exists', (client, signal) => client.head(path, signal));
     } catch (error) {
       if (!(error instanceof Error) || answeredStatus(error.cause) !== 403) throw error;
       present = true;
     }
     if (!present) return false;
-    return this.#call('delete', (client) => client.delete(path));
+    return this.#call('delete', (client, signal) => client.delete(path, signal));
   }
 
   /**
@@ -512,7 +525,7 @@ export class S3Provider implements StorageProvider {
     const refusal = storageKeyRefusal(path);
     if (refusal !== undefined) return Promise.reject(refusal);
 
-    return this.#call('exists', (client) => client.head(path));
+    return this.#call('exists', (client, signal) => client.head(path, signal));
   }
 
   /**

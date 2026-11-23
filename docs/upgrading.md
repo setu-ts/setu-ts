@@ -27,8 +27,10 @@ be ignored.
 - **Outages are errors.** `exists()` and `delete()` reject on an outage or a refused credential on
   every storage provider; code that treated `false` as "not there" during an outage now sees the
   error. `delete()` of an absent key now resolves `false` on S3 and B2 too (a `HEAD` runs first),
-  the answer every other provider gives.
-- **Status codes.** A storage or cloud-secrets outage answers `503` (a write that may have been
+  the answer every other provider gives. S3 `NoSuchBucket`, Azure `ContainerNotFound` and GCS local
+  `ENOENT` now reject instead of signalling an absent object.
+- **Status codes.** A storage write answered `502` now gives `BackendOutcomeUnknownError` (`504`); a
+  read keeps `503`. A storage or cloud-secrets outage answers `503` (a write that may have been
   applied, `504`) instead of a masked `500`; a missing object read with `get`/`getStream` answers
   `404` (`StorageObjectNotFoundError`). Catch those classes rather than matching error messages: an
   unclassified failure's message now starts `storage-plugin (<provider>): <call> failed:` or
@@ -40,7 +42,11 @@ be ignored.
   SendGrid 15 s). Raise it for large storage transfers, or set `0` to keep the old unbounded call.
 - **GCS.** The SDK's own retry is off, so a `5xx` answers at once; retry in the caller. A provider
   constructed directly needs `now` for `getSignedUrl`. A custom `endpoint` sends credentials unless
-  `endpointAuth: false`.
+  `endpointAuth: false`. Install `@google-cloud/storage@^7.18.0`. With credentials on, `put` to a
+  custom endpoint uploads in one multipart request, because the SDK's resumable upload sends none. A
+  differing `STORAGE_EMULATOR_HOST` and `endpoint` is refused with `RangeError` (scheme-less hosts
+  default to HTTPS and trailing slashes are ignored). Buffered downloads release their streams at
+  the deadline.
 - **Azure storage.** `connectionString` now works as documented; a SAS-URL passed as
   `connectionString` is no longer accepted (use the SAS connection-string form).
 - **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
@@ -53,9 +59,18 @@ be ignored.
   way.
 - **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
   `timeout`, not `timeoutSeconds`. `initTimeoutSeconds` must be a finite number in `(0, 2147483]`,
-  so `0` is refused.
+  so `0` is refused. A startup snapshot timeout leaves `status().healthy` false until a successful
+  refill.
 - **Slack.** A notification's `subject` is now part of the posted text.
-- **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`.
+- **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`. DNS refresh
+  failures/empty answers respect the attempt TTL and keep the last transport; with no transport yet,
+  a failed or timed-out lookup lets nodemailer resolve the host itself. `connectionTimeoutMs` also
+  bounds DNS refreshes; concurrent sends share one lookup and disconnect wins connect.
+- **Vault.** HTTP 5xx reads and writes now reject with `SecretProviderUnavailableError` (503); 4xx
+  handling is unchanged.
+- **Other refusals.** Azure downloads with no body reject unless marked deleted. Bun filesystem
+  errors retain their codes. Throwing upload-brand getters return undefined, sparse catalogue
+  prefixes throw TypeError, and abort getter errors become the task rejection reason.
 
 ### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
 

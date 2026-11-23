@@ -200,8 +200,9 @@ export interface GcsProviderOptions {
   /**
    * API endpoint, such as a private endpoint or an emulator
    * (`http://127.0.0.1:4443`), passed to the SDK as `apiEndpoint`.
-   * `STORAGE_EMULATOR_HOST`, when set, overrides it, and credentials
-   * follow it: set `endpointAuth: false` with an emulator.
+   * A differing `STORAGE_EMULATOR_HOST` is refused with `RangeError` (scheme-less
+   * hosts default to HTTPS; trailing slashes are ignored). Set `endpointAuth: false`
+   * with an emulator.
    *
    * @since 0.14.0
    */
@@ -284,11 +285,19 @@ export interface AzureBlobProviderOptions {
  * @since 0.1.0
  */
 export interface IS3Backend {
-  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
+  /** `signal` aborts the write when the provider's bound expires (since 0.14.0). */
+  put(
+    path: string,
+    data: Uint8Array,
+    options?: PutObjectOptions,
+    signal?: AbortSignal,
+  ): Promise<void>;
   /** `signal` (since 0.14.0) aborts the read when the provider's bound expires. */
   get(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
-  delete(path: string): Promise<boolean>;
-  head(path: string): Promise<boolean>;
+  /** `signal` aborts the delete when the provider's bound expires (since 0.14.0). */
+  delete(path: string, signal?: AbortSignal): Promise<boolean>;
+  /** `signal` aborts the presence check when the provider's bound expires (since 0.14.0). */
+  head(path: string, signal?: AbortSignal): Promise<boolean>;
   getSignedUrl(path: string, expiresIn: number): Promise<string>;
   /** `signal` (since 0.14.0) aborts obtaining the stream when the bound expires. */
   getStream(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array> | null>;
@@ -449,8 +458,10 @@ export interface StorageProvider {
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string>;
   /**
-   * Native streaming download seam; `null` when the provider has no native
-   * stream support (the service falls back to buffering {@linkcode get}).
+   * Omit this member for the service's buffered fallback over {@linkcode get}.
+   * An implemented member returns `null` only for a missing object;
+   * `StorageService.getStream` then throws `StorageObjectNotFoundError`
+   * without falling back to `get`.
    *
    * @param path - Object path/key
    * @returns A `ReadableStream` of object bytes, or `null`

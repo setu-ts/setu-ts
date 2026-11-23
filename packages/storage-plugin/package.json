@@ -43,7 +43,7 @@
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@azure/storage-blob": "^12",
-    "@google-cloud/storage": "^7"
+    "@google-cloud/storage": "^7.18.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {
@@ -63,7 +63,7 @@
     "@aws-sdk/client-s3": "^3",
     "@aws-sdk/s3-request-presigner": "^3",
     "@azure/storage-blob": "^12",
-    "@google-cloud/storage": "^7",
+    "@google-cloud/storage": "^7.18.0",
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",

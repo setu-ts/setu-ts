@@ -64,6 +64,7 @@ export interface AzureBlob {
     options?: AzureOperationOptions,
   ): Promise<AzureDownloadResult>;
   delete(options?: AzureOperationOptions): Promise<unknown>;
+  getProperties(options?: AzureOperationOptions): Promise<unknown>;
   exists(options?: AzureOperationOptions): Promise<boolean>;
   generateSasUrl?(options: { permissions: string; expiresOn: Date }): Promise<string>;
 }
@@ -72,7 +73,7 @@ export interface AzureBlob {
  * Promise-style blob shape the provider operates against — the SDK's own
  * `BlockBlobClient` satisfies it, and so does the lazily adapted facade.
  */
-export type AzureFacadeBlob = AzureBlob;
+export type AzureFacadeBlob = Omit<AzureBlob, 'getProperties'>;
 
 /** Container handle the provider operates against. */
 export interface AzureFacadeContainer {
@@ -144,12 +145,17 @@ export function validateAzureBlobClient(client: unknown): boolean {
 
 const HTTP_NOT_FOUND = 404;
 
-/** Reports whether a caught error is an HTTP 404. */
+/** A blob miss, never a container or other explicitly named 404. */
 export function isAzureNotFound(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const record = error as {
+    statusCode?: unknown;
+    details?: { errorCode?: unknown };
+    code?: unknown;
+  };
+  const code = record.details?.errorCode ?? record.code;
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND
+    record.statusCode === HTTP_NOT_FOUND && (typeof code !== 'string' || code === 'BlobNotFound')
   );
 }
 
@@ -249,7 +255,16 @@ export function adaptAzureModule(
             download: (offset, length) =>
               bound('get', (abortSignal) => blob.download(offset, length, { abortSignal })),
             delete: () => bound('delete', (abortSignal) => blob.delete({ abortSignal })),
-            exists: () => bound('exists', (abortSignal) => blob.exists({ abortSignal })),
+            exists: () =>
+              bound('exists', async (abortSignal) => {
+                try {
+                  await blob.getProperties({ abortSignal });
+                  return true;
+                } catch (error) {
+                  if (isAzureNotFound(error)) return false;
+                  throw error;
+                }
+              }),
             generateSasUrl: (sasOptions) => {
               const generate = blob.generateSasUrl;
               if (generate === undefined) {
@@ -449,8 +464,8 @@ export class AzureBlobProvider implements StorageProvider {
         : { blobHTTPHeaders: { blobContentType: options.contentType } }),
       ...(options?.metadata === undefined ? {} : { metadata: options.metadata }),
     };
-    return this.#call('put', async () => {
-      await this.#getBlockBlob(path).uploadData(data, uploadOptions);
+    return this.#call('put', async (abortSignal) => {
+      await this.#getBlockBlob(path).uploadData(data, { ...uploadOptions, abortSignal });
     });
   }
 
@@ -468,8 +483,12 @@ export class AzureBlobProvider implements StorageProvider {
     return this.#call<Uint8Array | null>(
       'get',
       async (signal) => {
-        const result = await this.#getBlockBlob(path).download();
-        if (result.deleted === true || result.readableStreamBody === undefined) return null;
+        const result = await this.#getBlockBlob(path).download(undefined, undefined, {
+          abortSignal: signal,
+        });
+        if (result.deleted === true) return null;
+        if (result.readableStreamBody === undefined || result.readableStreamBody === null)
+          throw new Error('AzureBlobProvider: unsupported download result (no readableStreamBody)');
         // A body still streaming when the bound expires is destroyed, so it
         // releases its connection.
         destroyOnAbort(result.readableStreamBody, signal);
@@ -498,10 +517,10 @@ export class AzureBlobProvider implements StorageProvider {
     if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call(
       'delete',
-      async () => {
+      async (abortSignal) => {
         // An SDK client resolves a response; an injected facade may resolve
         // `false` for an absent blob, the facade contract before 0.14.0.
-        const result = await this.#getBlockBlob(path).delete();
+        const result = await this.#getBlockBlob(path).delete({ abortSignal });
         return result !== false;
       },
       { value: false },
@@ -520,7 +539,24 @@ export class AzureBlobProvider implements StorageProvider {
     // the SDK resolves a '..' segment before it sends or signs.
     const refusal = storageKeyRefusal(path);
     if (refusal !== undefined) return Promise.reject(refusal);
-    return this.#call('exists', () => this.#getBlockBlob(path).exists(), { value: false });
+    return this.#call(
+      'exists',
+      async (abortSignal) => {
+        const blob: AzureFacadeBlob & Partial<Pick<AzureBlob, 'getProperties'>> =
+          this.#getBlockBlob(path);
+        // An injected SDK client's own `exists()` answers `false` for every
+        // 404, a missing container included; `getProperties` keeps the code.
+        if (typeof blob.getProperties !== 'function') return blob.exists({ abortSignal });
+        try {
+          await blob.getProperties({ abortSignal });
+          return true;
+        } catch (error) {
+          if (isAzureNotFound(error)) return false;
+          throw error;
+        }
+      },
+      { value: false },
+    );
   }
 
   /**
@@ -593,9 +629,13 @@ export class AzureBlobProvider implements StorageProvider {
     if (refusal !== undefined) return Promise.reject(refusal);
     return this.#call<ReadableStream<Uint8Array> | null>(
       'getStream',
-      async () => {
-        const result = await this.#getBlockBlob(path).download();
-        if (result.deleted === true || result.readableStreamBody === undefined) return null;
+      async (abortSignal) => {
+        const result = await this.#getBlockBlob(path).download(undefined, undefined, {
+          abortSignal,
+        });
+        if (result.deleted === true) return null;
+        if (result.readableStreamBody === undefined || result.readableStreamBody === null)
+          throw new Error('AzureBlobProvider: unsupported download result (no readableStreamBody)');
         const readable = result.readableStreamBody as unknown as AsyncIterable<Uint8Array>;
         return createEagerIterableStream(readable);
       },
