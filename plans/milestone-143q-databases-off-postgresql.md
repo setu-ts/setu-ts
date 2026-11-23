@@ -1,0 +1,890 @@
+# Milestone 143q — Databases off PostgreSQL (`@setu-ts/database-plugin`)
+
+> **Status:** Planning; re-verified against `develop` at `712369753` (after #609, #610, #611, #613)
+> on 2026-11-23. Branch: `feat/m143q-databases-off-postgresql` (or the two branches §0.2 proposes). `develop` and `main` are protected; all work, implementation and fixes, stays on this
+> letter's branch until it merges through one pull request into `develop`.
+
+## 0. Objective & scope
+
+The Data lane's first letter. Twelve rows from Part 26 (X119 on the Cosmos, DynamoDB and Bigtable
+emulators, X120 on MySQL 8.4) where an adapter that works on PostgreSQL either tells a caller
+something false or cannot run. When it ships: on Prisma with MySQL a conditional or versioned write
+that lost its race reports the miss, so 100 concurrent writers give exactly one winner; Drizzle with
+MySQL writes, filters and pages through the repository; a MySQL deadlock or duplicate key through
+`query()` answers the same status as on PostgreSQL; a Bigtable project runs on a host with no Google
+credentials and its reads stay flat as a row is updated; a call to Cosmos, DynamoDB or Bigtable ends
+within a bound that applies by default, and `/ready` reports a stopped store; a unit of work on those
+three stores can carry a conditional write; and the outbox, inbox, idempotency and agent-run stores
+are proved on MySQL or refused there by name.
+
+Every change is inside `packages/database-plugin` (its `src/`, `test/`, `README.md`, `AGENT_CARD.md`,
+`deno.json`, `package.json` devDependencies) plus the per-letter entries in `PUBLIC_API.md`,
+`CHANGELOG.md` and `docs/upgrading.md`. No other lane package is edited. `packages/common` is not
+changed (§1 rows C-1, C-2 show the contracts this letter needs already exist).
+
+- **In scope:** V13-230 (High), V13-231 (High), V13-236, V13-238, V13-239, V13-240, V13-241,
+  V13-242, V13-243, V13-244, V13-249, V13-251; the `database-plugin` half of V13-142 (a README note,
+  owned by M143b).
+- **NOT this letter:**
+  - M143h (Data lane, after this letter): V13-237 (`TimeoutError` name read as 503, Bigtable
+    `DEADLINE_EXCEEDED` masked), V13-115 (errors through the typed Drizzle builder), V13-252 (value
+    too long, lock wait timeout), V13-218 (foreign key, NOT NULL), V13-132 (`P1017`), V13-133,
+    V13-139, V13-50, V13-40. This letter edits `src/errors/classify.ts` for three MySQL signals only
+    (§3.5); M143h builds on that file afterwards, in lane order.
+  - M143n (Docs lane): V13-250 (README "four adapters", no DynamoDB or MySQL section), V13-253 (the
+    isolation advice on MySQL, Prisma `update()` returning the pre-image), V13-134 (the "Bounding a
+    call" rows for mysql2 and the mariadb adapter). This letter rewrites only the README rows its
+    own behaviour changes (§13); M143n owns the rest of those sections.
+  - M143e (CLI lane): V13-254 (Prisma arm PostgreSQL only, refusal names Drizzle).
+  - M143j (CLI lane): the template half of V13-231 (§11).
+  - M143l (Web lane): the `auth-plugin` half of V13-240 (§11).
+  - The `cloudflare-plugin` D1 transaction source keeps refusing a conditional write in a unit of
+    work (§9).
+
+### 0.1 Compared with
+
+The comparison rule: every default, behaviour, option name, error class, status, timeout and retry
+rule below was checked against this repository's sibling adapters (the "Sibling" column) and against
+established tools (web documentation, cited). "not verified" means the cell could not be confirmed
+from a primary source in this planning session.
+
+| Question | Sibling adapters here | EF Core | Hibernate / JPA | Rails | Django | Prisma's own guidance | TypeORM / Sequelize |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| How a conditional write learns it lost | Drizzle on PostgreSQL: `UPDATE … RETURNING`, empty = miss (`drizzle-adapter.ts:840-845`); DynamoDB: `ConditionalCheckFailedException` (`dynamo-data-source.ts:366-369`); Bigtable: CheckAndMutateRow `matched` (`bigtable-data-source.ts:374-377`); Cosmos: `IfMatch` etag (`cosmos-data-source.ts:389-396`); Prisma: only `P2025` (`prisma-adapter.ts:917-918`) | rows affected by the UPDATE; zero throws `DbUpdateConcurrencyException`, on every provider ([learn.microsoft.com/ef/core/saving/concurrency](https://learn.microsoft.com/en-us/ef/core/saving/concurrency)) | one UPDATE with the version in WHERE; a zero count is the stale signal, surfaced as `StaleObjectStateException` / `OptimisticLockException` ([Red Hat Hibernate guide §11.4](https://docs.redhat.com/en/documentation/red_hat_jboss_web_server/3/html/hibernate_core_reference_guide/sect-optimistic_concurrency_control)); exact zero-count wording not verified | `StaleObjectError` on the later save ([api.rubyonrails.org Locking::Optimistic](https://api.rubyonrails.org/classes/ActiveRecord/Locking/Optimistic.html)); the page does not state the mechanism, so "rows affected" is not verified | no built-in token; `QuerySet.update()` returns rows matched, and the MySQL backend sets `CLIENT_FOUND_ROWS` for that ([Django ticket #10438](https://code.djangoproject.com/ticket/10438), [#17435](https://code.djangoproject.com/ticket/17435)) | `updateMany` with `id` and `version` in `where`, then `count === 0` means it lost ([prisma.io v6 transactions, optimistic concurrency control](https://www.prisma.io/docs/orm/v6/prisma-client/queries/transactions)); Prisma issue #10207 records the MySQL failure of the read-then-write shape ([github.com/prisma/prisma/issues/10207](https://github.com/prisma/prisma/issues/10207)) | Sequelize raises `OptimisticLockError` "when a conflict is detected" ([sequelize.org optimistic locking](https://sequelize.org/docs/v6/other-topics/optimistic-locking/)), mechanism not verified; TypeORM `update()` reports no affected count, so it cannot enforce a version (issue thread, not primary docs: not verified) |
+| MySQL affected rows: matched or changed | none drive MySQL writes today | not verified | not verified | not verified | matched, by setting `CLIENT_FOUND_ROWS` (ticket #10438) | not documented | not verified |
+| A write rejected at commit in a buffered store | DynamoDB buffered create: `TransactionCanceledException` with `ConditionalCheckFailed` on a Put becomes `DuplicateKeyError` (`dynamo-adapter.ts:433-444`) | `DbUpdateConcurrencyException` from `SaveChanges`, the whole save rolled back (same page) | `OptimisticLockException` at flush or commit (same guide) | not verified | not applicable | not applicable | not verified |
+| Cosmos concurrency inside a batch | Cosmos non-transactional path writes `IfMatch` (`cosmos-data-source.ts:396`) | EF Core's Cosmos provider offers ETag concurrency (`UseETagConcurrency`, [learn.microsoft.com/ef/core/providers/cosmos/modeling](https://learn.microsoft.com/en-us/ef/core/providers/cosmos/modeling)) | not applicable | not applicable | not applicable | not applicable | not applicable |
+| A per-call bound on a NoSQL client the framework constructs | node-postgres `query_timeout` set by the app on its own `Pool` (README "Bounding a call"); every Redis-backed plugin here defaults `commandTimeoutMs` to 15 000 ms (`cache-plugin/src/stores/redis-store.ts:50`, `queue-plugin/src/adapters/redis-queue.ts:63`, `idempotency-plugin/src/constants.ts:45`) | not verified | not verified | not verified | not verified | not applicable | Spring Boot exposes driver timeouts as properties (`spring.elasticsearch.socket-timeout`) and a driver file for Cassandra ([docs.spring.io nosql](https://docs.spring.io/spring-boot/reference/data/nosql.html), cited by the X119 runner; not re-fetched) |
+| Health probe for a NoSQL store | MongoDB `ping` through an optional facade member (`mongo-adapter.ts:157`); Prisma and Drizzle `SELECT 1` | ASP.NET Core documents a database probe (cited by the X119 runner: [learn.microsoft.com health checks](https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks)); not re-fetched | not applicable | not applicable | not applicable | not applicable | Spring Boot ships Cassandra, Couchbase and MongoDB health indicators (X119 runner, [docs.spring.io actuator endpoints](https://docs.spring.io/spring-boot/reference/actuator/endpoints.html)); not re-fetched |
+| Passing driver options through | none: every lazy arm builds its client from two or three fields (`bigtable-client.ts:30-41`, `dynamo-client.ts:38-45`, `cosmos-client.ts:259`) | not applicable | not applicable | not applicable | `OPTIONS` dict passed to the driver (not re-fetched: not verified) | not applicable | TypeORM's `extra` option passes options to the driver (not re-fetched: not verified) |
+
+Where these camps split, the choice is under §12 "Open decisions for the maintainer", not made
+silently.
+
+### 0.2 Proposed split into two ordered parts
+
+The letter is large for one pull request: twelve rows across two unrelated families of code (the SQL
+adapters on MySQL, and the three NoSQL adapters), a new guarded MySQL backend, and a new frozen-relay
+test fixture. The two families share only `src/errors/classify.ts`, `README.md`, the PUBLIC_API
+section and the CHANGELOG entry.
+
+- **Part 1, MySQL** (`feat/m143q1-mysql-writes`): V13-230, V13-242, V13-243, V13-244, V13-251, the
+  MySQL conformance of the outbox, inbox, idempotency and agent-run stores (§3.7), and the guarded
+  MySQL suites. Holds the first High row. Its first step is the two measurements of §3.1.3 (M-1 on
+  MySQL, M-2 on PostgreSQL), before any Prisma design is written into `src/`; the rest of Part 1
+  (Drizzle, classifier) does not depend on them and may proceed in parallel.
+- **Part 2, NoSQL** (`feat/m143q2-nosql-bounds`, cut from `develop` after Part 1 merges):
+  V13-231, V13-236, V13-238, V13-239, V13-240, V13-241, V13-249, V13-142's README note. Holds the
+  second High row.
+
+Part 1 goes first because its `classify.ts` change is three additions that Part 2 does not touch,
+and its guarded MySQL backend is new CI infrastructure that should be seen alone. The split is an
+open decision (§12, D-1); everything below is written so either shape works, and each section names
+its part.
+
+## 1. Contracts verified from SOURCE (not names)
+
+| Reference | Source (file:line) | Verified surface / fact |
+| --- | --- | --- |
+| C-1 `IDataSource.updateWhere?` / `deleteWhere?` | `packages/common/src/services/database.ts:272` | Optional members; a miss returns `null` / `false`. No change needed. |
+| C-2 `IDatabaseAdapter.isHealthy?` | `packages/common/src/services/database.ts:424` | Optional `isHealthy?(): Promise<boolean>`. The three NoSQL adapters declare none today (X119-2: 0 occurrences). |
+| `DatabaseService.hasReachabilityProbe` / probe call | `packages/database-plugin/src/services/database-service.ts:414-470` | Probe present iff `typeof adapter.isHealthy === 'function'`; a missing probe omits `reachable` and reports `up` (README:1561-1568). |
+| Prisma conditional writes | `packages/database-plugin/src/adapters/prisma/prisma-adapter.ts:901-943` | `updateWhere` calls `delegate.update({ where: { ...key, AND: [where] }, data })`; `deleteWhere` calls `delegate.delete(...)`; only `P2025` is a miss. |
+| Prisma `ModelDelegate` facade | `prisma-adapter.ts:145-166` | Declares `findUnique`, `findMany`, `create`, `update`, `delete`, `count`. **No `updateMany`/`deleteMany`.** |
+| Prisma client facade `$transaction` | `prisma-adapter.ts:124-136` | Interactive `$transaction(fn, { maxWait, timeout, isolationLevel })`. |
+| Prisma data source factory | `prisma-adapter.ts:777-949`; called from `beginTransaction` at `:322` (with `tx`) and `createDataSource` at `:387` (with the root client) | The factory cannot tell a root client from a transaction client today; there is no scope parameter. |
+| Prisma connector resolution | `prisma-adapter.ts:458-469`, `PROVIDERS` at `:57-70` | `options.provider` wins, else `_activeProvider`; `'mysql'` is a known connector. |
+| Prisma on MySQL, statements sent by `update` | runner general log `~/Projects/hono-enterprise-published-smoke/v0.13.0/part28/x120/out/x105/mechanism/prisma-mysql-k2.txt` | `BEGIN; SELECT id … WHERE id = ? AND version = 1; UPDATE … WHERE id IN (?) AND (id = ? AND version = 1); SELECT … WHERE id = ?; COMMIT`. Both callers pass the first SELECT; the loser's UPDATE matches zero rows; Prisma returns the read-back. |
+| InnoDB snapshot semantics | [dev.mysql.com 8.4 innodb-consistent-read](https://dev.mysql.com/doc/refman/8.4/en/innodb-consistent-read.html) | A SELECT in a REPEATABLE READ transaction reads the snapshot; UPDATE and DELETE act on current committed data; a query sees changes made by earlier statements of the same transaction. |
+| Prisma's documented optimistic-concurrency pattern | [prisma.io v6 transactions](https://www.prisma.io/docs/orm/v6/prisma-client/queries/transactions) | `updateMany({ where: { id, version } })`, then `count === 0` is the lost race. |
+| `@prisma/adapter-mariadb` 7.10.1 affected rows | `~/Projects/hono-enterprise-published-smoke/v0.11.0/part21/x94/x94-prisma-my/node_modules/@prisma/adapter-mariadb/dist/index.js:331` | `executeRaw` returns `affectedRows`. The adapter passes the config to `mariadb.createPool` unchanged (`:519-521`). |
+| mariadb 3.5.4 `foundRows` default | same tree, `mariadb/lib/config/connection-options.js:173` | `this.foundRows = opts.foundRows === undefined \|\| Boolean(opts.foundRows)`: **on by default**, so `affectedRows` counts matched rows. |
+| mysql2 3.24.4 default flags | same tree, `mysql2/lib/connection_config.js:286-289` | `FOUND_ROWS` is in `getDefaultFlags`, so `affectedRows` counts matched rows unless the application passes `flags: '-FOUND_ROWS'`; `changedRows` is parsed from the localizable `info` text (`mysql2/lib/packets/resultset_header.js:98-102`). |
+| Prisma driver adapter error kinds | `node_modules/.pnpm/@prisma+driver-adapter-utils@7.10.1/.../dist/index.d.ts:151` (`UniqueConstraintViolation`), `:209` (`TransactionWriteConflict`), `:244` (`kind: 'mysql'`) | A portable `kind` discriminant on `meta.driverAdapterError.cause`. |
+| mariadb adapter's mapping of 1062 and 1213 | `adapter-mariadb/dist/index.js:180-188` (`originalCode: errno.toString()`), `:190-201` (1062 → `UniqueConstraintViolation`), `:284-287` (1213 → `TransactionWriteConflict`), `:294-300` (default → `kind: 'mysql'`) | **1062 and 1213 are not `kind: 'mysql'`**, so `classify.ts:277` never sets the `mysql-adapter` namespace for them and `'1062'`/`'1213'` fall through: the measured `P2010` 500s (X120-5, X120-6). |
+| `@prisma/adapter-pg` mapping | `node_modules/.pnpm/@prisma+adapter-pg@7.10.1/.../dist/index.js:472-488`, `:539-542` | `23505` → `UniqueConstraintViolation`; `40001`/`40P01` → `TransactionWriteConflict`: the same kinds, so one rule covers both adapters. |
+| Classifier tables | `packages/database-plugin/src/errors/classify.ts:87` (`DUPLICATE_KEY_CODES`), `:127-147`, `:258-282` (`prismaAdapterCause` reads `originalCode`, `kind`), `:539-553` | No `ER_LOCK_DEADLOCK`; no read of `kind` beyond `'mysql'`; no mysql2 closed-state anchor. |
+| mysql2 closed-connection error | `mysql2/lib/base/connection.js:250-256` | `new Error("Can't add new command when connection is in closed state")`, `fatal = true`, **no `code`**; raised before the command is sent. |
+| Drizzle repository writes | `packages/database-plugin/src/adapters/drizzle/drizzle-adapter.ts:776-868`, `returningRows` `:1372-1383`, `oneReturnedRow` `:1357-1370` | Every write calls `.returning()`; a builder without it throws a plain `Error` (masked 500). |
+| Drizzle `contains` | `drizzle-adapter.ts:1158-1165`, `:1266-1267` | Emits the SQL text `escape '\'`. |
+| Drizzle offset | `drizzle-adapter.ts:764-769` | `.offset()` without `.limit()` when `limit` is 0. |
+| Drizzle MySQL builder | `node_modules/.pnpm/drizzle-orm@0.45.2*/node_modules/drizzle-orm/mysql-core/query-builders/insert.d.ts:111` (`$returningId()`); `mysql2/session.d.ts:13` (`MySqlRawQueryResult = [ResultSetHeader, FieldPacket[]]`); `mysql-core/dialect.js:298-299` (`offset` emitted after `limit` only when set) | A MySQL insert offers `$returningId()`; an update or delete resolves to `[ResultSetHeader, …]` carrying `affectedRows`. |
+| MySQL `OFFSET` | [dev.mysql.com 8.4 SELECT](https://dev.mysql.com/doc/refman/8.4/en/select.html) | `OFFSET` exists only inside `LIMIT`; to read to the end, use `LIMIT offset, 18446744073709551615`. |
+| Drizzle dialect | `packages/database-plugin/src/query/json-path.ts:79-85`; option JSDoc `src/interfaces/index.ts:760-772` | `MySql…` class names map to `'mysql'`; the `dialect` option is documented as "used only to translate a nested JSON filter path". |
+| Bigtable lazy client | `src/adapters/bigtable/bigtable-client.ts:30-41` (`BigtableClientConfiguration`: `projectId`, `apiEndpoint`), `:129-147`, `:260-300` (`adaptBigtableSdkModule`: `getRows(adaptReadOptions(...))`, `row.filter(test, branches)`, no call options) | Two fields reach the SDK; no SDK option, no per-call option. |
+| Bigtable adapter options | `src/adapters/bigtable/bigtable-adapter.ts:107-140`; `src/interfaces/index.ts:1265-1350` | `connect()` issues no RPC; options carry `instance`, `tables`, `maxPageFetches`, `projectId`, `apiEndpoint`, `client`. |
+| Bigtable SDK 6.5.1 | `node_modules/.pnpm/@google-cloud+bigtable@6.5.1*/.../build/src/index.d.ts:33-52`, `index.js:412-422` (insecure creds when an endpoint is set), `:467-469` (metrics handler unless `metricsEnabled === false`); `tabular-api-surface.d.ts` `GetRowsOptions.gaxOptions`; `row.d.ts:38-42` `FilterConfig.gaxOptions`; `filter.d.ts:29` `column.cellLimit`; `v2/bigtable_client.d.ts:235` `pingAndWarm` | `metricsEnabled` is the only switch; both data calls take `gaxOptions`; the per-column cell limit exists. Client-side metrics are on by default for Node ([cloud.google.com bigtable client-side metrics](https://docs.cloud.google.com/bigtable/docs/client-side-metrics)). |
+| Bigtable facade filter union | `src/adapters/bigtable/bigtable-client-types.ts:132-146` | Has `{ row: { cellLimit } }`; **no `{ column: { cellLimit } }`**. |
+| Bigtable read decode | `src/adapters/bigtable/bigtable-data-source.ts:85-100`, reads at `:239-246`, `:421`, `:469` | Keeps `versions[0]`; no read carries a latest-cell filter. |
+| Buffered transaction sources omit conditional writes | `dynamo-data-source.ts:318-406`, `cosmos-data-source.ts:567-597`, `bigtable-data-source.ts:355-396` | `updateWhere`/`deleteWhere` are spread in only when there is no transaction buffer; `BaseRepository` then throws `UnsupportedQueryFeatureError('conditional-write', 'database-plugin', …)` (`base-repository.ts:132-137`). |
+| Bigtable transaction commit | `src/adapters/bigtable/bigtable-transaction.ts:103`, commit at `:235-262` | One CheckAndMutateRow per transaction; the test is `[{ all: true }]` with `onMatch`/`onNoMatch` chosen by `RowPrecondition`. |
+| DynamoDB transaction cancel reading | `src/adapters/dynamo/dynamo-adapter.ts:433-444` | Reads `CancellationReasons[i].Code === 'ConditionalCheckFailed'` and the write at that index. |
+| Cosmos batch `ifMatch` | `node_modules/.pnpm/@azure+cosmos@4.10.2/.../dist/esm/utils/batch.d.ts:59,73,80,97,105` | Batch operations accept `ifMatch`. The facade type (`cosmos-client-types.ts:148-212`) does not declare it. |
+| Cosmos lazy client and probe | `src/adapters/cosmos/cosmos-client.ts:244-261` (`new CosmosClient({ endpoint, key })`); `cosmos-adapter.ts:171-184` (`database.read()` at connect) | The database read is already a connect requirement, so its permission is proven. |
+| Cosmos per-call abort | `@azure/cosmos` `request/SharedOptions.d.ts:31` (`abortSignal`); `documents/ConnectionPolicy.d.ts:10` (`requestTimeout`) | Every request and feed option takes an `AbortSignal`. |
+| DynamoDB lazy client | `src/adapters/dynamo/dynamo-client.ts:38-45`, `:191-243` (`new module.DynamoDBClient(configuration)`, `client.send(new XCommand(input))`) | `send` is called with one argument. `@smithy/types@4.20.0` `http.d.ts:104` declares `abortSignal` on the handler options `send` takes. |
+| Agent-run store verify | `src/agent-runs/database-agent-run-store.ts:113-152` | A sweep-query refusal becomes `AgentRunStoreUnavailableError('query-unsupported', { cause })`. |
+| `AgentRunStoreUnavailableError` | `packages/common/src/errors/agent-runs.ts:56-70` | Fixed message `'Agent run store unavailable.'`; `reason` field. A message change is a `common` contract change (Core lane). |
+| Outbox refusal precedent | `src/outbox/errors.ts:6-15`, `database-outbox-store.ts:199-215` | A reason vocabulary and a sentence per reason, read off the cause chain. |
+| Versioned writes | `src/repositories/versioned-write.ts:88-110`, `:134-150`, `:179-197` | Built on `updateWhere`/`deleteWhere`, then one `findById` to tell 404 from 409. |
+| Capability tokens | `packages/common/src/tokens.ts:438` | No new token is introduced by this letter. |
+| Existing guarded backends | `.github/workflows/ci.yml:95-152` (env and `services`); `test/integration/real-cosmos-adapter.test.ts:38-43` | CI carries PostgreSQL (5433), MongoDB, DynamoDB Local (8000) and the Bigtable emulator (8086). **Cosmos is not in CI** (its suite guards on `COSMOS_ENDPOINT` and runs only locally). **There is no MySQL anywhere.** The `test.permissions` block of `packages/database-plugin/deno.json` is not read by the Node/Vitest runner and the package has no Deno-lane test (`scripts/test-lanes.ts`), so no net grant is added there. |
+| Guard style for real-backend suites | `test/integration/real-prisma-adapter.test.ts:118-121` | Vitest `it(name, { skip: skipReal }, fn)` with `skipReal` computed from the environment variable; a skipped case is reported as skipped, never as a pass. |
+| Range table for new devDependencies | `scripts/node-dependency-ranges.ts:26` (`EXTERNAL_RANGES`), read by `scripts/node-manifests.ts:191-193` | An external not in the table is refused by the manifest generator, so `mysql2` and `@prisma/adapter-mariadb` need a row there (root tooling, one line each). |
+| M143b hand-over for V13-142 | `plans/archive/milestone-143b-first-command-fails.md:152-156` (merged in #610) | No code or range change; a README note in the Bigtable section. |
+
+## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
+
+| # | Conflict | Resolution (picked side) | Doc deliverable (same PR) |
+| --- | --- | --- | --- |
+| C1 | README "Optimistic locking" says a versioned write applies inside a transaction on Prisma, and PUBLIC_API "Conditional writes" says a predicate miss writes nothing and returns `null`/`false`; on Prisma with MySQL the code returns a row (X120-1). | The documents are right; the code is fixed (§3.1). | README "Optimistic locking": add MySQL to the measured cells; CHANGELOG `Fixed`. |
+| C2 | README says Drizzle writes require `RETURNING` and the CLI refuses `--dialect mysql`; ROADMAP M143q's Outcome says Drizzle with MySQL writes through the repository. | ROADMAP wins: Drizzle with MySQL writes (§3.2). The CLI refusal text is M143e's (V13-254 hand-over, §11). | README Drizzle section: remove the `RETURNING` requirement, add "Drizzle on MySQL". |
+| C3 | README "Filtering": Drizzle `LIKE … ESCAPE '\'` "honours it unconditionally", while the clause does not parse on MySQL's default `sql_mode` (X120-2). | Code fixed for MySQL (§3.3); the README sentence is corrected. | README "Filtering and single-row lookup". |
+| C4 | README "What a driver condition returns" says MySQL `ER_DUP_ENTRY` answers 409 with no driver limit, and that errors through `query()` are classified; Prisma on MySQL answers 500 (X120-5, X120-6). | Code fixed (§3.5). | README table rows for mysql2 and the mariadb adapter. |
+| C5 | README "Health reporting" (1561-1569) says Cosmos, Bigtable and DynamoDB "omit the probe until each gains one optional member on its own client facade"; ROADMAP M143q says `/ready` reports a stopped store. | ROADMAP wins; the prior decision is argued against by X119-2 and replaced (§3.9). | README "Health reporting", PUBLIC_API database-plugin section. |
+| C6 | README "Bounding a call" (1494) says the plugin adds no deadline of its own; ROADMAP M143q says a NoSQL call ends within a bound. | Both hold: the plugin sets the driver's own cancelling deadline on clients it constructs and passes the signal to injected facades (§3.8). A JavaScript race that cannot cancel is still not added. | README "Bounding a call": rewrite the DynamoDB, Cosmos and Bigtable rows to "measured" with the new option. |
+| C7 | README "Optimistic locking" (281-283): the buffered sources answer 501 for a conditional write in a transaction. | Replaced for DynamoDB, Cosmos and Bigtable (§3.10); memory and D1 keep the refusal. | README "Optimistic locking". |
+| C8 | `src/interfaces/index.ts:760-772`: the Drizzle `dialect` option is "used only to translate a nested JSON filter path". | Widened: it also selects the MySQL `LIKE` escape and the offset-only limit (§3.3). | JSDoc and PUBLIC_API line. |
+
+## 3. Design decisions
+
+### 3.1 V13-230 (High, Part 1): Prisma conditional writes act on the affected-row count
+
+**Reproduction read.** `updateWhere` (`prisma-adapter.ts:910-916`) asks Prisma for `update` with the
+key and the predicate. On PostgreSQL Prisma sends one `UPDATE … RETURNING`, and a lost race returns
+no row, which Prisma raises as `P2025`. On MySQL there is no `RETURNING`, so Prisma 7.10 sends a
+SELECT of the id under the predicate, the UPDATE with the predicate re-applied, and a SELECT of the
+row (general log, §1). The SELECT reads InnoDB's REPEATABLE READ snapshot, so two callers both see
+version 1. The UPDATE reads current committed data, so the second caller's UPDATE waits for the
+first, finds version 2, and changes nothing. Prisma's plan for `update` does not check the
+UPDATE's affected count (it already proved existence with the first SELECT), and the final SELECT
+reads the snapshot again, because the transaction changed nothing it could see: the loser gets
+`{ version: 1, balance: 100 }`, never `P2025`. `deleteWhere` has the same shape (the delete answered
+204 while the row existed). The exact difference from the correct cells: PostgreSQL decides the
+outcome from the rows the UPDATE returned; Drizzle on MySQL through the typed builder decides it from
+`affectedRows`; Prisma on MySQL decides it from a snapshot read taken before the UPDATE ran.
+
+#### 3.1.0 DECIDED by the maintainer (D-2, 2026-11-22): which connectors take the count path
+
+The count path (§3.1.1) goes on **every** Prisma connector only if measurement M-2 (§3.1.3) shows
+its cost on PostgreSQL is small. Otherwise it applies only to connectors without `RETURNING`, chosen
+by connector (§3.1.4), and PostgreSQL keeps its single statement. Both branches are specified in
+full below, with their files and tests. Neither is written into `src/` until both measurements of
+§3.1.3 are in. **The branch that is built is recorded in this section (by editing the line below in
+the plan, in the same PR) and in the PR description, with the M-2 result table and raw log path.**
+
+- **Branch built:** to be filled from M-2's result: "every connector" (§3.1.2) if the threshold of
+  §3.1.3 holds, else "selected by connector" (§3.1.4).
+
+#### 3.1.1 The count path (shared by both branches)
+
+- **Mechanism.** `updateWhere` and `deleteWhere` call `updateMany` / `deleteMany` with the key and
+  the predicate conjoined, and act on the returned `count`, which on MySQL is the UPDATE's
+  `affectedRows` (matched rows: the mariadb driver's `foundRows` defaults to on, §1), subject to
+  measurement M-1. `count === 0` is the miss (`null` / `false`). For `updateWhere`, a `count` of 1 is
+  followed by `findUnique` on the key **on the same transaction client**, so the read sees this
+  write (the "earlier statements in the same transaction" rule, §1) while the row lock the UPDATE
+  took is still held. On the root client the two calls run inside
+  `client.$transaction(async (tx) => …)`; on a transaction client (a unit of work) they run directly
+  on that client. `deleteWhere` needs no read-back and no wrapping transaction: one `deleteMany`.
+- **Scope parameter.** The data-source factory gains an internal `scope: 'root' | 'transaction'`
+  parameter: `createDataSource` passes `'root'` (`:387`), `beginTransaction`'s `createDataSource`
+  passes `'transaction'` (`:322`). It is not exported; `createPrismaDataSource` (public, `:750`)
+  passes `'root'`.
+- **Composite keys.** `updateMany` takes a `WhereInput`, not a `WhereUniqueInput`, so the compound
+  key field (`{ tenantId_id: { … } }`) is not accepted. The key `where` for these two calls is built
+  from the resolved `keyColumns` as plain equalities (`buildKeyColumnsWhere`, internal), never from
+  `compoundKeyField`.
+- **A count above 1.** The key addresses at most one row, so `count > 1` means the configured
+  `keyColumns` are not a key of the table. It throws a named `Error` (`Prisma updateWhere on
+  '<entity>' matched <n> rows for one key; keyColumns do not name the table's key`) rather than
+  reporting success.
+
+#### 3.1.2 Branch A: one implementation on every connector
+
+- **Decision (if M-2 passes).** `updateWhere` and `deleteWhere` take the count path of §3.1.1 on
+  every connector, PostgreSQL included. Today's `delegate.update` / `delegate.delete` with
+  `AND: [where]` and the `P2025` catch are deleted from both members.
+- **Files.** `src/adapters/prisma/prisma-adapter.ts` only (the two members, `ModelDelegate`,
+  `buildKeyColumnsWhere`, the `scope` parameter).
+- **Tests.** `test/unit/prisma-conditional-write.test.ts` (the §3.1.1 rules, on a fake client in
+  PostgreSQL mode and in MySQL mode); the conformance table of §3.7 with `prisma` arms for both
+  dialects; the guarded `real-prisma-adapter.test.ts` (PostgreSQL, existing, now on the count path)
+  and `mysql-conditional-race.test.ts`.
+- **"One capability, one implementation."** Met directly: one code path.
+
+#### 3.1.3 The two measurements that come first (Part 1, step 1)
+
+Nothing in §3.1.2 or §3.1.4 is written into `src/` before both are recorded in the PR description.
+
+- **M-1, MySQL correctness of `count`.** On a dedicated MySQL 8.4 (not a shared container), with the
+  general log on, drive two concurrent `updateMany({ where: { id, version: 1 }, data: { version: 2 } })`
+  and two concurrent `deleteMany` of the same shape through Prisma 7.10.1 with
+  `@prisma/adapter-mariadb`, 100 trials each. Pass: in every trial exactly one call returns
+  `count: 1` and the other `count: 0`, and the general log shows the UPDATE / DELETE carrying the
+  predicate whose affected rows Prisma reported (not a count of the ids its pre-SELECT found).
+  Record the statements of one trial in the PR. A guarded test keeps it afterwards
+  (`mysql-conditional-race.test.ts`).
+- **M-2, PostgreSQL cost.** On the repository's database benchmark harness: the paired runner
+  `~/setu-benchmarks/2026-11-02-db-m128/db-bench.ts` (copied to a new dated run directory, as
+  `setup.sh` / the M128 run did), which alternates two servers within every pass behind an
+  equivalence gate and refuses to report any non-2xx. Two Setu-on-Prisma-on-PostgreSQL servers
+  built from packed tarballs of this branch, differing only in the path (`single` = today's
+  `delegate.update` path, `count` = §3.1.1; selected by a build of each tree, not a runtime switch in
+  `src/`). Routes, each over 10,000 seeded rows with the row chosen at random server-side so row
+  locks do not serialize the load: `POST /items/:id/touch` (`updateWhere` with a predicate that
+  always holds) and `POST /items/:id/version` (read, then `updateVersioned` with the version read).
+  - **Run settings.** `SERVER_CORES=8-15 LOAD_CORES=16-23`, PostgreSQL 16 in its own throwaway
+    container pinned to cores 24-31 (the M128 `bench-pg` setup), `PASSES=15`, `WARMUP=15s`,
+    `DURATION=20s`, bombardier `-c 64` with `-m POST`; about 2 × 15 × 2 × 35 s ≈ 35 minutes. One
+    load on the machine at a time (the run waits while any suite, `ci:local` or benchmark runs, as
+    the M128 `run.sh` does).
+  - **Metric.** Per route: the median over passes of the paired throughput ratio `count / single`
+    (requests per second), the passes won, and the median paired p99 latency ratio; the per-pass
+    rows sorted, so a bimodal run is seen before a median is read.
+  - **Threshold (proposed; a number the maintainer may change).** Branch A is built when, on both
+    routes, the median throughput ratio is **at least 95%** and the median p99 ratio is **at most
+    110%**, and the run is quotable (spread under the harness's own 15% bar and unimodal). Reason:
+    5% is about the largest gap the M128 run treated as within noise for a paired median, 110% p99
+    leaves room for the one extra statement's latency without hiding a tail, and an unquotable run
+    decides nothing (it is re-run, not read). Expectation, stated so the result is not a surprise:
+    the count path turns one statement into BEGIN, UPDATE, SELECT, COMMIT for `updateWhere` on the
+    root client, so a loss above 5% is likely; `deleteWhere` stays one statement either way.
+  - Otherwise Branch B (§3.1.4) is built. Either way the result table, the sorted per-pass rows and
+    the raw log path go in the PR description.
+
+#### 3.1.4 Branch B: the count path where `RETURNING` is absent, selected by connector
+
+- **Decision (if M-2 fails).** The connector chooses the path once, at `connect()`:
+  - `single` (today's `delegate.update` / `delegate.delete` with `AND: [where]` and the `P2025`
+    catch, unchanged): only for `'postgresql'` and `'postgres'`, the connectors whose single
+    statement is measured correct (X120's PostgreSQL controls; the guarded `real-prisma-adapter`
+    suite).
+  - `count` (§3.1.1): every other connector, **and an undetermined connector**. So MySQL, SQL
+    Server, CockroachDB and SQLite take the count path; a connector is moved to `single` only by a
+    guarded race test against that database, never by assumption.
+- **Detection, from source.** The connector is the one `resolveProvider()` already resolves
+  (`prisma-adapter.ts:458-469`): the explicit `options.provider` when set, else the generated
+  client's `_activeProvider` (declared on the runtime client, `@prisma/client/runtime/client.d.ts:1197`;
+  it is the generated schema's `datasource` provider), accepted only when it is in `PROVIDERS`
+  (`:57-70`). Undetermined is `undefined`, which selects `count`. The resolved value is stored once
+  as the adapter's internal `conditionalPath: 'single' | 'count'` and passed to the data-source
+  factory beside `scope` (both data-source entry points, root and transaction, read the same value).
+  The driver adapter's own `provider` field (`@prisma/adapter-mariadb` sets `provider = "mysql"`,
+  `dist/index.js:315`) is not read: the client facade does not expose it.
+- **How the two paths stay behaviourally identical.** One conformance table drives both. The
+  `prisma` arm of `test/fixtures/conditional-sources.ts` is parameterized by dialect as data
+  (`{ dialect: 'postgresql' }` → `single`, `{ dialect: 'mysql' }` → `count`, `{ dialect: undefined }`
+  → `count`), and every case of `conditional-write-conformance.test.ts` (hit, predicate miss, absent
+  key, lost race, tenant predicate, composite key, `count > 1`, returned row equals the stored row)
+  runs over every row of that table. A path that diverges on any case fails the same test. The
+  selection itself is a separate table-driven unit test: each `provider` value (and `undefined`)
+  against its expected path.
+- **"One capability, one implementation."** The rule exists so that two entry points to one
+  behaviour cannot honour different configuration. Here there is one entry point
+  (`updateWhere` / `deleteWhere`), one selection made once from the connector, and one behavioural
+  contract enforced by one table over both paths; the two paths are two strategies of one member, not
+  two entry points. The plan records this as a deliberate, tested exception to "one code path",
+  justified by M-2's measured cost, and the README says which connectors use which statement.
+- **Files.** `src/adapters/prisma/prisma-adapter.ts` (both paths, `conditionalPath`, `scope`,
+  `buildKeyColumnsWhere`, `ModelDelegate`).
+- **Tests.** `test/unit/prisma-conditional-write.test.ts` (both paths' rules; the path-selection
+  table); `test/unit/prisma-adapter-coverage.test.ts` (the `single` arm's `P2025` catch and refusal
+  branches stay covered); the dialect-parameterized conformance arm (§3.7); guarded
+  `real-prisma-adapter.test.ts` (PostgreSQL, `single`) and `mysql-conditional-race.test.ts` (MySQL,
+  `count`).
+
+#### 3.1.5 Fallback if M-1 fails (the `count` is not reliable on MySQL)
+
+- **Fallback design.** The count path issues its own statement instead of `updateMany`:
+  `$executeRawUnsafe('UPDATE <table> SET … WHERE <key> AND <predicate>', …values)`, whose return
+  value is the driver's affected rows (`$executeRawUnsafe(): PrismaPromise<number>`,
+  `@prisma/client/runtime/client.d.ts:216`; the mariadb adapter returns `affectedRows`,
+  `dist/index.js:331`), followed by the same `findUnique` read-back in the same transaction. Table
+  and column names come from the client's `_runtimeDataModel` (`client.d.ts:1187`; `dbName` for
+  `@@map` / `@map`), identifiers are quoted per connector, and values are bound, never interpolated.
+- **What it costs.** It reads a second underscore-prefixed client field (`_runtimeDataModel`), with
+  the same "not a stability promise" caveat `_activeProvider` carries, so a refusal by name when it
+  is absent; the adapter takes on value serialization Prisma does today (dates, decimals, JSON,
+  enums), a new branch for each type with tests; and it bypasses Prisma's query extensions and
+  middleware for these two members. `deleteWhere` takes the raw `DELETE` the same way.
+- **Floor.** If the raw statement cannot be made correct either, conditional writes on Prisma with
+  MySQL are refused by name (`UnsupportedQueryFeatureError('conditional-write', 'prisma', …)`, 501)
+  and the stores that need them refuse at `verify()`: the letter's Outcome sentence "refused there by
+  name". That outcome goes back to the maintainer before it is built.
+
+#### 3.1.6 Common to both branches
+
+- **The facade.** `ModelDelegate` gains `updateMany(args): Promise<{ count: number }>` and
+  `deleteMany(args): Promise<{ count: number }>`. Both are generated on every Prisma model, so the
+  structural facade loses no client.
+- **Versioned writes.** `updateVersioned` / `deleteVersioned` (`versioned-write.ts`) are unchanged:
+  they build on `updateWhere`/`deleteWhere`, so a lost race now reaches `missOutcome` and answers 409
+  (`VersionConflictError`) or 404.
+- **Why.** The count of the statement that took the row lock is the only signal that cannot be stale;
+  every compared tool that implements an optimistic token decides on it (§0.1). The serializable
+  workaround the runner found is not a fix: it changes the caller's isolation.
+- **Test home.** `test/unit/prisma-conditional-write.test.ts` (fake Prisma client, MySQL mode: a
+  `beforeUpdate` hook lets a second writer win between the pre-check and the UPDATE, reproducing the
+  general-log shape; asserts `null`/`false`, the `count > 1` refusal, the compound-key `where`, the
+  root `$transaction` versus direct transaction client); the conformance table (§3.7); and the guarded
+  real cell `test/integration/mysql-conditional-race.test.ts` (100 concurrent `updateVersioned` on
+  one version through `POST`-shaped service calls: exactly one 200-equivalent, 99 `VersionConflictError`;
+  20 concurrent `updateWhere` and `deleteWhere`: exactly one winner; delete against update: exactly
+  one winner; each winner's returned row read back through `findById` equals what is stored).
+
+### 3.2 V13-243 (Part 1): Drizzle on MySQL writes through the repository
+
+**Reproduction read.** `create`, `update`, `delete`, `updateWhere` and `deleteWhere`
+(`drizzle-adapter.ts:776-868`) all call `returningRows`, which throws a plain `Error` when the
+builder has no `returning` (`:1377-1381`); a MySQL builder has none, so every write is a masked 500
+at the first write while the application boots and `/ready` is up.
+
+- **Decision.** A write builder without `returning()` takes the **affected-row path**, decided per
+  call structurally (no dialect guess needed), with these rules:
+  - `update(id, data)`: `UPDATE … WHERE key`; zero affected rows is today's `Entity '<entity>' not
+    found` error; otherwise the row is read back by key.
+  - `updateWhere(id, where, data)`: `UPDATE … WHERE key AND predicate`; zero is `null`; otherwise the
+    row is read back by key.
+  - `delete` / `deleteWhere`: `affectedRows > 0`.
+  - `create(data)`: `INSERT`; the key is taken from `data` when it holds every key column, else from
+    `$returningId()` when the builder offers it (auto-increment or `$defaultFn` keys), else the
+    write is refused before it is sent with `UnsupportedQueryFeatureError('create', 'drizzle',
+    'Drizzle create on <entity> cannot learn the new key: the driver has no RETURNING and the
+    insert builder has no $returningId()')` (501). The row is then read back by key.
+  - Read-back and write run on one connection and inside one transaction: on the root instance the
+    pair runs in `instance.transaction(async (tx) => …)` (Drizzle's own, not the application's
+    isolation bridge, which is for units of work); on a transaction instance it runs directly. The
+    factory gains the same internal `scope` parameter as §3.1.
+  - The affected count is read by one internal function, `affectedRowsOf(result)`: a
+    `[ { affectedRows: number }, … ]` tuple (mysql2), or an object with `affectedRows` or
+    `rowsAffected` (other MySQL drivers Drizzle supports); any other shape throws
+    `UnsupportedQueryFeatureError('write', 'drizzle', 'Drizzle <op> on <entity>: the driver reported
+    no affected-row count (no RETURNING either)')` (501). Never a plain `Error`.
+- **`FOUND_ROWS`.** mysql2 counts matched rows by default (§1). An application that removes the
+  flag (`flags: '-FOUND_ROWS'`) makes an `updateWhere` whose data equals the stored values read as a
+  miss. This is documented in the README's new Drizzle-on-MySQL section, not detected: the pool's
+  flags are not reachable through the Drizzle instance's public surface, and the localizable `info`
+  text is not a stable signal (§1).
+- **Why.** ROADMAP M143q's Outcome. The comparison (§0.1) shows every compared stack writes on
+  MySQL through its repository, and the key is always known or returned, so write-then-read on one
+  connection is available.
+- **Test home.** `test/unit/drizzle-mysql-writes.test.ts` (fake instance with no `returning` and a
+  mysql2-shaped result; every rule above, including the unknown-shape 501 and the `$returningId()`
+  arms); the conformance table (§3.7); the guarded real cell `test/integration/real-drizzle-mysql.test.ts`
+  (X12's filter table, 45 steps, matching the memory cell; every write read back through `findById`).
+
+### 3.3 V13-242 (Part 1): `contains` and offset-only paging on Drizzle with MySQL
+
+**Reproduction read.** `drizzle-adapter.ts:1163-1165` and `:1267` emit the SQL text `escape '\'`.
+Under MySQL's default `sql_mode` a backslash escapes the closing quote, so the literal never ends:
+a syntax error (X120-2, causation shown both ways). `findAll` emits `.offset()` without `.limit()`
+when `limit` is 0 (`:764-769`), and MySQL has no `OFFSET` outside `LIMIT` (§1).
+
+- **Decision (escape).** When the resolved dialect is `'mysql'`, the escape character is a **bound
+  parameter** (`like ${pattern} escape ${'\\'}`): the bound value is one backslash whatever the
+  quoting rules. PostgreSQL and SQLite keep today's literal (measured correct; not touched). An
+  undetermined dialect keeps today's literal too, and the README says to pass `dialect: 'mysql'`
+  when the instance's class name does not reveal it.
+- **Decision (offset).** When the dialect is `'mysql'`, `offset > 0` and `limit === 0`, the query
+  carries `.limit(18446744073709551615)`, MySQL's documented "to the end" value (§1), as a
+  `bigint`-safe literal. Other dialects are unchanged.
+- **Why.** A bound parameter is the fix that does not depend on `sql_mode`; the runner's alternative
+  (emit `'\\'`) breaks under `NO_BACKSLASH_ESCAPES`.
+- **Test home.** `test/unit/drizzle-query.test.ts` (rendered SQL per dialect, using the real
+  `drizzle-orm/mysql-core` dialect through `mysql-proxy`, already in `deno.json`); the guarded real
+  cell (`contains` with `%`, `_` and `\` in the value returns the row holding them; offset-only
+  paging returns the tail).
+
+### 3.4 V13-251 (Part 1): a connection lost while a unit of work is idle, on mysql2
+
+**Reproduction read.** mysql2 refuses a command on a closed connection with `Can't add new command
+when connection is in closed state`, `fatal: true`, no `code` (§1). `classify.ts` has PostgreSQL's
+"not queryable" anchors (`:153-156`) and no mysql2 anchor, so the next repository read is a masked
+500 where the other three SQL cells answer 503.
+
+- **Decision.** One message anchor, matched exactly at the start of the message and only when no
+  string code is present in the chain (the existing PostgreSQL anchor rule): `'unavailable'` (503,
+  "not applied"), because the command was refused before it was sent.
+- **Test home.** `test/unit/classify-driver-error.test.ts` (one row in the table data); the guarded
+  real cell kills the connection between two reads of a unit of work and asserts 503 through the
+  service.
+
+### 3.5 V13-244 (Part 1): MySQL deadlock and duplicate key through `query()`
+
+**Reproduction read.** mysql2 reports a deadlock as `code: 'ER_LOCK_DEADLOCK'`, which no table holds
+(`classify.ts:543-553`). Through Prisma, both arrive as `P2010` with a driver-adapter cause whose
+`kind` is `UniqueConstraintViolation` (1062) or `TransactionWriteConflict` (1213); the classifier
+reads that cause's `originalCode` and sets the MySQL namespace only for `kind: 'mysql'`
+(`:277`), so `'1062'` and `'1213'` match nothing.
+
+- **Decision.**
+  1. `ER_LOCK_DEADLOCK` joins the string-code arm as `'conflict'` (InnoDB rolls the victim's whole
+     transaction back, so the 409 "safe to retry" holds as on PostgreSQL).
+  2. `prismaAdapterCause` also returns the driver-adapter `kind`, and the structured arm maps
+     `kind: 'UniqueConstraintViolation'` to `'duplicate'` and `kind: 'TransactionWriteConflict'` to
+     `'conflict'`. The kind is Prisma's portable discriminant (§1), so the same rule covers the pg
+     adapter (already answering 409 through its SQLSTATE `originalCode`) and the mariadb adapter.
+     No numeric code is read outside the existing namespace rule.
+- **Not this letter.** Other kinds (`ForeignKeyConstraintViolation`, `NullConstraintViolation`,
+  `LengthMismatch`, `ValueOutOfRange`, `SocketTimeout`) are M143h's rows (V13-218, V13-252); M143h
+  extends the same `kind` read (hand-over §11).
+- **Test home.** `test/unit/classify-driver-error.test.ts` (rows: mysql2 `ER_LOCK_DEADLOCK`; a
+  `P2010` carrying each of the two kinds from `adapter-mariadb` shape, and from `adapter-pg` shape;
+  a `kind: 'mysql'` with `originalCode: '1213'` stays on the existing namespace rule); guarded real
+  cell: a two-row opposite-order deadlock through `query()` on both MySQL cells answers 409, a
+  duplicate insert through `query()` on Prisma with MySQL answers 409.
+
+### 3.6 V13-142 half (Part 2): the README note
+
+- **Decision.** The Bigtable section of `README.md` gains one paragraph, the text M143b specified:
+  an application that also uses `@setu-ts/telemetry-plugin` lists `@opentelemetry/resources@^2.9.0`
+  and the other OpenTelemetry peers in its own `package.json`, which `setu new --template
+  microservice` and `setu add` now write; Bigtable 6 pulls `@opentelemetry/resources` 1, so no range
+  in this package fixes it. No code or range change.
+- **Test home.** None beyond `check:docs` (a prose note with no executable claim); the claim that
+  Bigtable 6 pulls `resources ^1` is cited from M143b's measurement.
+
+### 3.7 The stores built on conditional writes, proved on MySQL (Part 1)
+
+The outbox, inbox, idempotency, agent-run, tenant data store and grant source stores all live in
+this package (`src/outbox`, `src/inbox`, `src/idempotency`, `src/agent-runs`, `src/tenancy`,
+`src/authorization`) and reach the adapters only through `updateWhere`/`deleteWhere`/`create`. So the
+fix in §3.1 and §3.2 is what they need; what this letter adds is the proof.
+
+- **Decision: one table-driven conformance test.** `test/unit/conditional-write-conformance.test.ts`
+  already iterates `sources` from `test/fixtures/conditional-sources.ts` (dynamodb, memory, prisma,
+  drizzle, mongodb, cosmos, bigtable, d1). Two arms join that table as data: `prisma-mysql` (the
+  fake Prisma client in MySQL mode, §3.1) and `drizzle-mysql` (the fake Drizzle instance with no
+  `returning` and mysql2 result tuples, §3.2). Each arm also gets a `lostRace(source)` hook that
+  lets a concurrent winner land between the predicate check and the write, and one shared case
+  asserts, for every arm, that a lost race returns `null` / `false` and leaves the winner's row. The
+  enumeration of which arms support a conditional write inside a transaction is the same table's
+  `transactionalConditional: true | 'refused'` column, so a comment cannot drift from it.
+- **Real backends (guarded).** A new environment variable `MYSQL_URL` (a dedicated MySQL 8.4 on
+  `127.0.0.1:3307`, database `setu_test`), guarded with Vitest's `{ skip: skipMysql }` (the §1 guard style) so a missing
+  variable is counted as skipped, never as a pass. The guarded suites:
+  - `test/integration/mysql-conditional-race.test.ts` (§3.1) for both cells;
+  - `test/integration/real-drizzle-mysql.test.ts` (§3.2, §3.3, §3.4, §3.5);
+  - `test/integration/real-prisma-mysql.test.ts` (§3.1, §3.5), with a second generated client under
+    `test/fixtures/prisma-mysql/` (`provider = "mysql"`, `@prisma/adapter-mariadb`);
+  - `test/integration/store-conformance-mysql.test.ts`: runs the existing store contracts
+    (`describeOutboxStoreContract`, the inbox contract, the idempotency fixture, the agent-run
+    Postgres fixture's cases) against both MySQL cells, from new DDL fixtures
+    `test/fixtures/{outbox,inbox,idempotency}-mysql.sql`; plus a race case per store (two relays
+    claiming one outbox row, two consumers recording one inbox envelope, six parallel idempotency
+    begins on one key): exactly one winner, read back through the store's own reads.
+  - A store that cannot be served on MySQL is refused at `verify()` by name with its existing reason
+    vocabulary; the test asserts the refusal reason. If the implementation finds one (none is
+    expected, since every store uses only `create`, `updateWhere`, `deleteWhere`, `findAll` with
+    equality, order and limit), that refusal and its README line are added in this PR.
+- **Recording fakes versus real.** The unit conformance runs every arm on fakes; the guarded suites
+  run MySQL for real. PostgreSQL arms stay on their existing guarded suites, unchanged.
+- **Stores in other lanes.** The outbox relay (`messaging-plugin`) and `IdempotencyPlugin`
+  (`idempotency-plugin`) consume these stores through `common` interfaces; they are not edited. Their
+  proof on MySQL is the store conformance above. No hand-over is needed for them.
+- **Test home.** As listed.
+
+### 3.8 V13-238 (Part 2): a bound on every call to Cosmos, DynamoDB and Bigtable
+
+**Reproduction read.** With the store frozen for 200 s no read returned on any of the three. The
+lazy arms build their clients from two or three fields (§1) and pass no per-call option, so no
+bound is settable; the documented DynamoDB `requestTimeout` only warns without
+`throwOnRequestTimeout`, Cosmos `requestTimeout` bounds writes only (X119-4).
+
+- **Decision.** Each of the three arms gains `callTimeoutMs?: number` (name: D-3; default: D-4,
+  recommendation 15 000). It is a **cancelling driver deadline**, not a JavaScript race:
+  - DynamoDB: the lazy facade calls `client.send(command, { abortSignal })`; every facade method
+    takes an optional second argument `{ abortSignal?: AbortSignal }` (additive on `IDynamoClient`),
+    which the adapter always passes; an injected facade that ignores it is unbounded, as documented.
+  - Cosmos: every facade call that does I/O takes an optional `{ abortSignal }` in its request or
+    feed options (additive on the `ICosmosClient` family of types), passed by the data source and
+    transaction on every call.
+  - Bigtable: `readRows` and `conditionalMutate` on the facade take an optional `{ timeoutMs }`;
+    the lazy arm maps it to `gaxOptions: { timeout }` on `getRows` and `row.filter`.
+  - The signal is `AbortSignal.timeout(callTimeoutMs)` (a web standard, not a runtime API). When it
+    is the cause of a rejection, the adapter throws `DatabaseTimeoutError` (504, "outcome unknown")
+    itself, with the driver error as `cause`. It does not rely on the classifier's `TimeoutError`
+    rule, which M143h changes (V13-237), so the two letters cannot disagree.
+  - `0` is refused at construction, like `maxPageFetches` (`bigtable-adapter.ts:118-129`): a
+    positive integer is required. There is no "unbounded" value.
+- **Inside a unit of work.** The bound applies to each call, including the commit's single batch.
+- **Why.** The fixed-behaviour rule: a project that configures nothing must not hang. The plugin
+  constructs these clients, so the README's "the application owns the driver's bound" argument does
+  not hold for them (C6). The sibling bound in this repository for a backend the plugin constructs is
+  the Redis `commandTimeoutMs`, 15 000 ms in three packages (§0.1).
+- **Test home.** `test/unit/nosql-call-bound.test.ts` (each adapter with a fake facade that never
+  settles until aborted: rejects `DatabaseTimeoutError` with the abort as cause; the option reaches
+  the lazy arms: recording SDK fakes see `abortSignal` / `gaxOptions.timeout`; construction refuses
+  `0`, `NaN`, negatives); guarded real cells in `real-dynamo-adapter.test.ts`,
+  `real-cosmos-adapter.test.ts`, `real-bigtable-adapter.test.ts` behind the frozen relay (§3.13): a
+  point read, a page, a write and a unit of work each end within `callTimeoutMs + 1 s` with 504.
+
+### 3.9 V13-236 (Part 2): a readiness probe on the three NoSQL adapters
+
+**Reproduction read.** The three adapters declare no `isHealthy`, so the service omits `reachable`
+and `/ready` reports `up` for the whole outage (X119-2; `database-service.ts:426-427`).
+
+- **Decision.** Each adapter assigns `isHealthy` at construction, bounded by `callTimeoutMs`:
+  - Cosmos: `database.read()`, the same call `connect()` already requires (`cosmos-adapter.ts:176`),
+    so no new permission.
+  - DynamoDB and Bigtable: a point read of a fixed absent key (`'__setu_readiness__'`) on the
+    readiness entity's table. The readiness entity is a new option, `readinessEntity?: string`,
+    defaulting to the first entity in `entities` / `tables` in declaration order. `true` when the
+    service answered the read (a found or absent row, and on DynamoDB a `ValidationException`, which
+    the service only returns after resolving the table: the key type did not match); `false` on any
+    other refusal (table missing, access denied, unavailable) or the bound.
+  - With no readiness entity (no option, an empty mapping), the adapter has no probe, as today, and
+    logs one `warn` at `connect()` naming `readinessEntity`. See D-5 for the zero-configuration
+    alternative (an instance-level ping) and why it is not the recommendation.
+- **Why.** The probe must use a permission the application already holds; a point read of the
+  application's own table is that. Every compared framework ships a probe for these stores (§0.1).
+- **Test home.** `test/unit/nosql-readiness-probe.test.ts` (each adapter: the probe target, each
+  answer mapping, the bound, the warning without an entity); `test/unit/database-indicator-mapping.test.ts`
+  gains the three adapters as rows; guarded real cells: stop forwarding through the relay and
+  `/ready` reports not ready within the 2 s indicator bound.
+
+### 3.10 V13-241 (Part 2): conditional writes inside a unit of work on the three NoSQL stores
+
+**Reproduction read.** The buffered transaction sources spread `updateWhere`/`deleteWhere` in only
+without a buffer (§1), so inside a unit of work `BaseRepository` refuses with 501, and an unguarded
+read-modify-write loses updates while all answer 200 (200 requests, 1 or 2 applied).
+
+- **Decision.** The transaction sources gain `updateWhere` and `deleteWhere`. At the call, the
+  committed row is read and the predicate evaluated; a miss returns `null` / `false` and buffers
+  nothing. A match buffers the write **with the precondition carried to the commit**:
+  - DynamoDB: the buffered `Update` / `Delete` in `TransactWriteItems` carries the same
+    `ConditionExpression` the non-transactional path builds (`dynamo-data-source.ts:350-359`).
+  - Cosmos: the buffered batch operation carries `ifMatch` with the `_etag` of the row read (the
+    non-transactional guard, `cosmos-data-source.ts:389-396`); the facade batch operation types gain
+    an optional `ifMatch`.
+  - Bigtable: the transaction's single CheckAndMutateRow uses the predicate test chain
+    (`preconditionTest`, as the non-transactional path does at `bigtable-data-source.ts:371`) in
+    place of `[{ all: true }]` for its `onMatch` branch.
+  - If the precondition fails at commit, nothing is applied (each primitive is all-or-nothing) and
+    the commit throws `SerializationConflictError` (409, "rolled back, safe to retry"), with the
+    driver's cancellation as `cause`. That is the class whose meaning is exactly this outcome.
+  - `updateVersioned` inside a unit of work therefore returns the row at the call and the unit of
+    work fails at commit with 409 when another writer won: one winner per version.
+  - A buffered conditional write after another write to the same row in the same unit of work is
+    evaluated against the committed row, not the buffer, and this is documented (reads in these
+    transactions already observe committed state only, `bigtable-transaction.ts:14-16`).
+- **Memory and D1.** The memory adapter keeps the refusal (D-6); D1 is the Workers lane's and keeps
+  it (§9).
+- **Why.** Each store's atomic primitive takes a precondition, and the adapters already use them for
+  the `create` guard; EF Core reports the same outcome from `SaveChanges` (§0.1).
+- **Test home.** `test/unit/nosql-transactional-conditional.test.ts` (each adapter on its fake:
+  miss at call, match then conflict at commit, match then commit, the 409 class and cause); the
+  conformance table's `transactionalConditional` column (§3.7); guarded real cells: 200 parallel
+  units of work doing `updateVersioned` on one row give one winner per version and every loser 409.
+
+### 3.11 V13-231 (High, Part 2): a Bigtable project runs without Google credentials
+
+**Reproduction read.** SDK 6 constructs a `GCPMetricsHandler` unless `metricsEnabled === false`
+(`index.js:467-469`); its exporter runs every 60 s and throws `Could not load the default credentials`
+uncaught on a host without them. The plugin builds the client from `projectId` and `apiEndpoint`
+only (`bigtable-adapter.ts:136-139`), so the switch cannot be set.
+
+- **Decision.**
+  1. The lazy arm passes `metricsEnabled: false` whenever `apiEndpoint` is set (the emulator case:
+     the SDK already uses insecure channel credentials there, `index.js:412-422`).
+  2. A new option `clientOptions?: Readonly<Record<string, unknown>>` on the lazy arm is spread into
+     the SDK constructor options first, with `projectId`, `apiEndpoint` and the derived
+     `metricsEnabled` default applied only when the caller did not set them. So
+     `clientOptions: { metricsEnabled: false }` turns metrics off on a real project, and
+     `clientOptions: { metricsEnabled: true }` keeps them on an emulator. Name and scope: D-7.
+  3. `adaptBigtableSdkModule` stays internal; `clientOptions` makes exporting it unnecessary.
+- **The CLI half.** M143j writes `apiEndpoint` into the scaffold's Bigtable guidance (§11).
+- **Why.** The process must not die on the emulator or in CI; Google's own default stays for real
+  projects, where credentials exist (D-8 for the alternative of always off).
+- **Test home.** `test/unit/bigtable-client-seam.test.ts` (the recording SDK module sees
+  `metricsEnabled: false` with an endpoint, absent without one, the caller's value when set, and
+  every `clientOptions` key); the guarded real cell keeps the process alive past 90 s after its first
+  call with no credentials in the environment (a child process started by the test with
+  `GOOGLE_APPLICATION_CREDENTIALS` unset, asserting it is still serving at 90 s).
+
+### 3.12 V13-239 and V13-240 (Part 2): Bigtable reads and the first call
+
+**Reproduction read (V13-239).** An update writes a new cell version; reads carry no latest-cell
+filter, the facade maps every version and the decoder keeps `versions[0]` (§1), so a row's read cost
+grows with its update count (2.8 ms new, 97 ms after about 8,400 updates).
+
+- **Decision (V13-239).** The facade filter union gains `{ readonly column: { readonly cellLimit:
+  number } }` (the SDK's per-column limit, §1). Every read the data source issues (`readEntities`,
+  `readOne`, the count read, the page read) wraps its filter in a chain that begins with
+  `{ column: { cellLimit: 1 } }`; a read with no filter gets that filter alone. Condition tests and
+  the existence tests (`bigtable-scan.ts:406`, `:541`) are unchanged. Breaking for an injected facade
+  that switches exhaustively over the union: listed in §4.
+- **Reproduction read (V13-240).** `connect()` issues no RPC (`bigtable-adapter.ts:142-150`), so the
+  SDK's first-use setup, including its metadata-server detection on a host that is not Google's
+  (about 3 s; the `METADATA_SERVER_DETECTION=none` control answered in 52 ms), lands on the first
+  request, which the grant source's 2 s bound then denies.
+- **Decision (V13-240).** `connect()` runs the readiness probe of §3.9 once, bounded by
+  `callTimeoutMs`, when a readiness entity exists; its result is ignored (an outage at boot is
+  reported by `/ready`, not by a failed start), so the first application request pays nothing.
+  Without a readiness entity, no warm-up runs and the README names the cost and the SDK's
+  `METADATA_SERVER_DETECTION=none` switch. The admin-plane probe the README rejected stays rejected:
+  this is a data-plane read of the application's own table.
+- **Test home.** `test/unit/bigtable-page.test.ts` and `bigtable-data-source.test.ts` (every read
+  carries the latest-cell filter first); `bigtable-client-seam.test.ts` (the new variant maps to the
+  SDK's `column.cellLimit`); `bigtable-adapter.test.ts` (connect warms once, ignores the result,
+  respects the bound); guarded real cells: after 2,000 updates of one row a read takes under 3× the
+  new-row time; the first `findById` after `connect()` takes under 500 ms.
+
+### 3.13 The frozen relay (Part 2, test infrastructure)
+
+- **Decision.** A test fixture `test/fixtures/frozen-relay.ts`: a `node:net` TCP relay on a fixed
+  port per emulator (`127.0.0.1:18000` → 8000, `:18082` → 8082, `:18086` → 8086) with `freeze()`
+  (stop forwarding, hold sockets open) and `thaw()`. The guarded outage cells point the adapter at the
+  relay. No shared container is paused, stopped or restarted, so the suites can run beside other
+  sessions.
+- **Test home.** Used by §3.8, §3.9 cells; the fixture is under `test/` and is not measured.
+
+### 3.14 V13-249 (Part 2): the agent-run store names why it refuses
+
+**Reproduction read.** `verify()` wraps a sweep-query refusal as
+`AgentRunStoreUnavailableError('query-unsupported', { cause })` (`database-agent-run-store.ts:148-151`).
+The class's message is fixed in `common` (`'Agent run store unavailable.'`), and the cause reads
+"cannot order entity 'AgentRunApproval' by 'deadline, id'; only the resolved access path's sort key
+'(none)' is orderable", which suggests a missing sort key.
+
+- **Decision.** In this package only: `verify()` reads the cause chain (as the outbox's
+  `unavailableReason` does, `database-outbox-store.ts:199-215`) and, when the refusal is an
+  `UnsupportedQueryFeatureError` from `dynamodb` or `bigtable`, wraps it in one more
+  `UnsupportedQueryFeatureError('agent-runs', <adapter>, 'The agent-run store needs ordered
+  multi-field queries, which the <adapter> adapter cannot serve. Use PostgreSQL, SQLite or MongoDB
+  for agent runs.', { cause })` before `AgentRunStoreUnavailableError('query-unsupported', { cause })`.
+  The startup log renders the chain, so the first line under the fixed message names the reason.
+  The `reason` value is unchanged (`'query-unsupported'`). Whether `common`'s message should carry
+  the reason is D-9 (Core lane).
+- **Test home.** `test/unit/agent-run-store.test.ts` (the chain for each of the two adapters; any
+  other refusal unwrapped).
+
+## 4. Exported surface — every symbol names its consumer
+
+**Breaking for implementors:** an injected `IBigtableClient` must accept the new filter variant
+`{ column: { cellLimit } }` (§3.12) and the optional `{ timeoutMs }` argument (it may ignore it); an
+injected `IDynamoClient` / `ICosmosClient` gains optional arguments only. Ships in minor `0.14.0`, as
+a `BREAKING` CHANGELOG entry for the Bigtable facade.
+
+| Exported symbol | Kind | Consumer / real code path that READS it |
+| --- | --- | --- |
+| `BigtableFilter` (widened) | type | `bigtable-data-source.ts` read paths build the new variant; `adaptBigtableSdkModule` maps it |
+| `IBigtableTable.readRows` / `IBigtableRow.conditionalMutate` (optional second argument) | type | `bigtable-data-source.ts`, `bigtable-transaction.ts` pass `{ timeoutMs }`; lazy arm maps to `gaxOptions` |
+| `IDynamoClient` methods (optional `{ abortSignal }`) | type | `dynamo-data-source.ts`, `dynamo-adapter.ts` commit and probe pass it; lazy arm passes it to `send` |
+| `ICosmosClient` family (optional `abortSignal`, batch `ifMatch`) | type | `cosmos-data-source.ts`, `cosmos-transaction.ts`, probe |
+| `BigtableAdapterOptions`, `DynamoAdapterOptions`, `CosmosAdapterOptions` (new members, §4.1) | type | the adapters' constructors |
+| `DrizzleAdapterOptions.dialect` (JSDoc widened) | type | `drizzle-adapter.ts` `contains` and offset paths |
+
+No new runtime export, capability token or error class. `affectedRowsOf`, `buildKeyColumnsWhere`,
+the `scope` parameters and the frozen relay are internal.
+
+### 4.1 Options — every option names its consumer
+
+| Option | Consumer | Behavior (per implementation) |
+| --- | --- | --- |
+| `callTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0`/negative/`NaN` refused at construction |
+| `readinessEntity` (DynamoDB, Bigtable arms) | `isHealthy`, the Bigtable warm-up | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn` |
+| `clientOptions` (Bigtable lazy arm; D-7 for DynamoDB and Cosmos) | `createLazyBigtableLoader` → SDK constructor | spread first; `projectId`, `apiEndpoint`, `metricsEnabled` defaults fill only unset keys; unread when `client` is injected (documented, as `projectId` already is) |
+| `dialect: 'mysql'` (existing, wider consumer) | Drizzle `contains`, offset-only `findAll` | bound escape parameter; `LIMIT 18446744073709551615` |
+
+## 5. Implementation files
+
+| File | Purpose |
+| --- | --- |
+| `src/index.ts` | No new export; types re-exported as today |
+| `src/interfaces/index.ts` | §4.1 option members and JSDoc; `dialect` JSDoc |
+| `src/adapters/prisma/prisma-adapter.ts` | §3.1: `updateMany`/`deleteMany` on the facade, count path, `scope`, `buildKeyColumnsWhere` |
+| `src/adapters/drizzle/drizzle-adapter.ts` | §3.2 affected-row path, `affectedRowsOf`, `scope`; §3.3 escape and offset |
+| `src/errors/classify.ts` | §3.4 anchor; §3.5 `ER_LOCK_DEADLOCK`, Prisma `kind` |
+| `src/adapters/dynamo/dynamo-client.ts`, `dynamo-client-types.ts` | §3.8 `abortSignal` |
+| `src/adapters/dynamo/dynamo-adapter.ts`, `dynamo-data-source.ts`, `dynamo-transaction-buffer.ts` | §3.8 bound, §3.9 probe, §3.10 transactional conditional writes and commit conflict |
+| `src/adapters/cosmos/cosmos-client.ts`, `cosmos-client-types.ts` | §3.8 `abortSignal`, §3.10 `ifMatch` |
+| `src/adapters/cosmos/cosmos-adapter.ts`, `cosmos-data-source.ts`, `cosmos-transaction.ts` | §3.8, §3.9, §3.10 |
+| `src/adapters/bigtable/bigtable-client.ts`, `bigtable-client-types.ts` | §3.11 `metricsEnabled`, `clientOptions`; §3.8 `timeoutMs`; §3.12 filter variant |
+| `src/adapters/bigtable/bigtable-adapter.ts`, `bigtable-data-source.ts`, `bigtable-transaction.ts` | §3.8, §3.9, §3.10, §3.12 |
+| `src/agent-runs/database-agent-run-store.ts` | §3.14 |
+| `package.json`, `deno.json` (imports block, regenerated), `scripts/node-dependency-ranges.ts`, `pnpm-lock.yaml` | devDependencies `mysql2`, `@prisma/adapter-mariadb` (never runtime dependencies), with their `EXTERNAL_RANGES` rows (§1) |
+| `README.md`, `AGENT_CARD.md` | §2 deliverables, §3.6 note |
+
+## 6. Test plan (every `src/` file mapped; per-file 90% bar)
+
+| Test file | src covered | Key assertions (and the signature each call type-checks against) |
+| --- | --- | --- |
+| `test/unit/prisma-conditional-write.test.ts` | `prisma-adapter.ts` | §3.1.1 rules via `IDataSource.updateWhere(id, where, data): Promise<E \| null>`; Branch B adds the path-selection table (each `provider` and `undefined` against `single` / `count`) |
+| `test/unit/prisma-adapter-coverage.test.ts` (extended) | `prisma-adapter.ts` | `scope` root/transaction branches, `count > 1` refusal |
+| `test/unit/drizzle-mysql-writes.test.ts` (new) | `drizzle-adapter.ts` | §3.2 every rule, `affectedRowsOf` shapes |
+| `test/unit/drizzle-query.test.ts` (extended) | `drizzle-adapter.ts` | §3.3 rendered SQL per dialect |
+| `test/unit/classify-driver-error.test.ts` (extended, table data) | `classify.ts` | §3.4, §3.5 rows |
+| `test/unit/conditional-write-conformance.test.ts` + `test/fixtures/conditional-sources.ts` (extended) | all adapters' conditional paths | §3.7 lost-race case over every arm; `transactionalConditional` column |
+| `test/unit/nosql-call-bound.test.ts` (new) | the three adapters, clients, data sources, transactions | §3.8 |
+| `test/unit/nosql-readiness-probe.test.ts` (new) | the three adapters | §3.9 |
+| `test/unit/database-indicator-mapping.test.ts` (extended) | `database-service.ts` (unchanged code, new rows) | the three adapters report `reachable` |
+| `test/unit/nosql-transactional-conditional.test.ts` (new) | `dynamo-data-source.ts`, `dynamo-transaction-buffer.ts`, `dynamo-adapter.ts`, `cosmos-data-source.ts`, `cosmos-transaction.ts`, `bigtable-data-source.ts`, `bigtable-transaction.ts` | §3.10 |
+| `test/unit/bigtable-client-seam.test.ts` (extended) | `bigtable-client.ts` | §3.11, §3.12 mapping, `gaxOptions` |
+| `test/unit/bigtable-adapter.test.ts`, `bigtable-data-source.test.ts`, `bigtable-page.test.ts` (extended) | `bigtable-adapter.ts`, `bigtable-data-source.ts` | §3.12 |
+| `test/unit/dynamo-client-seam.test.ts`, `cosmos-client-seam.test.ts` (extended) | `dynamo-client.ts`, `cosmos-client.ts` | the lazy arms pass the signal; Cosmos `clientOptions` if D-7 says yes |
+| `test/unit/agent-run-store.test.ts` (extended) | `database-agent-run-store.ts` | §3.14 |
+| `test/integration/mysql-conditional-race.test.ts` (new, `MYSQL_URL`) | real Prisma and Drizzle on MySQL | §3.1, §3.2 races, read back |
+| `test/integration/real-drizzle-mysql.test.ts` (new, `MYSQL_URL`) | real Drizzle on MySQL | §3.2–§3.5 |
+| `test/integration/real-prisma-mysql.test.ts` (new, `MYSQL_URL`) | real Prisma on MySQL | §3.1, §3.5 |
+| `test/integration/store-conformance-mysql.test.ts` (new, `MYSQL_URL`) | the six stores | §3.7 |
+| `test/integration/real-{dynamo,cosmos,bigtable}-adapter.test.ts` (extended) | real emulators through the relay | §3.8–§3.12 |
+| `test/integration/real-import.test.ts` (extended) | the real `@google-cloud/bigtable` import | the lazy arm with `clientOptions` constructs a client |
+
+Every `src/` file in §5 has a test file above. The type-only `src/interfaces/index.ts` is covered by
+`test/unit/plugin-options-types.test.ts` (extended with the new members).
+
+## 7. Verification gates
+
+```bash
+git branch --show-current   # MUST be the letter's feat/ branch, never develop or main
+pnpm run check:plan
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test:tooling
+pnpm test:coverage database-plugin   # ANSI-stripped per-file table; every touched src file ≥ 90%
+pnpm run test:deno-lane
+# Part 1, before any Prisma path is written into src/ (§3.1.3), each result pasted in the PR:
+#   M-1: MySQL general-log race, 100 trials each for updateMany and deleteMany
+#   M-2: SERVER_CORES=8-15 LOAD_CORES=16-23 PASSES=15 PAIR=setu-prisma-single,setu-prisma-count \
+#        deno run -A db-bench.ts   (in a new dated copy of ~/setu-benchmarks/2026-11-02-db-m128)
+# guarded backends, each with a positive control that the suite did not skip:
+MYSQL_URL=mysql://root:root@127.0.0.1:3307/setu_test \
+  DYNAMODB_ENDPOINT=http://127.0.0.1:8000 COSMOS_ENDPOINT=… COSMOS_KEY=… \
+  BIGTABLE_EMULATOR_ENDPOINT=127.0.0.1:8086 pnpm test database-plugin
+pnpm run release:publish --dry-run
+pnpm run release:verify 0.13.0   # the version on develop until the release branch bumps it
+pnpm run ci:local   # final commit; every suite run goes through ~/.local/bin/setu-suite-queue
+```
+
+Self-audit pasted in the PR: the general log of one lost race on Prisma with MySQL after the fix
+(the `UPDATE` affected 0, the call returned `null`); the conformance test failing with §3.1 and
+§3.2 reverted; the grep for `Date.now()`, `as any`, `globalThis.__` in `src/`; each new option
+grepped to its consumer.
+
+## 8. Risks & mitigations
+
+- **Prisma `updateMany` on MySQL may not report the UPDATE's own count** (Prisma could count the ids
+  its pre-SELECT found). Mitigation: measurement M-1 (§3.1.3) runs first; an offline compile of the
+  Prisma 7.10.1 query plan was attempted in planning (`probes-143q/prisma-plan.mjs`) and did not get
+  past the compiler's request matching, so this is not verified. If M-1 fails, §3.1.5's fallback is
+  built, and its floor (a refusal) goes back to the maintainer first.
+- **M-2 compares two builds of one branch.** The `single` and `count` servers must differ only in the
+  path. Mitigation: build both from one commit, the `single` tree with a scratch patch in a separate
+  worktree under `.claude/worktrees/` that is never committed; the equivalence gate confirms the
+  response bodies match before any timing; the per-pass rows are sorted and a bimodal or over-15%
+  spread run is re-run, not read.
+- **M-2 occupies the machine for about 35 minutes.** Mitigation: it waits for other suites and
+  benchmarks (the M128 `run.sh` loop), and its time cost is stated to the maintainer before it starts.
+- **The gax `timeout` may not bound a server-streaming `ReadRows`** in SDK 6. Mitigation: the
+  guarded relay cell measures it first; if it does not, the lazy arm ends the read stream itself on
+  the deadline (the SDK stream's `end()`), still a cancelling bound, and the README says which.
+- **A mysql2 pool configured without `FOUND_ROWS`** reads a no-op `updateWhere` as a miss.
+  Mitigation: documented; a test pins the default-flags behaviour on the real server.
+- **The frozen relay changes timing** compared with `docker pause`. Mitigation: one cell per store
+  is cross-checked against the runner's X119 numbers (a bounded call ends near the bound).
+- **No MySQL in CI** today. Mitigation: D-10.
+- **No backend is reachable from the host today** (checked 2026-11-23 with `docker ps`): no MySQL,
+  and DynamoDB Local, the Cosmos and Bigtable emulators and PostgreSQL 5433 run only inside other
+  sessions' `ci:local` networks. This session does not start containers. Mitigation: M-1, M-2 and
+  every guarded suite wait until the coordinator provides MySQL 8.4 on `127.0.0.1:3307`, the three
+  emulators on 8000/8082/8086, and a PostgreSQL for M-2; the PR names which suites ran against which
+  backend.
+- **Scope**: twelve rows. Mitigation: the split in §0.2.
+
+## 9. Out of scope
+
+- D1's transaction source keeps refusing a conditional write in a unit of work (`cloudflare-plugin`,
+  Workers lane). If the maintainer wants parity, it is a new register row for M143o or later.
+- The memory adapter's transactions keep refusing a conditional write unless D-6 says otherwise.
+- Prisma's plain `update()` on MySQL returning the pre-image after a no-op UPDATE inside a snapshot
+  (X120-10): documented by M143n (V13-253); this letter changes only the conditional members.
+- Throttling (Cosmos 429, DynamoDB `ProvisionedThroughputExceeded`): no emulator produces it;
+  classification exists (`classify.ts:525-528`) and is unchanged.
+- Real cloud accounts: every NoSQL cell is closed against emulators, as the milestone says.
+
+## 10. Design security review
+
+Two trust boundaries are touched.
+
+1. **Conditional writes are the guard the tenant data store and the grant source rely on.** The
+   tenant store's conditional update carries the tenant column in its predicate
+   (`src/tenancy/database-tenant-data-store.ts`), and the grant source revokes through `deleteWhere`.
+   §3.1 and §3.2 change how the predicate's outcome is learned on MySQL; §3.10 adds predicates to
+   buffered commits. A defect here can let one tenant's write land on another tenant's row or report
+   a revoke that did not happen. Obligations: the conformance table (§3.7) carries a tenant arm for
+   every adapter (a write from tenant A to tenant B's row returns `null` and leaves the row), the
+   store conformance on MySQL runs the tenant store and the grant source, and no code path decides a
+   write's outcome from a read taken before the write.
+2. **Errors reaching the client.** §3.4, §3.5 and §3.8 change statuses. Obligations: the served
+   bodies are the existing fixed sentences (no driver message, no SQL, no key); the deadline's
+   `DatabaseTimeoutError` makes no claim about the outcome; the 409 for a commit conflict says "rolled
+   back", which every primitive guarantees.
+3. **`clientOptions`** passes application values to an SDK constructor. It is application
+   configuration, not request input, and is never logged (the adapter logs no option values).
+
+**A committed-tree security audit is required** before merge (CLAUDE.md: a diff that crosses a trust
+boundary), run by a fresh agent on the exact commit, following `.roo/skills/security-audit/SKILL.md`,
+with the two obligations above as its probes and positive controls.
+
+## 11. Hand-overs
+
+| To | Row | File | Sentence to apply |
+| --- | --- | --- | --- |
+| M143j (CLI, template half) | V13-231 | `packages/cli/src/commands/add.ts:2059` and the Bigtable lines the templates write | "The Bigtable registration guidance reads `apiEndpoint` from `BIGTABLE_EMULATOR_HOST` when it is set (`{ projectId, instance, apiEndpoint, tables: {} }`), so a project pointed at `cbtemulator` turns the SDK's client-side metrics off and does not exit after 60 s on a host without Google credentials." |
+| M143j or M143e (CLI) | V13-236, V13-240 | same guidance line | "The DynamoDB and Bigtable guidance names `readinessEntity` (or writes the first generated entity into `entities` / `tables`), so `/ready` has a probe and the Bigtable client is warmed at boot." Depends on D-5. |
+| M143l (Web, `auth-plugin`) | V13-240 | `packages/auth-plugin/src/scoped/options.ts:365` | "With the Bigtable warm-up (M143q §3.12) the first grant check no longer pays the SDK's first-use cost; M143l decides whether a `source-timeout` on a grant source should answer 503 rather than deny with 403." |
+| M143e (CLI) | V13-254 | `packages/cli/src/commands/add.ts` Prisma arm | "The `--dialect mysql` refusal for `--type drizzle` no longer applies: Drizzle with MySQL writes through the repository since 0.14.0." (The Prisma half of V13-254 is unchanged.) |
+| M143h (Data, next letter) | V13-218, V13-252, V13-132 | `src/errors/classify.ts` | "M143q added a read of the Prisma driver-adapter `kind` (`UniqueConstraintViolation`, `TransactionWriteConflict`); map `ForeignKeyConstraintViolation`, `NullConstraintViolation`, `LengthMismatch` and `ValueOutOfRange` on the same read." |
+| M143h (Data) | V13-237 | `src/errors/classify.ts:586` | "The NoSQL call bound of M143q throws `DatabaseTimeoutError` itself; the `TimeoutError` name rule now matters only for SDK-internal timeouts." |
+| M143h (Data) or M143n | V13-250 (third clause) | `src/repositories/base-repository.ts:132-137`, `versioned-write.ts:15` | "The `conditional-write` refusal names `'database-plugin'` as the adapter; pass the bound source's adapter name instead." This is code in the Data lane, so M143n cannot make it. |
+| M143n (Docs) | V13-134, V13-250, V13-253 | `packages/database-plugin/README.md` | "M143q rewrote the 'Bounding a call' rows for DynamoDB, Cosmos and Bigtable, added a Drizzle-on-MySQL section and the MySQL cells of 'Optimistic locking'; the mysql2 and mariadb bound rows, the DynamoDB section, the adapter count and the isolation advice remain yours." |
+
+V13-142's own hand-over from M143b is applied in §3.6.
+
+**Received from M143i, assigned to M143h (not this letter).** M143i's streamed-cancel hand-over names
+`packages/agent-runs-plugin/src/log/respond.ts`: the replay pump started in `start` reads
+`deps.store`, and `cancel()` only sets a flag, so a store read can outlive the request's `ctx.defer`
+cleanups. `agent-runs-plugin` is a Data-lane package, but no M143q row touches it and this letter's
+scope is `database-plugin` alone (§0); it is not a register row either. M143h, the lane's next letter
+("database errors a client can act on, and store signals"), takes it, with its row in
+`test/response-stream-cancel-inventory.test.ts`.
+
+## 12. Open decisions for the maintainer
+
+D-2 (which Prisma connectors take the count path) was decided by the maintainer on 2026-11-22
+and is recorded in §3.1.0; it is no longer open. D-11 is new with that decision.
+
+| # | Decision | Options and evidence | Recommendation |
+| --- | --- | --- | --- |
+| D-1 | One pull request or two (§0.2) | One: fewer merges of shared files. Two: each High row reviewed with its own family; the MySQL CI service lands alone. | Two, MySQL first. |
+| D-3 | Name of the per-call bound | `callTimeoutMs` (README heading "Bounding a call"); `commandTimeoutMs` (the Redis siblings, three packages); `requestTimeoutMs` (the SDKs' word). | `callTimeoutMs`. |
+| D-4 | Default bound | 15 000 ms (the repository's Redis command default, §0.1); 5 000 ms (the PostgreSQL cell's configured bound in X119); none (today; violates the fixed-behaviour rule). | 15 000 ms. |
+| D-5 | Readiness probe target without configuration | Mapped entity read (§3.9, uses the app's own permission; no probe on an empty mapping, which is what the CLI scaffolds today). Instance-level ping: Bigtable `PingAndWarm` exists in the GAPIC client (`v2/bigtable_client.d.ts:235`) but whether `cbtemulator` implements it is not verified; DynamoDB `DescribeEndpoints` / `ListTables` need permissions an application role may lack (not verified). | Mapped entity read, plus the CLI hand-over so scaffolds carry an entity. |
+| D-6 | Memory adapter: conditional writes inside a unit of work | Keep the 501 (the rows name only the three NoSQL stores; memory has a serializable mode that already serializes). Add them for parity with the test double applications use. | Keep the refusal; revisit if a row asks. |
+| D-7 | `clientOptions` on the DynamoDB and Cosmos lazy arms too | Bigtable needs it for V13-231. DynamoDB and Cosmos need it only for settings `callTimeoutMs` does not cover (X119-4 needed an eight-method facade to set one handler option). TypeORM `extra` and Spring Boot properties are the compared precedents (not verified). | Add it on all three, one shape. |
+| D-8 | Bigtable metrics default | Off only with `apiEndpoint` (§3.11; keeps Google's default on real projects). Always off (safer on any host without credentials; drops a Google default). | Off only with `apiEndpoint`. |
+| D-9 | `AgentRunStoreUnavailableError`'s message naming its `reason` | A `common` change (Core lane, existing contract). This letter's chain wrapper (§3.14) is enough to close V13-249. | No `common` change. |
+| D-10 | MySQL in CI | The guarded MySQL suites are skipped in CI unless `.github/workflows/ci.yml` gains a `mysql:8.4` service and `MYSQL_URL` (and the env is kept out of `ALLOW_SKIP`). No lane lists the workflow file; the lanes table would name it under Data for this change. The milestone gate requires the MySQL stores to be "driven before they are closed". | Add the service in Part 1, with the lanes table corrected first. |
+| D-11 | M-2's threshold, and how a connector other than PostgreSQL moves to the single statement under Branch B | Proposed: at least 95% median paired throughput and at most 110% median paired p99 on both routes, in a quotable run (§3.1.3). A stricter bar (98%, the M128 point-read gap treated as noise) favours Branch B; a looser one favours Branch A. Under Branch B, CockroachDB and SQLite have `RETURNING` but no guarded race test here, so they stay on the count path until one exists. | 95% and 110% as proposed; CockroachDB and SQLite stay on the count path. |
+
+## 13. Docs deliverables
+
+- `PUBLIC_API.md` (DatabasePlugin section): the new option members (§4.1), the Bigtable facade
+  change, the conditional-write rule "decided from the write's affected rows", transactional
+  conditional writes on the three NoSQL stores, the readiness probe.
+- `CHANGELOG.md` (one `0.14.0` entry for the letter): `Fixed` V13-230, V13-242, V13-243, V13-244,
+  V13-251, V13-231, V13-239, V13-240, V13-249; `Added` `callTimeoutMs`, `readinessEntity`,
+  `clientOptions`, conditional writes in NoSQL units of work, NoSQL readiness probes; `BREAKING` the
+  Bigtable facade filter variant. Each entry names its PR number after `gh pr create`.
+- `docs/upgrading.md`: the default call bound on the three stores (a call that used to wait now ends
+  at the bound with 504); `/ready` can now report the three stores down; an injected Bigtable facade
+  must handle the new filter variant; Drizzle with MySQL now writes.
+- `packages/database-plugin/README.md`: C1–C7, §3.6, a Drizzle-on-MySQL section (pool and bridge
+  example, `FOUND_ROWS`, `dialect: 'mysql'`), the MySQL DDL for the outbox, inbox and idempotency
+  stores (pinned by `readme-ddl.test.ts`, extended to the MySQL DDL).
+- `packages/database-plugin/AGENT_CARD.md`: one line each for the call bound and the readiness
+  entity, within the card's byte budget.
+- `CLAUDE.md` status line and the ROADMAP Progress Tracking row, in the letter's own PR.
