@@ -18,7 +18,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
 worker, rejecting with `signal.reason` unchanged. Pre-aborted calls reject without queuing work.
 Dashboards and alerts on `worker_pool_tasks_rejected_total` gain a `reason="aborted"` series for
 these cancellations, including calls aborted after admission. They do not increment completed or
-failed counts.
+failed counts. A `signal` that is not an `AbortSignal` of this realm (a polyfill, or one from
+another realm such as jsdom) now throws `TypeError` before the call is admitted; it used to be
+ignored.
 
 ### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
 

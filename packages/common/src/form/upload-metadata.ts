@@ -2,6 +2,7 @@
  * The upload brand: what an upload-taking middleware accepts, recorded on the
  * middleware function so a documentation generator can describe the route's
  * `multipart/form-data` body without importing the plugin that produced it.
+ * `@setu-ts/openapi-plugin` does not read it yet.
  *
  * Like the validation brand it is a description, not a mechanism: removing it
  * changes no runtime behaviour.
