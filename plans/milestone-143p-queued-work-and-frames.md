@@ -129,6 +129,9 @@ where the documentation is silent, its source on GitHub.
 | 29  | An existing subscription with different settings  | Spring Cloud GCP and Dapr leave it unchanged and silent; MassTransit on Service Bus rewrites it                                                                                                                                                                                                                                                                                                                                                                             | coordinator lookup from primary sources, 2026-11-23 (item 7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 30  | An injectable clock on a transport                | Rebus injects `IRebusTime`                                                                                                                                                                                                                                                                                                                                                                                                                                                  | coordinator lookup from primary sources, 2026-11-23 (item 8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 31  | Redelivery on an ordered Pub/Sub key              | Google: "Redeliveries of a message trigger redelivery of all subsequent messages for that key"                                                                                                                                                                                                                                                                                                                                                                              | coordinator lookup from primary sources, 2026-11-23 (item 9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 32  | Who refuses a missing dead-letter topic           | Pub/Sub itself: `DeadLetterPolicy.dead_letter_topic`, "The operation will fail if the topic does not exist"                                                                                                                                                                                                                                                                                                                                                                 | googleapis `google/pubsub/v1/pubsub.proto`; coordinator lookup from primary sources, 2026-11-23 (Q1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 33  | When a framework checks the dead-letter topic     | Spring Cloud GCP's `PubSubChannelProvisioner` calls `ensureTopicExists` for the dead-letter topic only inside `createSubscription`, under `if (deadLetterPolicy != null)`, reached only when `getSubscription` returns null; Dapr checks nothing                                                                                                                                                                                                                            | spring-cloud-gcp `main`; coordinator lookup from primary sources, 2026-11-23 (Q1, Q2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 34  | Rights to read a topic                            | `roles/pubsub.subscriber` lacks `pubsub.topics.get`                                                                                                                                                                                                                                                                                                                                                                                                                         | Google Pub/Sub access-control page; coordinator lookup from primary sources, 2026-11-23 (Q2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 What rows 10 to 14 settle for Part A: the unreadable rule follows NServiceBus and the RabbitMQ
 sibling (§3.5), but leaves the message for its visibility timeout when the forward fails rather than
@@ -143,7 +146,7 @@ Sidekiq on purpose (§10). Trace context travels in the envelope body (the AWS .
 is the precedent for refusing to start because of a queue attribute.
 
 Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went to the maintainer
-(§12); rows 19 to 31 record the comparisons behind the decisions of 2026-11-23.
+(§12); rows 19 to 34 record the comparisons behind the decisions of 2026-11-23.
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -521,13 +524,13 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
     `IRedisStreamsClient` (`interfaces/index.ts:30-60`) gains optional `xread?` and `xrevrange?`;
     `validateClient` (`:90-111`) does not require them, so existing injected clients still connect;
     a fan-out subscribe on a client without them is refused by name with a `TypeError` naming the
-    missing method (proposed, pending the maintainer). The node-redis adapter in `common`
-    (`common/src/redis/node-redis-adapter.ts`, beside `xreadgroup` at `:402`) gains `xread` and
-    `xrevrange` (its RESP3 normalizer already handles `XREAD`, `resp3.ts:5`), an out-of-lane
-    `common` change under D1. Cost, documented: no pending list, so a handler failure is logged once
-    per failure and the frame is not redelivered, and `consumerRetry` does not apply to a fan-out
-    subscription (as Spring Cloud Stream's anonymous consumers have no DLQ, and as Pub/Sub fan-out
-    has no dead-letter policy, §3.13). `unsubscribe()` stops the reader. Test home:
+    missing method (maintainer decision, 2026-11-23, Q3 (a); Compared with, row 26). The node-redis
+    adapter in `common` (`common/src/redis/node-redis-adapter.ts`, beside `xreadgroup` at `:402`)
+    gains `xread` and `xrevrange` (its RESP3 normalizer already handles `XREAD`, `resp3.ts:5`), an
+    out-of-lane `common` change under D1. Cost, documented: no pending list, so a handler failure is
+    logged once per failure and the frame is not redelivered, and `consumerRetry` does not apply to
+    a fan-out subscription (as Spring Cloud Stream's anonymous consumers have no DLQ, and as Pub/Sub
+    fan-out has no dead-letter policy, §3.13). `unsubscribe()` stops the reader. Test home:
     `fan-out-subscribe.test.ts` (the start id from `XREVRANGE`, `0-0` on an empty stream, the
     `XREAD` call shape, no `XGROUP`, the last id kept across an empty read and an error, no reclaim
     for a fan-out subscription, a failing handler not redelivered, a client without `xread` refused
@@ -657,32 +660,35 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   arms unchanged).
 
 - **Review amendments (2026-11-23):**
-  - **Dead-letter topic checks (maintainer decision, 2026-11-23).** At the first `subscribe` that
-    applies or attaches the dead-letter policy, not a `fanOut` subscribe (it has none, §3.13) and
-    not `connect()`, so a send-only or fan-out-only service never refuses (the D9 precedent)
-    (proposed, pending the maintainer), the broker reads `deadLetterTopic` once; concurrent first
-    subscribes share one memoized check:
-    - the topic does not exist → refuse that subscribe with the new exported
-      `PubSubDeadLetterTopicMissingError` naming the topic (Compared with, row 23: Spring Cloud GCP
-      throws on a non-existing topic with auto-create off);
-    - the topic exists with no subscription → warn once and continue: Google says such dead letters
-      are lost, but neither Spring Cloud GCP nor Dapr checks, and a subscription can be added after
-      deploy (row 23). The warning names the topic and says dead letters are dropped until it has a
-      subscription;
-    - the read fails → warn once and continue (proposed, pending the maintainer). The warning names
-      the topic and the error code; the README names the role on the dead-letter topic that lets the
-      check read it (the exact IAM permission behind `GetTopic` and `ListTopicSubscriptions` is
-      checked against Google's access-control page before the README is written; not verified here).
-      The transport gains
-      `inspectTopic?(topic): Promise<{ exists: boolean; subscriptions?: number }>` (listed in §4),
-      which `adaptPubSubModule` implements with `topic.exists()` (`GetTopic`; NOT_FOUND gives
+  - **Dead-letter topic checks (maintainer decision, 2026-11-23, replacing the earlier "missing
+    topic refuses the first subscribe").** The check runs only when the broker CREATES a
+    subscription with a dead-letter policy (Compared with, rows 32 and 33):
+    - **Attach path:** `open` resolves with `existing` when it attached to a subscription that
+      already existed (`pubsub-broker.ts:416`). No check and no warning: Google validated the
+      dead-letter topic when that subscription was created. A `fanOut` subscription carries no
+      dead-letter policy (§3.13), so it is never checked; a send-only service creates nothing and is
+      never checked.
+    - **Missing topic on the create path:** Google refuses it ("The operation will fail if the topic
+      does not exist", `pubsub.proto` `DeadLetterPolicy`, row 32). `CreateSubscription` reports
+      NOT_FOUND (gRPC 5) for a missing source topic too, so the code alone cannot tell the two
+      apart: on NOT_FOUND from a create that carried a dead-letter policy, the broker calls
+      `inspectTopic(deadLetterTopic)`; `exists: false` → the subscribe rejects with the new exported
+      `PubSubDeadLetterTopicMissingError` naming the topic, with the SDK error as `cause`; otherwise
+      the original error is rethrown unchanged. No separate pre-check.
+    - **No subscription on the dead-letter topic:** after a successful create, the broker reads the
+      topic's subscriptions; none → warn once per topic and continue (Google: dead letters published
+      to a topic with no subscription are lost; neither Spring Cloud GCP nor Dapr checks, and a
+      subscription can be added after deploy, row 23). The warning names the topic and says dead
+      letters are dropped until it has a subscription.
+    - **The read fails:** PERMISSION_DENIED (gRPC 7) → one `info` line naming the topic and the role
+      needed (`roles/pubsub.subscriber` lacks `pubsub.topics.get`, row 34); any other failure → warn
+      once naming the topic and the error code. In both cases the subscribe continues.
+    - **Seam:** `inspectTopic?(topic): Promise<{ exists: boolean; subscriptions?: number }>` (listed
+      in §4), implemented in `adaptPubSubModule` with `topic.exists()` (`GetTopic`; NOT_FOUND gives
       `false`, other errors reject, SDK 6.4.1 `build/src/topic.js:152-163`) and
-      `topic.getSubscriptions({ pageSize: 1, autoPaginate: false })` (`ListTopicSubscriptions`); a
-      transport without it skips the check with one warning.
-    - The missing-topic refusal rests on the Spring Cloud GCP precedent (row 23), not on proven
-      silent loss: whether Pub/Sub's own forwarding to a missing topic drops messages, and whether
-      `CreateSubscription` already refuses a missing dead-letter topic, is not verified; the
-      emulator run records both.
+      `topic.getSubscriptions({ pageSize: 1, autoPaginate: false })` (`ListTopicSubscriptions`). A
+      transport without it rethrows a create's NOT_FOUND unchanged and skips the subscription check
+      with one warning.
   - The topic is normalised to `projects/{project}/topics/{topic}` through the SDK's
     `pubsub.topic(name).name`, and backoffs are passed as `{ seconds, nanos }`.
   - The not-retryable forward acks only after the publish resolves; a failed publish nacks.
@@ -883,9 +889,9 @@ settlement failure; `queue_jobs_total` counts an outcome only after its settle s
 adapter. Part B: Pub/Sub and Service Bus failing handlers are now delayed and limited by default; an
 unroutable RabbitMQ outbox row is retried and then failed instead of marked sent, and an outbox on a
 RabbitMQ connection without publisher confirms refuses to start; a Pub/Sub consumer whose
-`deadLetterTopic` does not exist is refused at its first subscribe; the backplane `messaging`
-transport refuses a broker without fan-out. Frames are not dropped by age unless `maxFrameAgeMs` is
-set (D5), so the backplane's delivery is unchanged by default.
+`deadLetterTopic` does not exist is refused when the broker creates its subscription; the backplane
+`messaging` transport refuses a broker without fan-out. Frames are not dropped by age unless
+`maxFrameAgeMs` is set (D5), so the backplane's delivery is unchanged by default.
 
 | Exported symbol                                                                                      | Kind               | Consumer / real code path that READS it                                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -904,7 +910,7 @@ set (D5), so the backplane's delivery is unchanged by default.
 | `SnsPublisherOptions.runtime`                                                                        | option             | Read by `publishJob` for the default `id` (§4.1)                                                                                                                                                                                                                                                            |
 | `UnroutableMessageError` (messaging-plugin)                                                          | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications                                                                                                                                                                                        |
 | `OutboxPublisherConfirmsRequiredError` (messaging-plugin)                                            | class              | Thrown where the plugin activates the outbox when the broker reports no confirm channel (§3.10); surfaces from `app.start()`                                                                                                                                                                                |
-| `PubSubDeadLetterTopicMissingError` (messaging-plugin)                                               | class              | Thrown by `GcpPubSubBroker`'s first `subscribe` when `deadLetterTopic` does not exist (§3.11)                                                                                                                                                                                                               |
+| `PubSubDeadLetterTopicMissingError` (messaging-plugin)                                               | class              | Thrown by `GcpPubSubBroker.subscribe` when creating a subscription fails because `deadLetterTopic` does not exist (§3.11)                                                                                                                                                                                   |
 | `IPubSubTransport.inspectTopic?`                                                                     | member             | Implemented by `adaptPubSubModule`; read by the dead-letter topic check (§3.11)                                                                                                                                                                                                                             |
 | `IRedisStreamsClient.xread?`, `xrevrange?` (messaging-plugin)                                        | members            | Called by `RedisStreamsBroker` for a fan-out subscription only (§3.7); implemented by the node-redis adapter                                                                                                                                                                                                |
 | node-redis adapter `xread`, `xrevrange` (common, out of lane)                                        | methods            | Called by `RedisStreamsBroker` through `IRedisStreamsClient` when the client is node-redis                                                                                                                                                                                                                  |
@@ -1020,7 +1026,7 @@ completeness assertion against the package's list of arms.
 | `common/test/unit/node-redis-adapter.test.ts` (extended)                                                                                                                                                                                                                                                              | `redis/node-redis-adapter.ts`                                                                               | `xread` and `xrevrange` argument and reply shapes                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `messaging-plugin/test/integration/fan-out-conformance.test.ts`                                                                                                                                                                                                                                                       | every broker file                                                                                           | Table §3.7 as data: two broker instances, N publishes from each, each instance receives all 2N; `unsubscribe()` removes the per-instance resource (recorded on fakes, listed through the admin API on real arms); negative control: the same table without `fanOut` loses messages on the shared-group arms                                                                                                                                                                                                    |
 | `messaging-plugin/test/unit/consumer-retry-options.test.ts`                                                                                                                                                                                                                                                           | `consumer-retry.ts`, `rabbitmq-broker.ts`, `redis-streams-broker.ts`                                        | Shared validator; the two old arms' refusal texts unchanged (both entry points, non-default config)                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `messaging-plugin/test/unit/pubsub-consumer-retry.test.ts`                                                                                                                                                                                                                                                            | `pubsub-broker.ts`, `messaging-plugin.ts`                                                                   | §3.11 against a recording fake transport, including the dead-letter topic checks at first subscribe (missing → `PubSubDeadLetterTopicMissingError`; no subscription → one warning; read failure → one warning; send-only service and a first `fanOut` subscribe → no check; concurrent first subscribes → one read)                                                                                                                                                                                            |
+| `messaging-plugin/test/unit/pubsub-consumer-retry.test.ts`                                                                                                                                                                                                                                                            | `pubsub-broker.ts`, `messaging-plugin.ts`                                                                   | §3.11 against a recording fake transport, including the dead-letter topic checks of §3.11 (create with a missing topic → `PubSubDeadLetterTopicMissingError` with the SDK error as cause; NOT_FOUND for a missing source topic rethrown unchanged; attach to an existing subscription → no read; `fanOut` and send-only → no read; created with no subscription on the topic → one warning; PERMISSION_DENIED → one `info` line; other read failure → one warning)                                             |
 | `messaging-plugin/test/unit/service-bus-consumer-retry.test.ts`                                                                                                                                                                                                                                                       | `service-bus-broker.ts`, `messaging-plugin.ts`                                                              | §3.12 against a fake receiver and clock, plus the amendments: the explicit `maxAutoLockRenewalDurationInMs`; an early abandon with one warning when the lock budget left is below the delay; holds cancelled and abandoned on `unsubscribe()` and `disconnect()`; the measured `deliveryCount` base pinned; absent `deadLetter`/`deliveryCount` falls back to abandon with one warning                                                                                                                         |
 | `messaging-plugin/test/integration/consumer-retry-conformance.test.ts`                                                                                                                                                                                                                                                | the four retrying brokers                                                                                   | One table over rabbitmq, redis-streams, pubsub, service-bus: a handler that always fails is delivered exactly `maxAttempts` times (Pub/Sub: within the platform's documented approximation), spaced by at least the configured minimum delay, then dead-lettered with its payload; real arms guarded                                                                                                                                                                                                           |
 | `messaging-plugin/test/unit/pubsub-ordered-dispatch.test.ts`                                                                                                                                                                                                                                                          | `pubsub-ordering.ts`, `pubsub-broker.ts`                                                                    | §3.14 sequences                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -1218,15 +1224,22 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   opt-in for publishes in general, but the outbox README promises at-least-once delivery of every
   row. **Recommendation: (a).**
 - **Review items 1 to 10 (raised by the plan review of 2026-11-23).** **DECIDED by the maintainer,
-  2026-11-23:** (1) a missing Pub/Sub dead-letter topic refuses the first subscribe, one with no
-  subscription or an unreadable one warns once; (2) the outbox refuses to start on a RabbitMQ
-  connection without publisher confirms; (3) `fanOut` ignored with a warning on `respond`, refused
-  on an inbox subscription, warned when a declarative subscription lacks the marker; (4) Redis
-  Streams fan-out is a plain `XREAD`, no groups, no sweep; (5) the Service Bus lock budget and close
-  behaviour as §3.12; (6) Service Bus fan-out names keep a shortened `defaultQueue` prefix within 50
-  characters; (7) existing Pub/Sub subscriptions keep their settings with a warning; (8) the `now?`
-  clock parameter; (9) ordering plus a dead-letter topic accepted with a warning; (10) Pub/Sub
-  fan-out subscriptions get retry backoff and no dead-letter policy. Compared with, rows 23 to 31.
+  2026-11-23:** (1) superseded the same day by Q1/Q2 below; (2) the outbox refuses to start on a
+  RabbitMQ connection without publisher confirms; (3) `fanOut` ignored with a warning on `respond`,
+  refused on an inbox subscription, warned when a declarative subscription lacks the marker; (4)
+  Redis Streams fan-out is a plain `XREAD`, no groups, no sweep; (5) the Service Bus lock budget and
+  close behaviour as §3.12; (6) Service Bus fan-out names keep a shortened `defaultQueue` prefix
+  within 50 characters; (7) existing Pub/Sub subscriptions keep their settings with a warning; (8)
+  the `now?` clock parameter; (9) ordering plus a dead-letter topic accepted with a warning; (10)
+  Pub/Sub fan-out subscriptions get retry backoff and no dead-letter policy. Compared with, rows 23
+  to 31.
+- **Q1 to Q3 (raised by the third plan review, 2026-11-23).** **DECIDED by the maintainer,
+  2026-11-23:** Q1 and Q2 together: the dead-letter topic is checked only when the broker creates a
+  subscription with a dead-letter policy: Google's own refusal of a missing topic surfaces as
+  `PubSubDeadLetterTopicMissingError`, a topic with no subscription warns once, PERMISSION_DENIED
+  logs at `info`, other read failures warn once; attaching to an existing subscription checks
+  nothing (rows 32 to 34). Q3 (a): a `fanOut` subscribe on a Redis Streams client without `xread` is
+  a `TypeError` naming the method (row 26).
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
   once as its own PR, Part B after it on the same branch (§0.3).
 - **D8, the Pub/Sub ordering row.** **DECIDED by the maintainer, 2026-11-23: (a)** (Compared with,
