@@ -501,6 +501,11 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP';
 type FatalErrorOrigin = 'uncaughtException' | 'unhandledRejection';
 
+interface DnsResolverOptions {
+  readonly servers: readonly string[];
+  readonly timeoutMs: number;
+}
+
 interface IRuntimeServices {
   reportError?(record: Readonly<Record<string, unknown>>): void;
   platform(): RuntimePlatform;

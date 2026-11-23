@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### DNS errors and the reserved drain marker
+### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
 
 `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.
 Code reading `error.cause.code` must inspect `error.cause.errors` instead, in A-then-AAAA order;
