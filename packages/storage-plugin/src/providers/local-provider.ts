@@ -124,7 +124,8 @@ export class LocalStorageProvider implements StorageProvider {
   /**
    * M70c: `runtime.fs.stat(root)` succeeds — a disk that vanished is a real,
    * common failure. A permission change on the root itself after `connect()`
-   * is not detected (one on a parent directory fails the `stat`).
+   * is not detected; for a non-root process, losing search permission on a
+   * parent directory fails the `stat`.
    *
    * Also reports `false` when the root never proved WRITABLE at `connect()`.
    * A stat-only probe answered `up` for a root the process could read and not

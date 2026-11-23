@@ -623,10 +623,11 @@ export class GcsProvider implements StorageProvider {
   ): Promise<ReadableStream<Uint8Array> | null> {
     const iterator = readable[Symbol.asyncIterator]();
     let released = false;
+    let destroyed = false;
     const release = (): void => {
       if (released) return;
       released = true;
-      destroySource(readable);
+      destroyed = destroySource(readable);
     };
     let first: IteratorResult<unknown>;
     try {
@@ -653,7 +654,11 @@ export class GcsProvider implements StorageProvider {
       },
       async cancel(): Promise<void> {
         release();
-        await iterator.return?.();
+        // A destroyed source ends a pull in flight, so `return()` settles and is
+        // awaited. An injected source with no `destroy()` that stalls mid-pull
+        // would hold `return()` (and the kernel's wait on this cancel) forever.
+        const closing = Promise.resolve(iterator.return?.()).catch(() => undefined);
+        if (destroyed) await closing;
       },
     });
   }
@@ -667,7 +672,9 @@ function toBytes(chunk: unknown): Uint8Array {
 }
 
 /** Destroys a node stream when it exposes `destroy`; a no-op otherwise. */
-function destroySource(source: unknown): void {
+function destroySource(source: unknown): boolean {
   const destroy = (source as { destroy?: unknown }).destroy;
-  if (typeof destroy === 'function') (destroy as () => void).call(source);
+  if (typeof destroy !== 'function') return false;
+  (destroy as () => void).call(source);
+  return true;
 }

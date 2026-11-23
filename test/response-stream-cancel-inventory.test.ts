@@ -174,12 +174,14 @@ const CONSTRUCTIONS: readonly Row[] = [
   },
   {
     // A pull stream over the GCS SDK's read iterator after its first chunk:
-    // `cancel()` destroys the source and returns the iterator's own `return()`.
+    // `cancel()` destroys the source and awaits the iterator's `return()`,
+    // which the destroy lets settle; a source with no `destroy()` is not awaited.
     file: 'packages/storage-plugin/src/providers/gcs-provider.ts',
     count: 1,
-    cancelSettles: 'as-its-source',
+    cancelSettles: 'always',
     kind: 'forwards-cancel',
-    evidence: /async cancel\(\): Promise<void> \{\s*release\(\);\s*await iterator\.return\?\.\(\);/,
+    evidence:
+      /async cancel\(\): Promise<void> \{\s*release\(\);[\s\S]*?if \(destroyed\) await closing;/,
   },
   {
     // Node Readable adapter (pull waits for 'readable'), the eager iterable
