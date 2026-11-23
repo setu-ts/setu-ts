@@ -534,8 +534,22 @@ security-audited by a freshly spawned Claude agent following `.roo/skills/securi
 
 ## 10. Design security review
 
-The diff crosses two trust boundaries. The committed-tree audit (freshly spawned Claude agent,
-`.roo/skills/security-audit/SKILL.md`) runs these obligations with positive and negative controls:
+Reviewed on 2026-11-23, before implementation, by the planning session and two fresh-agent plan
+reviews.
+
+- **Flows:** (1) application configuration → `createDnsResolver({ servers, timeoutMs })` → UDP/TCP
+  queries to the chosen name servers → records returned to the caller (service discovery in M143c);
+  (2) a request arriving after `stop()` began → the kernel's pre-pipeline drain branch → the error
+  responder → the `x-setu-unprocessed: shutdown` header → a client deciding whether to send again.
+- **Assets:** the bound on how long a lookup can hold a caller and a socket; the integrity of the
+  name-server list (no host name resolved to find one); the truth of the marker's claim that the
+  request was not processed.
+- **Attackers:** a name server that never answers, answers slowly or answers with odd records; a
+  caller passing malformed options (wrong types, sparse arrays, proxies); application code that
+  writes the reserved header (accepted risk A1); an HTTP client sending the marker on a request (it
+  is a response header; the kernel never reads it from a request). The diff crosses two trust
+  boundaries. The committed-tree audit (freshly spawned Claude agent,
+  `.roo/skills/security-audit/SKILL.md`) runs these obligations with positive and negative controls:
 
 - **S1, the drain answer always carries the marker, with exactly the reserved value.** With and
   without an `errorHandler`, and when the responder writes the name with another value.
