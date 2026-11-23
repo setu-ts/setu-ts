@@ -25,17 +25,17 @@ of the live service.
   brand of §3.15); the R2 not-found row of V13-217 (M143o, Workers lane — it may throw the
   `StorageObjectNotFoundError` of §3.2); the `IStorage.delete`/`exists` JSDoc wording in
   `common/src/services/storage.ts` (Core lane, M143i, or Docs, M143n — this lane may not edit an
-  existing `common` file); **V13-131, stopped and reported for the Core lane (M143i):** an
-  application resolves the pool as `CapabilityServices['worker-pool']` = `IWorkerPool`
-  (`common/src/capability-services.ts:140`), whose `run` takes `WorkerRunOptions`
-  (`common/src/services/worker-pool.ts:87-91`), so `{ signal }` cannot reach the pool without adding
-  the field to that existing contract — a Core-lane change (the lane rule's "a change to an existing
-  contract is made by the Core lane first"); once it lands, the worker-pool half (queued withdrawal,
-  running termination, listener removal) is a follow-up in this lane; the
-  `docs/health-indicators.md` rows (storage, SES, secrets) and `docs/pages.md:122` ("a wrong type
-  with 400") — `docs/` belongs to the Docs lane (M143n), and M143m edits the same file for SQS; both
-  corrections are handed over; wiring the new stand-ins into CI (`.github/workflows/ci.yml` and
-  `scripts/local-ci.ts` belong to no lane).
+  existing `common` file); **V13-131, first stopped and reported for the Core lane (M143i), then
+  built here once M143i merged (§3.16):** an application resolves the pool as
+  `CapabilityServices['worker-pool']` = `IWorkerPool` (`common/src/capability-services.ts:140`),
+  whose `run` takes `WorkerRunOptions` (`common/src/services/worker-pool.ts:87-91`), so `{ signal }`
+  cannot reach the pool without adding the field to that existing contract — a Core-lane change (the
+  lane rule's "a change to an existing contract is made by the Core lane first"); once it lands, the
+  worker-pool half (queued withdrawal, running termination, listener removal) is a follow-up in this
+  lane; the `docs/health-indicators.md` rows (storage, SES, secrets) and `docs/pages.md:122` ("a
+  wrong type with 400") — `docs/` belongs to the Docs lane (M143n), and M143m edits the same file
+  for SQS; both corrections are handed over; wiring the new stand-ins into CI
+  (`.github/workflows/ci.yml` and `scripts/local-ci.ts` belong to no lane).
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -323,18 +323,21 @@ of the live service.
 - **Test home:** `common` `upload-metadata.test.ts`; storage `upload-middleware.test.ts` reads the
   brand back.
 
-### 3.16 V13-131 is not built in this letter
+### 3.16 V13-131: worker-pool calls cancelled by `WorkerRunOptions.signal`
 
-- **Decision:** stopped and reported for the Core lane (§0). No `common` file and no worker-pool
-  change ships here. The design the follow-up should build, once `WorkerRunOptions` carries
-  `readonly signal?: AbortSignal`: pre-aborted → reject with `signal.reason`, nothing queued; abort
-  while queued → removed from `pending`; abort while running → the worker terminated as the timeout
-  path does; listener removed on every settle; counted in the rejected-tasks metric under a new
-  `aborted` reason, not as `completed` or `failed`.
-- **Why:** an additive `WorkerRunSignalOptions` type would only work through a cast or a typed
-  intermediate variable, because the capability is typed `IWorkerPool`; the token↔interface rule
-  forbids the cast.
-- **Test home:** none in this letter.
+- **Decision:** stopped and reported for the Core lane (§0) at first, because the capability is
+  typed `IWorkerPool` and its `WorkerRunOptions` had no `signal` (an additive type would need a
+  cast, which the token↔interface rule forbids). M143i added `readonly signal?: AbortSignal` (#611);
+  once it merged, the worker-pool half was built here. Pre-aborted → reject with `signal.reason`,
+  nothing queued; abort while queued → removed from `pending` with the timeout's starting-worker
+  reclaim; abort while running → the worker terminated and replaced as the timeout path does;
+  listener attached before the task is queued and removed on every settle, with a `settled` flag
+  guarding a listener a host still holds; one signal shared by several calls withdraws the queued
+  ones together, so no replacement worker starts for them; a `signal` that is not an `AbortSignal`
+  is a `TypeError` before admission. Counted in the rejected-tasks metric under a new `aborted`
+  reason, never as `completed` or `failed`.
+- **Test home:** `worker-pool-plugin/test/unit/task-pool-abort.test.ts`; the real-thread case in
+  `test/e2e/real-worker.test.ts` with the `test/fixtures/wait-task.ts` fixture.
 
 ### 3.17 Catalogue key filter (V12-132)
 
@@ -479,7 +482,12 @@ refused). Ships in minor `0.14.0`.
 | `localization-plugin/test/integration/catalogue-route.test.ts` (extended)                                                                     | route, plugin validation             | §3.17                                                                                                                                                                                  |
 | `storage-plugin/test/unit/options-typing.test.ts` (extended)                                                                                  | `interfaces/index.ts`                | each provider's two option interfaces assignable both ways                                                                                                                             |
 
-Every fix's test is shown failing on the parent commit before the fix lands (recorded in the PR).
+Every fix's test is shown failing on the parent commit before the fix lands (recorded in the PR). |
+`worker-pool-plugin/test/unit/task-pool-abort.test.ts`, `test/e2e/real-worker.test.ts`
+(`fixtures/wait-task.ts`) | `pool/task-pool.ts`, `services/worker-pool-service.ts`,
+`services/sizing.ts`, `metrics/metric-names.ts` | pre-aborted/queued/running abort reject with
+`signal.reason`; listener removed on every settle; shared-signal batch; non-signal `TypeError`;
+`aborted` reason only; real worker terminated |
 
 ## 7. Verification gates
 

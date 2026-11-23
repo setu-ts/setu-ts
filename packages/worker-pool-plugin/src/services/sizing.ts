@@ -152,6 +152,33 @@ export function assertTaskTimeout(value: unknown, name: string): void {
 }
 
 /**
+ * Refuses a per-call `signal` that is not an `AbortSignal` (a `null` from
+ * JavaScript, a cast object). Checked before admission: the pool attaches a
+ * listener to it, and a value without one would fail inside a timer callback.
+ *
+ * @param value - The per-call `signal`; `undefined` is allowed
+ * @throws {TypeError} Unless `value` is `undefined` or has `aborted`,
+ * `addEventListener` and `removeEventListener`
+ */
+export function assertAbortSignal(value: unknown): void {
+  if (value === undefined) return;
+  const candidate = value as {
+    aborted?: unknown;
+    addEventListener?: unknown;
+    removeEventListener?: unknown;
+  } | null;
+  if (
+    typeof candidate !== 'object' ||
+    candidate === null ||
+    typeof candidate.aborted !== 'boolean' ||
+    typeof candidate.addEventListener !== 'function' ||
+    typeof candidate.removeEventListener !== 'function'
+  ) {
+    throw new TypeError(`signal must be an AbortSignal; received ${describe(value)}`);
+  }
+}
+
+/**
  * Validates the sizing options at the plugin factory, so a bad value fails
  * when the plugin is constructed rather than at `start()`.
  *

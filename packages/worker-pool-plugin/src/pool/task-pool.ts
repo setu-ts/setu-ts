@@ -57,10 +57,11 @@ export interface TaskPoolConfig {
  * a task that never reaches a worker — e.g. a module that never signals ready
  * — still times out instead of hanging) and carried through dispatch.
  *
- * Single settlement is structural, not flag-guarded: every settle path both
- * removes the task from its pending/slot location AND clears its timer, so no
- * second settle (a duplicate reply, a post-settle timeout, a crash after
- * completion) can reach it.
+ * Every settle path removes the task from its pending/slot location and goes
+ * through `cleanupTask`, which clears its timer, detaches its abort listener
+ * and sets `settled`. Removal keeps a duplicate reply, a post-settle timeout
+ * or a crash after completion from reaching it; `settled` guards the one
+ * callback a host may still hold, the abort listener.
  */
 interface Task {
   readonly input: unknown;
@@ -213,11 +214,12 @@ export class TaskPool {
         settled: false,
         timer: null,
       };
+      // Attached first: should it throw, nothing is queued and no timer runs.
+      if (task.onAbort !== null) signal!.addEventListener('abort', task.onAbort, { once: true });
       if (task.timeoutMs > 0) {
         task.timer = this.runtime.setTimeout(() => this.onTimeout(task), task.timeoutMs);
       }
       this.pending.push(task);
-      if (task.onAbort !== null) signal!.addEventListener('abort', task.onAbort, { once: true });
       this.pump();
       this.syncMetrics();
     });
@@ -286,7 +288,9 @@ export class TaskPool {
       // The loop therefore ends either when the slot becomes busy or when the
       // queue runs dry — the `undefined` shift IS that second exit, not a
       // defensive arm.
-      while (slot.ready && slot.task === null) {
+      // `terminating`: an abort raised while a dispatch copied its input (a
+      // getter on the input) terminates this slot inside the loop.
+      while (slot.ready && slot.task === null && !slot.terminating) {
         const item = this.pending.shift();
         if (item === undefined) {
           break;
@@ -550,6 +554,12 @@ export class TaskPool {
     if (task.settled) return;
     this.withdrawTask(task);
     this.rejectTask(task, reason, 'aborted');
+    // One signal shared by several calls (a request's) aborts them in turn;
+    // withdraw the queued ones now, so pump() starts no worker for them.
+    for (const queued of this.pending.filter((candidate) => candidate.signal?.aborted)) {
+      this.withdrawTask(queued);
+      this.rejectTask(queued, queued.signal!.reason, 'aborted');
+    }
     this.pump();
     this.syncMetrics();
   }

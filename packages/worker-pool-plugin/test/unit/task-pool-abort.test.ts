@@ -244,6 +244,72 @@ describe('TaskPool cancellation', () => {
     expect(metrics.require(WORKER_POOL_METRICS.REJECTED).total()).toBe(abortFirst ? 2 : 0);
     expect(pool.stats()).toMatchObject({ completed: 0, failed: abortFirst ? 0 : 2 });
   });
+  it('a value that is not an AbortSignal queues nothing and arms no timer', async () => {
+    const { pool, timers, host } = setup();
+    const bogus = { aborted: false } as unknown as AbortSignal;
+    await expect(pool.run('x', 50, bogus)).rejects.toBeInstanceOf(TypeError);
+    expect(pool.stats()).toMatchObject({ queued: 0, workers: 0 });
+    expect(timers.armed).toBe(0);
+    expect(host.handles).toHaveLength(0);
+    await pool.shutdown();
+  });
+
+  it('does not dispatch to a worker an abort terminated while its input was copied', async () => {
+    const controller = new AbortController();
+    // Stands in for structured clone reading an input getter that aborts the call.
+    const host = new FakeHost(
+      2,
+      (request) => {
+        if (request.input === 'A') controller.abort('reentrant');
+      },
+      true,
+    );
+    const { pool, metrics } = setup(10, new WorkerBudget(1), host);
+    const a = pool.run('A', 0, controller.signal);
+    const aborted = expect(a).rejects.toBe('reentrant');
+    const b = pool.run('B');
+    host.handles[0].emitReady();
+    await aborted;
+    expect(host.handles[0].terminated).toBe(true);
+    expect(host.handles[0].requests.map((request) => request.input)).toEqual(['A']);
+    host.handles[1].emitReady();
+    host.handles[1].replyOk('B done');
+    await expect(b).resolves.toBe('B done');
+    expectAborted(metrics);
+    await pool.shutdown();
+  });
+
+  it('one signal shared by several calls starts no replacement worker for them', async () => {
+    const host = new FakeHost(4, undefined, true);
+    const timers = new FakeTimers();
+    const metrics = new RecordingMetrics();
+    const pool = new TaskPool(
+      {
+        specifier: SPEC,
+        label: 'echo',
+        size: 3,
+        maxQueue: 100,
+        taskTimeoutMs: 0,
+        startupTimeoutMs: 60_000,
+      },
+      host,
+      createFakeRuntime(timers, host),
+      new WorkerBudget(3),
+      new WorkerPoolCollector(metrics, throwOnReport),
+    );
+    const controller = new AbortController();
+    const calls = Array.from({ length: 8 }, (_, i) => pool.run(i, 0, controller.signal));
+    const settled = Promise.allSettled(calls);
+    for (const handle of host.handles) handle.emitReady();
+    expect(host.handles).toHaveLength(3);
+    controller.abort('gone');
+    const results = await settled;
+    expect(results.every((r) => r.status === 'rejected' && r.reason === 'gone')).toBe(true);
+    expect(host.handles).toHaveLength(3);
+    expect(pool.stats()).toMatchObject({ queued: 0, workers: 0, failed: 0 });
+    expectAborted(metrics, 8);
+    await pool.shutdown();
+  });
 });
 
 describe('WorkerPoolService cancellation', () => {
@@ -259,6 +325,28 @@ describe('WorkerPoolService cancellation', () => {
       expect(timers.armed).toBe(0);
       expect(service.stats()[0]).toMatchObject({ queued: 0, completed: 0, failed: 0 });
       expectAborted(metrics);
+      await service.shutdown();
+    },
+  );
+
+  it.each([null, {}, { aborted: false }, 'signal'])(
+    'refuses a signal that is not an AbortSignal (%j) before admission, uncounted',
+    async (signal) => {
+      const timers = new FakeTimers();
+      const metrics = new RecordingMetrics();
+      const service = new WorkerPoolService(
+        {},
+        createFakeRuntime(timers, new FakeHost(1, undefined, true)),
+        new WorkerPoolCollector(metrics, throwOnReport),
+      );
+      const error = await service
+        .run(SPEC, 1, { signal: signal as unknown as AbortSignal })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(TypeError);
+      expect((error as Error).message).toMatch(/^signal must be an AbortSignal; received /);
+      expect(service.stats()).toEqual([]);
+      expect(metrics.require(WORKER_POOL_METRICS.REJECTED).total()).toBe(0);
+      expect(timers.armed).toBe(0);
       await service.shutdown();
     },
   );
