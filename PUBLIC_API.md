@@ -6102,7 +6102,8 @@ app.router.post('/thumbnail', async (ctx) => {
   `worker_pool_tasks_rejected_total`, without increasing completed or failed counts. Later aborts do
   nothing; shutdown/abort races keep the first result. Timeout validation, a shut-down service and
   an unavailable host retain precedence over abort; within an open pool, pre-aborted work is refused
-  before checking queue capacity.
+  before checking queue capacity. A `signal` that is not an `AbortSignal` of this realm rejects the
+  call with `TypeError` before admission, uncounted in the metrics.
 - `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
   (`{ taskModule, workers, busy, queued, completed, failed }`).
 - `IWorkerPool.shutdown(): Promise<void>` — terminate every worker, reject pending tasks (called by
@@ -14349,7 +14350,8 @@ Contract notes:
   `@setu-ts/worker-pool-plugin`: a pre-aborted signal rejects with `signal.reason` unchanged without
   queuing work, a queued call is withdrawn, and a running call's worker is terminated and replaced
   as on timeout. Each cancellation counts as `aborted` in the rejected-tasks metric, without
-  incrementing completed or failed counts.
+  incrementing completed or failed counts. A value that is not an `AbortSignal` of this realm
+  rejects the call with `TypeError`.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop

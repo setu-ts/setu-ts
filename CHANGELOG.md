@@ -13,7 +13,7 @@ All notable changes to this project are documented here. The format follows
   call's worker is terminated and replaced as on timeout. Each cancellation increments
   `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
-  realm now throws `TypeError` before the call is admitted; it used to be ignored.
+  realm now rejects the call with `TypeError` before it is admitted; it used to be ignored.
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)

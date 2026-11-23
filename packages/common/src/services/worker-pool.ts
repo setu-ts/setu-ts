@@ -31,7 +31,8 @@ export interface WorkerRunOptions {
    * A queued call is withdrawn; a running call's worker is terminated and
    * replaced, as on a timeout. Both reject with `signal.reason` unchanged.
    * The framework's pool counts cancellation as `aborted` in the rejected-tasks
-   * metric, without incrementing completed or failed counts.
+   * metric, without incrementing completed or failed counts, and rejects the
+   * call with `TypeError` unless the value is an `AbortSignal` of this realm.
    *
    * @since 0.14.0
    */
