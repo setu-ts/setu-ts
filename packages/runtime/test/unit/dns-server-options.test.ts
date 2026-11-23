@@ -50,10 +50,21 @@ describe('DNS server options', () => {
     ['a Symbol', Symbol('dns'), '(symbol)'],
     ['a null-prototype object', Object.create(null) as unknown, '(object)'],
     ['a number', 53, '(number)'],
+    ['an empty slot', undefined, '(undefined)'],
   ])('refuses %s with a RangeError naming its type', (_label, entry, shown) => {
     const run = () => parseDnsResolverOptions({ servers: [entry as never], timeoutMs: 0 });
     expect(run).toThrow(RangeError);
     expect(run).toThrow(`servers[0] ${shown}`);
+  });
+  it('refuses a sparse array at its first hole', () => {
+    // eslint-disable-next-line no-sparse-arrays -- the hole is the input under test
+    const sparse = [, '1.1.1.1'] as unknown as string[];
+    expect(() => parseDnsResolverOptions({ servers: sparse, timeoutMs: 0 })).toThrow(
+      'servers[0] (undefined)',
+    );
+    expect(() => parseDnsResolverOptions({ servers: new Array<string>(1), timeoutMs: 0 })).toThrow(
+      RangeError,
+    );
   });
   it.each([0, 2_147_483_647])('accepts timeoutMs %s and duplicate servers', (timeoutMs) => {
     const result = parseDnsResolverOptions({ servers: ['::1', '::1'], timeoutMs });

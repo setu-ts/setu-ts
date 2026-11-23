@@ -34,7 +34,8 @@ export function parseDnsResolverOptions(options: DnsResolverOptions): {
   if (!Array.isArray(options.servers) || options.servers.length === 0) {
     throw new RangeError('servers must be a non-empty array');
   }
-  const servers = options.servers.map((entry: string, index: number): IDnsServer => {
+  // `Array.from`, not `map`: `map` skips holes, so a sparse array would pass unchecked.
+  const servers = Array.from(options.servers, (entry: string, index: number): IDnsServer => {
     const invalid = (): never => {
       // A Symbol or a null-prototype object throws inside a template literal, so only a
       // string entry is quoted; anything else is named by its type.

@@ -340,8 +340,10 @@ decided on 2026-11-23 that the kernel removes none (§3.7).
     response-builder or `@setu-ts/testing` change.
   - The header is **reserved**. The constant's JSDoc, `PUBLIC_API.md`, `docs/upgrading.md` and the
     READMEs say so: only the kernel's pre-pipeline shutdown answer sets it. An application that sets
-    it is itself claiming the request was not processed, and a Setu gRPC client may then send that
-    unary call once more.
+    it is itself claiming the request was not processed, and a client that honours the marker may
+    send that request again. The docs say no more than that, because no client reads the marker yet:
+    the Setu gRPC client's rule (one resend of a unary call, within the deadline) is M143c §3.9's,
+    and M143c names it in the docs when it ships.
 - **Why:** the maintainer decided only that the kernel marks its drain 503. The "remove it
   everywhere else" item came from M143c's plan review. No compared framework removes its marker
   (Q6): Finagle sets `finagle-http-nack` and never strips it. Without removal, the cost is one extra
@@ -508,9 +510,10 @@ security-audited by a freshly spawned Claude agent following `.roo/skills/securi
 - **Real-DNS timing tests flake under load.** Mitigation: assert upper bounds with 250 ms of slack
   and never a lower bound below the share. The fixture runs on loopback with an OS-assigned port.
   Bun's whole-second rounding is asserted only as "within the whole bound".
-- **An application writes the reserved header on a response it processed.** A Setu gRPC client may
-  then send that unary call once more. Mitigation: the docs reserve the header and say what setting
-  it claims; the risk is accepted by the maintainer (§3.7, §10).
+- **An application writes the reserved header on a response it processed.** A client that honours
+  the marker may send that request again (with M143c, the Setu gRPC client resends a unary call
+  once). Mitigation: the docs reserve the header and say what setting it claims; the risk is
+  accepted by the maintainer (§3.7, §10).
 - **A per-lookup `Resolver` costs more than a shared one.** Measured cost is construction and
   `setServers`, both in-process. A lookup already costs a network round trip. This is not on the
   request path unless the caller puts it there; M143c's cache keeps it off.
@@ -541,9 +544,11 @@ The diff crosses two trust boundaries. The committed-tree audit (freshly spawned
 - (S3 was withdrawn with the removal design on 2026-11-23.)
 - **Accepted risk A1 (maintainer, 2026-11-23): application code can send the marker.** The kernel
   does not remove `x-setu-unprocessed` from responses it did not mark. An application that writes it
-  claims its request was not processed, and a Setu gRPC client may send that unary call once more,
-  to another instance of the same service, within the deadline. The audit records this as accepted,
-  not as a finding, and checks only that the docs reserve the header and state that consequence.
+  claims its request was not processed, and a client that honours the marker may send that request
+  again. With M143c's rule, the Setu gRPC client sends a unary call once more, to another instance
+  of the same service, within the deadline. The audit records this as accepted, not as a finding,
+  and checks only that the docs reserve the header and say that a client may send the request again
+  (the docs name no gRPC client until M143c ships its rule).
 - **S4, chosen name servers are IP literals only.** No host name is resolved to find a name server.
   A refused entry's `RangeError` names the entry but carries no other configuration. Servers come
   from application configuration, never from a request.
@@ -579,4 +584,6 @@ The diff crosses two trust boundaries. The committed-tree audit (freshly spawned
   Deno's own timer is `name: 'TimedOut'`.
 - **H4 (names):** OD2 A keeps M143c's constant names unchanged.
 - **H5 (marker):** the kernel does not remove the marker from other responses; an application that
-  sets it gets one resend of a unary call (§3.7).
+  sets it gets one resend of a unary call from M143c's client (§3.7). This branch's docs say only
+  that a client that honours the marker may send the request again; M143c names its gRPC client
+  there when the resend rule ships.

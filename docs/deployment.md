@@ -482,8 +482,8 @@ exactly; other values are reserved. The kernel does not remove the header from o
 application that sets it claims the request was not processed, and a client that honours the marker
 may send that request again.
 
-A client can use the exact marker as the server's claim that a unary request can be sent again
-within its deadline. An ordinary application 503 has no such guarantee.
+A client can use the exact marker as the server's claim that the request can be sent again within
+its deadline. An ordinary application 503 has no such guarantee.
 
 ### How the pieces line up
 
