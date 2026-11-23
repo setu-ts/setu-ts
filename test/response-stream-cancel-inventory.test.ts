@@ -206,7 +206,7 @@ const CONSTRUCTIONS: readonly Row[] = [
     count: 1,
     cancelSettles: 'always',
     kind: 'push',
-    evidence: /new ReadableStream\(\{\s*start\(controller\) \{\s*controller\.enqueue\(res\.Body\);/,
+    evidence: /new ReadableStream\(\{\s*start\(controller\) \{\s*controller\.enqueue\(body\);/,
   },
   {
     file: 'packages/storage-plugin/src/services/storage-service.ts',

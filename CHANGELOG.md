@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
   realm now rejects the call with `TypeError` before it is admitted; it used to be ignored.
 
-- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (M143, #613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
   the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
@@ -99,9 +99,9 @@ All notable changes to this project are documented here. The format follows
   backend error text has its control characters replaced. An SMTP `contentId` attachment is sent
   inline. Slack posts the subject in bold before the body.
 
-- **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
-  cause containing both address-family failures in A-then-AAAA order; migrate readers of
-  `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
+- **`@setu-ts/runtime` (M143, #613).** `IDnsResolver.resolveHost` now rejects with an
+  `AggregateError` cause containing both address-family failures in A-then-AAAA order; migrate
+  readers of `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
