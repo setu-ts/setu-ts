@@ -6,7 +6,7 @@
  * @module
  */
 import { describe, expect, it, vi } from 'vitest';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, ERROR_RESPONDER_STATE_KEY } from '@setu-ts/common';
 import type { IRequest, IRuntimeServices } from '@setu-ts/common';
 
 import { createRequestContext } from '../../src/context/request-context.ts';
@@ -225,6 +225,44 @@ describe('the cleanup paths that outlive the response', () => {
       expect(cleaned).toHaveBeenCalledOnce();
     } finally {
       gate.resolve();
+      await app.stop();
+    }
+  });
+
+  it('keeps the asynchronous cleanup of a request whose error responder threw alive', async () => {
+    const { createApplication } = await import('../../src/index.ts');
+    const { RuntimePlugin } = await import('@setu-ts/runtime');
+    const held: Promise<unknown>[] = [];
+    const cleaned = vi.fn();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin({
+          platform: 'cloudflare-workers',
+          waitUntil: (promise) => {
+            held.push(promise);
+          },
+        }),
+      ],
+    });
+    app.router.get('/', (ctx) => {
+      ctx.defer?.(async () => {
+        await Promise.resolve();
+        cleaned();
+      });
+      ctx.state.set(ERROR_RESPONDER_STATE_KEY, {
+        respond(): void {
+          throw new Error('responder failed');
+        },
+      });
+      throw new Error('handler failed');
+    });
+    await app.start();
+    try {
+      await app.fetch(new Request('http://test/')).catch(() => undefined);
+      expect(held).toHaveLength(1);
+      await held[0];
+      expect(cleaned).toHaveBeenCalledOnce();
+    } finally {
       await app.stop();
     }
   });

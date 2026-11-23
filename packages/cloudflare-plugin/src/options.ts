@@ -90,7 +90,9 @@ export interface WorkersQueueArm {
    * exhausted jobs with one warning each. Required for a Worker that consumes
    * the queue: `process()` refuses without it, because the platform deletes an
    * exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the
-   * adapter cannot see. `onFailed` runs before either.
+   * adapter cannot see. `onFailed` runs before either. Naming the queue's own
+   * binding fails `app.start()`: each exhausted job would be re-enqueued
+   * without end.
    * @since 0.14.0
    */
   readonly deadLetterQueue?: string | false;

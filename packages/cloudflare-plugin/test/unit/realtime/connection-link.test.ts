@@ -301,7 +301,7 @@ describe('ConnectionLink', () => {
     quick.close();
     await setImmediate();
     expect(logger.records.map((r) => r.message)).toEqual([
-      'cloudflare: backplane link closed before it opened',
+      'cloudflare: backplane link closed before its socket opened',
     ]);
     expect(logger.records[0]?.meta).toEqual({ topic: 'chat', connection: 'conn-1', dropped: 1 });
     expect(timers.pending).toEqual([]);

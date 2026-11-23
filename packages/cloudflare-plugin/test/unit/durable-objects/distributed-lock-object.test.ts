@@ -180,3 +180,11 @@ describe('DistributedLockObjectCore refusal text', () => {
     );
   });
 });
+
+describe('DistributedLockObjectCore /release refusal', () => {
+  it('answers 400 for a null body or a missing token', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect((await call(core, '/release', null)).status).toBe(400);
+    expect((await call(core, '/release', {})).status).toBe(400);
+  });
+});

@@ -131,6 +131,8 @@ interface Registration {
   readonly processor: JobProcessor<unknown>;
   readonly concurrency: number;
   readonly onFailed: ProcessOptions['onFailed'];
+  /** Where this name's exhausted jobs go, fixed when `process()` accepted it. */
+  readonly deadLetter: IQueueProducer | false;
 }
 
 /** A message paired with the envelope `dispatch` already read out of it. */
@@ -153,7 +155,13 @@ interface Delivery {
  * @example
  * ```typescript
  * const app = createApplication({
- *   plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, queue: { binding: 'JOBS' } })],
+ *   plugins: [
+ *     RuntimePlugin({ env, waitUntil }),
+ *     CloudflarePlugin({
+ *       env,
+ *       queue: { binding: 'JOBS', maxRetries: 3, deadLetterQueue: 'JOBS_DLQ' },
+ *     }),
+ *   ],
  * });
  * await app.start();
  *
@@ -202,6 +210,12 @@ export class WorkersQueue implements IQueue {
     if (typeof delay === 'number' && (!Number.isFinite(delay) || delay < 0)) {
       throw new RangeError(
         `WorkersQueue: retryDelaySeconds must be a finite number of seconds from 0, got ${String(delay)}`,
+      );
+    }
+    if (options?.deadLetter === producer) {
+      throw new CloudflareUnsupportedError(
+        'WorkersQueue: deadLetter is the producer of the queue it serves; an exhausted job would ' +
+          'be re-enqueued and run again without end. Bind a separate dead-letter queue.',
       );
     }
     this.#maxRetries = maxRetries;
@@ -257,7 +271,8 @@ export class WorkersQueue implements IQueue {
    * producer and no `deadLetterQueue: false`
    */
   process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
-    if (this.#deadLetter === undefined) {
+    const deadLetter = this.#deadLetter;
+    if (deadLetter === undefined) {
       throw new CloudflareUnsupportedError(
         `WorkersQueue cannot consume '${name}' without a dead-letter target: the platform ` +
           'deletes a job that exhausts max_retries unless wrangler.toml configures a ' +
@@ -270,6 +285,7 @@ export class WorkersQueue implements IQueue {
       processor: processor as JobProcessor<unknown>,
       concurrency: options?.concurrency ?? DEFAULT_CONCURRENCY,
       onFailed: options?.onFailed,
+      deadLetter,
     });
   }
 
@@ -330,13 +346,14 @@ export class WorkersQueue implements IQueue {
       const registration = envelope === undefined ? undefined : this.#processors.get(envelope.name);
 
       if (envelope === undefined || registration === undefined) {
-        const last = message.attempts >= this.#maxRetries && this.#deadLetter !== undefined;
+        const target = this.#deadLetter;
+        const last = message.attempts >= this.#maxRetries && target !== undefined;
         this.#reportUnroutable(batch.queue, message, envelope, last);
         if (last) {
           // The platform's next exhaustion would delete it: keep it instead.
           const reason =
             envelope === undefined ? 'body is not a job envelope' : 'no processor registered';
-          pending.push(this.#settleExhausted(batch.queue, message, envelope, reason));
+          pending.push(this.#settleExhausted(target, batch.queue, message, envelope, reason));
         } else {
           this.#retry(message);
         }
@@ -385,7 +402,13 @@ export class WorkersQueue implements IQueue {
           budget,
         });
       }
-      await this.#settleExhausted(queue, message, envelope, 'attempt budget exhausted');
+      await this.#settleExhausted(
+        registration.deadLetter,
+        queue,
+        message,
+        envelope,
+        'attempt budget exhausted',
+      );
       return;
     }
 
@@ -410,7 +433,7 @@ export class WorkersQueue implements IQueue {
           budget,
         });
         await this.#notifyFailed(registration, job, error);
-        await this.#settleExhausted(queue, message, envelope, error);
+        await this.#settleExhausted(registration.deadLetter, queue, message, envelope, error);
         return;
       }
       this.#logger?.()?.error('cloudflare-queue: processor failed, message retried', {
@@ -471,6 +494,7 @@ export class WorkersQueue implements IQueue {
    * @param reason - The processor's error, or the reason no processor ran
    */
   async #settleExhausted(
+    target: IQueueProducer | false,
     queue: string,
     message: IQueueMessage,
     envelope: JobEnvelope | undefined,
@@ -478,13 +502,6 @@ export class WorkersQueue implements IQueue {
   ): Promise<void> {
     const where =
       envelope === undefined ? { messageId: message.id } : { job: envelope.name, id: envelope.id };
-    const target = this.#deadLetter;
-    if (target === undefined) {
-      // No dead-letter target (only possible for a message nothing here
-      // processes): leave it to the platform's own dead_letter_queue.
-      this.#retry(message);
-      return;
-    }
     if (target === false) {
       message.ack();
       this.#logger?.()?.warn(

@@ -253,7 +253,7 @@ be answered together; a batch of one makes every request wait for the one before
 local workerd with a 250 ms responder: 50 concurrent requests were all answered in 1.6 s at 10 and
 took 13 s at 1, well past the default 5 s reply budget.
 
-Four things to know before you rely on it:
+Five things to know before you rely on it:
 
 - **`publish` reaches one consumer Worker, not every subscriber in the cluster.** Cloudflare allows
   exactly one active consumer per queue. Fan-out happens across the handlers registered inside that

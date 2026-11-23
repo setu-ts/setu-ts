@@ -540,6 +540,13 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     }).toThrow(/deadLetterQueue.*false/s);
   });
 
+  it('refuses a deadLetter that is the producer of the queue it serves', () => {
+    const producer = new FakeQueueProducer();
+    expect(() => new WorkersQueue(producer, new SequentialIds(), { deadLetter: producer })).toThrow(
+      /queue it serves/,
+    );
+  });
+
   it('lets a producer-only queue add without any dead-letter target', async () => {
     const producer = new FakeQueueProducer();
     const queue = new WorkersQueue(producer, new SequentialIds());

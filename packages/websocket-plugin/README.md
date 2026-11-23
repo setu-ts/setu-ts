@@ -412,8 +412,9 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
 
 ## Errors
 
-`WebSocketRoomsUnavailableError` is thrown by `room()` and `peek()` on Cloudflare Workers when no
-Durable Object backplane is registered (see
+`WebSocketRoomsUnavailableError` is thrown by `room()` and `peek()` on Cloudflare Workers when the
+registered backplane gives no per-connection links (none registered, or a Redis or `messaging` one),
+which only the Durable Object backplane does (see
 [Rooms on Cloudflare Workers](#rooms-on-cloudflare-workers)).
 
 `WebSocketUnavailableError` is exported for `instanceof` handling. It is thrown by `route()` when

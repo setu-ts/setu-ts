@@ -23,7 +23,7 @@ import type {
 } from '../durable-objects/do-facades.ts';
 import { asUpgradeResponse } from '../durable-objects/do-facades.ts';
 import { isRealtimeFrame } from '../durable-objects/frame-guard.ts';
-import { ConnectionLink } from './connection-link.ts';
+import { ConnectionLink, keepAliveQuietly } from './connection-link.ts';
 
 /** The synthetic URL the stub is fetched with. Only the path is meaningful. */
 const CONNECT_URL = 'https://realtime-backplane.internal/connect';
@@ -285,7 +285,7 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
    */
   publishViaHub(frame: RealtimeFrame): Promise<void> {
     const posted = this.#post(frame);
-    this.#options.waitUntil?.(posted);
+    keepAliveQuietly(this.#options.waitUntil, posted);
     return posted;
   }
 

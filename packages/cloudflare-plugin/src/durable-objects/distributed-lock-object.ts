@@ -105,7 +105,10 @@ export class DistributedLockObjectCore {
       return Response.json({ token: await this.#acquire(body.token, body.ttlMs) });
     }
     if (pathname === '/release') {
-      const body = (await request.json()) as { token: string };
+      const body = ((await request.json()) ?? {}) as { token?: unknown };
+      if (typeof body.token !== 'string') {
+        return new Response('token must be a string', { status: 400 });
+      }
       await this.#release(body.token);
       return Response.json({ released: true });
     }

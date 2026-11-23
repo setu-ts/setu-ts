@@ -27,8 +27,9 @@ wins. Pass the module import, never one request's `ctx.waitUntil`.
 
 ### Workers queue consumers need a dead-letter target (`@setu-ts/cloudflare-plugin`)
 
-A Worker that calls `queue.process()` now throws `CloudflareUnsupportedError` at startup unless the
-queue arm says where an exhausted job goes:
+`queue.process()` on a Workers queue now throws `CloudflareUnsupportedError` unless the queue arm
+says where an exhausted job goes (a `deadLetterQueue` naming the queue's own binding fails
+`app.start()`):
 
 ```typescript
 CloudflarePlugin({

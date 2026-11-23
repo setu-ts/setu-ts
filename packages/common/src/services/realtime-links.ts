@@ -42,8 +42,8 @@ export interface IRealtimeConnectionLink {
    */
   publish(frame: RealtimeFrame): boolean;
   /**
-   * Closes the link. Idempotent; a closed link delivers nothing more. When
-   * the link's first open is still in flight, frames queued before it are
+   * Closes the link. Idempotent; a closed link delivers nothing more. When an
+   * open (the first or a reopen) is in flight, frames queued before it are
    * sent once it opens and the link then closes, so a connection that leaves
    * quickly does not lose what it already broadcast (an implementation keeps
    * that flush alive where its platform allows). Frames queued while a lost

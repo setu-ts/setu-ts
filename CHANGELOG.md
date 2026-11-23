@@ -67,15 +67,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`@setu-ts/cloudflare-plugin` (M143o, breaking behaviour).** A Workers queue consumer now refuses
-  to start without a dead-letter target: `queue.process()` throws `CloudflareUnsupportedError`
-  unless the queue arm sets `deadLetterQueue` to a producer binding name or to `false`, because the
-  platform deletes an exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the
-  adapter cannot see. A job that exhausts its attempts calls `onFailed` once and is forwarded to
-  that producer (or discarded with a warning for `false`) instead of being acked away; `maxRetries`
-  (default 3) must equal `max_retries`, and a larger `maxAttempts` is capped with one warning per
-  job name (V13-197). `cacheApiMiddleware` no longer stores or serves per-visitor responses, the
-  same rule as `cacheMiddleware`: `private` (qualified or not) and `no-store` are refused, including
+- **`@setu-ts/cloudflare-plugin` (M143o, breaking behaviour).** A Workers queue consumer now needs a
+  dead-letter target: `queue.process()` throws `CloudflareUnsupportedError` unless the queue arm
+  sets `deadLetterQueue` to a producer binding name or to `false`, because the platform deletes an
+  exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the adapter cannot see. A
+  job that exhausts its attempts calls `onFailed` once and is forwarded to that producer (or
+  discarded with a warning for `false`) instead of being acked away; `maxRetries` (default 3) must
+  equal `max_retries`, and a larger `maxAttempts` is capped with one warning per job name (V13-197).
+  `cacheApiMiddleware` no longer stores or serves per-visitor responses, the same rule as
+  `cacheMiddleware`: `private` (qualified or not) and `no-store` are refused, including
   `private=Set-Cookie`, which now logs one warning naming the header; a credentialed request is
   served only a `public` entry that does not vary on a credential; the session plugin's per-visitor
   and cookie-dependent flags are honoured; `ttlSeconds` writes `max-age` without `public`;

@@ -131,7 +131,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       // Opening now: deliver nothing more, but send what was queued once open,
       // kept alive past this connection's request where the platform allows.
       this.#flushing = true;
-      if (this.#opening !== undefined) this.#options.waitUntil?.(this.#opening);
+      if (this.#opening !== undefined) keepAliveQuietly(this.#options.waitUntil, this.#opening);
       return;
     }
     if (this.#queue.length > 0) {
@@ -226,7 +226,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       // The link closed before it opened and the open failed: what it had
       // queued cannot be sent. Said once, without frame content.
       this.#flushing = false;
-      this.#options.logger?.()?.warn('cloudflare: backplane link closed before it opened', {
+      this.#options.logger?.()?.warn('cloudflare: backplane link closed before its socket opened', {
         topic: this.#options.topic,
         connection: this.#options.connectionId,
         dropped: this.#queue.length,
@@ -277,5 +277,20 @@ function closeQuietly(socket: IDurableObjectClientSocket): void {
     socket.close(1000, 'link closed');
   } catch {
     // Already closed.
+  }
+}
+
+/**
+ * Hands a promise to the platform's `waitUntil`, if any. A host that throws
+ * (called outside a request) loses only the extension, never the work.
+ */
+export function keepAliveQuietly(
+  waitUntil: ((promise: Promise<unknown>) => void) | undefined,
+  promise: Promise<unknown>,
+): void {
+  try {
+    waitUntil?.(promise);
+  } catch {
+    // The work still runs; only the extension is lost.
   }
 }

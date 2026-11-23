@@ -14048,10 +14048,10 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 `IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
 (queued until open; `false` when closed or called from a request that does not own the link, so the
-caller publishes another way) and `close(): void` (idempotent; while the first open is in flight,
-frames already queued are still sent once it opens, kept alive through `waitUntil` where the
-backplane has one; frames queued while a lost link waits to reopen are dropped with one `warn`).
-`IRealtimeLinkBackplane extends IRealtimeBackplane` adds
+caller publishes another way) and `close(): void` (idempotent; while an open, the first or a reopen,
+is in flight, frames already queued are still sent once it opens, kept alive through `waitUntil`
+where the backplane has one; frames queued while a lost link waits to reopen are dropped with one
+`warn`). `IRealtimeLinkBackplane extends IRealtimeBackplane` adds
 `openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
 owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and
 `publishViaHub(frame): Promise<void>` (publishes without a socket, from any request; reaches every
@@ -17142,8 +17142,11 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   warned about, never the payload. The platform's last delivery is kept in reserve: a failed send
   retries, and the redelivery forwards again without the error text and without a second `onFailed`;
   if that send fails too, the job leaves the adapter (the platform's `dead_letter_queue`, or
-  deleted) and that is logged. `retryDelaySeconds` (a number, or a function of the failed attempt)
-  passes `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
+  deleted) and that is logged. On a queue with no dead-letter target (producer-only), an unroutable
+  message on its last attempt is retried for the platform's own `dead_letter_queue`. A
+  `deadLetterQueue` naming the queue's own binding, or a `deadLetter` that is its own producer, is
+  refused, since each exhausted job would loop. `retryDelaySeconds` (a number, or a function of the
+  failed attempt) passes `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
   a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never

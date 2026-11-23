@@ -564,4 +564,36 @@ describe('DurableObjectBackplane links and hub publish', () => {
       { topic: 'realtime', error: 'down' },
     ]);
   });
+
+  it('passes its waitUntil to each link, and survives a host that throws', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const held: Promise<unknown>[] = [];
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      waitUntil: (p) => {
+        held.push(p);
+      },
+    });
+    const quick = backplane.openConnectionLink('c', () => {});
+    quick.publish(FRAME);
+    quick.close();
+    expect(held).toHaveLength(1);
+
+    const throwing = new DurableObjectBackplane(namespace, {
+      origin: 'b',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      waitUntil: () => {
+        throw new Error('outside a request');
+      },
+    });
+    await expect(throwing.publishViaHub(FRAME)).resolves.toBeUndefined();
+    const link2 = throwing.openConnectionLink('d', () => {});
+    link2.publish(FRAME);
+    expect(() => link2.close()).not.toThrow();
+  });
 });
