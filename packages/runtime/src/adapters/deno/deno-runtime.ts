@@ -9,7 +9,9 @@
  * @module
  */
 
+import { createDenoServerDnsResolver } from './deno-server-dns-resolver.ts';
 import type {
+  DnsResolverOptions,
   IDnsResolver,
   IFileSystem,
   IRuntimeServices,
@@ -69,9 +71,17 @@ export interface DenoHost {
   /** Remove a file or directory. */
   remove(path: string, options?: { recursive?: boolean }): Promise<void>;
   /** Resolves SRV records. */
-  resolveDns(query: string, recordType: 'SRV'): Promise<DenoSrvRecord[]>;
+  resolveDns(
+    query: string,
+    recordType: 'SRV',
+    options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal },
+  ): Promise<DenoSrvRecord[]>;
   /** Resolves address records. */
-  resolveDns(query: string, recordType: 'A' | 'AAAA'): Promise<string[]>;
+  resolveDns(
+    query: string,
+    recordType: 'A' | 'AAAA',
+    options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal },
+  ): Promise<string[]>;
   /** Open a file for reading. */
   open(path: string): Promise<Deno.FsFile>;
 }
@@ -96,6 +106,7 @@ export interface DenoDirEntry {
  * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @param dns - Injected DNS resolver (defaults to one over the host's `resolveDns`)
  * @param globalEvents - Where uncaught errors are announced (defaults to the global scope; `null` for none)
+ * @param createDnsResolver - Injected creator for resolvers with chosen name servers
  * @returns Complete runtime services for Deno
  */
 export function createDenoRuntimeServices(
@@ -112,6 +123,8 @@ export function createDenoRuntimeServices(
   // and `unhandledrejection` events, not through the `Deno` namespace.
   // `null` (not `undefined`, which would take this default) means none.
   globalEvents: GlobalEventHost | null = globalThis as unknown as GlobalEventHost,
+  createDnsResolver: (options: DnsResolverOptions) => IDnsResolver = (options) =>
+    createDenoServerDnsResolver(options, host),
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
@@ -255,6 +268,7 @@ export function createDenoRuntimeServices(
     fs,
     workers,
     dns,
+    createDnsResolver,
     ...signals,
   });
 }

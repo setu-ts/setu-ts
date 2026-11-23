@@ -14,6 +14,14 @@ All notable changes to this project are documented here. The format follows
   `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
   realm now rejects the call with `TypeError` before it is admitted; it used to be ignored.
+
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
+  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
+  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
+  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
+  independent of status. An application setting the marker claims no processing and a client that
+  honours the marker may send that request again.
+
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -90,6 +98,11 @@ All notable changes to this project are documented here. The format follows
   same way. Local `get` rejects a permission or I/O failure instead of answering `404`. Copied
   backend error text has its control characters replaced. An SMTP `contentId` attachment is sent
   inline. Slack posts the subject in bold before the body.
+
+- **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
+  cause containing both address-family failures in A-then-AAAA order; migrate readers of
+  `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
+
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A
