@@ -9,6 +9,7 @@ import { FrameAge, type BackplaneReporter } from './frame-age.ts';
 import {
   BackendUnavailableError,
   dispatchRealtimeFrame,
+  BackendOutcomeUnknownError,
   toBackendFault,
   watchConnection,
   withDeadline,
@@ -531,10 +532,11 @@ export class RedisBackplane implements IRealtimeBackplane {
     try {
       await publisher.publish(this.#topic, JSON.stringify(this.#frameAge.stamp(frame)));
     } catch (error) {
-      // A command timeout leaves the PUBLISH possibly on the wire (X3-3).
-      this.#frameAge.publishFailed(error instanceof Error && /timed out/i.test(error.message));
-      // M131a X88-5: a backend fault says whether the frame was applied.
+      // M131a X88-5: a backend fault says whether the frame was applied. An
+      // outcome-unknown fault (a timeout, a reset after the write) means the
+      // PUBLISH may still reach Redis and arrive late (X3-3).
       const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
+      this.#frameAge.publishFailed(fault instanceof BackendOutcomeUnknownError);
       if (fault !== undefined) throw fault;
       throw error;
     }

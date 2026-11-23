@@ -185,9 +185,13 @@ export class MessagingBackplane implements IRealtimeBackplane {
     try {
       await this.#broker.publish(this.#topic, this.#frameAge.stamp(frame));
     } catch (error) {
-      // Only a publish timeout leaves the outcome unknown (the broker may
-      // still deliver); the messaging plugin names that error.
-      this.#frameAge.publishFailed(error instanceof Error && error.name === 'PublishTimeoutError');
+      // A publish timeout or an outcome-unknown backend fault means the broker
+      // may still deliver the frame. Matched by name: this package cannot
+      // import the messaging plugin's error class.
+      this.#frameAge.publishFailed(
+        error instanceof Error &&
+          (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError'),
+      );
       throw error;
     }
     this.#frameAge.publishSucceeded();

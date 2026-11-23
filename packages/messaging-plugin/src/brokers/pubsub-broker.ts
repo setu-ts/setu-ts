@@ -955,8 +955,11 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     this.#probe = null;
     await this.#rr.close();
 
-    // Every subscription is closed even when one close fails.
-    await Promise.allSettled([...this.#subscriptions.values()].map((sub) => sub.close()));
+    // Every subscription is closed even when one close fails; the first
+    // failure is rethrown once the transport is closed too.
+    const closes = await Promise.allSettled(
+      [...this.#subscriptions.values()].map((sub) => sub.close()),
+    );
     this.#subscriptions.clear();
 
     if (this.#transport) {
@@ -964,6 +967,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       this.#transport = null;
     }
     this.#ready = false;
+    const failed = closes.find((result) => result.status === 'rejected');
+    if (failed !== undefined) throw failed.reason;
   }
 
   isReady(): boolean {

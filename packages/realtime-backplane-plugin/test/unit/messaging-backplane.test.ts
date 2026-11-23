@@ -363,6 +363,12 @@ describe('messaging backplane independent delivery and frame age', () => {
       vi.spyOn(broker, 'publish').mockRejectedValueOnce(timeout);
       await expect(backplane.publish(FRAME)).rejects.toBe(timeout);
       expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
+      const afterTimeout = warn.mock.calls.length;
+      await backplane.publish(FRAME);
+      const lost = Object.assign(new Error('lost'), { name: 'BackendOutcomeUnknownError' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(lost);
+      await expect(backplane.publish(FRAME)).rejects.toBe(lost);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 1);
       expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(max > 0);
       await backplane.close();
     },

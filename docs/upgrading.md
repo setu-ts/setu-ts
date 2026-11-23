@@ -49,8 +49,9 @@ can consume only names with a `deadLetterQueues` entry.
   `BackplaneFanOutUnsupportedError` when the broker does not confirm a fan-out subscription. Every
   built-in broker does. You are affected if you run it on Cloudflare's `WorkersBroker` (use the
   Durable Object backplane), on a `custom` broker (return `fanOut: true` from `subscribe` when the
-  caller passed `fanOut: true` and every instance receives every message), or on Service Bus without
-  the `Manage` right (grant it, or use the `'redis'` transport).
+  caller passed `fanOut: true` and every instance receives every message). On Service Bus without
+  the `Manage` right it fails with the SDK's authorization error instead (grant it, or use the
+  `'redis'` transport).
 - **BREAKING: Redis Streams clients you implement yourself.** A fan-out subscription calls `xread`
   and `xrevrange`. `ioredis` and `fromNodeRedis` provide both; a hand-written `IRedisStreamsClient`
   without them is refused at that `subscribe()` with a `TypeError` naming the method. Add both

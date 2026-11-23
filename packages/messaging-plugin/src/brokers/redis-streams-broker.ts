@@ -199,10 +199,6 @@ interface ConsumerLoopDeps {
   ) => Promise<void>;
 }
 
-/**
- * Builds the per-subscription consumer loop (poll, reclaim, in-flight guards,
- * stop flag and drain) that one shared timer tick drives.
- */
 /** The leading Redis error code (`NOPERM`, `WRONGTYPE`, …) of a failure, never its text. */
 function redisErrorCode(error: unknown): string {
   try {
@@ -213,6 +209,10 @@ function redisErrorCode(error: unknown): string {
   }
 }
 
+/**
+ * Builds the per-subscription consumer loop (poll, reclaim, in-flight guards,
+ * stop flag and drain) that one shared timer tick drives.
+ */
 function createConsumerLoop(deps: ConsumerLoopDeps): ConsumerLoop {
   const {
     runtime,
@@ -852,7 +852,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
         timeoutMs: SHUTDOWN_DRAIN_MS,
         onTimeout: () => new Error('Redis fanOut shutdown drain timed out'),
         timing: resolveProbeTiming(this.#runtime),
-      }).catch(() => this.#logger?.error('Redis fanOut shutdown drain timed out'));
+      }).catch(() => log('Redis fanOut shutdown drain timed out'));
     };
     this.#activeSubscriptions.set(id, {
       id,

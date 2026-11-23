@@ -327,6 +327,37 @@ const NAMESPACE_ABSENT_STATUSES: ReadonlySet<number> = new Set([404, 410]);
 const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
 
 /**
+ * A log-safe label for an admin or SDK failure: its code or status, never its
+ * message text (remote text stays out of logs).
+ */
+function errorName(error: unknown): string {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    if (typeof value?.code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value.code))
+      return value.code;
+    if (typeof value?.statusCode === 'number' && Number.isInteger(value.statusCode))
+      return `status ${value.statusCode}`;
+  } catch {
+    /* fall through */
+  }
+  return 'unknown error';
+}
+
+/** Whether an admin failure is an authorization refusal (401/403 or an Unauthorized code). */
+function unauthorized(error: unknown): boolean {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    return (
+      value?.statusCode === 401 ||
+      value?.statusCode === 403 ||
+      (typeof value?.code === 'string' && value.code.startsWith('Unauthorized'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Classifies a failed administration probe (M90b, corrected for V5-2).
  *
  * The probe reads the namespace's MANAGEMENT plane to report on its DATA
@@ -365,37 +396,6 @@ const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
  * @param error - The caught probe error
  * @returns `true` reachable, `false` positively absent, `undefined` unknown
  */
-/**
- * A log-safe label for an admin or SDK failure: its code or status, never its
- * message text (remote text stays out of logs).
- */
-function errorName(error: unknown): string {
-  try {
-    const value = error as { code?: unknown; statusCode?: unknown } | null;
-    if (typeof value?.code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value.code))
-      return value.code;
-    if (typeof value?.statusCode === 'number' && Number.isInteger(value.statusCode))
-      return `status ${value.statusCode}`;
-  } catch {
-    /* fall through */
-  }
-  return 'unknown error';
-}
-
-/** Whether an admin failure is an authorization refusal (401/403 or an Unauthorized code). */
-function unauthorized(error: unknown): boolean {
-  try {
-    const value = error as { code?: unknown; statusCode?: unknown } | null;
-    return (
-      value?.statusCode === 401 ||
-      value?.statusCode === 403 ||
-      (typeof value?.code === 'string' && value.code.startsWith('Unauthorized'))
-    );
-  } catch {
-    return false;
-  }
-}
-
 function classifyProbeFailure(error: unknown): boolean | undefined {
   if (typeof error !== 'object' || error === null) {
     return undefined;
@@ -937,8 +937,11 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#generation++;
     await this.#rr.close();
 
-    // Every subscription is closed even when one close fails.
-    await Promise.allSettled([...this.#subscriptions.values()].map((sub) => sub.close()));
+    // Every subscription is closed even when one close fails; the first
+    // failure is rethrown once the transport is closed too.
+    const closes = await Promise.allSettled(
+      [...this.#subscriptions.values()].map((sub) => sub.close()),
+    );
     this.#subscriptions.clear();
 
     if (this.#transport) {
@@ -955,6 +958,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       this.#evidence = null;
     }
     this.#ready = false;
+    const failed = closes.find((result) => result.status === 'rejected');
+    if (failed !== undefined) throw failed.reason;
   }
 
   isReady(): boolean {

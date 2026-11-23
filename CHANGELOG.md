@@ -91,9 +91,10 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p).**
   - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`
     with `BackplaneFanOutUnsupportedError` a broker that does not confirm it (Cloudflare's
-    `WorkersBroker`, a `custom` broker that ignores the option, a Redis Streams client without
-    `xread`). On Kafka, NATS, Redis Streams, Pub/Sub and Service Bus every replica now receives
-    every frame; before, a shared consumer group handed each frame to one replica (V13-258).
+    `WorkersBroker`, a `custom` broker that ignores the option); a Redis Streams client without
+    `xread` fails it with a `TypeError`, and Service Bus without `Manage` with the SDK's error. On
+    Kafka, NATS, Redis Streams, Pub/Sub and Service Bus every replica now receives every frame;
+    before, a shared consumer group handed each frame to one replica (V13-258).
   - Pub/Sub and Service Bus retry a failing handler with a delay and a limit by default; set
     `consumerRetry: false` for the old immediate nack or abandon (V13-261). Pub/Sub sets the
     subscription's retry and dead-letter policies only when it creates the subscription; a missing

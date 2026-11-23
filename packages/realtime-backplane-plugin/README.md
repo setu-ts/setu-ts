@@ -72,11 +72,13 @@ the broker answered with a fan-out subscription: in-memory, Redis Streams, Rabbi
 Pub/Sub and Service Bus do (see the messaging plugin's "Fan-out subscriptions"). Before 0.14.0 a
 shared consumer group on Kafka, NATS, Redis Streams, Pub/Sub and Service Bus handed each frame to
 one replica only, so most replicas missed it. A broker that does not confirm fan-out (Cloudflare's
-`WorkersBroker`, a `custom` broker that ignores the option, a Redis Streams client without `xread`)
-makes `register()` throw `BackplaneFanOutUnsupportedError`, so the application refuses to start; use
-the `'redis'` transport, or on Workers the Durable Object backplane. On Service Bus the per-replica
-subscription needs the `Manage` right. Configuring the transport with no messaging capability
-registered also throws during `register()` rather than failing silently per request.
+`WorkersBroker`, or a `custom` broker that ignores the option) makes `register()` throw
+`BackplaneFanOutUnsupportedError`, so the application refuses to start; use the `'redis'` transport,
+or on Workers the Durable Object backplane. A broker that cannot create the fan-out subscription
+fails `register()` with its own error instead: a Redis Streams client without `xread` or `xrevrange`
+with a `TypeError` naming the method, Service Bus without the `Manage` right with the SDK's
+authorization error. Configuring the transport with no messaging capability registered also throws
+during `register()` rather than failing silently per request.
 
 ### `'redis'`
 
@@ -110,20 +112,20 @@ from the start. See
 
 ## Options
 
-| Option                    | Applies to               | Default                  | Description                                                                                                                                                       |
-| ------------------------- | ------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                   | all but memory           | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
-| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
-| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
-| `url`                     | `'redis'`                | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
-| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair; required together                                                                                                                           |
-| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
-| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
-| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | Opt-in: a receiver drops a frame older than this many milliseconds by the sender's clock. `0` delivers every frame. Must be `0`–`2147483647`. See Limitations     |
-| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                   |
-| `instance`                | `'custom'`               | —                        | The transport to register, used as-is                                                                                                                             |
-| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
-| `diagnostics`             | all but `'custom'`       | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
+| Option                    | Applies to               | Default                  | Description                                                                                                                                                                               |
+| ------------------------- | ------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                   | all but memory           | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                              |
+| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                       |
+| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                        |
+| `url`                     | `'redis'`                | —                        | Connection URL, used only on the lazy-load path                                                                                                                                           |
+| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair; required together                                                                                                                                                   |
+| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                           |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations                         |
+| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | Opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this many milliseconds by the receiver's clock. `0` delivers every frame. Must be `0`–`2147483647`. See Limitations |
+| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                                           |
+| `instance`                | `'custom'`               | —                        | The transport to register, used as-is                                                                                                                                                     |
+| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                                            |
+| `diagnostics`             | all but `'custom'`       | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                                            |
 
 ## Diagnostics (M98l)
 

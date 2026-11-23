@@ -1775,27 +1775,27 @@ eventually consistent, so a sequential duplicate inside the consistency window c
 Without `maxAttempts` (the default) a handler failure is rethrown and the broker's own budget
 applies:
 
-| Broker        | On a handler failure                                                                            |
-| ------------- | ----------------------------------------------------------------------------------------------- |
-| RabbitMQ      | retried and then dead-lettered by `consumerRetry` (a durable named queue — the inbox's default) |
-| Redis Streams | retried and then dead-lettered by `consumerRetry`                                               |
-| Service Bus   | the platform's max delivery count and dead-letter queue                                         |
-| Pub/Sub       | the subscription's dead-letter policy                                                           |
-| NATS          | redelivered without limit — set `maxAttempts`                                                   |
-| Kafka         | the partition blocks on the message — set `maxAttempts`                                         |
-| in-memory     | reported and dropped                                                                            |
+| Broker        | On a handler failure                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| RabbitMQ      | retried and then dead-lettered by `consumerRetry` (a durable named queue — the inbox's default)            |
+| Redis Streams | retried and then dead-lettered by `consumerRetry`                                                          |
+| Service Bus   | retried and then dead-lettered by `consumerRetry` (since 0.14.0), within the platform's max delivery count |
+| Pub/Sub       | retried with the subscription's backoff by `consumerRetry` (since 0.14.0), then its dead-letter policy     |
+| NATS          | redelivered without limit — set `maxAttempts`                                                              |
+| Kafka         | the partition blocks on the message — set `maxAttempts`                                                    |
+| in-memory     | reported and dropped                                                                                       |
 
 With `maxAttempts`, each failure is counted on a separate row OUTSIDE the rolled-back transaction,
 and at the limit the delivery is PARKED and acknowledged: its marker becomes `parked` with the
 envelope (up to `maxParkedEnvelopeBytes`), so the partition moves on and every redelivery is
 skipped. A parse rejection parks at once — redelivery cannot fix it. The count is a lower bound (two
 concurrent failures can record one increment), so parking comes one attempt late, never early. On
-RabbitMQ and Redis Streams `consumerRetry` (default 5 attempts) also applies, and whichever budget
-runs out first wins: set `maxAttempts` at or below `consumerRetry.maxAttempts`, or set
-`consumerRetry: false`, or the broker dead-letters the delivery before it is ever parked. On a
-backend that defers writes, a concurrent delivery's park can commit while a sibling's successful
-transaction is still open; the sibling then rolls back and acknowledges, and the event ends parked —
-recoverable through `release('retry')`.
+RabbitMQ, Redis Streams, Service Bus and Pub/Sub (with a `deadLetterTopic`) `consumerRetry` (default
+5 attempts) also applies, and whichever budget runs out first wins: set `maxAttempts` at or below
+`consumerRetry.maxAttempts`, or set `consumerRetry: false`, or the broker dead-letters the delivery
+before it is ever parked. On a backend that defers writes, a concurrent delivery's park can commit
+while a sibling's successful transaction is still open; the sibling then rolls back and
+acknowledges, and the event ends parked — recoverable through `release('retry')`.
 
 ```typescript
 import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';

@@ -54,6 +54,34 @@ describe('closing cloud fan-out subscriptions when the admin delete fails', () =
     expect(JSON.stringify(warn.mock.calls)).not.toContain('remote secret text');
   });
 
+  it.each(['pubsub', 'service-bus'] as const)(
+    '%s: a failing subscription close still closes the rest and the transport, then rejects',
+    async (arm) => {
+      const failure = new Error('close failed');
+      const pubsub = pubSubTransport();
+      const serviceBus = serviceBusTransport();
+      const broker =
+        arm === 'pubsub'
+          ? new GcpPubSubBroker(clockRuntime().runtime, new JsonSerializer(), {
+              client: pubsub.transport,
+              projectId: 'p',
+              consumerRetry: false,
+            })
+          : new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {
+              client: serviceBus.transport,
+              consumerRetry: false,
+            });
+      await broker.connect();
+      for (const topic of ['a', 'b', 'c']) await broker.subscribe(topic, () => {});
+      const opens = arm === 'pubsub' ? pubsub.opens : serviceBus.opens;
+      opens[0]!.close.mockRejectedValueOnce(failure);
+      await expect(broker.disconnect()).rejects.toBe(failure);
+      expect(opens.every((open) => open.close.mock.calls.length === 1)).toBe(true);
+      expect((arm === 'pubsub' ? pubsub : serviceBus).transport.close).toHaveBeenCalledOnce();
+      expect(broker.isReady()).toBe(false);
+    },
+  );
+
   it('Pub/Sub: a deadLetterTopic with consumerRetry false warns once that it is ignored', async () => {
     const fake = pubSubTransport();
     const warn = vi.fn();

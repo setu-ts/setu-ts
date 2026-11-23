@@ -719,8 +719,8 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
     and is not changed (maintainer decision, 2026-11-23; Compared with, row 29: Spring Cloud GCP and
     Dapr leave it silently, MassTransit on Service Bus rewrites it); the upgrade notes say
     subscriptions created before 0.14.0 keep their policies until the operator updates them.
-  - Transport seams (listed in §4): `onMessage` gains `orderingKey?: string` and
-    `deliveryAttempt?: number`; `open` takes an options object
+  - Transport seams (listed in §4): `onMessage` gains `orderingKey?: string` (a planned
+    `deliveryAttempt?` was dropped in review as unread); `open` takes an options object
     `{ onClosed?, create?: { retryPolicy?, deadLetterPolicy?, messageRetentionSeconds?, expirationTtlSeconds? } }`
     used when `open` creates the subscription, and resolves with
     `existing?: { retryPolicy?, deadLetterPolicy? }` read from the `getMetadata()` call the adapter
@@ -940,7 +940,7 @@ RabbitMQ connection without publisher confirms refuses to start; a Pub/Sub consu
 | `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                          | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                                                                                                                                                                                                            |
 | `ServiceBusMessagingOptions*.consumerRetry`                                                          | option             | Read by `ServiceBusBroker` (§4.1)                                                                                                                                                                                                                                                                           |
 | `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                            | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                                                                                                                                                                                                              |
-| `IPubSubSubscription.existing?`; Pub/Sub `onMessage` `orderingKey?`, `deliveryAttempt?`              | members            | Filled by `adaptPubSubModule`; read by the policy-differs warning (§3.11) and `pubsub-ordering.ts` (§3.14)                                                                                                                                                                                                  |
+| `IPubSubSubscription.existing?`; Pub/Sub `onMessage` `orderingKey?`                                  | members            | Filled by `adaptPubSubModule`; read by the policy-differs warning (§3.11) and `pubsub-ordering.ts` (§3.14); `deliveryAttempt` was dropped in review: ordering gates by message id and nothing else read it                                                                                                  |
 | `IServiceBusTransport.getSubscription?`                                                              | member             | Implemented by `adaptServiceBusModule`; read by the `maxDeliveryCount` clamp (§3.12)                                                                                                                                                                                                                        |
 | `IServiceBusTransport.createSubscription` 3rd parameter; `onMessage` `deliveryCount?`, `deadLetter?` | parameter, members | Read by `adaptServiceBusModule`; written by the fan-out path and §3.12                                                                                                                                                                                                                                      |
 | `BackplaneFanOutUnsupportedError` (backplane)                                                        | class              | Thrown by `MessagingBackplane.connect()`; surfaces from `app.start()`                                                                                                                                                                                                                                       |
@@ -1176,6 +1176,16 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
 - **Core lane, taken into this letter (D1, 2026-11-23):** the `discarded` member of the diagnostics
   settlement vocabulary (`common` `diagnostics.ts:618-619`) is Part B scope (§3.18), with the
   `diagnostics-plugin` `queue-protocol.ts` set updated as a named out-of-lane edit.
+- **Decorator lane (`decorator-plugin`, found in the Part B review):**
+  `@Subscribe(topic, { fanOut: true })` discards the returned subscription
+  (`decorator-plugin/src/plugin/ingress-registration.ts:349`), so it cannot warn when the broker
+  ignored `fanOut`, as the declarative path does (`messaging-plugin.ts:757`). Check the marker there
+  and warn through the plugin's logger.
+- **Residuals recorded in the Part B review, not fixed here:** a RabbitMQ publish whose channel
+  closes before its confirm rejects with a plain `Error`, so the backplane's uncertain-publish
+  warning does not fire for it (only `PublishTimeoutError` and `BackendOutcomeUnknownError` do);
+  whether a Service Bus subscription with an open receiver counts as active for `autoDeleteOnIdle`
+  is vendor-documented, not measured.
 - **M143o (Workers):** apply §3.15's rule to `WorkersQueue` (V13-197): `onFailed` once, then a
   dead-letter target, or refuse at start when none can be proved. No change is needed for the
   backplane: `WorkersBroker` subscriptions carry no `fanOut` marker, so the `messaging` transport is

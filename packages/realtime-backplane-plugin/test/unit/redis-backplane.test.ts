@@ -2419,9 +2419,13 @@ describe('Redis frame age and publication uncertainty', () => {
       vi.spyOn(client, 'publish').mockRejectedValueOnce(new Error('secret'));
       await expect(backplane.publish(FRAME)).rejects.toThrow('secret');
       expect(warn).toHaveBeenCalledTimes(before);
-      vi.spyOn(client, 'publish').mockRejectedValueOnce(new Error('Command timed out'));
+      vi.spyOn(client, 'publish').mockRejectedValueOnce(new Error('Connection is closed.'));
       await expect(backplane.publish(FRAME)).rejects.toThrow();
       expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
+      const afterReset = warn.mock.calls.length;
+      vi.spyOn(client, 'publish').mockRejectedValueOnce(new Error('Command timed out'));
+      await expect(backplane.publish(FRAME)).rejects.toThrow();
+      expect(warn).toHaveBeenCalledTimes(afterReset);
       expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(maxFrameAgeMs > 0);
       await backplane.close();
     },
