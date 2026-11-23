@@ -222,9 +222,10 @@ unbracketed `::1:5353` is itself an IPv6 address on port 53, not a port suffix.
 `timeoutMs` is an integer from 0 to 2_147_483_647. A positive value bounds a whole `resolveSrv` call
 or a whole `resolveHost` call covering both A and AAAA, using an independent timer and cancellation
 per call. Each server attempt gets `max(1, ceil(timeoutMs / servers.length))` ms. An event loop
-stalled by application work can delay timers. A timeout from the resolver has `code: 'ETIMEOUT'`;
-already answered address families are still returned. The default `runtime.dns` continues using the
-host resolver without this added bound.
+stalled by application work can delay timers. A timeout from the resolver's own timers has
+`code: 'ETIMEOUT'` (an attempt Deno ends itself is `TimedOut`, with no `code`); already answered
+address families are still returned. The default `runtime.dns` continues using the host resolver
+without this added bound.
 
 Node and Bun use a separate `node:dns/promises` Resolver per call with `tries: 1`. The attempt share
 is a target: the first lookup in a Node process takes about twice that share. Bun rounds attempt

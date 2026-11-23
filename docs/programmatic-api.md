@@ -521,6 +521,7 @@ interface IRuntimeServices {
   readonly fs?: IFileSystem;
   readonly workers?: IWorkerHost;
   readonly dns?: IDnsResolver;
+  createDnsResolver?(options: DnsResolverOptions): IDnsResolver;
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
 }

@@ -63,6 +63,37 @@ describe('DNS server options', () => {
       "servers[0] 'not-an-ip'",
     );
   });
+  it('reads the server count once', () => {
+    let reads = 0;
+    const servers = new Proxy(['::1'], {
+      get(target, key, receiver) {
+        if (key === 'length') return reads++ === 0 ? 1 : 0;
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    expect(parseDnsResolverOptions({ servers, timeoutMs: 10 }).servers).toHaveLength(1);
+    expect(reads).toBe(1);
+  });
+  it.each([Number.NaN, -1, 0.5])('refuses a list whose length reads %s', (length) => {
+    const servers = new Proxy(['::1'], {
+      get(target, key, receiver) {
+        return key === 'length' ? length : (Reflect.get(target, key, receiver) as unknown);
+      },
+    });
+    expect(() => parseDnsResolverOptions({ servers, timeoutMs: 10 })).toThrow(
+      'servers must be a non-empty array',
+    );
+  });
+  it('returns the timeoutMs it checked', () => {
+    let reads = 0;
+    const options = {
+      servers: ['::1'],
+      get timeoutMs() {
+        return reads++ === 0 ? 10 : -5;
+      },
+    };
+    expect(parseDnsResolverOptions(options).timeoutMs).toBe(10);
+  });
   it('refuses a sparse array at its first hole', () => {
     // eslint-disable-next-line no-sparse-arrays -- the hole is the input under test
     const sparse = [, '1.1.1.1'] as unknown as string[];

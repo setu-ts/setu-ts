@@ -24,17 +24,15 @@ export function parseDnsResolverOptions(options: DnsResolverOptions): {
   servers: readonly IDnsServer[];
   timeoutMs: number;
 } {
-  if (
-    !Number.isInteger(options.timeoutMs) ||
-    options.timeoutMs < 0 ||
-    options.timeoutMs > 2_147_483_647
-  ) {
+  // Each option is read once, so the value checked is the value returned.
+  const timeoutMs = options.timeoutMs;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > 2_147_483_647) {
     throw new RangeError('timeoutMs must be an integer from 0 to 2147483647');
   }
   const list = options.servers;
   // `length` is read once, so the check and the loop see the same count.
-  const count = Array.isArray(list) ? list.length : 0;
-  if (count === 0) {
+  const count: unknown = Array.isArray(list) ? list.length : 0;
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) {
     throw new RangeError('servers must be a non-empty array');
   }
   // Read by index over `length`: `map` skips holes and `Array.from` follows a replaced iterator.
@@ -65,5 +63,5 @@ export function parseDnsResolverOptions(options: DnsResolverOptions): {
       return invalid();
     return { address, port, family };
   });
-  return { servers, timeoutMs: options.timeoutMs };
+  return { servers, timeoutMs };
 }
