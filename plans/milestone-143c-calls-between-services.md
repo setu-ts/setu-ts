@@ -736,11 +736,14 @@ because the drain answer is written through the application's error responder wh
     and a resend). The 64 KiB threshold is one named constant citing the measurement: Node's server
     refused 65,620 octets without advertising a limit, and grpc-go's server advertises one only when
     configured (`internal/transport/http2_server.go:205`, read 2026-11-23) while enforcing its own
-    default (`:173-178`), so the client does not rely on the peer advertising. Cost, stated in the
-    README: a call over 64 KiB that a draining peer refuses is not resent. Consistent with F3 option
-    B: caller input never ejects a healthy instance. Re-measured after the change: 6 calls with a 70
-    KiB header against two default Setu servers fail with `GrpcHeaderListTooLargeError` (72,201
-    octets over the 65,536 threshold), nothing is ejected, and the next 4 calls are served 2 and 2.
+    default (`:173-178`), so the client does not rely on the peer advertising. A refusal from a peer
+    that is shutting down (GOAWAY, so the client session is already closed) stays a refused stream
+    and is resent: on Node 24.22.1 `session.closed` is `true` after a GOAWAY refusal and `false`
+    after an oversized-header refusal (code review 2026-11-23; the drain cost first stated here was
+    avoidable). Consistent with F3 option B: caller input never ejects a healthy instance.
+    Re-measured after the change: 6 calls with a 70 KiB header against two default Setu servers fail
+    with `GrpcHeaderListTooLargeError` (72,201 octets over the 65,536 threshold), nothing is
+    ejected, and the next 4 calls are served 2 and 2.
   - **F5 — DECIDED A by the maintainer (2026-11-23).** A peer that advertises a limit below normal
     callers' headers fails every call routed to it without being reported, so it is never ejected (1
     of 2 such replicas: 50 % of calls fail; before F2 it was ejected after 5). Options: A, exempt

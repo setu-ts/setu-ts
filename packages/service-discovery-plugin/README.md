@@ -272,8 +272,10 @@ Warm names always answer from cache immediately. Once a list is `cacheTtlMs` old
 background refresh; concurrent refreshes for one name coalesce. `cacheTtlMs: 0` starts a refresh on
 every warm call, coalesced while one runs. The last good list survives failures indefinitely. Cold
 names await one coalesced read, bounded by `resolveTimeoutMs` (default 2000 ms, `0` unbounded), and
-reject with a branded 503 when it fails. A failed background refresh spaces retries by 1, 2, 4, 8,
-16, then 30 seconds per name; a successful answer resets the spacing.
+reject with a branded 503 when it fails, except provider configuration faults (a multi-port
+Kubernetes service with no `portName`, or a rejected token), which pass through unbranded and
+answer 500. A failed background refresh spaces retries by 1, 2, 4, 8, 16, then 30 seconds per name;
+a successful answer resets the spacing.
 
 An empty answer holds a nonempty list for `emptyAnswerGraceMs` (default 30000 ms; `0` replaces at
 once). Read and watch callers see the same held list, with `degraded: true`. Nonempty answers reset
@@ -307,8 +309,9 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 
 - `everResolved` — `false` until the first successful provider read, so a backend that was never
   reached is `down`, not `up` (the X10-3 fix).
-- `degraded` — a warm name's last read failed, or an empty answer is held during its grace. Cold
-  failures reject and log, then leave no cached failure state.
+- `data.degraded` — true when a warm name's last read failed, or an empty answer is held during its
+  grace; the status stays `up`. Visible with `HealthPlugin({ details: true })`. Cold failures reject
+  and log, then leave no cached failure state.
 - `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
   `limit=1` EndpointSlice LIST). DNS uses the last lookup outcome: an absent name is success; any
   other failure, including a lookup abandoned at its bound, is unreachable. Before a lookup DNS

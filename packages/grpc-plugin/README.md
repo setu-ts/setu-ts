@@ -130,16 +130,15 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   the peer advertised less than any gRPC default. If the resend meets the same fault, the call fails
   as `Unavailable`, with a message naming the header size and advertised limit. Calls started before
   the session holds the peer's SETTINGS (the first on each new session, and after a reconnect or
-  GOAWAY) skip that advertised-limit check. When the peer advertises no limit, a `REFUSED_STREAM` on
-  a sent header list over 64 KiB (65536 octets) instead fails with `GrpcHeaderListTooLargeError`: no
-  report and no resend. Its `size` is the sent list's RFC size and its `limit` is the client's
-  65536-octet threshold. At or under 65536, a refusal still reports failure and is resent; an
-  accepted larger list is unaffected. Cost: a call over 64 KiB that a draining peer refuses
-  (`REFUSED_STREAM` after GOAWAY) is not resent either and fails with `GrpcHeaderListTooLargeError`.
-  Caller cancellation reports nothing. Streaming reports success when response headers arrive; later
-  iteration errors report nothing. A deadline tighter than healthy latency can eject a healthy
-  instance, bounded by discovery's defaults (5 failures in 30 s, 50% cap, never the last instance,
-  30 s ejection).
+  GOAWAY) skip that advertised-limit check. When no header-list limit was known when the call
+  started, a `REFUSED_STREAM` on a sent header list over 64 KiB (65536 octets) instead fails with
+  `GrpcHeaderListTooLargeError`: no report and no resend. Its `size` is the sent list's RFC size and
+  its `limit` is the client's 65536-octet threshold. At or under 65536, a refusal still reports
+  failure and is resent; an accepted larger list is unaffected. A refusal from a peer shutting down
+  (its session closed or destroyed) stays a refused stream and is resent. Caller cancellation
+  reports nothing. Streaming reports success when response headers arrive; later iteration errors
+  report nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
+  discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
 - **Connections.** A Service address that balances connections pins every call to one pod. Discover
   pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
   pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every
@@ -271,12 +270,12 @@ are left to Connect's automatic `unimplemented` responder.
 
 ## Errors
 
-| Error                         | Thrown when                                                                                                                                                                                                                                                                                                                         |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GrpcRuntimeLoadError`        | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                                                                                                                                          |
-| `GrpcDescriptorError`         | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                                                                                                                                          |
-| `GrpcHeaderListTooLargeError` | The `cause` of a call over both the peer's advertised header-list limit and 8 KiB, or over the client's 65536-octet threshold when a peer advertising no limit refuses the stream; carries `size` and `limit`; no report or resend. At or under 8 KiB, exceeding an advertised limit counts against the instance and is resent once |
-| `GrpcUnavailableError`        | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true`                                                                                                                  |
+| Error                         | Thrown when                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GrpcRuntimeLoadError`        | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                                                                                                                                                                                                   |
+| `GrpcDescriptorError`         | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                                                                                                                                                                                                   |
+| `GrpcHeaderListTooLargeError` | The `cause` of a call over both the peer's advertised header-list limit and 8 KiB, or over the client's 65536-octet threshold when no header-list limit was known when the call started and the peer refuses the stream on an open session; carries `size` and `limit`; no report or resend. At or under 8 KiB, exceeding an advertised limit counts against the instance and is resent once |
+| `GrpcUnavailableError`        | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true`                                                                                                                                                                           |
 
 ## Limitations
 

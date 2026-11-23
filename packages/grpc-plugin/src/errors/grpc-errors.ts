@@ -61,18 +61,20 @@ export class GrpcUnavailableError extends Error {
 
 /**
  * A client call whose request header list exceeds both the peer's advertised
- * limit and 8 KiB, or the client's threshold when a peer advertising no limit
- * refuses it. At or under 8 KiB, exceeding an advertised limit instead counts
- * against the instance; unary calls are resent once within the remaining
- * deadline: that peer advertised less than any gRPC default.
+ * limit and 8 KiB, or the client's threshold when no header-list limit was known
+ * when the call started and the peer refuses it. At or under 8 KiB, exceeding an
+ * advertised limit instead counts against the instance; unary calls are resent
+ * once within the remaining deadline: that peer advertised less than any gRPC default.
  * For an advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`, the call is stopped before
  * the peer processes it (a call started before the session holds the peer's
- * SETTINGS, such as the first on a new session, is not checked). If the peer
- * advertises no limit, a list over the client's 64 KiB threshold becomes this
- * error only when the peer refuses the stream; a normal answer is unaffected.
+ * SETTINGS, such as the first on a new session, is not checked). If no header-list
+ * limit was known when the call started, a list over the client's 64 KiB threshold
+ * becomes this error only when the peer refuses the stream; a normal answer is unaffected.
  * It is never reported against the instance, and it is not sent
  * to another one: the headers are the caller's to shrink. It reaches the caller
  * as the `cause` of the call's `ConnectError`.
+ * A refusal from a peer shutting down (its session closed or destroyed) stays
+ * a refused stream and is resent.
  *
  * Sizes follow RFC 7541 §4.1: each field counts its name and value octets plus
  * 32.
@@ -81,19 +83,19 @@ export class GrpcUnavailableError extends Error {
 export class GrpcHeaderListTooLargeError extends Error {
   /** The request's header list size, in octets. */
   readonly size: number;
-  /** The peer's advertised limit, or the client's unadvertised-limit threshold, in octets. */
+  /** The peer's advertised limit, or the client's threshold when no limit was known, in octets. */
   readonly limit: number;
 
   /**
    * @param size - The sent header list's RFC 7541 §4.1 size, in octets
-   * @param limit - The advertised limit, or 65536 for an unadvertised-limit refusal
-   * @param reason - Selects the client-threshold message when the peer advertised none and refused
+   * @param limit - The advertised limit, or 65536 for a refusal when no limit was known
+   * @param reason - Selects the client-threshold message when no limit was known when the call started
    */
   constructor(size: number, limit: number, reason?: 'unadvertised-refusal') {
     super(
       reason === 'unadvertised-refusal'
         ? `The call's header list is ${size} octets, over the client's ${limit}-octet threshold; ` +
-            'the peer advertised no header-list limit and refused the stream. Send fewer or smaller headers.'
+            'no header-list limit was known when the call started and the peer refused the stream. Send fewer or smaller headers.'
         : `The call's header list is ${size} octets, over the ${limit} the peer accepts ` +
             '(HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE); send fewer or smaller headers.',
     );

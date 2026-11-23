@@ -69,25 +69,26 @@ All notable changes to this project are documented here. The format follows
   with this error as the call error's `cause`: no report or resend. At or under 8 KiB, exceeding the
   advertised limit counts as `failure` against the instance; unary calls are resent once to another
   pick within the remaining deadline, like a refused stream: the peer advertised less than any gRPC
-  default. Calls started before peer SETTINGS skip that advertised-limit check. When the peer
-  advertises no limit, a `REFUSED_STREAM` on a sent list over 65536 octets instead fails with this
-  same error: `size` is the RFC list size, `limit` is the client's 65536 threshold, no outcome is
-  reported, and no resend occurs. Smaller or equal lists retain refused stream handling; an accepted
-  larger list is unaffected. Cost: a draining peer's refusal after GOAWAY of a list over 65536 is
-  not resent either.
+  default. Calls started before peer SETTINGS skip that advertised-limit check. When no header-list
+  limit was known when the call started, a `REFUSED_STREAM` on a sent list over 65536 octets instead
+  fails with this same error: `size` is the RFC list size, `limit` is the client's 65536 threshold,
+  no outcome is reported, and no resend occurs. Smaller or equal lists retain refused stream
+  handling; an accepted larger list is unaffected. A refusal from a peer shutting down (its session
+  closed or destroyed) stays a refused stream and is resent.
 - **`@setu-ts/service-discovery-plugin`.** At most 256 unwatched names that have only ever answered
   empty (absent DNS names, services not yet registered) stay cached; the oldest is evicted, and a
   watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above). The resolve
   warnings of names with no non-empty list (never resolved, or only ever empty) share a budget of 20
   `warn` lines a minute; past it they log at `debug`, with one notice.
 - **`@setu-ts/service-discovery-plugin`.** Health reflects DNS's last lookup outcome, preserves it
-  on watch unsubscribe, and reports warm failed reads or held empty answers as `degraded`. Cold
-  failures leave no cached failure state. A name keeps its reporter while its failure run is open
-  (repeats at debug, recovery at info), bounded at 256 concurrently failing names. Watch listener
-  errors are isolated and warn once per failing run. A read that started before a newer watch
-  delivery neither replaces the delivered list nor marks the name failed or starts retry spacing;
-  its failure is still logged and opens a failure run that the next success closes. Kubernetes probe
-  timeouts name the API and bound.
+  on watch unsubscribe, and sets `data.degraded` for warm failed reads or held empty answers while
+  the status stays `up` (visible with `HealthPlugin({ details: true })`). Cold failures leave no
+  cached failure state. A name keeps its reporter while its failure run is open (repeats at debug,
+  recovery at info), bounded at 256 concurrently failing names. Watch listener errors are isolated
+  and warn once per failing run. A read that started before a newer watch delivery neither replaces
+  the delivered list nor marks the name failed or starts retry spacing; its failure is still logged
+  and opens a failure run that the next success closes. Kubernetes probe timeouts name the API and
+  bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.

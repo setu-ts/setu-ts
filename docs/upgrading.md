@@ -55,12 +55,13 @@ the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeE
 chain, with no report or resend. A list at or under 8 KiB that exceeds the advertised limit instead
 counts as `failure` against the instance; unary calls are resent once to another pick within the
 remaining deadline, like a refused stream: that peer advertised less than any gRPC default. If the
-resend meets the same fault, `Unavailable` names the header size and advertised limit. With no
-advertised limit, a sent list over 65536 octets becomes that same caller error only on
-`REFUSED_STREAM`; `size` is the RFC 7541 §4.1 list size and `limit` is the client's 65536 threshold.
-Neither case reports an outcome or resends. At or under 65536, refused-stream failure and resend
-remain; an accepted larger list is unaffected. Shrink the headers on this error. Cost: a draining
-peer's refusal after GOAWAY of a list over 65536 is not resent either.
+resend meets the same fault, `Unavailable` names the header size and advertised limit. When no
+header-list limit was known when the call started, a sent list over 65536 octets becomes that same
+caller error only on `REFUSED_STREAM`; `size` is the RFC 7541 §4.1 list size and `limit` is the
+client's 65536 threshold. Neither case reports an outcome or resends. At or under 65536,
+refused-stream failure and resend remain; an accepted larger list is unaffected. Shrink the headers
+on this error. A refusal from a peer shutting down (its session closed or destroyed) stays a refused
+stream and is resent.
 
 ### Module pages (`@setu-ts/cli`)
 

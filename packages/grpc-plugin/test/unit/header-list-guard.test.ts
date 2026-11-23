@@ -68,6 +68,20 @@ describe('guardHeaderList', () => {
     { advertised: false, size: 65536, reaction: 'refused', result: 'refused' },
     { advertised: false, size: 65536, reaction: 'answer', result: 'passes' },
     { advertised: false, size: 65537, reaction: 'refused', result: 'caller' },
+    {
+      advertised: false,
+      size: 65537,
+      reaction: 'refused',
+      sessionState: 'closed',
+      result: 'refused',
+    },
+    {
+      advertised: false,
+      size: 65537,
+      reaction: 'refused',
+      sessionState: 'destroyed',
+      result: 'refused',
+    },
     { advertised: false, size: 65537, reaction: 'answer', result: 'passes' },
     { advertised: true, limit: 1024, size: 8191, reaction: 'answer', result: 'instance' },
     { advertised: true, limit: 1024, size: 8192, reaction: 'answer', result: 'instance' },
@@ -78,7 +92,12 @@ describe('guardHeaderList', () => {
   ] as const;
 
   for (const row of cases) {
-    for (const order of ['error-close', 'error-before-rst-close', 'close-only'] as const) {
+    for (const order of [
+      'error-close',
+      'error-before-rst-close',
+      'close-only',
+      'destroy-error-close',
+    ] as const) {
       it(`${JSON.stringify(row)} (${order})`, async () => {
         const runtime = await loadConnectModule();
         expect(UNADVERTISED_HEADER_LIST_LIMIT).toBe(65536);
@@ -90,6 +109,12 @@ describe('guardHeaderList', () => {
         const session = sessionFor(stream);
         guardHeaderList(session);
         await session.request();
+        // GOAWAY can shut down the session after the call starts, before its refusal.
+        if ('sessionState' in row) Object.assign(stream.session!, { [row.sessionState]: true });
+        const nativeRefusal = Object.assign(
+          new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'),
+          { code: 'ERR_HTTP2_STREAM_ERROR' },
+        );
         let settled: Error | undefined = stream.destroyedWith[0];
         const errors: Error[] = [];
         stream.on('error', (error: Error) => {
@@ -109,14 +134,10 @@ describe('guardHeaderList', () => {
         });
         if (stream.destroyedWith.length === 0) {
           if (row.reaction === 'refused') {
-            if (order === 'error-close') stream.rstCode = 7;
+            if (order === 'error-close' || order === 'destroy-error-close') stream.rstCode = 7;
+            if (order === 'destroy-error-close') stream.destroy(nativeRefusal);
             if (order !== 'close-only')
-              stream.emit(
-                'error',
-                Object.assign(new Error('Stream closed with error code NGHTTP2_REFUSED_STREAM'), {
-                  code: 'ERR_HTTP2_STREAM_ERROR',
-                }),
-              );
+              stream.emit('error', stream.destroyedWith[0] ?? nativeRefusal);
             stream.rstCode = 7;
           } else stream.emit('response', { ':status': 200 });
           stream.emit('close');
@@ -136,6 +157,15 @@ describe('guardHeaderList', () => {
         expect(isRefusedStream(wrapped)).toBe(
           row.result === 'refused' || row.result === 'instance',
         );
+        if ('sessionState' in row) {
+          expect(settled).not.toBeInstanceOf(GrpcHeaderListTooLargeError);
+          if (order !== 'close-only') {
+            expect(settled).toBe(nativeRefusal);
+            expect(errors).toEqual([nativeRefusal]);
+          }
+          if (order === 'destroy-error-close')
+            expect(stream.destroyedWith).toEqual([nativeRefusal]);
+        }
         if (row.result === 'instance') {
           expect(settled).not.toBeInstanceOf(GrpcHeaderListTooLargeError);
           expect(settled?.cause).toBeUndefined();
@@ -148,7 +178,11 @@ describe('guardHeaderList', () => {
           expect(settled).toMatchObject({ size: row.size, limit });
           expect(settled?.cause).toBeUndefined();
           if (!row.advertised) {
-            expect(settled?.message).toContain('peer advertised no header-list limit and refused');
+            expect(settled?.message).toContain(
+              'no header-list limit was known when the call started',
+            );
+            expect(settled?.message).toContain(`${row.size} octets`);
+            expect(settled?.message).toContain('65536-octet threshold');
             expect(errors).toHaveLength(1);
           }
         }

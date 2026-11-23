@@ -1,6 +1,7 @@
 /**
  * Enforces advertised HTTP/2 limits, distinguishing undersized peer limits
- * from oversized caller headers, and reclassifies large unadvertised refusals.
+ * from oversized caller headers, and reclassifies large refusals when no limit
+ * was known when the call started.
  * Internal — not exported from the package barrel.
  *
  * @module
@@ -10,11 +11,12 @@ import { GrpcHeaderListTooLargeError } from '../errors/grpc-errors.ts';
 /** One encoder for every size computation. */
 const ENCODER = new TextEncoder();
 
-/** What Node reports for `maxHeaderListSize` when the peer advertised none. */
+/** Node's `maxHeaderListSize` default before SETTINGS or when no limit is advertised. */
 const NO_ADVERTISED_LIMIT = 4294967295;
 
 /**
- * Caller threshold when a peer advertises no limit and refuses the stream.
+ * Caller threshold when no header-list limit was known when the call started
+ * and the peer refuses the stream while its session is still open.
  * Node 24's HTTP/2 server advertised no maxHeaderListSize and refused a
  * 65,620-octet list with REFUSED_STREAM. grpc-go also advertises only when
  * configured (internal/transport/http2_server.go:205), so we cannot rely on
@@ -63,7 +65,11 @@ export interface GuardedStreamLike {
   /** The headers Node sent, pseudo-headers included. */
   readonly sentHeaders?: Readonly<Record<string, unknown>>;
   /** The stream's session, carrying the peer's settings. */
-  readonly session?: { readonly remoteSettings?: { readonly maxHeaderListSize?: number } } | null;
+  readonly session?: {
+    readonly remoteSettings?: { readonly maxHeaderListSize?: number };
+    readonly closed?: boolean;
+    readonly destroyed?: boolean;
+  } | null;
   /** The peer's stream reset code (REFUSED_STREAM is 7). */
   readonly rstCode?: number;
   /** Dispatches events to connect-node's stream listeners. */
@@ -104,9 +110,11 @@ export function headerListSize(headers: Readonly<Record<string, unknown>>): numb
  * {@linkcode GrpcHeaderListTooLargeError} (no report or resend). At or below the
  * floor it gets {@linkcode PeerHeaderListLimitError}: an instance failure, with
  * unary calls resent once like a refused stream, because the peer advertised
- * less than any gRPC default. With no advertised limit,
+ * less than any gRPC default. When no header-list limit was known when the call started,
  * only a REFUSED_STREAM on a list over {@linkcode UNADVERTISED_HEADER_LIST_LIMIT}
  * becomes that caller error; an accepted list is never stopped pre-emptively.
+ * A refusal from a peer shutting down (its session closed or destroyed) stays
+ * a refused stream and is resent.
  *
  * @param session - The session manager to guard
  */
@@ -153,7 +161,7 @@ function guardUnadvertisedRefusal(stream: GuardedStreamLike, size: number): void
   };
   stream.emit = function (event: string | symbol, ...args: unknown[]): boolean {
     const refusedError = event === 'error' && isRefusal(stream, args[0]);
-    if (refusedError || (event === 'close' && stream.rstCode === 7 && !replaced)) {
+    if (refusedError || (event === 'close' && isRefusal(stream, undefined) && !replaced)) {
       replaced = true;
       if (event === 'error') return emit.call(this, event, callerError(), ...args.slice(1));
       // Node emits error before close; handle close-only runtimes too, before
@@ -164,8 +172,9 @@ function guardUnadvertisedRefusal(stream: GuardedStreamLike, size: number): void
   };
 }
 
-/** Node's REFUSED_STREAM reset or native error, including before rstCode is set. */
+/** Node's REFUSED_STREAM reset or native error on a session that is not shutting down. */
 function isRefusal(stream: GuardedStreamLike, error: unknown): boolean {
+  if (stream.session?.closed || stream.session?.destroyed) return false;
   return (
     stream.rstCode === 7 ||
     (error instanceof Error &&

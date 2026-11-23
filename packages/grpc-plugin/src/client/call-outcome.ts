@@ -88,7 +88,8 @@ const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
  * and `DataLoss`: a request that makes a healthy handler throw must not eject
  * replicas. The same codes without a server answer fail. Caller cancellation
  * and the client faults `isPreSendFault` recognises report nothing, including
- * oversized headers refused by a peer advertising no limit. A list over an
+ * oversized headers refused on an open session when no header-list limit was
+ * known when the call started. A list over an
  * advertised limit but at or under 8 KiB is an instance failure: that peer
  * advertised less than any gRPC default; only lists over 8 KiB are exempt.
  * @param error - The rejected call
@@ -114,7 +115,7 @@ export function callOutcome(
 }
 
 /**
- * Caller header faults (including an oversized unadvertised-limit refusal),
+ * Caller header faults (including an oversized refusal when no limit was known at call start),
  * and Connect's pre-send binary serialization and `writeMaxBytes` refusals
  * with no response metadata.
  */
