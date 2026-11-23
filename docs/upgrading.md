@@ -41,19 +41,20 @@ own. Every other server answer reports success, including application codes and 
 `Unknown`, `DataLoss`. The same codes without a server answer fail. A request that makes a healthy
 handler throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a
 broken dependency, say) is not ejected by call outcomes. Take it out through readiness (health
-checks) instead; the same holds for a wrong service or proxy answering a JSON object on a 500 or 400
-on the default `connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the
+checks) instead; the same holds for a wrong service or proxy answering a JSON object on a non-200
+that does not map to `Unavailable`, `Unimplemented` or `DeadlineExceeded` (a 400, 401, 403 or 500,
+say) on the default `connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the
 response headers, by the server or by this client's own session over its memory cap, is never
 counted against the instance or resent; the call fails as `ResourceExhausted` with
-`GrpcExcessiveLoadError` as its `cause`; send fewer headers or fewer concurrent streams. A few
-client-side faults raised before the request leaves (binary serialization, `writeMaxBytes`, a
-request header Node refuses) report nothing, and a header `Headers` rejects fails the call before
-any instance is picked. Caller abort reports nothing. Tight deadlines can therefore eject healthy
-instances; size deadlines for normal latency. Streaming still reports success at response headers
-only. A drain 503 is not resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to
-spread calls; a single Service address pins a connection to one pod. Cancelling a response stream
-aborts the handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it
-to exit promptly.
+`GrpcExcessiveLoadError` as its `cause`; send fewer headers or fewer concurrent streams, or keep
+fewer large replies in flight on one connection. A few client-side faults raised before the request
+leaves (binary serialization, `writeMaxBytes`, a request header Node refuses) report nothing, and a
+header `Headers` rejects fails the call before any instance is picked. Caller abort reports nothing.
+Tight deadlines can therefore eject healthy instances; size deadlines for normal latency. Streaming
+still reports success at response headers only. A drain 503 is not resent. Discover individual pods
+(headless DNS mode `'a'` or Kubernetes) to spread calls; a single Service address pins a connection
+to one pod. Cancelling a response stream aborts the handler's `ctx.signal` before awaiting cleanup
+without a bound; handlers must observe it to exit promptly.
 
 Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
 the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause

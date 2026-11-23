@@ -112,7 +112,7 @@ export class GrpcHeaderListTooLargeError extends Error {
  * response headers, by the server or by this client's own HTTP/2 session when it is
  * over its memory cap (RFC 9113 §7: this client's behaviour looked excessive, as
  * Node's server says for more than 128 header fields). A reset after the response
- * headers on a streaming call surfaces while iterating and is not wrapped. The call is never reported against the instance, whatever
+ * headers is not wrapped (a unary call then reports failure). The call is never reported against the instance, whatever
  * it sent, and is not sent to another one. It reaches the caller as the `cause`
  * of a `ConnectError` with code `ResourceExhausted` (grpc-go's mapping of the
  * code); the original stream error is its own `cause`.

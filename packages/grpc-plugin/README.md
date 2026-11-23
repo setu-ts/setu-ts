@@ -116,22 +116,25 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   `DataLoss`. The same codes without a server answer fail. A request that makes a healthy handler
   throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a broken
   dependency, say) is not ejected by call outcomes. Take it out through readiness (health checks)
-  instead. On the default `connect` protocol a JSON object body on a 400 or 500 is read as a server
-  answer, so a wrong service or proxy that answers every call that way counts as answered
-  (`Internal`/`Unknown`) and is not ejected by call outcomes either; a JSON 404, 502 or 503 still
-  fails (`Unimplemented`/`Unavailable`), and so does an HTML error page. A stream reset with HTTP/2
-  `ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's own HTTP/2
-  session when it is over its memory cap) means this client's behaviour looked excessive (Node's
-  server says so for more than 128 header fields): it is never counted against the instance and is
-  not resent, and the call fails as `ResourceExhausted` with `GrpcExcessiveLoadError` as its
-  `cause`. A reset after the response headers on a streaming call surfaces while iterating and
-  reports nothing. A few client-side faults raised before the request leaves report nothing:
-  Connect's binary serialization failure (`Internal`), its `writeMaxBytes` refusal
-  (`ResourceExhausted`), and a request header Node refuses before sending: a connection-specific
-  header on HTTP/2 (`connection`, `keep-alive`, `proxy-connection`, `upgrade`, `transfer-encoding`,
-  `http2-settings`, `te` other than `trailers`) or a control character in a header value on
-  HTTP/1.1. A header name or value that `Headers` itself rejects fails the call before any instance
-  is picked. A call whose header list (RFC 7541 §4.1 sizes) is over the peer's advertised HTTP/2
+  instead. On the default `connect` protocol a JSON object body on any non-200 unary answer is read
+  as a server answer, its code taken from the body's `code` field or else from the HTTP status (404
+  `Unimplemented`; 429, 502, 503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their auth codes;
+  any other status `Unknown`). It fails only when that code is `Unavailable`, `Unimplemented` or
+  `DeadlineExceeded`, so a wrong service or proxy that answers every call with, say, a JSON 400,
+  401, 403 or 500 counts as answered and is not ejected by call outcomes either; an HTML error page
+  is no answer and fails. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers
+  (by the server, or by this client's own HTTP/2 session when it is over its memory cap) means this
+  client's behaviour looked excessive (Node's server says so for more than 128 header fields): it is
+  never counted against the instance and is not resent, and the call fails as `ResourceExhausted`
+  with `GrpcExcessiveLoadError` as its `cause`. A reset after the response headers is not covered: a
+  unary call then reports failure, and a streaming call surfaces it while iterating and reports
+  nothing. A few client-side faults raised before the request leaves report nothing: Connect's
+  binary serialization failure (`Internal`), its `writeMaxBytes` refusal (`ResourceExhausted`), and
+  a request header Node refuses before sending: a connection-specific header on HTTP/2
+  (`connection`, `keep-alive`, `proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`,
+  `te` other than `trailers`) or a control character in a header value on HTTP/1.1. A header name or
+  value that `Headers` itself rejects fails the call before any instance is picked. A call whose
+  header list (RFC 7541 §4.1 sizes) is over the peer's advertised HTTP/2
   `SETTINGS_MAX_HEADER_LIST_SIZE` is stopped before the peer processes it. If the list is also over
   8 KiB (8192 octets), it is the caller's fault, with `GrpcHeaderListTooLargeError` as its error's
   `cause`: no report or resend. At or under 8 KiB it counts as `failure` against that instance;

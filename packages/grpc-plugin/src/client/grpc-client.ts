@@ -491,8 +491,8 @@ export class GrpcClients {
       const outcome = callOutcome(error, signal, runtime.isWireError);
       if (outcome !== undefined) this.#report(discovery, instance, outcome);
       if (!signal?.aborted && !runtime.isWireError(error) && isExcessiveLoadReset(error)) {
-        // The server judged this client's behaviour excessive: the caller's to
-        // change, so neither counted against the instance nor sent again.
+        // This client's behaviour looked excessive (to the server, or to its own
+        // session's memory cap): the caller's to change, so neither counted against the instance nor sent again.
         const calm = new GrpcExcessiveLoadError(error);
         throw runtime.resourceExhausted(calm.message, calm);
       }

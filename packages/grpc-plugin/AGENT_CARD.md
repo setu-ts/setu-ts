@@ -45,10 +45,10 @@ export function registerRpcService(
   served.
 - A duplicate service type name throws; no implementation means reflection only.
 - Server answers succeed, thrown handler errors too; no answer, unavailable, unimplemented, deadline
-  and peer cancel fail. Abort, pre-send faults and ENHANCE_YOUR_CALM resets report nothing, as do
-  headers over a peer's advertised limit and 8 KiB, or over 64 KiB refused on an open session with
-  no known limit; at or under 8 KiB the instance fails.
-- Drain 503s aren't resent; discover pods to balance.
+  and peer cancel fail. Abort, pre-send faults and early ENHANCE_YOUR_CALM resets report nothing, as
+  do headers over a peer's advertised limit and 8 KiB, or over 64 KiB refused on an open session
+  with no known limit; at or under 8 KiB the instance fails.
+- Drain 503s aren't resent; discover pods.
 - Stream cancel aborts `ctx.signal`, then awaits cleanup unbounded.
 - The health bridge serves with no health capability; aggregate degraded is not serving.
 

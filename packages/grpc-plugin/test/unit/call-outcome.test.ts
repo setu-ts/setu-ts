@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { Code, ConnectError } from '@connectrpc/connect';
-import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { codeFromHttpStatus, errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import {
   callOutcome,
@@ -342,5 +342,34 @@ for (const [label, build, wire, matches, expected] of [
     expect(isExcessiveLoadReset(error)).toBe(matches);
     expect(callOutcome(error, undefined, () => wire)).toBe(expected);
     expect(isRefusedStream(error)).toBe(false);
+  });
+}
+
+// The README's rule for a JSON object body on a non-200 unary answer (default `connect`
+// protocol), as data: connect reads it as a server answer, its code from the body's `code`
+// field or else from the HTTP status, and only Unavailable, Unimplemented and
+// DeadlineExceeded fail.
+for (const [status, body, expected] of [
+  [400, {}, 'success'],
+  [401, {}, 'success'],
+  [403, {}, 'success'],
+  [408, {}, 'success'],
+  [409, {}, 'success'],
+  [500, {}, 'success'],
+  [501, {}, 'success'],
+  [404, {}, 'failure'],
+  [429, {}, 'failure'],
+  [502, {}, 'failure'],
+  [503, {}, 'failure'],
+  [504, {}, 'failure'],
+  [500, { code: 'unavailable' }, 'failure'],
+  [503, { code: 'not_found' }, 'success'],
+] as const) {
+  it(`reads a JSON object on HTTP ${status} ${JSON.stringify(body)} as a server answer → ${expected}`, async () => {
+    const runtime = await loadConnectModule();
+    const fallback = new ConnectError(`HTTP ${status}`, codeFromHttpStatus(status));
+    const error = errorFromJson(body, undefined, fallback);
+    expect(error.isWireError).toBe(true);
+    expect(callOutcome(error, undefined, runtime.isWireError)).toBe(expected);
   });
 }

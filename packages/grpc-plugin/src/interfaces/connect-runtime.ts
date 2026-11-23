@@ -205,8 +205,8 @@ export interface ConnectRuntime {
   unavailable(message: string, cause?: unknown): Error;
 
   /**
-   * A Connect `ResourceExhausted` error, for a call the server reset with
-   * HTTP/2 `ENHANCE_YOUR_CALM` (grpc-go's mapping of that code).
+   * A Connect `ResourceExhausted` error, for a call whose stream was reset with
+   * HTTP/2 `ENHANCE_YOUR_CALM`, by the server or by this client's own session (grpc-go's mapping of that code).
    *
    * @param message - The error message
    * @param cause - The error it replaces, kept as its `cause`
