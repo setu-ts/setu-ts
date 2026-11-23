@@ -316,7 +316,7 @@ requests → close the server socket → shutdown hooks → close hooks**. A rej
 reported only after the remaining shutdown phases finish. Refused requests carry the reserved
 `x-setu-unprocessed: shutdown` marker, independent of the error responder's status, before any
 request lifecycle hook, middleware or handler ran. An application setting that header makes the same
-not-processed claim and a Setu gRPC client may send that unary call once more.
+not-processed claim and a client that honours the marker may send that request again.
 
 ```typescript
 ctx.lifecycle.onStopping(() => {

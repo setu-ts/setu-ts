@@ -46,6 +46,15 @@ describe('DNS server options', () => {
       'servers[0]',
     );
   });
+  it.each([
+    ['a Symbol', Symbol('dns'), '(symbol)'],
+    ['a null-prototype object', Object.create(null) as unknown, '(object)'],
+    ['a number', 53, '(number)'],
+  ])('refuses %s with a RangeError naming its type', (_label, entry, shown) => {
+    const run = () => parseDnsResolverOptions({ servers: [entry as never], timeoutMs: 0 });
+    expect(run).toThrow(RangeError);
+    expect(run).toThrow(`servers[0] ${shown}`);
+  });
   it.each([0, 2_147_483_647])('accepts timeoutMs %s and duplicate servers', (timeoutMs) => {
     const result = parseDnsResolverOptions({ servers: ['::1', '::1'], timeoutMs });
     expect(result.timeoutMs).toBe(timeoutMs);

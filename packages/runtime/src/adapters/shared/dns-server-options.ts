@@ -36,8 +36,11 @@ export function parseDnsResolverOptions(options: DnsResolverOptions): {
   }
   const servers = options.servers.map((entry: string, index: number): IDnsServer => {
     const invalid = (): never => {
+      // A Symbol or a null-prototype object throws inside a template literal, so only a
+      // string entry is quoted; anything else is named by its type.
+      const shown = typeof entry === 'string' ? `'${entry}'` : `(${typeof entry})`;
       throw new RangeError(
-        `servers[${index}] '${entry}' must be an IP literal with an optional decimal port (1..65535); a port needs brackets for IPv6`,
+        `servers[${index}] ${shown} must be an IP literal with an optional decimal port (1..65535); a port needs brackets for IPv6`,
       );
     };
     if (typeof entry !== 'string' || entry.includes('%')) return invalid();

@@ -59,8 +59,8 @@ since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No requ
 middleware or handler ran; an error responder may format the answer. Its meaning is independent of
 status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
 exactly; other values are reserved. The kernel does not remove the header from other responses. An
-application that sets it claims the request was not processed, and a Setu gRPC client may send that
-unary call once more.
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
 
 ## Usage
 

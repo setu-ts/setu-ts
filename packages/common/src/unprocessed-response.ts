@@ -4,8 +4,7 @@
  * or handler ran; an error responder may format the answer. This guarantee
  * covers the Setu server, not work performed by an intervening proxy.
  *
- * An application that sets it claims the request was not processed, and a Setu
- * gRPC client may send that unary call once more, independently of status.
+ * An application that sets it claims the request was not processed, and a client that honours the marker may send that request again, independently of status.
  * Readers compare the value exactly; other values are reserved.
  *
  * @since 0.14.0

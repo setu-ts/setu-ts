@@ -33,7 +33,7 @@ try {
 ## Behaviour the types do not show
 
 - Drain refusals set reserved `x-setu-unprocessed: shutdown` before request processing, independent
-  of status; an application setting it claims the same and permits one unary resend.
+  of status; an application setting it claims the same, and a client may send it again.
 - Plugins register during `app.start()`, in dependency order; their capabilities are absent
   beforehand. Startup requires a provider for `CAPABILITIES.RUNTIME`.
 - Starting without a port does not bind a socket; `app.start({ port: 3000 })` listens.

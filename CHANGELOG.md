@@ -12,8 +12,8 @@ All notable changes to this project are documented here. The format follows
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
   the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
-  independent of status. An application setting the marker claims no processing and a Setu gRPC
-  client may send that unary call once more.
+  independent of status. An application setting the marker claims no processing and a client that
+  honours the marker may send that request again.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,

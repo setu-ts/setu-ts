@@ -47,7 +47,8 @@ export function registerStatusRoutes(router: IRouterApi): void {
 ## Behaviour the types do not show
 
 - `DnsResolverOptions` configures optional `createDnsResolver`; reserved
-  `UNPROCESSED_HEADER`/`UNPROCESSED_SHUTDOWN` claim no processing, permitting one unary resend.
+  `UNPROCESSED_HEADER`/`UNPROCESSED_SHUTDOWN` claim no processing, so a client may send the request
+  again.
 - A capability token does not install its provider. Resolve services in handlers through
   `ctx.services`; application-level services exist after `app.start()` registers plugins.
 - Path and query values are strings. `ctx.request.json<T>()` parses JSON but its type argument does

@@ -259,9 +259,6 @@ The drain bound is `StartOptions.drainTimeoutMs`; there is no other shutdown opt
 
 **The two drain numbers, in one place.** The bound must fit inside the orchestrator's grace period
 
-The kernel's pre-pipeline drain answer sets `UNPROCESSED_HEADER: UNPROCESSED_SHUTDOWN`
-(`x-setu-unprocessed: shutdown`), after the error responder, independent of its status.
-
 (the time between `SIGTERM` and `SIGKILL`) minus the pre-stop delay and the time the shutdown and
 close hooks need. The library default is **10 000 ms**, which fits a 30 s grace with room to spare.
 For a project deployed with the manifests `setu new` generates, **20 000 ms** fits: they give 30 s
@@ -269,6 +266,9 @@ of grace and a 5 s pre-stop sleep, leaving 25 s, of which 20 s drain and 5 s clo
 run the hooks. The generated entry does not pass it yet, so such a project drains for the default.
 Change any one of the grace period, the pre-stop sleep or `drainTimeoutMs`, and recheck the other
 two.
+
+The kernel's pre-pipeline drain answer sets `UNPROCESSED_HEADER: UNPROCESSED_SHUTDOWN`
+(`x-setu-unprocessed: shutdown`), after the error responder, independent of its status.
 
 ### Usage
 
@@ -891,8 +891,8 @@ since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No requ
 middleware or handler ran; an error responder may format the answer. Its meaning is independent of
 status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
 exactly; other values are reserved. The kernel does not remove the header from other responses. An
-application that sets it claims the request was not processed, and a Setu gRPC client may send that
-unary call once more.
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
 
 ```typescript
 interface IRuntimeServices {
@@ -14096,28 +14096,6 @@ reaches `redactors[<string>]`):
 | `DATA_CLASSIFICATIONS.PCI`    | `'pci'`    |
 | `DATA_CLASSIFICATIONS.SECRET` | `'secret'` |
 
-The injected factory signatures (since 0.14.0 for the creator parameter) are:
-
-```typescript
-createNodeRuntimeServices(host?: NodeHost, workers?: IWorkerHost, dns?: IDnsResolver,
-  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
-createBunRuntimeServices(host?: BunHost, workers?: IWorkerHost, dns?: IDnsResolver,
-  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
-createDenoRuntimeServices(host?: DenoHost, workers?: IWorkerHost, dns?: IDnsResolver,
-  globalEvents?: GlobalEventHost | null,
-  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
-```
-
-Both exported `DenoDnsHost` and `DenoHost` accept an optional trailing options parameter on both
-`resolveDns` overloads (since 0.14.0). Hosts with only two parameters remain assignable:
-
-```typescript
-resolveDns(query: string, recordType: 'SRV',
-  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<DenoSrvRecord[]>;
-resolveDns(query: string, recordType: 'A' | 'AAAA',
-  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<string[]>;
-```
-
 ### Values (runtime exports)
 
 <!-- version:history -->
@@ -15082,6 +15060,28 @@ Cloudflare Workers.
 > const result = this.handler(frameworkRequest);
 > return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
 > ```
+
+The injected factory signatures (since 0.14.0 for the creator parameter) are:
+
+```typescript
+createNodeRuntimeServices(host?: NodeHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createBunRuntimeServices(host?: BunHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createDenoRuntimeServices(host?: DenoHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  globalEvents?: GlobalEventHost | null,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+```
+
+Both exported `DenoDnsHost` and `DenoHost` accept an optional trailing options parameter on both
+`resolveDns` overloads (since 0.14.0). Hosts with only two parameters remain assignable:
+
+```typescript
+resolveDns(query: string, recordType: 'SRV',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<DenoSrvRecord[]>;
+resolveDns(query: string, recordType: 'A' | 'AAAA',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<string[]>;
+```
 
 ### Values (runtime exports)
 
