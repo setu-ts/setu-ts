@@ -1,10 +1,11 @@
 # Milestone 143p — Messaging lane (`@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`)
 
-> **Status:** Planning. Branch: `feat/m143p-queued-work-and-frames`. `develop` and `main` are
-> protected; all work (implementation and fixes) stays on this one branch until it merges through a
-> single PR into `develop`. D7 is decided (§0.3): Part A ships first as its own PR from this branch;
-> Part B follows on the same branch, carrying its `common` change itself (D1, decided 2026-11-23).
-> Lane: Messaging, first in its lane; M143m follows on the same packages. Ships in `0.14.0`.
+> **Status:** Complete (Parts A and B). Branch: `feat/m143p-queued-work-and-frames`. `develop` and
+> `main` are protected; all work (implementation and fixes) stays on this one branch until it merges
+> through a single PR into `develop`. D7 is decided (§0.3): Part A ships first as its own PR from
+> this branch; Part B follows on the same branch, carrying its `common` change itself (D1, decided
+> 2026-11-23). Lane: Messaging, first in its lane; M143m follows on the same packages. Ships in
+> `0.14.0`.
 
 ## 0. Objective & scope
 
