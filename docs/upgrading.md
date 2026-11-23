@@ -79,7 +79,10 @@ cutting a release renames that heading to the version and is a rename, not a rec
 - **The SDK refuses an invalid policy everywhere.** `new HttpClient(...)` now checks the policy as
   `createClient` does, and the message names the field and value
   (`circuitBreaker.threshold must be a positive safe integer; received 0`). A test matching the old
-  `circuitBreaker.threshold must be >= 1` text needs the new one.
+  `circuitBreaker.threshold must be >= 1` text needs the new one. Values accepted before and refused
+  now: a non-integer `threshold`; a `timeout` of 0 or less, `Infinity` or above 2147483647 (a
+  `timeout: Infinity` once meant "failures in a row" — use a finite window, or the rate arm); a
+  negative, infinite or over-range `resetTimeout`.
 - **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
   rate policy throws a `RangeError` when `wrap()` builds the breaker.
 

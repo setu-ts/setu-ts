@@ -100,7 +100,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M101h: +1 for the Redaction policy-shape example.
   // M117: +1 for the node-redis example; `redis` resolves through the snippet tsconfig to the
   // devDependency `common` already carries, so the fence checks against node-redis's own types.
-  'packages/common/README.md': 4,
+  // Circuit breaker follow-up: +1 for the createBreakerWindow example (imports the subpath).
+  'packages/common/README.md': 5,
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).
@@ -156,7 +157,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 4,
   // M98n: +1 for the devtool-gated observed-fetch composition.
-  'packages/sdk/README.md': 15,
+  // Circuit breaker follow-up: +1 for the rate-arm circuitBreaker example.
+  'packages/sdk/README.md': 16,
   'packages/telemetry-plugin/README.md': 2,
   'packages/testing/README.md': 10,
   // M111d: the npm create entry. Shell lines only, so it is gated at zero —

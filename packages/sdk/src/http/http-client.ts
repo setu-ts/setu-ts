@@ -54,6 +54,31 @@ function isJsonMediaType(contentType: string): boolean {
   return essence === 'application/json' || essence.endsWith('+json');
 }
 
+/**
+ * Reads each circuit-breaker field once (own or inherited) into a frozen copy,
+ * then checks that copy. The copy is what every origin's breaker gets, so a
+ * caller mutating its object later — or a getter answering differently on a
+ * second read — cannot change a later origin's window or the cooldown the
+ * breaker reads on every call, nor make a later origin's first request throw.
+ */
+function snapshotBreakerPolicy(policy: CircuitBreakerPolicy): CircuitBreakerPolicy {
+  const read: Record<string, unknown> = {};
+  for (const field of [
+    'threshold',
+    'failureRateThreshold',
+    'minimumCalls',
+    'timeout',
+    'resetTimeout',
+  ] as const) {
+    const value = policy[field];
+    if (value !== undefined) read[field] = value;
+  }
+  const copy = Object.freeze(read) as unknown as CircuitBreakerPolicy;
+  const refused = breakerPolicyRangeError(copy);
+  if (refused !== null) throw refused;
+  return copy;
+}
+
 // Origin-keyed breaker and limiter maps.
 //
 // A single client is single-origin in practice: `baseUrl` is fixed and every
@@ -127,11 +152,7 @@ export class HttpClient implements IHttpClient {
     this.#timing = options.timing;
     if (options.retry !== undefined) this.#retry = validateRetryPolicy(options.retry);
     if (options.circuitBreaker !== undefined) {
-      const refused = breakerPolicyRangeError(options.circuitBreaker);
-      if (refused !== null) throw refused;
-      // A frozen copy: a caller mutating its object later cannot change a later
-      // origin's window or the cooldown the breaker reads on every call.
-      this.#circuitBreaker = Object.freeze({ ...options.circuitBreaker });
+      this.#circuitBreaker = snapshotBreakerPolicy(options.circuitBreaker);
     }
     this.#maxRequests = options.rateLimit?.maxRequests;
     this.#windowMs = options.rateLimit?.windowMs;

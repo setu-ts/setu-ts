@@ -1,8 +1,8 @@
 # Milestone 143 Core follow-up — One Breaker Trip Rule, With a Rate Arm (`@setu-ts/common`, `@setu-ts/sdk`)
 
-> **Status:** Planning. Branch: `feat/m143-core-breaker`. `develop` and `main` are protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR into
-> `develop`.
+> **Status:** Complete (PR pending). Branch: `feat/m143-core-breaker`. `develop` and `main` are
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR into `develop`.
 
 ## 0. Objective & scope
 

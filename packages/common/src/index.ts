@@ -484,7 +484,7 @@ export type {
   RetryPolicy,
   WrapOptions,
 } from './services/resilience.ts';
-// Circuit-breaker trip rule shared by the resilience plugin and the SDK client
+// Circuit-breaker trip rule (the SDK client's breaker runs on it)
 export { breakerPolicyRangeError, createBreakerWindow } from './services/breaker-window.ts';
 export type { IBreakerWindow } from './services/breaker-window.ts';
 export type { IStorage, PutObjectOptions, SignedUrlOptions } from './services/storage.ts';

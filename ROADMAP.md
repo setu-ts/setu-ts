@@ -17430,7 +17430,7 @@ eight letters and M143d, the second CLI letter, hold all 23 High rows.
 - **Circuit breaker** (`common` + `sdk`; V13-104's Core and SDK halves, the row stays M143c's) — the
   `CircuitBreakerPolicy` union with a failure-rate arm, the shared trip rule `createBreakerWindow`
   (also at `@setu-ts/common/breaker-window`) and `breakerPolicyRangeError`, and the SDK breaker
-  moved onto it, which stops it clearing on a closed-state success. ⬜
+  moved onto it, which stops it clearing on a closed-state success. ✅
 
 ### Milestone 143a: Sessions and Shared Caches
 

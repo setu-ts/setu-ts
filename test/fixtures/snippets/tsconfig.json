@@ -74,6 +74,7 @@
         "../../../packages/localization-plugin/src/format/index.ts"
       ],
       "@setu-ts/validation-plugin/zod": ["../../../packages/validation-plugin/src/zod/index.ts"],
+      "@setu-ts/common/breaker-window": ["../../../packages/common/src/services/breaker-window.ts"],
       "@setu-ts/cli/main": ["../../../packages/cli/src/main.ts"],
       "@setu-ts/cli/node-version": ["../../../packages/cli/src/utils/node-version.ts"],
       "react-router": [

@@ -392,4 +392,29 @@ describe('client resilience composition', () => {
     );
     expect(fetchCount).toBe(1);
   });
+
+  it('takes a policy whose fields are inherited and keeps it for every request', async () => {
+    const { timing } = createTiming();
+    let fetchCount = 0;
+    const policy = Object.create({ threshold: 1, timeout: 10_000, resetTimeout: 5000 }) as {
+      threshold: number;
+      timeout: number;
+      resetTimeout: number;
+    };
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: () => {
+        fetchCount++;
+        return Promise.resolve(new Response('', { status: 503 }));
+      },
+      circuitBreaker: policy,
+    });
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      ClientCircuitOpenError,
+    );
+    expect(fetchCount).toBe(1);
+  });
 });

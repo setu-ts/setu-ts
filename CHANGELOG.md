@@ -12,11 +12,11 @@ All notable changes to this project are documented here. The format follows
   can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
   `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
   beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
-  rule both breakers share (returning an `IBreakerWindow`), also served alone as
-  `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one policy check.
-  The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin` still takes only
-  the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds the breaker.
-  V13-104.
+  rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
+  served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
+  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
+  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
+  the breaker. V13-104.
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -59,7 +59,9 @@ All notable changes to this project are documented here. The format follows
   counts as a call the origin answered. An invalid policy now throws a `RangeError` naming the
   field, whether the client comes from `createClient` or `new HttpClient`
   (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
-  `circuitBreaker.threshold must be >= 1`).
+  `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
+  non-integer `threshold`, a `timeout` of 0 or less, `Infinity` or above 2147483647, and a negative,
+  infinite or over-range `resetTimeout`.
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A

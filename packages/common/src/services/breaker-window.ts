@@ -94,8 +94,9 @@ function isPositiveInteger(value: unknown): boolean {
 
 /**
  * Checks a circuit-breaker policy, returning the refusal or `null` when it is
- * valid. Every breaker that takes a {@linkcode CircuitBreakerPolicy} runs this
- * one check, and {@linkcode createBreakerWindow} throws it.
+ * valid. It is the one check for a {@linkcode CircuitBreakerPolicy}:
+ * {@linkcode createBreakerWindow} throws it, and the SDK client runs it when it
+ * is built.
  *
  * The arm is decided by presence (a field is present when it is not
  * `undefined`): `threshold` together with `failureRateThreshold` or
@@ -265,8 +266,9 @@ function rateWindow(policy: CircuitBreakerRatePolicy, now: () => number): IBreak
 /**
  * Creates the failure window for one circuit breaker.
  *
- * The policy is checked with {@linkcode breakerPolicyRangeError} and copied,
- * so changing the caller's object afterwards changes nothing.
+ * Each policy field is read once into a copy, which is checked with
+ * {@linkcode breakerPolicyRangeError} and then used, so changing the caller's
+ * object afterwards changes nothing.
  *
  * - **Count arm:** each failure is timestamped exactly; it trips when at least
  *   `threshold` failures are less than `timeout` old.
@@ -295,22 +297,35 @@ export function createBreakerWindow(
   policy: CircuitBreakerPolicy,
   now: () => number,
 ): IBreakerWindow {
-  const error = breakerPolicyRangeError(policy);
+  // Each field is read exactly once, into a plain object that is both checked
+  // and used: a getter cannot pass the check and then return something else.
+  const snapshot = {
+    threshold: policy.threshold,
+    failureRateThreshold: policy.failureRateThreshold,
+    minimumCalls: policy.minimumCalls,
+    timeout: policy.timeout,
+    resetTimeout: policy.resetTimeout,
+  };
+  const error = breakerPolicyRangeError(snapshot as CircuitBreakerPolicy);
   if (error !== null) {
     throw error;
   }
-  if (policy.threshold !== undefined) {
+  if (snapshot.threshold !== undefined) {
     return countWindow(
-      { threshold: policy.threshold, timeout: policy.timeout, resetTimeout: policy.resetTimeout },
+      {
+        threshold: snapshot.threshold,
+        timeout: snapshot.timeout,
+        resetTimeout: snapshot.resetTimeout,
+      },
       now,
     );
   }
   return rateWindow(
     {
-      failureRateThreshold: policy.failureRateThreshold,
-      minimumCalls: policy.minimumCalls,
-      timeout: policy.timeout,
-      resetTimeout: policy.resetTimeout,
+      failureRateThreshold: snapshot.failureRateThreshold as number,
+      minimumCalls: snapshot.minimumCalls as number,
+      timeout: snapshot.timeout,
+      resetTimeout: snapshot.resetTimeout,
     },
     now,
   );

@@ -323,6 +323,22 @@ describe('createBreakerWindow — conformance', () => {
     expect(rateWindow.recordFailure()).toBe(true);
   });
 
+  it('reads each field once, so a getter cannot pass the check and then change', () => {
+    let reads = 0;
+    const policy = {
+      get threshold(): number {
+        reads++;
+        return reads === 1 ? 2 : Number.NaN;
+      },
+      timeout: 1000,
+      resetTimeout: 0,
+    };
+    const window = createBreakerWindow(policy, () => 0);
+    expect(reads).toBe(1);
+    window.recordFailure();
+    expect(window.recordFailure()).toBe(true);
+  });
+
   it('throws the same RangeError breakerPolicyRangeError returns', () => {
     const policy = { threshold: 0, timeout: 1000, resetTimeout: 0 };
     const expected = breakerPolicyRangeError(policy);
