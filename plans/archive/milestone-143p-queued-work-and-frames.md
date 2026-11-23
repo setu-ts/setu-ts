@@ -612,17 +612,20 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
     needs a confirm channel with return listeners (`rabbitmq-broker.ts:798-800`). On a connection
     without one (`#confirmed` false, `:1048-1057`), the relay refuses to start: where the plugin
     activates the outbox (the step that runs each store's `verify()` and fails `start()`,
-    `messaging-plugin.ts` around `:755-810`), it reads an internal broker-property symbol
-    `ROUTED_PUBLISH_AVAILABLE` (in `publish-options.ts` beside `PUBLISH_REQUIRE_ROUTE`, never
-    exported) from the composed broker. `broker.connect()` runs at `messaging-plugin.ts:517`, before
-    the facades wrap it (`:533`, `:557`), and `registerOutbox` reads the composed broker (`:579`) in
-    `onInit` (`:797`), so the channel exists by then. `RabbitMqBroker` answers
-    `this.#confirmed && isCloseObservable(this.#channel)`, the same two conditions as the guard at
-    `:798-800`; other brokers leave it undefined (no check); `TracedBroker` and `PipelinedBroker`
-    forward it through a getter. `false` throws the new exported
-    `OutboxPublisherConfirmsRequiredError`, whose message says the outbox needs publisher confirms
-    and names `createConfirmChannel`. A plain publish with a warning is rejected because it would
-    still mark unroutable rows sent (Compared with, row 24: NServiceBus always uses confirms).
+    `messaging-plugin.ts` around `:755-810`), it asks the internal registry
+    `routedPublishAvailable(broker)` (in `publish-options.ts` beside `PUBLISH_REQUIRE_ROUTE`, never
+    exported; a broker registers a probe with `registerRoutedPublish`) about the composed broker.
+    Implemented first as a symbol-keyed getter, it moved to a `WeakMap` registry because the getter
+    failed `isolatedDeclarations` in the package build. `broker.connect()` runs at
+    `messaging-plugin.ts:517`, before the facades wrap it (`:533`, `:557`), and `registerOutbox`
+    reads the composed broker (`:579`) in `onInit` (`:797`), so the channel exists by then.
+    `RabbitMqBroker` answers `this.#confirmed && isCloseObservable(this.#channel)`, the same two
+    conditions as the guard at `:798-800`; other brokers leave it undefined (no check);
+    `TracedBroker` and `PipelinedBroker` register a probe that forwards to their inner broker.
+    `false` throws the new exported `OutboxPublisherConfirmsRequiredError`, whose message says the
+    outbox needs publisher confirms and names `createConfirmChannel`. A plain publish with a warning
+    is rejected because it would still mark unroutable rows sent (Compared with, row 24: NServiceBus
+    always uses confirms).
   - `UnroutableMessageError` reaches the relay unwrapped: `publishConfirmed` rethrows it as is
     rather than wrapping it in its generic `Error` (`:299-305`, `:320`). Test: the relay's failure
     path receives an `instanceof UnroutableMessageError`.
@@ -950,7 +953,7 @@ RabbitMQ connection without publisher confirms refuses to start; a Pub/Sub consu
 
 Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.prepareConsumer`,
 `fan-out.ts`, `consumer-retry.ts`, `pubsub-ordering.ts`, `frame-age.ts`, `PUBLISH_REQUIRE_ROUTE`,
-`ROUTED_PUBLISH_AVAILABLE`, `StaleClaimError`.
+`registerRoutedPublish`, `routedPublishAvailable`, `StaleClaimError`.
 
 ### 4.1 Options — every option names its consumer
 
@@ -974,7 +977,7 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 | `packages/common/src/services/diagnostics.ts` (out of lane, D1)                              | `'discarded'` in `QueueSettlementState`; corrected JSDoc (§3.18)                                                                                                                                                                                                                                                                     |
 | `packages/diagnostics-plugin/src/protocol/queue-protocol.ts` (out of lane, D1)               | `'discarded'` in the `SETTLEMENTS` set                                                                                                                                                                                                                                                                                               |
 | `packages/common/src/redis/node-redis-adapter.ts` (out of lane, D1)                          | `xread`, `xrevrange`                                                                                                                                                                                                                                                                                                                 |
-| `packages/messaging-plugin/src/tracing/traced-broker.ts`, `src/pipeline/pipelined-broker.ts` | Forward `ROUTED_PUBLISH_AVAILABLE`                                                                                                                                                                                                                                                                                                   |
+| `packages/messaging-plugin/src/tracing/traced-broker.ts`, `src/pipeline/pipelined-broker.ts` | Register a forwarding `routedPublishAvailable` probe                                                                                                                                                                                                                                                                                 |
 | `packages/queue-plugin/src/index.ts`                                                         | Export `SqsDeadLetterTargetMissingError`                                                                                                                                                                                                                                                                                             |
 | `packages/queue-plugin/src/errors.ts`                                                        | `SqsDeadLetterTargetMissingError`                                                                                                                                                                                                                                                                                                    |
 | `packages/queue-plugin/src/adapters/sqs-queue.ts`                                            | `claimRenewal`, validation, stale settles throw, `prepareConsumer` target resolution, clamp and its warning, forward with attributes, unreadable retirement, envelope through `sqs-envelope.ts`, `defaults` parameter, `getQueueAttributes`/`getQueueUrl`/attributes/`messageId` in `adaptSqsModule`, logger typed `{ error, warn }` |
@@ -998,7 +1001,7 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 | `packages/messaging-plugin/src/brokers/redis-streams-broker.ts`                              | Fan-out `XREAD` reader from `$`, no group; validation through `consumer-retry.ts`                                                                                                                                                                                                                                                    |
 | `packages/messaging-plugin/src/brokers/pubsub-broker.ts`                                     | Fan-out subscription, retry and dead-letter policies, not-retryable forward, stream recovery, ordered dispatch ; logger widened to `{ error, warn?, info? }`                                                                                                                                                                         |
 | `packages/messaging-plugin/src/brokers/service-bus-broker.ts`                                | Fan-out subscription with idle deletion, hold-then-abandon retry, `deadLetterMessage`, `maxDeliveryCount` read                                                                                                                                                                                                                       |
-| `packages/messaging-plugin/src/brokers/publish-options.ts`                                   | `PUBLISH_REQUIRE_ROUTE` and `ROUTED_PUBLISH_AVAILABLE` symbols                                                                                                                                                                                                                                                                       |
+| `packages/messaging-plugin/src/brokers/publish-options.ts`                                   | `PUBLISH_REQUIRE_ROUTE` symbol and the `registerRoutedPublish` / `routedPublishAvailable` registry                                                                                                                                                                                                                                   |
 | `packages/messaging-plugin/src/outbox/relay.ts`                                              | Sets `PUBLISH_REQUIRE_ROUTE`                                                                                                                                                                                                                                                                                                         |
 | `packages/messaging-plugin/src/brokers/request-reply-core.ts`                                | `respond` ignores `fanOut` with one warning (§3.6)                                                                                                                                                                                                                                                                                   |
 | `packages/messaging-plugin/src/integration/subscribe.ts`                                     | `inbox` with `fanOut` refused (§3.6)                                                                                                                                                                                                                                                                                                 |
