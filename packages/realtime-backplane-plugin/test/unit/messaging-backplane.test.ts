@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setImmediate } from 'node:timers/promises';
 import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 
 /**
@@ -365,10 +366,15 @@ describe('messaging backplane independent delivery and frame age', () => {
       expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
       const afterTimeout = warn.mock.calls.length;
       await backplane.publish(FRAME);
-      const lost = Object.assign(new Error('lost'), { name: 'BackendOutcomeUnknownError' });
+      const lost = new BackendOutcomeUnknownError('broker', { cause: new Error('lost') });
       vi.spyOn(broker, 'publish').mockRejectedValueOnce(lost);
       await expect(backplane.publish(FRAME)).rejects.toBe(lost);
       expect(warn).toHaveBeenCalledTimes(afterTimeout + 1);
+      await backplane.publish(FRAME);
+      const reset = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(reset);
+      await expect(backplane.publish(FRAME)).rejects.toBe(reset);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 2);
       expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(max > 0);
       await backplane.close();
     },

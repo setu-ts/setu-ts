@@ -177,9 +177,11 @@ send carries the sender's wall-clock time (`sentAtMs`, removed before a handler 
 that by its own clock, and logs one `warn` when it starts dropping and one when it accepts frames
 again. It relies on the replicas' clocks agreeing (NTP keeps them within milliseconds); a replica
 with a skewed clock drops or keeps frames wrongly, which the warning names as a possible cause. It
-is off by default, as in the Socket.IO, Phoenix and Action Cable backplanes. A publish that timed
-out logs one `warn` per failing state saying the frame may still arrive late (and, with
-`maxFrameAgeMs` on, that receivers drop it if it is older than the bound).
+is off by default, as in the Socket.IO, Phoenix and Action Cable backplanes. A publish whose outcome
+is unknown (it timed out, or the connection was lost after the write) logs one `warn` per failing
+state saying the frame may still arrive late (and, with `maxFrameAgeMs` on, that receivers drop it
+if it is older than the bound). A RabbitMQ channel that closes before its publish confirm logs no
+such warning.
 
 On `'redis'`, a frame published while a connection is down is lost:
 

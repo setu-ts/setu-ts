@@ -1395,8 +1395,11 @@ seam. `MemoryQueue` and `RedisQueue` (ioredis-based delayed queue using Redis so
 this seam in M15. `RabbitMqQueue` (implemented in M15b) uses polling via `basicGet` over a ready
 queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue. `SqsQueue` (M54) uses
 AWS SQS with visibility timeouts, envelope-based retry tracking, and DLQ promotion when
-`maxAttempts` is reached — the DLQ adapter forwards the original message body to the DLQ queue URL
-then deletes the source message, with separate diagnostics for send vs delete failures. The
+`maxAttempts` is reached. Since 0.14.0 the target comes from `deadLetterQueues[name]` or the queue's
+own redrive policy (whose `maxReceiveCount` caps the attempts); the adapter forwards the original
+body with three `setu-*` attributes (reason, attempts, source message id) and then deletes the
+source, `false` discards instead, and a consumed name with no target is refused before its first
+poll. The
 `SnsPublisher` export is a separate AWS SNS fan-out helper (not a `QueueAdapter`): it publishes to a
 single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam as `SqsQueue`.
 

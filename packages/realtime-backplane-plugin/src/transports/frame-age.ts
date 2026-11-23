@@ -91,8 +91,8 @@ export class FrameAge {
   }
 
   /**
-   * Reports a failed publication whose outcome is unknown (a timeout: the
-   * command may already be on the wire), once per failing state. A failure
+   * Reports a failed publication whose outcome is unknown (it timed out, or the
+   * connection was lost after the write), once per failing state. A failure
    * whose frame never left the process is not reported here.
    * @param uncertain - Whether the frame may still reach the broker
    * @returns Nothing

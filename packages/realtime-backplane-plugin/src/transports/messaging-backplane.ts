@@ -15,7 +15,7 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
-import { dispatchRealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, dispatchRealtimeFrame, toBackendFault } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { createTransportHandlerReporter } from './handler-errors.ts';
 
@@ -185,12 +185,14 @@ export class MessagingBackplane implements IRealtimeBackplane {
     try {
       await this.#broker.publish(this.#topic, this.#frameAge.stamp(frame));
     } catch (error) {
-      // A publish timeout or an outcome-unknown backend fault means the broker
-      // may still deliver the frame. Matched by name: this package cannot
-      // import the messaging plugin's error class.
+      // A publish timeout or an outcome-unknown backend fault (including a raw
+      // connection error after the write) means the broker may still deliver
+      // the frame. PublishTimeoutError is matched by name: it belongs to the
+      // messaging plugin, which this package cannot import.
       this.#frameAge.publishFailed(
-        error instanceof Error &&
-          (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError'),
+        (error instanceof Error && error.name === 'PublishTimeoutError') ||
+          toBackendFault(error, 'realtime-backplane-plugin: messaging transport') instanceof
+            BackendOutcomeUnknownError,
       );
       throw error;
     }

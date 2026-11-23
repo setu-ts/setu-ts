@@ -52,17 +52,17 @@ export function createReceiptJobProcessor(
   ms), so a test polls its read-back route until the result appears. `delayMs` is milliseconds.
 - Read-back state can live in a module both files import; the factory gets `services` to resolve
   capabilities at `onInit` (a capability resolved there must be registered, e.g. `LoggerPlugin`).
-- `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
-- `onFailed` runs after the last attempt, not on retries; keep it idempotent.
+- `job.attempts` is 1 on first delivery. A throw fails an attempt; make effects repeat-safe.
+- `onFailed` runs after the last attempt, not retries; keep it idempotent.
 - Default concurrency is 1 per name.
 - The default memory adapter is process-local; shutdown stops polling and disconnects it.
 
 ## Other options
 
 - `adapter: 'redis'` or `'rabbitmq'` uses `url` (node-redis: `client`); `'sqs'` uses `sqs`.
-- An SQS consumer needs `deadLetterQueues[name]` (URL or `false` to discard) or a redrive policy, or
-  it will not start.
+- SQS: a consumed name needs `deadLetterQueues[name]` (URL or `false`) or a redrive policy, else a
+  declared processor fails `app.start()`.
 - `schedule` registers cron-recurring jobs.
-- `behaviors` wraps processor execution; `diagnostics` observes approved queue names only.
+- `behaviors` wraps processors; `diagnostics` observes approved queue names only.
 
 <!-- card-allow: LoggerPlugin -->
