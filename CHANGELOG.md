@@ -73,7 +73,8 @@ All notable changes to this project are documented here. The format follows
   exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the adapter cannot see. A
   job that exhausts its attempts calls `onFailed` once and is forwarded to that producer (or
   discarded with a warning for `false`) instead of being acked away; `maxRetries` (default 3) must
-  equal `max_retries`, and a larger `maxAttempts` is capped with one warning per job name (V13-197).
+  equal `max_retries`, and a larger `maxAttempts` is capped with one warning per job name; a
+  `deadLetterQueue` naming the queue's own binding fails `app.start()` (V13-197).
   `cacheApiMiddleware` no longer stores or serves per-visitor responses, the same rule as
   `cacheMiddleware`: `private` (qualified or not) and `no-store` are refused, including
   `private=Set-Cookie`, which now logs one warning naming the header; a credentialed request is

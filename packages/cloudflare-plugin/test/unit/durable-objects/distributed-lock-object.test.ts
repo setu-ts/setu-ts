@@ -188,3 +188,15 @@ describe('DistributedLockObjectCore /release refusal', () => {
     expect((await call(core, '/release', {})).status).toBe(400);
   });
 });
+
+describe('DistributedLockObjectCore non-JSON body', () => {
+  it('answers 400, not a throw, for a body that is not JSON', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    for (const path of ['/acquire', '/release']) {
+      const response = await core.fetch(
+        new Request(`https://lock.internal${path}`, { method: 'POST', body: 'not json' }),
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+});

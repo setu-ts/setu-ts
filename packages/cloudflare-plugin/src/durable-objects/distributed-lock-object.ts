@@ -85,12 +85,13 @@ export class DistributedLockObjectCore {
    * Routes one lock operation.
    *
    * @param request - The request {@linkcode DurableObjectLock} sent
-   * @returns The operation's JSON result, or a 404 for an unknown path
+   * @returns The operation's JSON result, a 400 for a body that is not JSON
+   * or carries a bad `token` or `ttlMs`, or a 404 for an unknown path
    */
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === '/acquire') {
-      const body = ((await request.json()) ?? {}) as { token?: unknown; ttlMs?: unknown };
+      const body = (await readBody(request)) as { token?: unknown; ttlMs?: unknown };
       // The client refuses the same values; this is defence in depth for a
       // caller that is not DurableObjectLock (a JSON body turns Infinity and
       // NaN into null, and `now + null` would expire at once).
@@ -105,7 +106,7 @@ export class DistributedLockObjectCore {
       return Response.json({ token: await this.#acquire(body.token, body.ttlMs) });
     }
     if (pathname === '/release') {
-      const body = ((await request.json()) ?? {}) as { token?: unknown };
+      const body = (await readBody(request)) as { token?: unknown };
       if (typeof body.token !== 'string') {
         return new Response('token must be a string', { status: 400 });
       }
@@ -148,5 +149,15 @@ export class DistributedLockObjectCore {
       return;
     }
     await this.#state.storage.delete(HOLDER_KEY);
+  }
+}
+
+/** The request's JSON body as an object; `{}` for a body that is not a JSON object. */
+async function readBody(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const parsed: unknown = await request.json();
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
 }

@@ -726,11 +726,14 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
   });
 
   it('discards an unroutable message on its last attempt when deadLetter is false', async () => {
-    const { queue } = build({ deadLetter: false });
+    const { queue, logger } = build({ deadLetter: false });
     queue.process('known', () => {});
     const message = new FakeQueueMessage('cf-g', 'not an envelope', 3);
     await queue.dispatch(new FakeQueueBatch('q', [message]));
     expect(message.disposition).toBe('acked');
+    expect(logger.messages()).toContain(
+      'cloudflare-queue: message not routable on its last attempt, discarded',
+    );
   });
 });
 

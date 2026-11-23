@@ -50,10 +50,7 @@ export interface DurableObjectLockOptions {
  *
  * Structurally satisfies `scheduler-plugin`'s `IDistributedLock` without
  * importing it — that interface is internal to its own package, and
- * AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin. The
- * application hands an instance to `SchedulerPlugin`, the same wiring
- * `KvSessionStore` uses for `SessionPlugin`, because that option is read at
- * plugin construction before any application exists.
+ * AI_GUIDELINES §2.2/§3.3 forbid a plugin importing another plugin.
  *
  * Correctness comes from the platform rather than from an algorithm: a Durable
  * Object executes one request at a time, so the read-compare-write inside

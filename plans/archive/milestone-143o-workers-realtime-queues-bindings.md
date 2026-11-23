@@ -1,6 +1,6 @@
 # Milestone 143o — Workers: Realtime, Durable Objects, Queues and Bindings (`@setu-ts/cloudflare-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/runtime` Workers adapter)
 
-> **Status:** Approved by the maintainer 2026-11-23 (decisions in §12). Branch:
+> **Status:** Complete (implemented inline; decisions in §12). Branch:
 > `feat/m143o-workers-realtime-queues-bindings`. `develop` and `main` are protected: all work
 > (implementation and fixes) stays on this one branch until it merges via ONE PR into `develop`;
 > part 1 (realtime) precedes part 2 in commit order (§14). **Implementation:** inline by Claude, not

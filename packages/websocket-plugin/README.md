@@ -413,9 +413,9 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
 ## Errors
 
 `WebSocketRoomsUnavailableError` is thrown by `room()` and `peek()` on Cloudflare Workers when the
-registered backplane gives no per-connection links (none registered, or a Redis or `messaging` one),
-which only the Durable Object backplane does (see
-[Rooms on Cloudflare Workers](#rooms-on-cloudflare-workers)).
+registered backplane gives no per-connection links (none registered, or any
+`RealtimeBackplanePlugin` transport: `memory`, `redis` or `messaging`), which only the Durable
+Object backplane does (see [Rooms on Cloudflare Workers](#rooms-on-cloudflare-workers)).
 
 `WebSocketUnavailableError` is exported for `instanceof` handling. It is thrown by `route()` when
 the registered `IHttpAdapter` implements no `setUpgradeRouter` seam — which happens only with a
@@ -489,6 +489,10 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+The message limit is enforced at the transport while reading on Node. Bun retains its per-server 16
+MB transport cap; Bun and Deno apply the plugin limit after buffering. Connection caps, idle
+timeouts and application heartbeats remain off by default.
 
 ## Full API
 

@@ -348,7 +348,12 @@ export class WorkersQueue implements IQueue {
       if (envelope === undefined || registration === undefined) {
         const target = this.#deadLetter;
         const last = message.attempts >= this.#maxRetries && target !== undefined;
-        this.#reportUnroutable(batch.queue, message, envelope, last);
+        this.#reportUnroutable(
+          batch.queue,
+          message,
+          envelope,
+          !last ? 'retried' : target === false ? 'discarded' : 'dead-lettered',
+        );
         if (last) {
           // The platform's next exhaustion would delete it: keep it instead.
           const reason =
@@ -584,12 +589,12 @@ export class WorkersQueue implements IQueue {
     queue: string,
     message: IQueueMessage,
     envelope: JobEnvelope | undefined,
-    last = false,
+    outcome: 'retried' | 'discarded' | 'dead-lettered' = 'retried',
   ): void {
     this.#logger?.()?.error(
-      last
-        ? 'cloudflare-queue: message not routable on its last attempt, dead-lettered'
-        : 'cloudflare-queue: message not routable, retried',
+      outcome === 'retried'
+        ? 'cloudflare-queue: message not routable, retried'
+        : `cloudflare-queue: message not routable on its last attempt, ${outcome}`,
       {
         queue,
         messageId: message.id,

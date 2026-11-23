@@ -191,12 +191,16 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   is sent to the dead-letter queue unchanged, plus `failedAt`, `attempts` and a bounded `error`
   text, and acked.
 - **One delivery stays in reserve.** The platform delivers a message up to `max_retries + 1` times
-  and the budget stops one short, so a dead-letter send that fails is retried on that last delivery
-  (without the error text, to stay under the message size limit). If that second send fails too, the
-  job leaves the adapter's hands: the platform writes it to `dead_letter_queue` when one is
-  configured, or deletes it. That is why the stanza above sets both.
+  and the budget stops one short, so a dead-letter send that fails is retried on a later delivery
+  (on the default budget that is the last one, and the copy then carries no error text, to stay
+  under the message size limit). If that second send fails too, the job leaves the adapter's hands:
+  the platform writes it to `dead_letter_queue` when one is configured, or deletes it. That is why
+  the stanza above sets both.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
-  retried, and on its last attempt forwarded or discarded the same way.
+  retried, and on its last attempt forwarded or discarded the same way; a queue with no dead-letter
+  target (one that only produces) keeps retrying it for the platform's own `dead_letter_queue`.
+- **`deadLetterQueue` must be another queue.** Naming the queue's own binding fails `app.start()`:
+  each exhausted job would be re-enqueued and run again without end.
 - **`retryDelaySeconds`** spaces redeliveries: a number of seconds, or a function of the attempt
   that failed, bounded by `maxDelaySeconds`. Omitted, the queue's own `retry_delay` applies.
 
