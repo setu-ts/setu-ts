@@ -528,10 +528,11 @@ never the body. It runs no `onFailed` and is not counted. If the forward fails, 
 for its visibility timeout and warned again on the next receive. An SNS `SubscriptionConfirmation`
 delivered to the queue is retired this way: confirm a subscription from the console or the CLI.
 
-**AWS rights a consumer needs:** `sqs:GetQueueAttributes` on the source queue, `sqs:GetQueueUrl`
-when the redrive policy names the target, `sqs:SendMessage` on the target, and `kms:GenerateDataKey`
-when the target uses a customer-managed KMS key. With `deadLetterQueues[name]` a URL and the
-attribute read refused, the adapter warns once and continues without lowering attempts.
+**AWS rights a consumer needs:** `sqs:GetQueueAttributes` on the source queue (not for a name set to
+`false`), `sqs:GetQueueUrl` when the redrive policy names the target, `sqs:SendMessage` on the
+target, and `kms:GenerateDataKey` when the target uses a customer-managed KMS key. With
+`deadLetterQueues[name]` a URL and the attribute read refused, the adapter warns once and continues
+without lowering attempts.
 
 #### SNS to SQS
 
