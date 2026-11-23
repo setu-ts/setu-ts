@@ -10,6 +10,7 @@
  */
 
 import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
+import { combineAddressFamilies } from './address-families.ts';
 import * as nodeDns from 'node:dns/promises';
 
 /**
@@ -31,33 +32,6 @@ export interface NodeDnsModule {
   resolve4(hostname: string): Promise<string[]>;
   /** Resolves IPv6 addresses. */
   resolve6(hostname: string): Promise<string[]>;
-}
-
-/**
- * Concatenates the fulfilled halves of the `A`/`AAAA` pair, rejecting only
- * when both failed.
- *
- * An IPv4-only host has no `AAAA` record at all and the resolver rejects
- * rather than returning an empty list, so tolerating one failed family is what
- * makes `resolveHost` usable against an ordinary host.
- */
-function combineAddressFamilies(
-  results: readonly PromiseSettledResult<string[]>[],
-  hostname: string,
-): readonly string[] {
-  const addresses: string[] = [];
-  const failures: unknown[] = [];
-  for (const result of results) {
-    if (result.status === 'fulfilled') {
-      addresses.push(...result.value);
-    } else {
-      failures.push(result.reason);
-    }
-  }
-  if (failures.length === results.length) {
-    throw new Error(`DNS lookup failed for ${hostname}`, { cause: failures[0] });
-  }
-  return addresses;
 }
 
 /**

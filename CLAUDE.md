@@ -877,6 +877,13 @@ here.
   telemetry peers on every runtime, Pub/Sub emulator host in the dotenv, view CSS before tests, an
   empty workspace's root test; V13-36, V13-140…V13-143, V13-145, V13-148, V13-154, V13-161, V13-166,
   V13-168) — complete (PR #610).
+- **Milestone 143 Core follow-up — circuit breaker** (`common` + `sdk`, plus a one-line
+  `resilience-plugin` guard — V13-104's Core and SDK halves: the `CircuitBreakerPolicy` union with a
+  failure-rate arm, `createBreakerWindow` and `breakerPolicyRangeError` at
+  `@setu-ts/common/breaker-window`, the SDK breaker on them) — complete (PR #612).
+- **Milestone 143 Core follow-up** (`common` + `runtime` + `kernel` — DNS resolver with chosen name
+  servers and a whole-lookup bound, `resolveHost` failing with every lookup's error, and the drain
+  503's `x-setu-unprocessed` marker; Core halves of V13-246 and V13-23) — complete (PR #613).
 - **Milestone 143c** (`service-discovery-plugin` + `grpc-plugin` — calls between services that hang
   or pile up: bounded cold reads and background refresh of warm names, one empty-answer grace rule,
   stable Consul ids, DNS absence and health, server answers versus instance faults in gRPC call

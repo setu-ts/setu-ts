@@ -48,7 +48,7 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
   failure. The default Node host waits for listening/error.
 - `runtime.hrtime()` and `ctx.startTime` are monotonic milliseconds; `runtime.now()` is epoch time.
 - On Workers, only string entries from `env` populate `runtime.env`; the option is ignored on Node,
-  Deno and Bun. Workers omit `fs`, `workers`, `dns` and `onSignal`.
+  Deno and Bun. Workers omit `fs`, `workers`, `dns`, `createDnsResolver` and `onSignal`.
 
 ## Other options
 

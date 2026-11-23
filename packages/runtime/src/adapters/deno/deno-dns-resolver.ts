@@ -5,6 +5,7 @@
  * @module
  */
 
+import { combineAddressFamilies } from '../shared/address-families.ts';
 import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 
 /**
@@ -40,9 +41,17 @@ export interface DenoSrvRecord {
  */
 export interface DenoDnsHost {
   /** Resolves SRV records. */
-  resolveDns(query: string, recordType: 'SRV'): Promise<DenoSrvRecord[]>;
+  resolveDns(
+    query: string,
+    recordType: 'SRV',
+    options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal },
+  ): Promise<DenoSrvRecord[]>;
   /** Resolves address records. */
-  resolveDns(query: string, recordType: 'A' | 'AAAA'): Promise<string[]>;
+  resolveDns(
+    query: string,
+    recordType: 'A' | 'AAAA',
+    options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal },
+  ): Promise<string[]>;
 }
 
 /**
@@ -68,19 +77,7 @@ export function createDenoDnsResolver(host: DenoDnsHost): IDnsResolver {
         host.resolveDns(hostname, 'A'),
         host.resolveDns(hostname, 'AAAA'),
       ]);
-      const addresses: string[] = [];
-      const failures: unknown[] = [];
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
-          addresses.push(...result.value);
-        } else {
-          failures.push(result.reason);
-        }
-      }
-      if (failures.length === results.length) {
-        throw new Error(`DNS lookup failed for ${hostname}`, { cause: failures[0] });
-      }
-      return addresses;
+      return combineAddressFamilies(results, hostname);
     },
   };
 }

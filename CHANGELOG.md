@@ -12,6 +12,22 @@ All notable changes to this project are documented here. The format follows
   `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and `staleForMs`.
   Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range `resolveTimeoutMs`
   (0–2147483647) with `RangeError`.
+- **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
+  breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
+  `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
+  beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
+  rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
+  served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
+  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
+  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
+  the breaker. V13-104.
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
+  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
+  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
+  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
+  independent of status. An application setting the marker claims no processing and a client that
+  honours the marker may send that request again.
+
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -115,6 +131,24 @@ All notable changes to this project are documented here. The format follows
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.
+- **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
+  #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
+  `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).
+  The SDK's breaker runs on `createBreakerWindow`: a success no longer empties it, so `threshold`
+  failures within `timeout` trip the circuit however many successes fall between them; a call that
+  succeeds after the circuit tripped no longer closes it (only a half-open probe does); on the rate
+  arm a 4xx counts as a call the origin answered. An invalid policy now throws a `RangeError` naming
+  the field, whether the client comes from `createClient` or `new HttpClient`
+  (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
+  `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
+  non-integer `threshold` or one above `Number.MAX_SAFE_INTEGER`; a missing `threshold` (with no
+  rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old code
+  coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
+  negative, infinite or over-range `resetTimeout`, or a missing one.
+- **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
+  cause containing both address-family failures in A-then-AAAA order; migrate readers of
+  `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
+
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A

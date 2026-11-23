@@ -29,6 +29,19 @@ describe('http/contracts — compile-time type fixture', () => {
     expect(options.baseUrl).toEqual('https://api.example.com');
   });
 
+  it('ClientOptions.circuitBreaker accepts the rate arm', () => {
+    const options: ClientOptions = {
+      baseUrl: 'https://api.example.com',
+      circuitBreaker: {
+        failureRateThreshold: 50,
+        minimumCalls: 20,
+        timeout: 10_000,
+        resetTimeout: 5000,
+      },
+    };
+    expect(options.circuitBreaker?.threshold).toBeUndefined();
+  });
+
   it('ClientRequest is assignable with json body', () => {
     const req: ClientRequest<{ name: string }> = {
       method: 'POST',

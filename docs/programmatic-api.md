@@ -313,7 +313,10 @@ ctx.lifecycle.onError((error, ctx) => {
 Shutdown lifecycle hooks. The kernel owns the guard, drain, and socket close. The actual shutdown
 order is: **stopping hooks while requests are still accepted → refuse new requests → drain in-flight
 requests → close the server socket → shutdown hooks → close hooks**. A rejecting stopping hook is
-reported only after the remaining shutdown phases finish.
+reported only after the remaining shutdown phases finish. Refused requests carry the reserved
+`x-setu-unprocessed: shutdown` marker, independent of the error responder's status, before any
+request lifecycle hook, middleware or handler ran. An application setting that header makes the same
+not-processed claim and a client that honours the marker may send that request again.
 
 ```typescript
 ctx.lifecycle.onStopping(() => {
@@ -518,8 +521,14 @@ interface IRuntimeServices {
   readonly fs?: IFileSystem;
   readonly workers?: IWorkerHost;
   readonly dns?: IDnsResolver;
+  createDnsResolver?(options: DnsResolverOptions): IDnsResolver;
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
+}
+
+interface DnsResolverOptions {
+  readonly servers: readonly string[];
+  readonly timeoutMs: number;
 }
 ```
 
@@ -540,6 +549,11 @@ process, and returns a function that removes the handler. It never keeps the pro
 runtime still exits as it would have and prints its own report. The kernel subscribes while an
 application runs and writes one `fatal` line, `Process failed`, through the registered logger. It is
 absent on Cloudflare Workers.
+
+`createDnsResolver` (since 0.14.0) returns a new resolver that asks the given IP-literal name
+servers and bounds each whole lookup by a positive `timeoutMs` (zero leaves only the runtime's own
+timeout); invalid options throw `RangeError`. Node, Bun and Deno provide it; it is absent on
+Cloudflare Workers.
 
 ### Runtime Platform
 

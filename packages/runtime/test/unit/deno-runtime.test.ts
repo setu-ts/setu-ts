@@ -398,3 +398,33 @@ describe('Deno onFatalError (V13-11)', () => {
     ).toBeUndefined();
   });
 });
+
+it('exposes createDnsResolver and forwards options to the injected creator', () => {
+  const options = { servers: ['127.0.0.1:5353'], timeoutMs: 100 };
+  const resolver = {
+    resolveHost: () => Promise.resolve(['10.0.0.1']),
+    resolveSrv: () => Promise.resolve([]),
+  };
+  const seen: unknown[] = [];
+  const runtime = createDenoRuntimeServices(
+    createFakeDenoHost(),
+    undefined,
+    undefined,
+    null,
+    (value) => {
+      seen.push(value);
+      return resolver;
+    },
+  );
+  expect(typeof runtime.createDnsResolver).toBe('function');
+  expect(runtime.createDnsResolver!(options)).toBe(resolver);
+  expect(seen).toEqual([options]);
+});
+
+it('uses the default Deno creator and validates at creation', async () => {
+  const runtime = createDenoRuntimeServices(createFakeDenoHost(), undefined, undefined, null);
+  expect(() => runtime.createDnsResolver!({ servers: [], timeoutMs: 0 })).toThrow(RangeError);
+  expect(
+    await runtime.createDnsResolver!({ servers: ['::1'], timeoutMs: 0 }).resolveHost('ok'),
+  ).toEqual([]);
+});
