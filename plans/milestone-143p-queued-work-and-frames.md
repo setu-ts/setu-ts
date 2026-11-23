@@ -3,8 +3,8 @@
 > **Status:** Planning. Branch: `feat/m143p-queued-work-and-frames`. `develop` and `main` are
 > protected; all work (implementation and fixes) stays on this one branch until it merges through a
 > single PR into `develop`. D7 is decided (§0.3): Part A ships first as its own PR from this branch;
-> Part B follows on the same branch after the Core PR. Lane: Messaging, first in its lane; M143m
-> follows on the same packages. Ships in `0.14.0`.
+> Part B follows on the same branch, carrying its `common` change itself (D1, decided 2026-11-23).
+> Lane: Messaging, first in its lane; M143m follows on the same packages. Ships in `0.14.0`.
 
 ## 0. Objective & scope
 
@@ -16,8 +16,8 @@ no delay and no limit, a fatal Pub/Sub stream error leaves the consumer dead whi
 and the Pub/Sub ordering claim does not hold; the backplane's `messaging` transport loses
 cross-replica frames on four of the six cross-process brokers; a paused Redis or RabbitMQ delivers
 frames seconds late; and an unroutable RabbitMQ outbox row is marked sent. This letter fixes all
-eleven rows in the three Messaging-lane packages, plus one additive `common` contract change that
-goes through the Core lane first (§0.2, D1).
+eleven rows in the three Messaging-lane packages, plus two additive `common` contract changes that
+ship in this letter's own PR as a flagged out-of-lane edit (§0.2, D1).
 
 - **In scope (11 rows):** V13-198 (High), V13-199 (High), V13-258 (High), X3-3, V13-107, V13-212,
   V13-213, V13-214, V13-260, V13-261, V13-266. The design decisions in §3, each mapped to a row in
@@ -51,27 +51,32 @@ under `~/Projects/hono-enterprise-published-smoke/v0.13.0/part28/x121` and `x122
 None of the eleven failed to reproduce from source. V13-258's Pub/Sub and Service Bus halves and
 X3-3's RabbitMQ half are driven for the first time by this letter's guarded suites.
 
-### 0.2 The one change outside the lane
+### 0.2 The changes outside the lane
 
 V13-258 needs the backplane to ask any `IMessageBroker` for a subscription that every instance
 receives, and to know whether it got one. The backplane cannot import `messaging-plugin`
 (AI_GUIDELINES, "no plugin imports another plugin"), so the request and the answer must be in the
-`common` contract. That is two optional members on existing interfaces in
+`common` contract: two optional members on existing interfaces in
 `packages/common/src/services/messaging.ts` (`SubscribeOptions.fanOut`, `ISubscription.fanOut`,
-§3.6). Optional members are additive for callers and implementors, but they change an existing
-contract, so by the lane rule (ROADMAP, "`common` is additive outside the Core lane") they ship as a
-small Core-lane pull request first. This plan writes that PR's text (§4, §5) and lists it as open
-decision D1. Nothing else in `common` changes.
+§3.6). Part A's discard opt-out (§3.3a) also needs a `discarded` member in the diagnostics
+settlement vocabulary (`packages/common/src/services/diagnostics.ts`, `QueueSettlementState`,
+§3.18). Both are additive for callers; the vocabulary member widens a union that
+`diagnostics-plugin` validates against a set, so that reader is updated in this PR too.
+
+**Decided (maintainer, 2026-11-23, D1):** these `common` changes ship in M143p's own PR, flagged in
+the PR body as an out-of-lane `common` edit, not as a separate Core-lane PR first. M143i (#611) has
+merged and no other session edits Core files now. Every reader of both types is found by search
+(§3.6, §3.18) and each out-of-lane file touched is named in §5 and the PR body.
 
 ### 0.3 Proposed split (open decision D7)
 
 Eleven rows across three packages, each with guarded real-backend suites, is larger than any recent
-single letter, and only half of it waits on the Core PR. Proposed order:
+single letter. Proposed order:
 
 1. **Part A, SQS and SNS (`queue-plugin` only):** V13-198, V13-199, V13-212, V13-213, V13-214. Needs
    nothing outside the lane and can start at once.
 2. **Part B, brokers and the backplane (`messaging-plugin`, `realtime-backplane-plugin`):** V13-258,
-   X3-3, V13-107, V13-260, V13-261, V13-266. Starts after the Core PR for D1 merges.
+   X3-3, V13-107, V13-260, V13-261, V13-266, plus the two `common` changes (§0.2).
 
 **Decided (maintainer, 2026-11-22): two parts.** Part A ships first, as its own PR from this branch.
 Each part has its own CHANGELOG, PUBLIC_API and upgrade entries. The Progress Tracking row, the
@@ -197,7 +202,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
 | C5  | `messaging-plugin/README.md:86` "Order kept by blocking, on an ordering subscription" vs X122-9                                                           | Code changes (§3.14); the row is re-measured and the cell rewritten from the test                                                                         | Messaging README ordering table                                                       |
 | C6  | `messaging-plugin/README.md:1106` "At-least-once delivery of every committed row" vs V13-107                                                              | Code changes (§3.10); README says "delivered to a bound queue" on RabbitMQ and names the unroutable rule                                                  | Messaging README outbox section                                                       |
 | C7  | `realtime-backplane-plugin/README.md:159` "lost, never delivered late" vs X3-3's pause measurements                                                       | Code changes (§3.9); README names `maxFrameAgeMs` and the clock assumption                                                                                | Backplane README lateness paragraph (the readiness half stays with M143n, V13-269)    |
-| C8  | `common` `SubscribeOptions` documents only competing groups, while RabbitMQ's queue-less form fans out                                                    | Picked: `fanOut` is the one documented way to fan out; RabbitMQ's queue-less behaviour stays and is documented as the arm's own default, not the contract | `PUBLIC_API.md` common messaging section (Core PR)                                    |
+| C8  | `common` `SubscribeOptions` documents only competing groups, while RabbitMQ's queue-less form fans out                                                    | Picked: `fanOut` is the one documented way to fan out; RabbitMQ's queue-less behaviour stays and is documented as the arm's own default, not the contract | `PUBLIC_API.md` common messaging section (this PR)                                    |
 
 ## 3. Design decisions
 
@@ -324,8 +329,8 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   4. the outcome is counted as `queue_jobs_total{outcome="discarded"}`, a new value of the package's
      own `JobOutcome` (`job-processor.ts:52`), counted after the delete succeeds (§3.2). The
      diagnostics observer's settlement vocabulary is a `common` type (`diagnostics.ts:618-619`) with
-     no discard member, so the observer is told `dead-lettered` with outcome `terminal-error`;
-     adding `discarded` there is a Core-lane hand-over (§11);
+     no discard member, so the observer is told `dead-lettered` with outcome `terminal-error`; Part
+     B adds `discarded` there and the observer reports it (§3.18);
   5. an unreadable message on a `false` name (§3.5) is deleted and warned the same way; no
      `onFailed`, no count, as in §3.5.
 
@@ -422,7 +427,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
 
 ### 3.6 A fan-out subscription in the `common` contract
 
-- **Decision (Core-lane PR, D1):** two optional members in
+- **Decision (in this PR, D1 decided 2026-11-23):** two optional members in
   `packages/common/src/services/messaging.ts`:
   - `SubscribeOptions.fanOut?: true`: "every subscribing instance receives every message published
     after it subscribed; the consumer is not durable and is removed on `unsubscribe()`. Refused with
@@ -436,8 +441,10 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   per-replica `queue` passed by the backplane needs no contract change but leaves a durable queue
   behind on every crash, and on RabbitMQ and Service Bus that queue keeps collecting frames for ever
   (§12, D1).
-- **Test home:** `fan-out-subscribe.test.ts` (messaging-plugin; refusal with `queue`, marker set);
-  the Core PR's own type test in `packages/common`.
+- **Test home:** `fan-out-subscribe.test.ts` (messaging-plugin; refusal with `queue`, marker set); a
+  type test in `packages/common/test/unit/` that the two members exist and are optional. Every
+  reader of `SubscribeOptions` and `ISubscription` is found with `rg` before the change; an
+  implementor that builds a literal of one of these types is unaffected (both members optional).
 
 ### 3.7 How each broker honours `fanOut`
 
@@ -644,6 +651,28 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
 - **Why:** CLAUDE.md, an export change updates PUBLIC_API.md in the same change.
 - **Test home:** `pnpm run check:docs` and the fence gate for every changed example.
 
+### 3.18 A `discarded` settlement state
+
+- **Decision:** `QueueSettlementState` (`common` `diagnostics.ts`) gains `'discarded'`: "the adapter
+  deleted an exhausted job because its dead-letter target is explicitly disabled
+  (`deadLetterQueues[name]: false` on SQS); the job is gone, by configuration." When `deadLetter`
+  returns `'discarded'` (§3.3a), the job processor and the service's dead-worker path report
+  `settled('terminal-error', 'discarded')` instead of `'dead-lettered'`. SQS stays a non-confirming
+  adapter (`DeleteMessage` with an old receipt can succeed without deleting), so the collector still
+  maps a completed SQS settle to `unknown`; `discarded` reaches the wire only for an adapter that
+  confirms, or as the input the collector maps. The JSDoc on `QueueSettlementState` is corrected:
+  since Part A a stale SQS settle and a failed SQS dead-letter send reject (`failed`), and only a
+  delete whose receipt has gone stale on the server is absorbed. `diagnostics-plugin`'s
+  `queue-protocol.ts` accepts the new member in its `SETTLEMENTS` set. Every other reader found by
+  `rg QueueSettlementState` (job processor, observation collector, service) is checked for an
+  exhaustive switch or table.
+- **Why:** §3.3a's discard is not a dead letter; reporting it as one tells an operator the payload
+  is in a dead store when it is not.
+- **Test home:** `job-processor.test.ts` and `sqs-dead-letter-target.test.ts` (the `discarded`
+  settlement passed to the observer, on both the final-failure and dead-worker paths);
+  `diagnostics-plugin` `queue-protocol` test (the new member accepted, an unknown string still
+  refused).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none for implementors of an exported interface (every new interface
@@ -661,27 +690,28 @@ unroutable RabbitMQ outbox row is retried and then failed instead of marked sent
 `messaging` transport refuses a broker without fan-out; frames older than 5 s are dropped by
 default.
 
-| Exported symbol                                                                                     | Kind               | Consumer / real code path that READS it                                                                              |
-| --------------------------------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `SubscribeOptions.fanOut` (common, Core PR)                                                         | interface member   | Read by `fan-out.ts` in every messaging-plugin broker; set by `MessagingBackplane.connect()`                         |
-| `ISubscription.fanOut` (common, Core PR)                                                            | interface member   | Set by every broker that honours `fanOut`; read by `MessagingBackplane.connect()`                                    |
-| `SqsDeadLetterTargetMissingError` (queue-plugin)                                                    | class              | Thrown by `SqsQueue.prepareConsumer` (D9); an application catches it from `app.start()` for a declared processor     |
-| `ISqsTransport.getQueueAttributes?`, `getQueueUrl?`                                                 | interface members  | Called by `sqs-redrive.ts` when a name is first consumed; `adaptSqsModule` implements both                           |
-| `ISqsTransport.send` 4th parameter `attributes?`                                                    | parameter          | Read by `adaptSqsModule`'s send; written by the dead-letter forward                                                  |
-| `SqsQueueOptions.deadLetterQueues` value type `string \| false`                                     | type widening      | Read by `sqs-redrive.ts` and `deadLetter` (§3.3a)                                                                    |
-| `SqsReceivedMessage.messageId?`                                                                     | interface member   | Filled by `adaptSqsModule`; read by the unreadable warning and the `setu-source-message-id` attribute                |
-| `SqsSdkModule.GetQueueAttributesCommand`, `GetQueueUrlCommand`                                      | interface members  | Used by `adaptSqsModule`                                                                                             |
-| `SqsQueue` constructor 4th parameter `defaults?`                                                    | parameter          | Filled by `QueuePlugin` from `defaultMaxAttempts`; read by `reserve` for an envelope without `maxAttempts`           |
-| `SnsPublisher.publishJob`                                                                           | method             | Application code; the SNS to SQS pairing                                                                             |
-| `SnsPublisherOptions.telemetry`                                                                     | option             | Read by `publishJob` (§4.1)                                                                                          |
-| `SnsPublisherOptions.runtime`                                                                       | option             | Read by `publishJob` for the default `id` (§4.1)                                                                     |
-| `UnroutableMessageError` (messaging-plugin)                                                         | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications |
-| `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                         | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                     |
-| `ServiceBusMessagingOptions*.consumerRetry`                                                         | option             | Read by `ServiceBusBroker` (§4.1)                                                                                    |
-| `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                           | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                       |
-| `IServiceBusTransport.createSubscription` 3rd parameter; `onMessage` `deliveryCount?`, `deadLetter` | parameter, members | Read by `adaptServiceBusModule`; written by the fan-out path and §3.12                                               |
-| `BackplaneFanOutUnsupportedError` (backplane)                                                       | class              | Thrown by `MessagingBackplane.connect()`; surfaces from `app.start()`                                                |
-| `MessagingBackplaneOptions.maxFrameAgeMs`, `RedisBackplaneOptions.maxFrameAgeMs`                    | options            | Read by the receive path of each transport (§4.1)                                                                    |
+| Exported symbol                                                                                     | Kind               | Consumer / real code path that READS it                                                                                |
+| --------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `SubscribeOptions.fanOut` (common, out of lane)                                                     | interface member   | Read by `fan-out.ts` in every messaging-plugin broker; set by `MessagingBackplane.connect()`                           |
+| `ISubscription.fanOut` (common, out of lane)                                                        | interface member   | Set by every broker that honours `fanOut`; read by `MessagingBackplane.connect()`                                      |
+| `QueueSettlementState` member `'discarded'` (common, out of lane)                                   | type member        | Passed by `job-processor.ts` and `queue-service.ts` on a discard; accepted by `diagnostics-plugin` `queue-protocol.ts` |
+| `SqsDeadLetterTargetMissingError` (queue-plugin)                                                    | class              | Thrown by `SqsQueue.prepareConsumer` (D9); an application catches it from `app.start()` for a declared processor       |
+| `ISqsTransport.getQueueAttributes?`, `getQueueUrl?`                                                 | interface members  | Called by `sqs-redrive.ts` when a name is first consumed; `adaptSqsModule` implements both                             |
+| `ISqsTransport.send` 4th parameter `attributes?`                                                    | parameter          | Read by `adaptSqsModule`'s send; written by the dead-letter forward                                                    |
+| `SqsQueueOptions.deadLetterQueues` value type `string \| false`                                     | type widening      | Read by `sqs-redrive.ts` and `deadLetter` (§3.3a)                                                                      |
+| `SqsReceivedMessage.messageId?`                                                                     | interface member   | Filled by `adaptSqsModule`; read by the unreadable warning and the `setu-source-message-id` attribute                  |
+| `SqsSdkModule.GetQueueAttributesCommand`, `GetQueueUrlCommand`                                      | interface members  | Used by `adaptSqsModule`                                                                                               |
+| `SqsQueue` constructor 4th parameter `defaults?`                                                    | parameter          | Filled by `QueuePlugin` from `defaultMaxAttempts`; read by `reserve` for an envelope without `maxAttempts`             |
+| `SnsPublisher.publishJob`                                                                           | method             | Application code; the SNS to SQS pairing                                                                               |
+| `SnsPublisherOptions.telemetry`                                                                     | option             | Read by `publishJob` (§4.1)                                                                                            |
+| `SnsPublisherOptions.runtime`                                                                       | option             | Read by `publishJob` for the default `id` (§4.1)                                                                       |
+| `UnroutableMessageError` (messaging-plugin)                                                         | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications   |
+| `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                         | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                       |
+| `ServiceBusMessagingOptions*.consumerRetry`                                                         | option             | Read by `ServiceBusBroker` (§4.1)                                                                                      |
+| `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                           | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                         |
+| `IServiceBusTransport.createSubscription` 3rd parameter; `onMessage` `deliveryCount?`, `deadLetter` | parameter, members | Read by `adaptServiceBusModule`; written by the fan-out path and §3.12                                                 |
+| `BackplaneFanOutUnsupportedError` (backplane)                                                       | class              | Thrown by `MessagingBackplane.connect()`; surfaces from `app.start()`                                                  |
+| `MessagingBackplaneOptions.maxFrameAgeMs`, `RedisBackplaneOptions.maxFrameAgeMs`                    | options            | Read by the receive path of each transport (§4.1)                                                                      |
 
 Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.prepareConsumer`,
 `fan-out.ts`, `consumer-retry.ts`, `pubsub-ordering.ts`, `frame-age.ts`, `PUBLISH_REQUIRE_ROUTE`,
@@ -705,7 +735,9 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 
 | File                                                                             | Purpose                                                                                                                                                                                                                                                                                                                              |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/common/src/services/messaging.ts` (Core PR)                            | `SubscribeOptions.fanOut`, `ISubscription.fanOut` with JSDoc                                                                                                                                                                                                                                                                         |
+| `packages/common/src/services/messaging.ts` (out of lane, D1)                    | `SubscribeOptions.fanOut`, `ISubscription.fanOut` with JSDoc                                                                                                                                                                                                                                                                         |
+| `packages/common/src/services/diagnostics.ts` (out of lane, D1)                  | `'discarded'` in `QueueSettlementState`; corrected JSDoc (§3.18)                                                                                                                                                                                                                                                                     |
+| `packages/diagnostics-plugin/src/protocol/queue-protocol.ts` (out of lane, D1)   | `'discarded'` in the `SETTLEMENTS` set                                                                                                                                                                                                                                                                                               |
 | `packages/queue-plugin/src/index.ts`                                             | Export `SqsDeadLetterTargetMissingError`                                                                                                                                                                                                                                                                                             |
 | `packages/queue-plugin/src/errors.ts`                                            | `SqsDeadLetterTargetMissingError`                                                                                                                                                                                                                                                                                                    |
 | `packages/queue-plugin/src/adapters/sqs-queue.ts`                                | `claimRenewal`, validation, stale settles throw, `prepareConsumer` target resolution, clamp and its warning, forward with attributes, unreadable retirement, envelope through `sqs-envelope.ts`, `defaults` parameter, `getQueueAttributes`/`getQueueUrl`/attributes/`messageId` in `adaptSqsModule`, logger typed `{ error, warn }` |
@@ -757,6 +789,8 @@ completeness assertion against the package's list of arms.
 
 | Test file                                                                                                                                                                                                                                                                                                             | src covered                                                          | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                            |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/test/unit/fan-out-contract.test.ts` (new)                                                                                                                                                                                                                                                                     | `services/messaging.ts`, `services/diagnostics.ts` (types)           | `fanOut` optional on both interfaces; `'discarded'` assignable to `QueueSettlementState`                                                                                                                                                                                                                    |
+| `diagnostics-plugin/test/unit/queue-protocol.test.ts` (extended)                                                                                                                                                                                                                                                      | `protocol/queue-protocol.ts`                                         | `discarded` accepted; an unknown settlement string still refused                                                                                                                                                                                                                                            |
 | `queue-plugin/test/unit/sqs-claim-renewal.test.ts`                                                                                                                                                                                                                                                                    | `sqs-queue.ts`                                                       | §3.1, §3.2: `claimRenewal.extend(name, id, token): Promise<boolean>`; range refusals; stale settles throw                                                                                                                                                                                                   |
 | `queue-plugin/test/unit/sqs-dead-letter-target.test.ts`                                                                                                                                                                                                                                                               | `sqs-redrive.ts`, `sqs-queue.ts`, `errors.ts`                        | §3.3 steps 1 to 6, both refusals, clamp warning, forward attributes, no delete without target                                                                                                                                                                                                               |
 | `queue-plugin/test/unit/sqs-envelope.test.ts`                                                                                                                                                                                                                                                                         | `sqs-envelope.ts`                                                    | Round trip; SNS notification unwrap; each refusal reason; never throws                                                                                                                                                                                                                                      |
@@ -810,7 +844,8 @@ pnpm run release:verify 0.14.0
 
 The guarded suites run once with the full backend set (the `full-backend-test-command` env block),
 one suite at a time on the shared machine; the conformance tables' real arms are read from the
-report, not assumed. The Core PR runs its own `packages/common` gates first.
+report, not assumed. The `common` and `diagnostics-plugin` changes run under the same gates
+(`pnpm test:coverage common diagnostics-plugin` in the edit loop, then the full `ci:local`).
 
 ## 8. Risks & mitigations
 
@@ -877,9 +912,9 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
 
 ## 11. Hand-overs
 
-- **Core lane (before Part B):** a small PR adding `SubscribeOptions.fanOut` and
-  `ISubscription.fanOut` to `packages/common/src/services/messaging.ts` with the JSDoc in §3.6 and
-  the `PUBLIC_API.md` common messaging entries (C8).
+- **Core lane, taken into this letter (D1, 2026-11-23):** `SubscribeOptions.fanOut` and
+  `ISubscription.fanOut` in `packages/common/src/services/messaging.ts` with the JSDoc in §3.6 and
+  the `PUBLIC_API.md` common messaging entries (C8) are Part B scope, not a hand-over.
 - **M143m, same lane, next:** V13-263 uses
   `IServiceBusTransport.createSubscription(topic, sub, { autoDeleteOnIdleMs })` for the reply inbox;
   V13-215 builds the SQS probe on `ISqsTransport.getQueueAttributes`; its SQS time-bound option
@@ -891,9 +926,9 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   (`:134-141` starts an SQS consumer with no target, which would now refuse); the coordinator
   corrects the lanes table in `ROADMAP.md`, not this letter. `docs/messaging-emulators.md:141-148`
   gains `AWS_LOCALSTACK_ENDPOINT_URL` here.
-- **Core lane (any time, additive):** a `discarded` member for the diagnostics settlement vocabulary
-  (`common` `diagnostics.ts:618-619`), so the observer can report §3.3a's discard; until then it
-  reports `dead-lettered`.
+- **Core lane, taken into this letter (D1, 2026-11-23):** the `discarded` member of the diagnostics
+  settlement vocabulary (`common` `diagnostics.ts:618-619`) is Part B scope (§3.18), with the
+  `diagnostics-plugin` `queue-protocol.ts` set updated as a named out-of-lane edit.
 - **M143o (Workers):** apply §3.15's rule to `WorkersQueue` (V13-197): `onFailed` once, then a
   dead-letter target, or refuse at start when none can be proved. No change is needed for the
   backplane: `WorkersBroker` subscriptions carry no `fanOut` marker, so the `messaging` transport is
@@ -914,11 +949,12 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
 ## 12. Open decisions for the maintainer
 
 - **D1, how the backplane gets fan-out.** (a) Optional `SubscribeOptions.fanOut` and
-  `ISubscription.fanOut` in `common`, through a Core PR (Spring Cloud Stream anonymous groups,
-  Socket.IO per-server queues and subscriptions); (b) the backplane passes a per-replica `queue`, no
-  contract change, but every crash leaves a durable queue that keeps collecting frames on RabbitMQ
-  and Service Bus; (c) make queue-less mean fan-out everywhere, reversing the M119a decision of
-  2026-10-24. **Recommendation: (a).**
+  `ISubscription.fanOut` in `common` (Spring Cloud Stream anonymous groups, Socket.IO per-server
+  queues and subscriptions); (b) the backplane passes a per-replica `queue`, no contract change, but
+  every crash leaves a durable queue that keeps collecting frames on RabbitMQ and Service Bus; (c)
+  make queue-less mean fan-out everywhere, reversing the M119a decision of 2026-10-24.
+  **Recommendation: (a).** **DECIDED by the maintainer, 2026-11-23: (a), with the `common` change
+  shipped in M143p's own PR and flagged as out of lane, not as a Core PR first (§0.2).**
 - **D2, an SQS queue with no dead-letter target.** **DECIDED by the maintainer, 2026-11-22: (a),
   refuse at `connect()`, with the queue's redrive policy accepted as a target.** Amended the same
   day: the check runs before a consumed name's first poll (D9), and
@@ -956,7 +992,7 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   `mandatory` opt-in for publishes in general, but the outbox README promises at-least-once delivery
   of every row. **Recommendation: (a).**
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
-  once as its own PR, Part B after the Core PR (§0.3).
+  once as its own PR, Part B after it on the same branch (§0.3).
 - **D8, the Pub/Sub ordering row.** (a) Fix in the framework (§3.14); (b) correct the README only.
   **Recommendation: (a)**, because Google's page assigns the ordering of asynchronous work to the
   subscriber, which here is the broker.
