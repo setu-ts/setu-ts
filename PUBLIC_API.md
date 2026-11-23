@@ -1048,12 +1048,13 @@ stalled by application work can delay timers. A timeout from the resolver's own 
 families are still returned. The default `runtime.dns` continues using the host resolver without
 this added bound.
 
-Node and Bun use a separate `node:dns/promises` Resolver per call with `tries: 1`. The attempt share
-is a target: the first lookup in a Node process takes about twice that share. Bun rounds attempt
-timing more coarsely (300 or 500 ms can take about 1 s); a short whole bound may end before a later
-server is tried. The resolver's own timer still enforces the whole bound. With zero, no own timer is
-installed: Node/Bun use the runtime's default attempt timeout (Node about 2 s per server, about 3 s
-for the first lookup in a process).
+Node and Bun try the servers in order, one attempt per server, each through its own
+`node:dns/promises` `Resolver` with `tries: 1` and one server. The resolver ends each attempt at its
+share with its own timer (c-ares itself never ends an attempt before about 250 ms, and Bun rounds
+attempts up to whole seconds), then moves to the next server after any error except `ENOTFOUND` or
+`ENODATA`, which are the zone's own answer. With zero, no own timer is installed: each attempt runs
+to the runtime's default attempt timeout (on Node about 2 s per server, about 3 s for the first
+lookup in a process).
 
 Deno takes one name server per call, so it tries servers in order, rotating on any error except
 `NotFound`. Each attempt is aborted at its share when the bound is positive. Deno 2.9.6 itself ends

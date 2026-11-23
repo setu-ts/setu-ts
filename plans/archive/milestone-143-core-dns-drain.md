@@ -231,6 +231,14 @@ decided on 2026-11-23 that the kernel removes none (§3.7).
     - a silent server rejecting with `ETIMEOUT` in under `timeoutMs + 250` ms;
     - two servers whose first is silent still answering from the second within the bound.
 
+- **Changed after PR review (2026-11-23):** c-ares never ends an attempt before about 250 ms
+  (measured on Node 24.22.1), so with servers [silent, answering] and a 300 ms bound the
+  single-`Resolver` design above timed out before reaching the second server. Node and Bun now
+  mirror §3.4: each record-type query tries the servers in order, one attempt per server through its
+  own `Resolver` (`tries: 1`, one server), ended at its share by the resolver's own timer, moving on
+  after any error except `ENOTFOUND`/`ENODATA`. The whole-lookup timer and its settling rules are
+  unchanged.
+
 ### 3.4 Deno: `resolveDns` with `nameServer`, servers tried in order
 
 - **Decision:** a new module, `packages/runtime/src/adapters/deno/deno-server-dns-resolver.ts`,

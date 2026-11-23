@@ -199,16 +199,17 @@ describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
   it('answers from loopback and bounds a silent server', async () => {
     const server = await startDnsServer();
     const childFile = resolve(root, '.tmp/runtime-edge-server/bun-dns-child.mjs');
-    await mkdir(resolve(root, '.tmp/runtime-edge-server'), { recursive: true });
-    await build({
-      entryPoints: [resolve(root, 'packages/runtime/test/fixtures/bun-dns-child.ts')],
-      outfile: childFile,
-      bundle: true,
-      platform: 'node',
-      format: 'esm',
-      logLevel: 'silent',
-    });
+    // The server is stopped even when the bundle step fails.
     try {
+      await mkdir(resolve(root, '.tmp/runtime-edge-server'), { recursive: true });
+      await build({
+        entryPoints: [resolve(root, 'packages/runtime/test/fixtures/bun-dns-child.ts')],
+        outfile: childFile,
+        bundle: true,
+        platform: 'node',
+        format: 'esm',
+        logLevel: 'silent',
+      });
       const output = await new Promise<string>((resolveOutput, reject) => {
         const child = spawn('bun', [childFile, server.server], {
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -229,7 +230,8 @@ describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
           clearTimeout(timeout);
           reject(error);
         });
-        child.on('exit', (code) => {
+        // `close`, not `exit`: `exit` can fire before stdout has been read to the end.
+        child.on('close', (code) => {
           clearTimeout(timeout);
           if (code === 0) resolveOutput(stdout);
           else reject(new Error(stderr));

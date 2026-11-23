@@ -1,8 +1,11 @@
 /**
- * `createDnsResolver` on Node and Bun: one `node:dns/promises` `Resolver` per
- * lookup (its `cancel()` would otherwise cancel other lookups), `tries: 1`,
- * each server given an equal share of the bound, and a whole-lookup timer of
- * the resolver's own.
+ * `createDnsResolver` on Node and Bun: each record-type query tries the servers
+ * in order, one attempt per server, each through a `node:dns/promises`
+ * `Resolver` of its own (`tries: 1`, one server) so cancelling it touches no
+ * other attempt. An attempt ends at its equal share of the bound by the
+ * resolver's own timer, because c-ares does not end an attempt before about
+ * 250 ms whatever `timeout` asks for. The next server is tried after any error
+ * except `ENOTFOUND`/`ENODATA`. A whole-lookup timer bounds the call.
  *
  * `Resolver` is read from a namespace import at call time, never named, so a
  * Worker that loads the runtime barrel links even where the member is absent.
@@ -30,7 +33,7 @@ export interface INodeDnsDependencies {
   clearTimeout(handle: TimerHandle): void;
 }
 
-/** Creates an independent resolver with a bound over each complete lookup. */
+/** Creates a resolver that tries each server in turn, within a bound over the whole lookup. */
 export function createNodeServerDnsResolver(
   options: DnsResolverOptions,
   deps: INodeDnsDependencies = {
@@ -44,17 +47,21 @@ export function createNodeServerDnsResolver(
     family === 6 ? `[${address}]:${port}` : port === 53 ? address : `${address}:${port}`,
   );
 
+  const share = Math.max(1, Math.ceil(timeoutMs / servers.length));
+  // NXDOMAIN and no-data are the zone's own answer: another server would give the same.
+  const absent = (error: unknown): boolean => {
+    const code = (error as { code?: unknown } | null)?.code;
+    return code === 'ENOTFOUND' || code === 'ENODATA';
+  };
+
   function lookup<T>(
     hostname: string,
     queries: readonly ((resolver: NodeResolverLike) => Promise<T>)[],
   ): Promise<PromiseSettledResult<T>[]> {
-    const resolver = deps.createResolver({
-      tries: 1,
-      timeout: timeoutMs === 0 ? -1 : Math.max(1, Math.ceil(timeoutMs / servers.length)),
-    });
-    resolver.setServers(serverStrings);
     return new Promise((resolve) => {
       const results: PromiseSettledResult<T>[] = [];
+      // Every attempt still in flight, so the whole-lookup timer can stop all of them.
+      const active = new Set<() => void>();
       let remaining = queries.length;
       let settled = false;
       let timedOut = false;
@@ -72,25 +79,88 @@ export function createNodeServerDnsResolver(
             new Error(`DNS lookup for ${hostname} did not finish within ${timeoutMs} ms`),
             { code: 'ETIMEOUT' },
           );
-          resolver.cancel();
+          for (const stop of active) stop();
           for (let i = 0; i < queries.length; i++) {
             results[i] ??= { status: 'rejected', reason: error };
           }
           finish();
         }, timeoutMs);
       }
+
+      // One attempt: a resolver of its own holding one server, ended at its share of the bound.
+      function attempt(
+        query: (resolver: NodeResolverLike) => Promise<T>,
+        index: number,
+      ): Promise<T> {
+        const resolver = deps.createResolver({ tries: 1, timeout: timeoutMs === 0 ? -1 : share });
+        resolver.setServers([serverStrings[index]!]);
+        return new Promise<T>((resolveAttempt, rejectAttempt) => {
+          let done = false;
+          let attemptTimer: TimerHandle | undefined;
+          const settle = (outcome: () => void): void => {
+            if (done) return;
+            done = true;
+            if (attemptTimer !== undefined) deps.clearTimeout(attemptTimer);
+            active.delete(stop);
+            outcome();
+          };
+          // The `ECANCELLED` rejection `cancel()` causes arrives after `done` is set, so it is ignored.
+          const stop = (): void => {
+            settle(() =>
+              rejectAttempt(
+                Object.assign(new Error(`DNS lookup for ${hostname} was stopped`), {
+                  code: 'ETIMEOUT',
+                }),
+              ),
+            );
+            resolver.cancel();
+          };
+          active.add(stop);
+          if (timeoutMs > 0) {
+            attemptTimer = deps.setTimeout(() => {
+              settle(() =>
+                rejectAttempt(
+                  Object.assign(
+                    new Error(
+                      `DNS attempt for ${hostname} at server ${index} did not finish within its ${share} ms share`,
+                    ),
+                    { code: 'ETIMEOUT' },
+                  ),
+                ),
+              );
+              resolver.cancel();
+            }, share);
+          }
+          Promise.resolve()
+            .then(() => query(resolver))
+            .then(
+              (value) => settle(() => resolveAttempt(value)),
+              (reason: unknown) => settle(() => rejectAttempt(reason)),
+            );
+        });
+      }
+
+      // Servers in order; the next one only after an error that is not the zone's own answer.
+      async function queryServers(query: (resolver: NodeResolverLike) => Promise<T>): Promise<T> {
+        for (let index = 0; ; index++) {
+          try {
+            return await attempt(query, index);
+          } catch (error) {
+            if (timedOut || absent(error) || index === servers.length - 1) throw error;
+          }
+        }
+      }
+
       queries.forEach((query, index) => {
         const record = (result: PromiseSettledResult<T>): void => {
           if (timedOut || settled) return;
           results[index] = result;
           if (--remaining === 0) finish();
         };
-        Promise.resolve()
-          .then(() => query(resolver))
-          .then(
-            (value) => record({ status: 'fulfilled', value }),
-            (reason: unknown) => record({ status: 'rejected', reason }),
-          );
+        queryServers(query).then(
+          (value) => record({ status: 'fulfilled', value }),
+          (reason: unknown) => record({ status: 'rejected', reason }),
+        );
       });
     });
   }

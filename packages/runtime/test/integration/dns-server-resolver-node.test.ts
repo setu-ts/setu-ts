@@ -43,7 +43,8 @@ describe('real Node chosen-server resolver', () => {
   });
   it('reaches a second server after a silent first within the whole bound', async () => {
     const before = silent.queries;
-    const timeoutMs = 3000;
+    // Below c-ares's ~250 ms attempt floor: only the resolver's own per-attempt deadline moves on in time.
+    const timeoutMs = 300;
     const began = runtime.hrtime();
     const dns = runtime.createDnsResolver!({ servers: [silent.server, answer.server], timeoutMs });
     expect(await dns.resolveHost('ok.test')).toEqual(['10.0.0.1']);
