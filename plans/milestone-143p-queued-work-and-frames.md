@@ -1183,9 +1183,10 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   and warn through the plugin's logger.
 - **Residuals recorded in the Part B review, not fixed here:** a RabbitMQ publish whose channel
   closes before its confirm rejects with a plain `Error`, so the backplane's uncertain-publish
-  warning does not fire for it (only `PublishTimeoutError` and `BackendOutcomeUnknownError` do);
-  whether a Service Bus subscription with an open receiver counts as active for `autoDeleteOnIdle`
-  is vendor-documented, not measured.
+  warning does not fire for it (`PublishTimeoutError`, `BackendOutcomeUnknownError` and the raw
+  lost-connection errors `toBackendFault` classifies as outcome-unknown do); whether a Service Bus
+  subscription with an open receiver counts as active for `autoDeleteOnIdle` is vendor-documented,
+  not measured.
 - **M143o (Workers):** apply §3.15's rule to `WorkersQueue` (V13-197): `onFailed` once, then a
   dead-letter target, or refuse at start when none can be proved. No change is needed for the
   backplane: `WorkersBroker` subscriptions carry no `fanOut` marker, so the `messaging` transport is

@@ -189,8 +189,11 @@ export class MessagingBackplane implements IRealtimeBackplane {
       // connection error after the write) means the broker may still deliver
       // the frame. PublishTimeoutError is matched by name: it belongs to the
       // messaging plugin, which this package cannot import.
+      // The name check also covers a BackendOutcomeUnknownError from a second
+      // installed copy of @setu-ts/common, which instanceof cannot recognise.
       this.#frameAge.publishFailed(
-        (error instanceof Error && error.name === 'PublishTimeoutError') ||
+        (error instanceof Error &&
+          (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError')) ||
           toBackendFault(error, 'realtime-backplane-plugin: messaging transport') instanceof
             BackendOutcomeUnknownError,
       );

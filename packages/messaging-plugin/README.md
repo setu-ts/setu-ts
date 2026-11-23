@@ -274,7 +274,7 @@ after a confirmed copy but before the original ack can duplicate a message.
 
 These numeric options throw `RangeError` at construction for invalid values, including `NaN`,
 fractions, empty delay arrays and decreasing tiers. `ConsumerRetryOptions` is shared with Redis
-Streams; each broker retains its own defaults and lease semantics.
+Streams, Pub/Sub and Service Bus; each broker retains its own defaults, bounds and lease semantics.
 
 For group queue `Q`, each distinct delay `d` creates a durable quorum queue `Q.retry.<d>ms`, with
 queue-level `x-message-ttl: d` and default-exchange dead-letter routing back to `Q`. It uses

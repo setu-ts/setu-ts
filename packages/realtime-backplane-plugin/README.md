@@ -172,8 +172,9 @@ resumes, so the frame arrives up to the length of the pause late (measured up to
 and on `'messaging'` over RabbitMQ alike, while the sender logged the publish as failed.
 
 **`maxFrameAgeMs` (opt-in).** Since 0.14.0 every frame the `'redis'` and `'messaging'` transports
-send carries the sender's wall-clock time (`sentAtMs`, removed before a handler sees the frame; a
-0.13.0 receiver ignores it). With `maxFrameAgeMs` above `0`, a receiver drops a frame older than
+send through the plugin carries the sender's wall-clock time (a transport constructed directly
+without a `now` clock sends unstamped frames) (`sentAtMs`, removed before a handler sees the frame;
+a 0.13.0 receiver ignores it). With `maxFrameAgeMs` above `0`, a receiver drops a frame older than
 that by its own clock, and logs one `warn` when it starts dropping and one when it accepts frames
 again. It relies on the replicas' clocks agreeing (NTP keeps them within milliseconds); a replica
 with a skewed clock drops or keeps frames wrongly, which the warning names as a possible cause. It

@@ -375,6 +375,12 @@ describe('messaging backplane independent delivery and frame age', () => {
       vi.spyOn(broker, 'publish').mockRejectedValueOnce(reset);
       await expect(backplane.publish(FRAME)).rejects.toBe(reset);
       expect(warn).toHaveBeenCalledTimes(afterTimeout + 2);
+      await backplane.publish(FRAME);
+      // A same-named error from another copy of @setu-ts/common.
+      const foreign = Object.assign(new Error('lost'), { name: 'BackendOutcomeUnknownError' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(foreign);
+      await expect(backplane.publish(FRAME)).rejects.toBe(foreign);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 3);
       expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(max > 0);
       await backplane.close();
     },
