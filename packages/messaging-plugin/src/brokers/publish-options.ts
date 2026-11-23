@@ -25,8 +25,39 @@ import { DEDUPLICATION_ID_HEADER, ORDERING_KEY_HEADER, parsePublishOptions } fro
 
 /** Internal outbox intent: accepting a publish requires a bound route. @since 0.14.0 */
 export const PUBLISH_REQUIRE_ROUTE: unique symbol = Symbol('publish-require-route');
-/** Internal capability advertised by brokers needing confirms for routing. @since 0.14.0 */
-export const ROUTED_PUBLISH_AVAILABLE: unique symbol = Symbol('routed-publish-available');
+/**
+ * Internal registry: a broker that can only honour a required route with
+ * publisher confirms registers a probe here; a facade registers one that
+ * forwards to its inner broker. A WeakMap rather than a symbol-keyed member,
+ * so nothing appears on the brokers' public declarations.
+ */
+const ROUTED_PUBLISH_PROBES = new WeakMap<object, () => boolean | undefined>();
+
+/**
+ * Registers whether `broker` can confirm a required route.
+ * @param broker - The broker or facade instance
+ * @param probe - Answers at call time; `undefined` means not applicable
+ * @returns Nothing
+ * @throws Never
+ * @since 0.14.0
+ * @internal
+ */
+export function registerRoutedPublish(broker: object, probe: () => boolean | undefined): void {
+  ROUTED_PUBLISH_PROBES.set(broker, probe);
+}
+
+/**
+ * Whether `broker` can confirm a required route: `false` only for a broker
+ * that needs publisher confirms and has none; `undefined` when not applicable.
+ * @param broker - The (possibly wrapped) broker
+ * @returns The broker's answer, or undefined
+ * @throws Never
+ * @since 0.14.0
+ * @internal
+ */
+export function routedPublishAvailable(broker: object): boolean | undefined {
+  return ROUTED_PUBLISH_PROBES.get(broker)?.();
+}
 
 /** The validated, frozen form of caller-supplied publish options. @internal */
 export type ValidatedPublishOptions = ParsedPublishOptions;

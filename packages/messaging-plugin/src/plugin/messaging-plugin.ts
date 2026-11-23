@@ -1,5 +1,5 @@
 import { resolvePubSubRetry, resolveServiceBusRetry } from '../brokers/consumer-retry.ts';
-import { ROUTED_PUBLISH_AVAILABLE } from '../brokers/publish-options.ts';
+import { routedPublishAvailable } from '../brokers/publish-options.ts';
 import { OutboxPublisherConfirmsRequiredError } from '../errors.ts';
 import type {
   HealthIndicatorFn,
@@ -834,12 +834,7 @@ function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): 
       if (!ctx.services.has(CAPABILITIES.SCHEDULER)) throw new OutboxRelayUnscheduledError();
       scheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
     }
-    if (
-      (broker as IMessageBroker & { readonly [ROUTED_PUBLISH_AVAILABLE]?: boolean })[
-        ROUTED_PUBLISH_AVAILABLE
-      ] === false
-    )
-      throw new OutboxPublisherConfirmsRequiredError();
+    if (routedPublishAvailable(broker) === false) throw new OutboxPublisherConfirmsRequiredError();
     const active = resolveOutboxStores(ctx, options);
     const stores = active.kind === 'single' ? [active.store] : [...active.stores.values()];
     for (const store of stores) {

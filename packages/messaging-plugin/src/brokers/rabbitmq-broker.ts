@@ -1,5 +1,5 @@
 import { UnroutableMessageError } from '../errors.ts';
-import { PUBLISH_REQUIRE_ROUTE, ROUTED_PUBLISH_AVAILABLE } from './publish-options.ts';
+import { PUBLISH_REQUIRE_ROUTE, registerRoutedPublish } from './publish-options.ts';
 import { resolveConsumerRetry } from './consumer-retry.ts';
 import { wantsFanOut, markFanOut } from './fan-out.ts';
 import type {
@@ -484,6 +484,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#serializer = serializer;
     this.#url = options?.url ?? 'amqp://localhost:5672';
     this.#injectedClient = options?.client;
+    // A required route needs confirms and on/off return listeners (the outbox).
+    registerRoutedPublish(this, () => this.#confirmed && isCloseObservable(this.#channel));
     this.#exchangeName = options?.exchangeName ?? 'messaging';
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
     // Refused here rather than at the first channel operation, which would
@@ -705,17 +707,6 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   async isHealthy(): Promise<boolean> {
     const reachable = await this.reachability();
     return reachable !== false;
-  }
-
-  /**
-   * Whether this connection can confirm a required route.
-   * @returns True only with confirms and return listeners
-   * @throws Never
-   * @since 0.14.0
-   * @internal
-   */
-  get [ROUTED_PUBLISH_AVAILABLE](): boolean {
-    return this.#confirmed && isCloseObservable(this.#channel);
   }
 
   /**

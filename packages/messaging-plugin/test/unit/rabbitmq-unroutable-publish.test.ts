@@ -7,7 +7,7 @@ import { TracedBroker } from '../../src/tracing/traced-broker.ts';
 import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
 import {
   PUBLISH_REQUIRE_ROUTE,
-  ROUTED_PUBLISH_AVAILABLE,
+  routedPublishAvailable,
 } from '../../src/brokers/publish-options.ts';
 import { UnroutableMessageError } from '../../src/errors.ts';
 import { FakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
@@ -27,7 +27,7 @@ describe('RabbitMQ required-route publications', () => {
             ? new TracedBroker(inner, recordingTelemetry(), 'rabbitmq')
             : new PipelinedBroker(inner, []);
       await broker.connect();
-      expect(broker[ROUTED_PUBLISH_AVAILABLE]).toBe(true);
+      expect(routedPublishAvailable(broker)).toBe(true);
       await broker.publish('unbound', { canary: 'payload-secret' });
       const options: PublishOptions & { [PUBLISH_REQUIRE_ROUTE]: true } = {
         [PUBLISH_REQUIRE_ROUTE]: true,
@@ -107,12 +107,16 @@ describe('RabbitMQ required-route publications', () => {
       client: new FakeAmqpConnection({ withoutConfirmChannel: true }),
     });
     await rabbit.connect();
-    expect(rabbit[ROUTED_PUBLISH_AVAILABLE]).toBe(false);
+    expect(routedPublishAvailable(rabbit)).toBe(false);
+    // Facades forward the inner broker's answer, nested too.
+    const traced = new TracedBroker(rabbit, recordingTelemetry(), 'rabbitmq');
+    expect(routedPublishAvailable(traced)).toBe(false);
+    expect(routedPublishAvailable(new PipelinedBroker(traced, []))).toBe(false);
     await rabbit.disconnect();
     const memory = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
     expect(
-      new TracedBroker(memory, recordingTelemetry(), 'memory')[ROUTED_PUBLISH_AVAILABLE],
+      routedPublishAvailable(new TracedBroker(memory, recordingTelemetry(), 'memory')),
     ).toBeUndefined();
-    expect(new PipelinedBroker(memory, [])[ROUTED_PUBLISH_AVAILABLE]).toBeUndefined();
+    expect(routedPublishAvailable(new PipelinedBroker(memory, []))).toBeUndefined();
   });
 });
