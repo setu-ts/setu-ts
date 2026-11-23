@@ -676,7 +676,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
       `false` → the subscribe rejects with the new exported `PubSubDeadLetterTopicMissingError`
       naming the topic, with the SDK error as `cause`; `true`, or `topicExists` rejecting, or a
       transport without it → the create's original error is rethrown unchanged and the inspect error
-      is not logged (derived, pending the maintainer's confirmation); Spring's `ensureTopicExists`
+      is not logged (derived; confirmed by the maintainer, 2026-11-23); Spring's `ensureTopicExists`
       likewise surfaces only one error). No separate pre-check. The emulator run records the real
       status code and whether the emulator validates the dead-letter topic at all; the unit tests do
       not depend on the code.
@@ -693,13 +693,14 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
       (`messaging-plugin.ts:308`). It widens to `{ error, warn?, info? }` and the plugin forwards
       `info` too. A missing `warn` falls back to `error` (the Part A SQS precedent); a missing
       `info` drops the line, because Q2 chose `info` so that a least-privilege deployment is not
-      warned on every start (derived, pending the maintainer's confirmation).
+      warned on every start (derived; confirmed by the maintainer, 2026-11-23).
     - **Created or attached:** the `open` result gains `created?: boolean`; `adaptPubSubModule`
       always sets it (`true` after its create, `false` on the `ALREADY_EXISTS` attach branch, which
       also fills `existing` from `getMetadata`, `:416`). The post-create subscription read runs only
       when `created === true`; a custom transport that leaves it unset is treated as an attach and
-      checks nothing, matching "attaching checks nothing" (derived, pending the maintainer's
-      confirmation).
+      checks nothing, matching "attaching checks nothing" (derived; confirmed by the maintainer,
+      2026-11-23). The messaging README's custom-transport section says a transport must report
+      `created` for the dead-letter-topic check to run.
     - **Seam:** two optional members, so one answer never masks the other:
       `topicExists?(topic): Promise<boolean>` (`topic.exists()`, i.e. `GetTopic`; NOT_FOUND gives
       `false`, other errors reject, SDK 6.4.1 `build/src/topic.js:152-163`) and
@@ -710,7 +711,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
     - **Re-creation by stream recovery (§3.13):** a re-open that re-creates the subscription runs
       the same create-path rules. `PubSubDeadLetterTopicMissingError` there is a failed re-open,
       logged once like the closure, and retried on the schedule; the no-subscription warning stays
-      once per topic across re-creates (derived, pending the maintainer's confirmation).
+      once per topic across re-creates (derived; confirmed by the maintainer, 2026-11-23).
   - The topic is normalised to `projects/{project}/topics/{topic}` through the SDK's
     `pubsub.topic(name).name`, and backoffs are passed as `{ seconds, nanos }`.
   - The not-retryable forward acks only after the publish resolves; a failed publish nacks.
