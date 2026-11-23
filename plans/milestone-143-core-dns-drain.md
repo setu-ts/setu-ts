@@ -9,13 +9,13 @@
 M143c (Services lane) handed two pieces to the Core lane, and both block M143c rows. **V13-246,
 server half:** the `dns` discovery arm cannot be pointed at a name server, and a lookup has no bound
 the runtime enforces. The plugin may not import `node:dns`, so the runtime must offer a resolver
-built for chosen name servers with a per-lookup bound (maintainer decision OD3 option A, M143c plan
-§3.6 and §11). In the same seam, `resolveHost` keeps only the first family's failure as its `cause`,
-so a caller cannot tell "no such name" from "the AAAA lookup timed out". **V13-23, client half:**
-the kernel's drain 503 says nothing a client can trust about whether the request ran. M143c's gRPC
-client resends a unary call only when the server marks the 503 as not processed (maintainer decision
-OD6 option C, M143c plan §3.9 and §11), with Finagle's `finagle-http-nack` as the precedent. This
-branch ships the runtime half of the first and the server half of the second.
+built for chosen name servers with a per-lookup bound (maintainer decision on M143c's OD3, option A,
+M143c plan §3.6 and §11). In the same seam, `resolveHost` keeps only the first family's failure as
+its `cause`, so a caller cannot tell "no such name" from "the AAAA lookup timed out". **V13-23,
+client half:** the kernel's drain 503 says nothing a client can trust about whether the request ran.
+M143c's gRPC client resends a unary call only when the server marks the 503 as not processed
+(maintainer decision OD6 option C, M143c plan §3.9 and §11), with Finagle's `finagle-http-nack` as
+the precedent. This branch ships the runtime half of the first and the server half of the second.
 
 - **In scope:**
   - An optional `IRuntimeServices.createDnsResolver(options)` in `common`.
@@ -27,15 +27,13 @@ branch ships the runtime half of the first and the server half of the second.
   - `resolveHost` rejecting with every failed lookup (an `AggregateError` cause), on the existing
     `runtime.dns` resolvers and the new ones.
   - The exported marker constants in `common`.
-  - The kernel setting the marker on its drain 503 and removing it from every other response's
-    headers and HTTP trailers.
+  - The kernel setting the marker on its drain 503. It is not removed from other responses
+    (maintainer decision, 2026-11-23, §3.7).
   - Docs: `PUBLIC_API.md`, `docs/upgrading.md`, the three READMEs and agent cards, `CHANGELOG.md`.
 - **NOT this milestone:**
   - The discovery plugin's `servers` option, its validation, and reading `createDnsResolver`: M143c
     (`service-discovery-plugin`).
   - The gRPC client's resend rule that reads the marker: M143c §3.9 (`grpc-plugin`).
-  - Refusing the marker in gRPC handler trailers that the plugin encodes into the body (gRPC-Web):
-    handed back to M143c (§12 H1). The kernel cannot see bytes inside a body.
   - `src/adapters/workers`: Workers lane. Nothing there changes; the member stays absent because
     `cf-runtime.ts` never sets it.
   - The Node HTTP/2 listener advertising `maxHeaderListSize`: dropped by the maintainer on
@@ -61,9 +59,8 @@ NXDOMAIN or SERVFAIL, or never replies. "Not verified" means it was not confirme
 path returned 404), so .NET is not used in any recommendation here.
 
 Where they split: Q2 divides between a whole-lookup bound (grpc-go, Go) and a per-attempt one
-(Envoy, c-ares); OD1 in §11 chooses. Q6 has no framework precedent for removing the marker, so the
-removal rests on RFC 9113's "must not claim unless it can guarantee it", which the maintainer's OD6
-hand-over already asks for.
+(Envoy, c-ares); OD1 in §11 chooses. Q6 shows no framework removes its marker; the maintainer
+decided on 2026-11-23 that the kernel removes none (§3.7).
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -117,7 +114,7 @@ hand-over already asks for.
 - **Why:** the optional-member shape follows `dns?`, `onSignal?` and `onFatalError?` on the same
   interface. An optional member breaks no implementor (`IRuntimeServices` is implemented outside the
   repo by test fakes). Workers has no resolver API, so leaving it absent lets M143c refuse with a
-  named error, as the decided OD3 says.
+  named error, as M143c's decided OD3 says.
 - **Test home:** `packages/runtime/test/unit/node-runtime.test.ts`, `bun-runtime.test.ts`,
   `deno-runtime.test.ts` (the member is a function and passes the injected creator its options),
   `packages/runtime/test/unit/cf-runtime.test.ts` (the key is absent:
@@ -326,85 +323,41 @@ hand-over already asks for.
 - **Test home:** `packages/common/test/unit/unprocessed-response.test.ts` (the exact strings, and a
   lowercase name, because `Headers` lowercases).
 
-### 3.7 The kernel marks its drain answer and removes the marker everywhere else
+### 3.7 The kernel marks its drain answer (decided by the maintainer, 2026-11-23)
 
-- **Decision:** `packages/kernel/src/context/response.ts` gains a module-level `WeakSet` of marked
-  builders and an exported function `markUnprocessed(builder)`. Neither is exported from the kernel
-  barrel, and the package exports only `.`, so applications cannot reach it.
-  - `markUnprocessed` adds the builder to the set and calls
-    `builder.header(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN)`.
-  - The drain branch calls `markUnprocessed(builder)` after `respondWithError(…)`, so the header is
-    present, with exactly that value, whatever the error responder wrote. A responder that wrote the
-    name with another value is overwritten.
-  - **Removal at the one read point.**
-    - `headersForSnapshot()` is read by every runtime adapter, `dispatch`, `inject`, the
-      refused-upgrade writer and both diagnostics listeners (§1; the review confirmed no other read
-      path). It deletes `UNPROCESSED_HEADER` from the materialised headers unless the builder is
-      marked. Each delete is guarded by `has()`.
-    - **OD3 recommendation A:** it also deletes `trailer-x-setu-unprocessed`, the Connect protocol's
-      header encoding of a trailer, which connect folds into an error's metadata (§1).
-    - `responseInitForSnapshot()` needs no change. `#responseInit` only ever holds the kernel's
-      frozen built-in inits (`content-type`, `location`), and every application header write goes
-      through `#headers` (§1). A unit test pins that invariant.
-    - **Trailers are wrapped once, in `stream()`,** the only place `#trailers` is set
-      (`response.ts:198-205`). There the producer's promise becomes `trailers.then(stripMarker)`,
-      and the wrapper gets the same `catch(ignoreRejection)` the original gets today (`:202`). That
-      way a producer whose trailers reject still raises no unhandled rejection, and the wrapper
-      still rejects for `streamWithTrailers`' `onTrailersFailed` (`node-http-adapter.ts:385-414`).
-      Wrapping in `snapshot()` would make a new unobserved promise on every call, and the kernel
-      calls `snapshot()` beyond the adapter (`application.ts:2295`). `streamOptions` hands back the
-      wrapped promise, and the kernel's re-wraps through it strip twice, which is harmless. A drain
-      answer never streams.
-  - **What removal covers:** every header a handler, middleware, lifecycle hook, error responder or
-    plugin wrote through `IResponse`, on buffered, streamed and `HEAD` responses alike, on the
-    adapter, `dispatch` and `inject` paths.
-  - **What it does not cover:** bytes inside a body. A gRPC-Web trailer frame is one (§12 H1).
-  - **Performance:** removal runs only on headers already materialised (`headersForSnapshot`
-    materialises anyway). Each call adds one `WeakSet.has` and two `Headers.has`. There is no
-    allocation, and nothing changes on the `#responseInit` fast path M88 built. The unit test
-    asserts that a `json()` response's snapshot still carries `responseInit`. No benchmark pair is
-    run: the added work is constant and allocation-free. If the maintainer wants one, it is the M88
-    response-path pair.
-- **Why:**
-  - RFC 9113 §8.7 lets a server claim "not processed" only when it can guarantee it. Only the drain
-    branch runs before any application code, so only it may claim it.
-  - Removing the marker elsewhere makes the claim the kernel's to keep, as the maintainer's OD6
-    hand-over asks. Without removal, an application that copied the header gets its unary calls
-    resent.
-  - A proxy route copying an upstream Setu service's drain 503 is also stripped, which is correct:
-    the proxy did process the request.
-  - No compared framework removes its marker (Q6). Finagle removes only its request marker. So this
-    is stricter than precedent, on purpose.
-  - Removing at write time would miss the live `Headers` a snapshot exposes, and it would throw in
-    code that only copies headers. Removing at the read point covers every writer.
-- **Test home:**
-  - `packages/kernel/test/unit/response.test.ts`:
-    - a marked builder keeps the header;
-    - an unmarked one loses it, whether written by `header`, `appendHeader`, `setHeaders` with a
-      frozen record, or `setHeaders` with a plain record;
-    - the `trailer-` form is removed;
-    - streamed trailers lose it and keep their other fields;
-    - rejecting trailers, with `snapshot()` called three times, raise no unhandled rejection, and
-      the trailers taken from the snapshot still reject;
-    - `json()` keeps `responseInit` with no materialised headers.
-  - `packages/kernel/test/integration/drain-unprocessed-marker.test.ts`, using `inject`, `fetch` and
-    `dispatch` each:
-    - the drain 503 carries `x-setu-unprocessed: shutdown` with no `errorHandler`;
-    - it carries it with a registered `errorHandler` writing problem+json;
-    - it carries it with a responder that writes the header with another value (the value is
-      `shutdown`);
-    - a handler's own 503 does not carry it;
-    - a request admitted before `stop()` began, whose handler answers 503 during the drain, does not
-      carry it (§10 S2);
-    - a handler-set header on a 200 is removed;
-    - a middleware-set header and an `onResponse` hook's header are removed;
-    - an in-pipeline error whose responder writes the header is removed;
-    - a streamed response's header is removed;
-    - a `HEAD` answer's header is removed;
-    - the existing drain-window test still sees 503.
-  - `packages/runtime/test/e2e/drain-unprocessed-marker-node.test.ts`: on a real Node listener, a
-    request during `stop()`'s drain gets the header on the wire, and a handler-set header does not
-    reach the wire.
+- **Decision:** in the drain branch of `#handleRequest`
+  (`packages/kernel/src/application/application.ts:1392-1408`), after `respondWithError(…)`, the
+  kernel calls `builder.header(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN)`.
+  - It runs after the responder, so the header is present with exactly that value whatever the error
+    responder wrote. A responder that wrote the name with another value is overwritten, because
+    `header()` sets rather than appends (`response.ts:98-101`).
+  - No other kernel site sets it.
+  - **The kernel does not remove the header from any other response** (maintainer decision,
+    2026-11-23, replacing this plan's earlier removal design and its OD3). A handler, middleware,
+    hook or error responder that writes `x-setu-unprocessed` sends it. `ResponseBuilder`,
+    `headersForSnapshot()`, `stream()` and the `@setu-ts/testing` double are unchanged.
+  - The header is **reserved**. The constant's JSDoc, `PUBLIC_API.md`, `docs/upgrading.md` and the
+    READMEs say so: only the kernel's pre-pipeline shutdown answer sets it. An application that sets
+    it is itself claiming the request was not processed, and a Setu gRPC client may then send that
+    unary call once more.
+- **Why:** the maintainer decided only that the kernel marks its drain 503. The "remove it
+  everywhere else" item came from M143c's plan review. No compared framework removes its marker
+  (Q6): Finagle sets `finagle-http-nack` and never strips it. Without removal, the cost is one extra
+  send of one unary call, and only when an application writes the reserved header itself, which is
+  that application's own claim. §10 records this as an accepted risk.
+- **Test home:** `packages/kernel/test/integration/drain-unprocessed-marker.test.ts`, on each of
+  `inject`, `fetch` and `dispatch`:
+  - the drain 503 carries `x-setu-unprocessed: shutdown` with no `errorHandler`;
+  - it carries it with a registered `errorHandler` writing problem+json;
+  - it carries it with a responder that writes the header with another value (the value is
+    `shutdown`);
+  - a handler's own 503 outside a drain does not carry it;
+  - a request admitted before `stop()` began, whose handler answers 503 during the drain, does not
+    carry it (§10 S2);
+  - the existing drain-window test still sees 503.
+
+  `packages/runtime/test/e2e/drain-unprocessed-marker-node.test.ts`: on a real Node listener, a
+  request during `stop()`'s drain gets the header on the wire.
 
 ### 3.8 The UDP DNS test fixture
 
@@ -426,20 +379,6 @@ hand-over already asks for.
   existing `runtime-edges-bun-deno.test.ts` pattern: it runs only when `bun` is installed and
   asserts the silent-server bound and an answer.
 
-### 3.9 The `@setu-ts/testing` response double removes the marker too
-
-- **Decision:** `packages/testing/src/mock-context.ts` applies the same rule as the kernel builder.
-  Its `snapshot()` (`:385`) deletes `UNPROCESSED_HEADER` and `trailer-x-setu-unprocessed` from the
-  headers it returns. Its trailers are wrapped once in `stream()` (`:378-381`), as in §3.7, with the
-  rejection still observed. The double has no drain path, so nothing in it is ever marked.
-- **Why:** the double's own JSDoc says it mirrors the kernel builder "so a test asserting on the
-  double cannot pass where the real builder would fail". A handler test that sets the marker would
-  otherwise pass on the double and lose the header in production. CLAUDE.md requires a test double
-  to honour the real contract.
-- **Test home:** `packages/testing/test/unit/mock-context.test.ts`: a header set by `header`,
-  `appendHeader` or `setHeaders` is absent from the snapshot; the `trailer-` form too; streamed
-  trailers lose it and keep other fields; rejecting trailers raise no unhandled rejection.
-
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none. `createDnsResolver` is optional. `DenoDnsHost`'s new parameter
@@ -450,8 +389,8 @@ is optional and trailing. The `resolveHost` cause changes behaviour, not types, 
 | --------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `IRuntimeServices.createDnsResolver` (`common`)                             | optional interface method | M143c `service-discovery-plugin/src/providers/provider-factory.ts` (its `servers` arm); set by the Node, Bun and Deno runtime factories                                                                       |
 | `DnsResolverOptions` (`common`)                                             | type                      | The member's parameter; `parseDnsResolverOptions` in `runtime`; M143c's factory call                                                                                                                          |
-| `UNPROCESSED_HEADER` (`common`)                                             | const                     | `kernel/src/context/response.ts` (`markUnprocessed`, removal); M143c `grpc-plugin/src/grpc-client.ts` §3.9                                                                                                    |
-| `UNPROCESSED_SHUTDOWN` (`common`)                                           | const                     | `kernel/src/context/response.ts` (`markUnprocessed`); M143c `grpc-plugin` §3.9                                                                                                                                |
+| `UNPROCESSED_HEADER` (`common`)                                             | const                     | `kernel/src/application/application.ts` drain branch; M143c `grpc-plugin/src/grpc-client.ts` §3.9                                                                                                             |
+| `UNPROCESSED_SHUTDOWN` (`common`)                                           | const                     | `kernel/src/application/application.ts` drain branch; M143c `grpc-plugin` §3.9                                                                                                                                |
 | `DenoDnsHost` (`runtime`, existing, widened)                                | interface                 | `createDenoDnsResolver` and `createDenoServerDnsResolver`; the Deno runtime factory passes its `DenoHost`                                                                                                     |
 | `createNodeDnsResolver`, `createDenoDnsResolver` (existing)                 | function                  | Unchanged signatures; now use the shared `combineAddressFamilies`                                                                                                                                             |
 | `DenoHost` (`runtime`, existing, widened)                                   | interface                 | `resolveDns` gains the optional third parameter; read by `createDenoRuntimeServices`, which passes it to both Deno resolvers                                                                                  |
@@ -459,8 +398,7 @@ is optional and trailing. The `resolveHost` cause changes behaviour, not types, 
 | `createDenoRuntimeServices` (existing, widened)                             | function                  | A fifth positional parameter after `globalEvents`, the same creator. Same readers                                                                                                                             |
 
 Internal and not exported: `parseDnsResolverOptions`, `createNodeServerDnsResolver`,
-`createDenoServerDnsResolver`, `combineAddressFamilies`, and `markUnprocessed`. Each is read by its
-runtime factory or by the kernel drain branch.
+`createDenoServerDnsResolver` and `combineAddressFamilies`. Each is read by its runtime factory.
 
 ### 4.1 Options — every option names its consumer
 
@@ -486,32 +424,28 @@ runtime factory or by the kernel drain branch.
 | `packages/runtime/src/adapters/node/node-runtime.ts`                     | inject and set `createDnsResolver`                                                                       |
 | `packages/runtime/src/adapters/bun/bun-runtime.ts`                       | inject and set `createDnsResolver`                                                                       |
 | `packages/runtime/src/services/cross-runtime.ts`                         | `'createDnsResolver'` in the `Pick`                                                                      |
-| `packages/kernel/src/context/response.ts`                                | `markUnprocessed`, the marked set, removal in `headersForSnapshot`, the trailers wrap in `stream()`      |
-| `packages/testing/src/mock-context.ts`                                   | the same removal in the double's `snapshot()` and `stream()` (§3.9)                                      |
-| `packages/kernel/src/application/application.ts`                         | drain branch calls `markUnprocessed(builder)`                                                            |
+| `packages/kernel/src/application/application.ts`                         | drain branch sets `UNPROCESSED_HEADER: UNPROCESSED_SHUTDOWN` after `respondWithError`                    |
 | `scripts/test-lanes.ts`                                                  | add the Deno real-resolver test to `DENO_LANE_TESTS`                                                     |
 | `packages/runtime/src/index.ts`                                          | unchanged (no new export; `DenoDnsHost` already exported)                                                |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                           | src covered                                  | Key assertions (and the signature each call type-checks against)                                                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/unprocessed-response.test.ts` (new)                                                                      | `unprocessed-response.ts`                    | exact strings; lowercase name (§3.6)                                                                                              |
-| `packages/common/test/unit/runtime-contracts.test.ts` (updated)                                                                     | `runtime.ts` (types only)                    | a fake `IRuntimeServices` without `createDnsResolver` and one with it both type-check; `DnsResolverOptions` fields are `readonly` |
-| `packages/runtime/test/unit/dns-server-options.test.ts` (new)                                                                       | `dns-server-options.ts`                      | §3.2's table of accepted and refused entries and bounds; each `RangeError` names the field and index                              |
-| `packages/runtime/test/unit/address-families.test.ts` (new)                                                                         | `address-families.ts`                        | §3.5's table; `cause` is an `AggregateError` with `errors` in A-then-AAAA order                                                   |
-| `packages/runtime/test/unit/node-server-dns-resolver.test.ts` (new)                                                                 | `node-server-dns-resolver.ts`                | §3.3's fake-resolver assertions against `createNodeServerDnsResolver(options: DnsResolverOptions, deps)`                          |
-| `packages/runtime/test/integration/dns-server-resolver-node.test.ts` (new)                                                          | `node-server-dns-resolver.ts` (real path)    | §3.3's real `node:dns` assertions against the UDP fixture                                                                         |
-| `packages/runtime/test/unit/deno-server-dns-resolver.test.ts` (new)                                                                 | `deno-server-dns-resolver.ts`                | §3.4's fake-host assertions                                                                                                       |
-| `packages/runtime/test/integration/dns-server-resolver-deno.test.ts` (new, Deno lane)                                               | `deno-server-dns-resolver.ts` (real path)    | §3.4's real `Deno.resolveDns` assertions                                                                                          |
-| `packages/runtime/test/integration/runtime-edges-bun-deno.test.ts` (extended)                                                       | Bun real path                                | Bun arm: an answer and the silent-server bound, guarded on `bun` being installed                                                  |
-| `packages/runtime/test/unit/node-dns-resolver.test.ts`, `deno-dns-resolver.test.ts` (updated)                                       | the two default resolvers                    | the aggregate cause; `DenoDnsHost` without the third parameter still assignable                                                   |
-| `packages/runtime/test/unit/node-runtime.test.ts`, `bun-runtime.test.ts`, `deno-runtime.test.ts`, `cross-runtime.test.ts` (updated) | the factories and the merge                  | §3.1                                                                                                                              |
-| `packages/runtime/test/unit/cf-runtime.test.ts` (updated)                                                                           | `cf-runtime.ts` (no edit)                    | `createDnsResolver` absent                                                                                                        |
-| `packages/kernel/test/unit/response.test.ts` (updated)                                                                              | `response.ts`                                | §3.7 unit assertions                                                                                                              |
-| `packages/kernel/test/integration/drain-unprocessed-marker.test.ts` (new)                                                           | `application.ts` drain branch, `response.ts` | §3.7 integration assertions on `inject`, `fetch` and `dispatch`                                                                   |
-| `packages/runtime/test/e2e/drain-unprocessed-marker-node.test.ts` (new)                                                             | the wire                                     | §3.7 wire assertions                                                                                                              |
-| `packages/testing/test/unit/mock-context.test.ts` (updated)                                                                         | `mock-context.ts`                            | §3.9                                                                                                                              |
+| Test file                                                                                                                           | src covered                               | Key assertions (and the signature each call type-checks against)                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/unprocessed-response.test.ts` (new)                                                                      | `unprocessed-response.ts`                 | exact strings; lowercase name (§3.6)                                                                                              |
+| `packages/common/test/unit/runtime-contracts.test.ts` (updated)                                                                     | `runtime.ts` (types only)                 | a fake `IRuntimeServices` without `createDnsResolver` and one with it both type-check; `DnsResolverOptions` fields are `readonly` |
+| `packages/runtime/test/unit/dns-server-options.test.ts` (new)                                                                       | `dns-server-options.ts`                   | §3.2's table of accepted and refused entries and bounds; each `RangeError` names the field and index                              |
+| `packages/runtime/test/unit/address-families.test.ts` (new)                                                                         | `address-families.ts`                     | §3.5's table; `cause` is an `AggregateError` with `errors` in A-then-AAAA order                                                   |
+| `packages/runtime/test/unit/node-server-dns-resolver.test.ts` (new)                                                                 | `node-server-dns-resolver.ts`             | §3.3's fake-resolver assertions against `createNodeServerDnsResolver(options: DnsResolverOptions, deps)`                          |
+| `packages/runtime/test/integration/dns-server-resolver-node.test.ts` (new)                                                          | `node-server-dns-resolver.ts` (real path) | §3.3's real `node:dns` assertions against the UDP fixture                                                                         |
+| `packages/runtime/test/unit/deno-server-dns-resolver.test.ts` (new)                                                                 | `deno-server-dns-resolver.ts`             | §3.4's fake-host assertions                                                                                                       |
+| `packages/runtime/test/integration/dns-server-resolver-deno.test.ts` (new, Deno lane)                                               | `deno-server-dns-resolver.ts` (real path) | §3.4's real `Deno.resolveDns` assertions                                                                                          |
+| `packages/runtime/test/integration/runtime-edges-bun-deno.test.ts` (extended)                                                       | Bun real path                             | Bun arm: an answer and the silent-server bound, guarded on `bun` being installed                                                  |
+| `packages/runtime/test/unit/node-dns-resolver.test.ts`, `deno-dns-resolver.test.ts` (updated)                                       | the two default resolvers                 | the aggregate cause; `DenoDnsHost` without the third parameter still assignable                                                   |
+| `packages/runtime/test/unit/node-runtime.test.ts`, `bun-runtime.test.ts`, `deno-runtime.test.ts`, `cross-runtime.test.ts` (updated) | the factories and the merge               | §3.1                                                                                                                              |
+| `packages/runtime/test/unit/cf-runtime.test.ts` (updated)                                                                           | `cf-runtime.ts` (no edit)                 | `createDnsResolver` absent                                                                                                        |
+| `packages/kernel/test/integration/drain-unprocessed-marker.test.ts` (new)                                                           | `application.ts` drain branch             | §3.7 integration assertions on `inject`, `fetch` and `dispatch`                                                                   |
+| `packages/runtime/test/e2e/drain-unprocessed-marker-node.test.ts` (new)                                                             | the wire                                  | §3.7 wire assertions                                                                                                              |
 
 The fixture `packages/runtime/test/fixtures/udp-dns-server.ts` is excluded from measurement. The
 fail-without-fix proof for the hand-back: the drain integration test fails before the kernel edit,
@@ -519,17 +453,16 @@ and the address-families test fails on `failures[0]`.
 
 ## 6.1 Documentation deliverables (same PR)
 
-| Document                                                                               | Change                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PUBLIC_API.md`                                                                        | `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` beside `dns` (around `:905-1010`); the `IDnsResolver.resolveHost` `AggregateError` cause; the two constants under Common; the widened `DenoDnsHost` and `DenoHost`; the three factory signatures (factory table around `:15009`); kernel shutdown notes naming the marker and its removal |
-| `docs/upgrading.md` (Unreleased)                                                       | the `resolveHost` cause change, and that the kernel removes `x-setu-unprocessed` from every response but its drain answer                                                                                                                                                                                                                               |
-| `docs/deployment.md`                                                                   | the drain section names the marker and what a client may do with it                                                                                                                                                                                                                                                                                     |
-| `packages/common/README.md`, `packages/runtime/README.md`, `packages/kernel/README.md` | the new surface; the runtime DNS section states §3.2's accepted forms, the bound and its per-runtime caveats (C1, C2, the first-lookup doubling, Bun timing); `## Exports` tables regenerated with `pnpm run docs:exports`                                                                                                                              |
-| `packages/testing/README.md`                                                           | the double removes the marker (§3.9)                                                                                                                                                                                                                                                                                                                    |
-| `packages/{common,runtime,kernel}/AGENT_CARD.md`                                       | one line each, within the card byte budget                                                                                                                                                                                                                                                                                                              |
-| `CHANGELOG.md` `[Unreleased]`                                                          | Added: `createDnsResolver`, `DnsResolverOptions`, the constants and the drain marker. Changed: the `resolveHost` cause, and header removal by the kernel and the testing double (`check-changelog-coverage` needs every new barrel export named)                                                                                                        |
-| JSDoc                                                                                  | `@since 0.14.0` on each new export (`check-since-tags`); the TypeDoc ratchet (`generate-api-docs --check`) passes                                                                                                                                                                                                                                       |
-| `ROADMAP.md`, `CLAUDE.md`                                                              | per OD4; the CLAUDE.md status line "complete (PR pending)"; the plan archived to `plans/archive/`                                                                                                                                                                                                                                                       |
+| Document                                                                               | Change                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUBLIC_API.md`                                                                        | `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` beside `dns` (around `:905-1010`); the `IDnsResolver.resolveHost` `AggregateError` cause; the two constants under Common; the widened `DenoDnsHost` and `DenoHost`; the three factory signatures (factory table around `:15009`); kernel shutdown notes naming the marker; the header is reserved (§3.7) |
+| `docs/upgrading.md` (Unreleased)                                                       | the `resolveHost` cause change, and the new reserved `x-setu-unprocessed` header on the drain answer: what it means, and what an application that sets it is claiming                                                                                                                                                                                                  |
+| `docs/deployment.md`                                                                   | the drain section names the marker and what a client may do with it                                                                                                                                                                                                                                                                                                    |
+| `packages/common/README.md`, `packages/runtime/README.md`, `packages/kernel/README.md` | the new surface; the runtime DNS section states §3.2's accepted forms, the bound and its per-runtime caveats (C1, C2, the first-lookup doubling, Bun timing); `## Exports` tables regenerated with `pnpm run docs:exports`                                                                                                                                             |
+| `packages/{common,runtime,kernel}/AGENT_CARD.md`                                       | one line each, within the card byte budget                                                                                                                                                                                                                                                                                                                             |
+| `CHANGELOG.md` `[Unreleased]`                                                          | Added: `createDnsResolver`, `DnsResolverOptions`, the constants and the drain marker. Changed: the `resolveHost` cause (`check-changelog-coverage` needs every new barrel export named)                                                                                                                                                                                |
+| JSDoc                                                                                  | `@since 0.14.0` on each new export (`check-since-tags`); the TypeDoc ratchet (`generate-api-docs --check`) passes                                                                                                                                                                                                                                                      |
+| `ROADMAP.md`, `CLAUDE.md`                                                              | per OD4; the CLAUDE.md status line "complete (PR pending)"; the plan archived to `plans/archive/`                                                                                                                                                                                                                                                                      |
 
 ## 7. Verification gates
 
@@ -560,9 +493,9 @@ security-audited by a freshly spawned Claude agent following `.roo/skills/securi
 - **Real-DNS timing tests flake under load.** Mitigation: assert upper bounds with 250 ms of slack
   and never a lower bound below the share. The fixture runs on loopback with an OS-assigned port.
   Bun's whole-second rounding is asserted only as "within the whole bound".
-- **Removing a header in `headersForSnapshot` breaks an application that relied on sending
-  `x-setu-unprocessed`.** None is known. The prefix is the framework's, and the CHANGELOG and the
-  upgrading note state the removal.
+- **An application writes the reserved header on a response it processed.** A Setu gRPC client may
+  then send that unary call once more. Mitigation: the docs reserve the header and say what setting
+  it claims; the risk is accepted by the maintainer (§3.7, §10).
 - **A per-lookup `Resolver` costs more than a shared one.** Measured cost is construction and
   `setServers`, both in-process. A lookup already costs a network round trip. This is not on the
   request path unless the caller puts it there; M143c's cache keeps it off.
@@ -577,7 +510,8 @@ security-audited by a freshly spawned Claude agent following `.roo/skills/securi
 - Reading record TTLs: Node's `resolveSrv` returns none (M143c Q11). M143c keeps `cacheTtlMs`.
 - A marker for other kernel refusals, such as the pre-pipeline 400 or a body-limit 413. Those
   requests may already have been read, and nothing consumes a marker for them.
-- The gRPC client's use of the marker, and trailer frames inside a gRPC-Web body: M143c (H1).
+- The gRPC client's use of the marker: M143c §3.9.
+- Removing the marker from responses other than the drain answer: decided against (§3.7).
 - Workers DNS: Workers lane; there is no resolver API.
 
 ## 10. Design security review
@@ -585,64 +519,47 @@ security-audited by a freshly spawned Claude agent following `.roo/skills/securi
 The diff crosses two trust boundaries. The committed-tree audit (freshly spawned Claude agent,
 `.roo/skills/security-audit/SKILL.md`) runs these obligations with positive and negative controls:
 
-- **S1, the marker is unforgeable by application code.** A handler, middleware, hook, error
-  responder or plugin that writes `x-setu-unprocessed`, in any case, by any `IResponse` method or
-  the snapshot's live `Headers`, never reaches the wire, `dispatch` or `inject`. Only the drain
-  branch's builder carries it. Negative control: the drain 503 still carries it.
-- **S2, the marker never appears on a processed request.** A request admitted before `stop()` began
-  and finishing during the drain does not carry it, even if its status is 503.
-- **S3, no reach into `markUnprocessed`.** It is not exported from the kernel barrel, and the
-  package `exports` map has no subpath to `context/response`.
+- **S1, the drain answer always carries the marker, with exactly the reserved value.** With and
+  without an `errorHandler`, and when the responder writes the name with another value.
+- **S2, the kernel never marks a processed request.** A request admitted before `stop()` began and
+  finishing during the drain does not carry the marker from the kernel, even with status 503.
+- **Accepted risk A1 (maintainer, 2026-11-23): application code can send the marker.** The kernel
+  does not remove `x-setu-unprocessed` from responses it did not mark. An application that writes it
+  claims its request was not processed, and a Setu gRPC client may send that unary call once more,
+  to another instance of the same service, within the deadline. The audit records this as accepted,
+  not as a finding, and checks only that the docs reserve the header and state that consequence.
 - **S4, chosen name servers are IP literals only.** No host name is resolved to find a name server.
   A refused entry's `RangeError` names the entry but carries no other configuration. Servers come
   from application configuration, never from a request.
 - **S5, a silent or hostile name server cannot hold a lookup past its bound.** With `timeoutMs > 0`,
   every lookup settles by the bound, the cancelled query frees its socket (`Resolver.cancel`, Deno
-  signal), and no timer is left behind after settling.
-- **S6, no growth across lookups.** Per-lookup resolvers and timers are released; the marked-builder
-  set is a `WeakSet`.
+  abort), and no timer is left behind after settling.
+- **S6, no growth across lookups.** Per-lookup resolvers, controllers and timers are released.
 - **S7, response records are not trusted beyond their shape.** SRV and address answers pass through
   as today (the mapping is unchanged). The audit confirms that nothing new parses record contents.
 
-## 11. Open decisions for the maintainer
+## 11. Decisions (maintainer, 2026-11-23)
 
-- **OD1, what `timeoutMs` bounds.**
-  - **A (recommended):** the whole lookup call, enforced by the resolver's own timer, with each
-    server's attempt given an equal share. This matches grpc-go `ResolvingTimeout` and Go's
-    `context`. It is the meaning M143c's `resolveTimeoutMs` already has.
-  - **B:** each server attempt, as c-ares and Envoy's `query_timeout_seconds` do. The worst case is
-    then `servers × timeoutMs` on Node, and longer on Bun (whole seconds, Q2).
-  - **C:** A without the split, so the first server gets the whole bound. A silent first server then
-    leaves the others unused.
-- **OD2, the marker's name and value.**
-  - **A (recommended):** `UNPROCESSED_HEADER = 'x-setu-unprocessed'` and
-    `UNPROCESSED_SHUTDOWN = 'shutdown'`, as M143c proposed, so M143c needs no change.
-  - **B:** a presence-only header (Finagle's form), which leaves no room for a later reason.
-- **OD3, the Connect `trailer-` form.**
-  - **A (recommended):** the kernel also removes `trailer-x-setu-unprocessed` from headers. Connect
-    clients fold that header into an error's metadata (§1), and it is an ordinary HTTP header the
-    kernel serves.
-  - **B:** remove only `x-setu-unprocessed`, and leave every trailer encoding to `grpc-plugin` (H1).
-- **OD4, where this work is recorded.** There is no ROADMAP letter.
-  - **A (recommended):** a "Core follow-ups" list under ROADMAP's M143 section, with one line per
-    follow-up PR naming the rows it closes (V13-246 server half, V13-23 marker half). Also one
-    CLAUDE.md "Current status" line, "M143 Core follow-up — DNS resolver and drain marker". The two
-    sibling Core follow-ups can use the same list.
-  - **B:** a new letter, M143s, with its own ROADMAP section. That renumbers nothing but adds a
-    letter outside the eighteen the closeout planned.
+- **OD1, what `timeoutMs` bounds: A.** The whole lookup call, enforced by the resolver's own timer,
+  with each server's attempt given an equal share. Rejected: B, each server attempt (c-ares, Envoy);
+  C, the whole lookup without the split.
+- **OD2, the marker's name and value: A.** `UNPROCESSED_HEADER = 'x-setu-unprocessed'` and
+  `UNPROCESSED_SHUTDOWN = 'shutdown'`. Rejected: B, a presence-only header.
+- **OD3, the Connect `trailer-` form: moot.** The kernel removes the marker from no response (§3.7).
+- **OD4, where this work is recorded: A, as a shared list.** A heading
+  `#### Core follow-ups (after M143i)` under ROADMAP's M143 section, with one line for this PR (the
+  circuit-breaker follow-up adds its line under the same heading), and a CLAUDE.md "Current status"
+  line.
+- **Marker removal: not done** (§3.7, §10 A1).
 
 ## 12. Hand-backs to M143c (relayed by the coordinator)
 
-- **H1 (gRPC-Web trailers):** the kernel cannot remove a marker that `grpc-plugin` encodes inside a
-  gRPC-Web body's trailer frame. Connect puts trailer fields into `ConnectError.metadata` for gRPC
-  and gRPC-Web (§1). Two remedies, for M143c to choose: `grpc-plugin` refuses or drops
-  `x-setu-unprocessed` in handler response trailers it encodes, or the client reads the marker only
-  from a response whose HTTP status is not 200. The kernel already removes it from headers and HTTP
-  trailers.
 - **H2 (classifier):** walk `AggregateError.errors` and call the name absent only when **every**
   member is absent. On Deno 2.9.6, `NotFound` also means SERVFAIL (C2), so a Deno SERVFAIL reads as
   absent; state it in the discovery README.
-- **H3 (docs):** Deno's signalled lookup ends at about 2 s, not 1 s (C1). Timeouts surface as
-  `code: 'ETIMEOUT'` from the resolver's own bound on every runtime. On Deno, an attempt that ends
-  on Deno's own timer is `name: 'TimedOut'`.
-- **H4 (names):** if the maintainer keeps OD2 A, M143c's constant names are unchanged.
+- **H3 (docs):** Deno's signalled lookup ends at about 2 s, not 1 s (C1). Timeouts from the
+  resolver's own bound surface as `code: 'ETIMEOUT'` on every runtime; an attempt that ends on
+  Deno's own timer is `name: 'TimedOut'`.
+- **H4 (names):** OD2 A keeps M143c's constant names unchanged.
+- **H5 (marker):** the kernel does not remove the marker from other responses; an application that
+  sets it gets one resend of a unary call (§3.7).
