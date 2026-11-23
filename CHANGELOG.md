@@ -8,9 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`@setu-ts/worker-pool-plugin` (M143r; V13-131).** `WorkerRunOptions.signal` cancels a call with
-  `signal.reason` unchanged: pre-aborted work is not queued, queued work is withdrawn, and a running
-  call's worker is terminated and replaced as on timeout. Each cancellation increments
+- **`@setu-ts/worker-pool-plugin` (M143r, #614; V13-131).** `WorkerRunOptions.signal` cancels a call
+  with `signal.reason` unchanged: pre-aborted work is not queued, queued work is withdrawn, and a
+  running call's worker is terminated and replaced as on timeout. Each cancellation increments
   `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
   realm now rejects the call with `TypeError` before it is admitted; it used to be ignored.
@@ -44,26 +44,26 @@ All notable changes to this project are documented here. The format follows
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
 
-- **`@setu-ts/common` (M143r).** `StorageObjectNotFoundError` (a `404` status hint, the key in
+- **`@setu-ts/common` (M143r, #614).** `StorageObjectNotFoundError` (a `404` status hint, the key in
   `message` and on `.key`, never in the served body) and the upload brand `UPLOAD_METADATA` /
   `withUploadMetadata` / `uploadMetadataOf` (typed `UploadMetadata`), which `createUploadMiddleware`
   now carries so a documentation generator can see a multipart route (`@setu-ts/openapi-plugin` does
   not read it yet).
-- **Provider options (M143r; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
+- **Provider options (M143r, #614; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
   `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
   `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault) and the `ses` and `sendgrid`
   mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the key form) and
   `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm; `connectionTimeoutMs`,
   `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime it reads is the
   exported `SmtpRuntime` type); `exposeCatalogues.keyPrefixes` on the localization catalogue route.
-- **Readiness probes (M143r; V13-215, the lane half).** The `gcs` and `azure` storage arms, the
-  `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each reads
-  reachable when the backend answers: an HTTP status below `500`, or for `gcp` any gRPC code but
-  `UNAVAILABLE` and `DEADLINE_EXCEEDED`.
+- **Readiness probes (M143r, #614; V13-215, the lane half).** The `gcs` and `azure` storage arms,
+  the `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each
+  reads reachable when the backend answers: an HTTP status below `500`, or for `gcp` any gRPC code
+  but `UNAVAILABLE` and `DEADLINE_EXCEEDED`.
 
 ### Changed
 
-- **BREAKING — provider arms (M143r; `@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`,
+- **BREAKING — provider arms (M143r, #614; `@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`,
   `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`; V13-232,
   V13-233, V13-234, V13-235, V13-217, V13-245, V13-248, V13-4, V13-193, V13-257).** LaunchDarkly
   receives `waitForInitialization({ timeout })` (it was passed `timeoutSeconds`, which the SDK does
