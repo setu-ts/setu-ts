@@ -709,7 +709,7 @@ authenticated streams send their credentials, and a WebSocket stays alive across
 keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
 use); a missing one fails the check rather than skipping it. It builds `@setu-ts/common` first: the
 SDK's circuit breaker imports `@setu-ts/common/breaker-window`, which resolves to common's compiled
-output on every runtime the driver runs on.
+output under plain Node, Bun and workerd.
 
 ```bash
 pnpm --dir apps/realtime-clients run start 3400
