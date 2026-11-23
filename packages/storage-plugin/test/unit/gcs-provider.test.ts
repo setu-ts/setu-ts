@@ -1354,6 +1354,49 @@ describe('GcsProvider getStream cancellation safety', () => {
     await tick();
     await tick();
   });
+
+  it('cancel waits for the source iterator to finish before it settles', async () => {
+    let returned = 0;
+    let finish: () => void = () => undefined;
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          createReadStream: () => {
+            let calls = 0;
+            const iterator = {
+              next: (): Promise<IteratorResult<Uint8Array>> =>
+                calls++ === 0
+                  ? Promise.resolve({ done: false, value: new Uint8Array([1]) })
+                  : new Promise<never>(() => undefined),
+              return: (): Promise<IteratorResult<Uint8Array>> => {
+                returned++;
+                return new Promise((resolve) => {
+                  finish = () => resolve({ done: true, value: undefined });
+                });
+              },
+            };
+            return { [Symbol.asyncIterator]: () => iterator };
+          },
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const stream = (await provider.getStream('wait')) as ReadableStream<Uint8Array>;
+    const reader = stream.getReader();
+    expect((await reader.read()).done).toBe(false);
+    let settled = false;
+    const cancelling = reader.cancel().then(() => {
+      settled = true;
+    });
+    await tick();
+    await tick();
+    expect(returned).toBe(1);
+    expect(settled).toBe(false);
+    finish();
+    await cancelling;
+    expect(settled).toBe(true);
+  });
 });
 
 // ── Injected-client stream shapes (the 0.8.0 compat guarantee) ─────────────

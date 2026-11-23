@@ -49,6 +49,8 @@ export interface GcsFacadeFile {
    * The object's bytes as a stream. Cancelling a `getStream` result destroys
    * it and waits for its iterator to finish, so `destroy()` must end a read
    * still pending (a Node `Readable` does, unless it never emits `'close'`).
+   * A stream with no `destroy()` holds the cancel until its pending read
+   * settles.
    */
   createReadStream(): NodeJS.ReadableStream;
 }
@@ -85,6 +87,8 @@ export interface GcsFile {
    * The object's bytes as a stream. Cancelling a `getStream` result destroys
    * it and waits for its iterator to finish, so `destroy()` must end a read
    * still pending (a Node `Readable` does, unless it never emits `'close'`).
+   * A stream with no `destroy()` holds the cancel until its pending read
+   * settles.
    */
   createReadStream(): NodeJS.ReadableStream;
 }
