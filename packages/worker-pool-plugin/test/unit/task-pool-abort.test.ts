@@ -352,7 +352,13 @@ describe('WorkerPoolService cancellation', () => {
     },
   );
 
-  it.each([null, {}, { aborted: false }, 'signal'])(
+  it.each([
+    null,
+    {},
+    { aborted: false },
+    'signal',
+    { aborted: 1, addEventListener: () => undefined, removeEventListener: () => undefined },
+  ])(
     'refuses a signal that is not an AbortSignal (%j) before admission, uncounted',
     async (signal) => {
       const timers = new FakeTimers();
@@ -392,6 +398,35 @@ describe('WorkerPoolService cancellation', () => {
     expect(service.stats()).toEqual([]);
     await service.shutdown();
   });
+
+  it.each(['aborted', 'reason'] as const)(
+    'a signal whose %s getter throws rejects the call instead of throwing',
+    async (prop) => {
+      const service = new WorkerPoolService(
+        {},
+        createFakeRuntime(new FakeTimers(), new FakeHost(1, undefined, true)),
+      );
+      let reads = 0;
+      const signal = {
+        get aborted(): boolean {
+          // The check reads it once; the pool reads it again.
+          if (prop === 'aborted' && ++reads > 1) throw new Error('getter');
+          return prop === 'reason';
+        },
+        get reason(): unknown {
+          throw new Error('getter');
+        },
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      } as unknown as AbortSignal;
+      let pending: Promise<unknown> | undefined;
+      expect(() => {
+        pending = service.run(SPEC, 1, { signal });
+      }).not.toThrow();
+      await expect(pending).rejects.toThrow('getter');
+      await service.shutdown();
+    },
+  );
 
   it('keeps timeout validation, closed service, and unavailable host ahead of cancellation', async () => {
     const timers = new FakeTimers();

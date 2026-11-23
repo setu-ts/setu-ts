@@ -214,8 +214,8 @@ An outage is an error, never "not there". On every cloud arm:
   rejects.
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/
   `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
-  `delete` with `BackendUnavailableError` when the request was refused before it was sent and
-  `BackendOutcomeUnknownError` (`504`) when it may have been applied.
+  `delete` with `BackendUnavailableError` when the request was refused before it was sent or
+  answered `502`/`503`, and `BackendOutcomeUnknownError` (`504`) when it may have been applied.
 - Anything else — a refused credential, a missing bucket — rejects with an `Error` whose message
   starts `storage-plugin (<provider>): <call> failed:`, so the masked `500` names the backend in the
   log.
@@ -257,14 +257,15 @@ The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wir
 ### Backpressure — per provider
 
 Demand-driven streaming is **not** a property of `getStream?` in general. It holds for `S3Provider`
-and is measured there; the other providers reach the object differently, and two of them read as
-fast as the backend will send regardless of what the consumer is doing.
+and is measured there; the other providers reach the object differently: `AzureBlobProvider` reads
+as fast as the backend will send regardless of what the consumer is doing, and the memory and local
+providers buffer the whole object.
 
 | Provider                      | Streaming                | Bounded memory for a slow consumer                                                   |
 | ----------------------------- | ------------------------ | ------------------------------------------------------------------------------------ |
 | `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.                     |
 | `GcsProvider`                 | Native, pulled           | Not measured — read on demand after the first chunk; cancelling destroys the source. |
-| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling now releases the upstream stream.                |
+| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling releases the upstream stream.                    |
 | `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                                      |
 | `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.                      |
 
