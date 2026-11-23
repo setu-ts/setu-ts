@@ -1,9 +1,10 @@
 # Milestone 143q — Databases off PostgreSQL (`@setu-ts/database-plugin`)
 
-> **Status:** Planning; re-verified against `develop` at `712369753` (after #609, #610, #611, #613)
-> on 2026-11-23. Branch: `feat/m143q-databases-off-postgresql` (or the two branches §0.2 proposes).
-> `develop` and `main` are protected; all work, implementation and fixes, stays on this letter's
-> branch until it merges through one pull request into `develop`.
+> **Status:** Approved by the maintainer on 2026-11-23 (decisions in §12); re-verified against
+> `develop` at `712369753` (after #609, #610, #611, #613). Branch:
+> `feat/m143q-databases-off-postgresql` (one branch and one pull request, D-1). `develop` and `main`
+> are protected; all work, implementation and fixes, stays on this branch until it merges through
+> one pull request into `develop`.
 
 ## 0. Objective & scope
 
@@ -72,19 +73,18 @@ adapters on MySQL, and the three NoSQL adapters), a new guarded MySQL backend, a
 frozen-relay test fixture. The two families share only `src/errors/classify.ts`, `README.md`, the
 PUBLIC_API section and the CHANGELOG entry.
 
-- **Part 1, MySQL** (`feat/m143q1-mysql-writes`): V13-230, V13-242, V13-243, V13-244, V13-251, the
-  MySQL conformance of the outbox, inbox, idempotency and agent-run stores (§3.7), and the guarded
-  MySQL suites. Holds the first High row. Its first step is the two measurements of §3.1.3 (M-1 on
-  MySQL, M-2 on PostgreSQL), before any Prisma design is written into `src/`; the rest of Part 1
-  (Drizzle, classifier) does not depend on them and may proceed in parallel.
-- **Part 2, NoSQL** (`feat/m143q2-nosql-bounds`, cut from `develop` after Part 1 merges): V13-231,
-  V13-236, V13-238, V13-239, V13-240, V13-241, V13-249, V13-142's README note. Holds the second High
-  row.
+- **Part 1, MySQL** (first on the branch): V13-230, V13-242, V13-243, V13-244, V13-251, the MySQL
+  conformance of the outbox, inbox, idempotency and agent-run stores (§3.7), and the guarded MySQL
+  suites. Holds the first High row. Its first step is the two measurements of §3.1.3 (M-1 on MySQL,
+  M-2 on PostgreSQL), before any Prisma design is written into `src/`; the rest of Part 1 (Drizzle,
+  classifier) does not depend on them and may proceed in parallel.
+- **Part 2, NoSQL** (after Part 1, same branch): V13-231, V13-236, V13-238, V13-239, V13-240,
+  V13-241, V13-249, V13-142's README note. Holds the second High row.
 
 Part 1 goes first because its `classify.ts` change is three additions that Part 2 does not touch,
-and its guarded MySQL backend is new CI infrastructure that should be seen alone. The split is an
-open decision (§12, D-1); everything below is written so either shape works, and each section names
-its part.
+and its guarded MySQL backend is new CI infrastructure that should be seen alone. D-1 decided one
+branch and one pull request (2026-11-23): the two parts are an order of work on that branch, Part 1
+first; each section still names its part.
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -553,7 +553,7 @@ lazy arms build their clients from two or three fields (§1) and pass no per-cal
 is settable; the documented DynamoDB `requestTimeout` only warns without `throwOnRequestTimeout`,
 Cosmos `requestTimeout` bounds writes only (X119-4).
 
-- **Decision.** Each of the three arms gains `callTimeoutMs?: number` (name: D-3; default: D-4,
+- **Decision.** Each of the three arms gains `requestTimeoutMs?: number` (name: D-3; default: D-4,
   recommendation 15 000). It is a **cancelling driver deadline**, not a JavaScript race:
   - DynamoDB: the lazy facade calls `client.send(command, { abortSignal })`; every facade method
     takes an optional second argument `{ abortSignal?: AbortSignal }` (additive on `IDynamoClient`),
@@ -563,7 +563,7 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
     transaction on every call.
   - Bigtable: `readRows` and `conditionalMutate` on the facade take an optional `{ timeoutMs }`; the
     lazy arm maps it to `gaxOptions: { timeout }` on `getRows` and `row.filter`.
-  - The signal is `AbortSignal.timeout(callTimeoutMs)` (a web standard, not a runtime API). On
+  - The signal is `AbortSignal.timeout(requestTimeoutMs)` (a web standard, not a runtime API). On
     DynamoDB and Cosmos a rejection while `signal.aborted` is true becomes `DatabaseTimeoutError`
     (504, "outcome unknown"), thrown by the adapter with the driver error as `cause` (decided by
     `signal.aborted`, not by error identity: smithy rewraps the reason into its own `AbortError`,
@@ -574,8 +574,17 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
     (`createReadStreamInternal.js:76-78, 251-257, 308-311`;
     `google-gax/build/src/createApiCall.js:80-105`). It does not rely on the classifier's
     `TimeoutError` rule, which M143h changes (V13-237), so the two letters cannot disagree.
-  - `0` is refused at construction, like `maxPageFetches` (`bigtable-adapter.ts:118-129`): a
-    positive integer is required. There is no "unbounded" value.
+  - **Range (maintainer decision D-4, 2026-11-23).** Default 15 000 ms. `0` **disables** the bound
+    (no signal, no `gaxOptions.timeout`: the SDK's own defaults apply, as before this letter), as
+    the Redis `commandTimeoutMs` does. Refused at construction with a `RangeError` naming the
+    option: a negative value, `NaN`, a non-integer, or a value above 2 147 483 647 (the timer
+    ceiling). The range check reuses `deadlineRangeError('requestTimeoutMs', …)` from
+    `@setu-ts/common` (`packages/common/src/health/deadline.ts:77`, exported, same "0 disables the
+    bound" wording), plus a `Number.isInteger` check before it.
+  - **Name (D-3).** `requestTimeoutMs`: Setu's existing name for a whole-call bound (M143r ships it
+    for storage, secrets and mail, following the Vault provider's sibling option). Its JSDoc and the
+    README say it bounds the whole call, retries included, unlike the SDKs' per-HTTP-request
+    `requestTimeout` (AWS `NodeHttpHandler`, Cosmos `ConnectionPolicy`).
 - **Inside a unit of work.** The bound applies to each call, including the commit's single batch.
 - **Why.** The fixed-behaviour rule: a project that configures nothing must not hang. The plugin
   constructs these clients, so the README's "the application owns the driver's bound" argument does
@@ -583,10 +592,11 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
   is the Redis `commandTimeoutMs`, 15 000 ms in three packages (§0.1).
 - **Test home.** `test/unit/nosql-call-bound.test.ts` (each adapter with a fake facade that never
   settles until aborted: rejects `DatabaseTimeoutError` with the abort as cause; the option reaches
-  the lazy arms: recording SDK fakes see `abortSignal` / `gaxOptions.timeout`; construction refuses
-  `0`, `NaN`, negatives); guarded real cells in `real-dynamo-adapter.test.ts`,
-  `real-cosmos-adapter.test.ts`, `real-bigtable-adapter.test.ts` behind the frozen relay (§3.13): a
-  point read, a page, a write and a unit of work each end within `callTimeoutMs + 1 s` with 504.
+  the lazy arms: recording SDK fakes see `abortSignal` / `gaxOptions.timeout`; `0` passes no signal
+  and no `gaxOptions.timeout`; construction refuses negatives, `NaN`, non-integers and values above
+  the ceiling); guarded real cells in `real-dynamo-adapter.test.ts`, `real-cosmos-adapter.test.ts`,
+  `real-bigtable-adapter.test.ts` behind the frozen relay (§3.13): a point read, a page, a write and
+  a unit of work each end within `requestTimeoutMs + 1 s` with 504.
 
 ### 3.9 V13-236 (Part 2): a readiness probe on the three NoSQL adapters
 
@@ -594,10 +604,10 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
 and `/ready` reports `up` for the whole outage (X119-2; `database-service.ts:426-427`).
 
 - **Decision.** Each adapter assigns `isHealthy` at construction. The probe's own bound is
-  `min(callTimeoutMs, 2000)`, the service's reachability bound (§1), so a probe against a frozen
-  store does not stay open after the service has stopped waiting. An expiry **rejects** (unknown,
-  which the indicator reads as `degraded`, the Drizzle probe's precedent); `false` is kept for an
-  answer that refused:
+  `min(requestTimeoutMs, 2000)` (2000 when `requestTimeoutMs` is `0`), the service's reachability
+  bound (§1), so a probe against a frozen store does not stay open after the service has stopped
+  waiting. An expiry **rejects** (unknown, which the indicator reads as `degraded`, the Drizzle
+  probe's precedent); `false` is kept for an answer that refused:
   - Cosmos: `database.read()`, the same call `connect()` already requires (`cosmos-adapter.ts:176`),
     so no new permission.
   - DynamoDB and Bigtable: a point read of a fixed absent key (`'__setu_readiness__'`) on the
@@ -730,13 +740,13 @@ grows with its update count (2.8 ms new, 97 ms after about 8,400 updates).
   `findById` after `connect()` on the emulator with `metricsEnabled: false`.
 - **Decision (V13-240).** If M-3 is under 500 ms, no warm-up is built: §3.11 closes the row and the
   guarded cell asserts the first call's latency. Otherwise `connect()` runs one warm-up read and
-  awaits it, bounded by `min(callTimeoutMs, 2000)`, so boot waits at most 2 s on a frozen store; its
-  result is ignored (an outage at boot is reported by `/ready`, not by a failed start). The warm-up
-  is independent of `readinessEntity`: it reads a sentinel row of the readiness entity's table when
-  one exists, else of the first mapped table, else of a fixed table name, since a `NOT_FOUND` still
-  establishes the channel. The README names the SDK's `METADATA_SERVER_DETECTION=none` switch. The
-  admin-plane probe the README rejected stays rejected: this is a data-plane read of the
-  application's own table.
+  awaits it, bounded by `min(requestTimeoutMs, 2000)` (2000 when it is `0`), so boot waits at most 2
+  s on a frozen store; its result is ignored (an outage at boot is reported by `/ready`, not by a
+  failed start). The warm-up is independent of `readinessEntity`: it reads a sentinel row of the
+  readiness entity's table when one exists, else of the first mapped table, else of a fixed table
+  name, since a `NOT_FOUND` still establishes the channel. The README names the SDK's
+  `METADATA_SERVER_DETECTION=none` switch. The admin-plane probe the README rejected stays rejected:
+  this is a data-plane read of the application's own table.
 - **Test home.** `test/unit/bigtable-page.test.ts` and `bigtable-data-source.test.ts` (every read
   carries the latest-cell filter first); `bigtable-client-seam.test.ts` (the new variant maps to the
   SDK's `column.cellLimit`); `bigtable-adapter.test.ts` (connect warms once, ignores the result,
@@ -794,34 +804,34 @@ the `scope` parameters and the frozen relay are internal.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                                   | Consumer                                                                                                                                         | Behavior (per implementation)                                                                                                                                                                            |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `callTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0`/negative/`NaN` refused at construction |
-| `readinessEntity` (DynamoDB, Bigtable arms)                              | carried by `buildAdapterOptions`; `isHealthy`, the Bigtable warm-up                                                                              | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn`                                                                                                        |
-| `clientOptions` (Bigtable lazy arm; D-7 for DynamoDB and Cosmos)         | carried by `buildAdapterOptions`; `createLazyBigtableLoader` → SDK constructor                                                                   | spread first; `projectId`, `apiEndpoint`, `metricsEnabled` defaults fill only unset keys; unread when `client` is injected (documented, as `projectId` already is)                                       |
-| `dialect: 'mysql'` (existing, wider consumer)                            | Drizzle `contains`, offset-only `findAll`                                                                                                        | bound escape parameter; `LIMIT 18446744073709551615`                                                                                                                                                     |
+| Option                                                                      | Consumer                                                                                                                                         | Behavior (per implementation)                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0` disables the bound; negative, `NaN`, non-integer or above 2 147 483 647 refused at construction |
+| `readinessEntity` (DynamoDB, Bigtable arms)                                 | carried by `buildAdapterOptions`; `isHealthy`, the Bigtable warm-up                                                                              | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn`                                                                                                                                                                 |
+| `clientOptions` (Bigtable lazy arm; D-7 for DynamoDB and Cosmos)            | carried by `buildAdapterOptions`; `createLazyBigtableLoader` → SDK constructor                                                                   | spread first; `projectId`, `apiEndpoint`, `metricsEnabled` defaults fill only unset keys; unread when `client` is injected (documented, as `projectId` already is)                                                                                                |
+| `dialect: 'mysql'` (existing, wider consumer)                               | Drizzle `contains`, offset-only `findAll`                                                                                                        | bound escape parameter; `LIMIT 18446744073709551615`                                                                                                                                                                                                              |
 
 ## 5. Implementation files
 
-| File                                                                                                            | Purpose                                                                                                                                             |
-| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`                                                                                                  | No new export; types re-exported as today                                                                                                           |
-| `src/interfaces/index.ts`                                                                                       | §4.1 option members and JSDoc; `dialect` JSDoc                                                                                                      |
-| `src/adapters/prisma/prisma-adapter.ts`                                                                         | §3.1: `updateMany`/`deleteMany` on the facade, count path, `scope`, `buildKeyColumnsWhere`                                                          |
-| `src/adapters/drizzle/drizzle-adapter.ts`                                                                       | §3.2 affected-row path, `affectedRowsOf`, `scope`; §3.3 escape and offset                                                                           |
-| `src/errors/classify.ts`                                                                                        | §3.4 anchor; §3.5 `ER_LOCK_DEADLOCK`, Prisma `kind`                                                                                                 |
-| `src/adapters/dynamo/dynamo-client.ts`, `dynamo-client-types.ts`                                                | §3.8 `abortSignal`                                                                                                                                  |
-| `src/adapters/dynamo/dynamo-adapter.ts`, `dynamo-data-source.ts`, `dynamo-transaction-buffer.ts`                | §3.8 bound, §3.9 probe, §3.10 transactional conditional writes and commit conflict                                                                  |
-| `src/adapters/cosmos/cosmos-client.ts`, `cosmos-client-types.ts`                                                | §3.8 `abortSignal`, §3.10 `ifMatch`                                                                                                                 |
-| `src/adapters/cosmos/cosmos-adapter.ts`, `cosmos-data-source.ts`, `cosmos-transaction.ts`                       | §3.8, §3.9, §3.10                                                                                                                                   |
-| `src/adapters/bigtable/bigtable-client.ts`, `bigtable-client-types.ts`                                          | §3.11 `metricsEnabled`, `clientOptions`; §3.8 `timeoutMs`; §3.12 filter variant                                                                     |
-| `src/adapters/bigtable/bigtable-adapter.ts`, `bigtable-data-source.ts`, `bigtable-transaction.ts`               | §3.8, §3.9, §3.10, §3.12                                                                                                                            |
-| `src/agent-runs/database-agent-run-store.ts`                                                                    | §3.14                                                                                                                                               |
-| `src/plugin/database-plugin.ts`                                                                                 | `carry('callTimeoutMs')`, `carry('readinessEntity')`, `carry('clientOptions')`; the `BIGTABLE_EMULATOR_HOST` read through `ctx.runtime.env` (§3.11) |
-| `src/query/like-escape.ts`                                                                                      | the `!` escape form for MySQL (§3.3)                                                                                                                |
-| `src/errors.ts`                                                                                                 | unchanged unless D-13 chooses 501 for the two Drizzle refusals                                                                                      |
-| `package.json`, `deno.json` (imports block, regenerated), `scripts/node-dependency-ranges.ts`, `pnpm-lock.yaml` | devDependencies `mysql2`, `@prisma/adapter-mariadb` (never runtime dependencies), with their `EXTERNAL_RANGES` rows (§1)                            |
-| `README.md`, `AGENT_CARD.md`                                                                                    | §2 deliverables, §3.6 note                                                                                                                          |
+| File                                                                                                            | Purpose                                                                                                                                                |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`                                                                                                  | No new export; types re-exported as today                                                                                                              |
+| `src/interfaces/index.ts`                                                                                       | §4.1 option members and JSDoc; `dialect` JSDoc                                                                                                         |
+| `src/adapters/prisma/prisma-adapter.ts`                                                                         | §3.1: `updateMany`/`deleteMany` on the facade, count path, `scope`, `buildKeyColumnsWhere`                                                             |
+| `src/adapters/drizzle/drizzle-adapter.ts`                                                                       | §3.2 affected-row path, `affectedRowsOf`, `scope`; §3.3 escape and offset                                                                              |
+| `src/errors/classify.ts`                                                                                        | §3.4 anchor; §3.5 `ER_LOCK_DEADLOCK`, Prisma `kind`                                                                                                    |
+| `src/adapters/dynamo/dynamo-client.ts`, `dynamo-client-types.ts`                                                | §3.8 `abortSignal`                                                                                                                                     |
+| `src/adapters/dynamo/dynamo-adapter.ts`, `dynamo-data-source.ts`, `dynamo-transaction-buffer.ts`                | §3.8 bound, §3.9 probe, §3.10 transactional conditional writes and commit conflict                                                                     |
+| `src/adapters/cosmos/cosmos-client.ts`, `cosmos-client-types.ts`                                                | §3.8 `abortSignal`, §3.10 `ifMatch`                                                                                                                    |
+| `src/adapters/cosmos/cosmos-adapter.ts`, `cosmos-data-source.ts`, `cosmos-transaction.ts`                       | §3.8, §3.9, §3.10                                                                                                                                      |
+| `src/adapters/bigtable/bigtable-client.ts`, `bigtable-client-types.ts`                                          | §3.11 `metricsEnabled`, `clientOptions`; §3.8 `timeoutMs`; §3.12 filter variant                                                                        |
+| `src/adapters/bigtable/bigtable-adapter.ts`, `bigtable-data-source.ts`, `bigtable-transaction.ts`               | §3.8, §3.9, §3.10, §3.12                                                                                                                               |
+| `src/agent-runs/database-agent-run-store.ts`                                                                    | §3.14                                                                                                                                                  |
+| `src/plugin/database-plugin.ts`                                                                                 | `carry('requestTimeoutMs')`, `carry('readinessEntity')`, `carry('clientOptions')`; the `BIGTABLE_EMULATOR_HOST` read through `ctx.runtime.env` (§3.11) |
+| `src/query/like-escape.ts`                                                                                      | the `!` escape form for MySQL (§3.3)                                                                                                                   |
+| `src/errors.ts`                                                                                                 | unchanged unless D-13 chooses 501 for the two Drizzle refusals                                                                                         |
+| `package.json`, `deno.json` (imports block, regenerated), `scripts/node-dependency-ranges.ts`, `pnpm-lock.yaml` | devDependencies `mysql2`, `@prisma/adapter-mariadb` (never runtime dependencies), with their `EXTERNAL_RANGES` rows (§1)                               |
+| `README.md`, `AGENT_CARD.md`                                                                                    | §2 deliverables, §3.6 note                                                                                                                             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -841,7 +851,7 @@ the `scope` parameters and the frozen relay are internal.
 | `test/unit/bigtable-adapter.test.ts`, `bigtable-data-source.test.ts`, `bigtable-page.test.ts` (extended) | `bigtable-adapter.ts`, `bigtable-data-source.ts`                                                                                                                                     | §3.12                                                                                                                                                                                                                                                       |
 | `test/unit/dynamo-client-seam.test.ts`, `cosmos-client-seam.test.ts` (extended)                          | `dynamo-client.ts`, `cosmos-client.ts`                                                                                                                                               | the lazy arms pass the signal; Cosmos `clientOptions` if D-7 says yes                                                                                                                                                                                       |
 | `test/unit/agent-run-store.test.ts` (extended)                                                           | `database-agent-run-store.ts`                                                                                                                                                        | §3.14                                                                                                                                                                                                                                                       |
-| `test/unit/plugin-nosql-options.test.ts` (new)                                                           | `database-plugin.ts`                                                                                                                                                                 | registering through `DatabasePlugin({ type: 'dynamodb' \| 'cosmos' \| 'bigtable', options: { callTimeoutMs, readinessEntity, clientOptions } })` delivers each value to the adapter; `BIGTABLE_EMULATOR_HOST` in a fake `runtime.env` turns metrics off     |
+| `test/unit/plugin-nosql-options.test.ts` (new)                                                           | `database-plugin.ts`                                                                                                                                                                 | registering through `DatabasePlugin({ type: 'dynamodb' \| 'cosmos' \| 'bigtable', options: { requestTimeoutMs, readinessEntity, clientOptions } })` delivers each value to the adapter; `BIGTABLE_EMULATOR_HOST` in a fake `runtime.env` turns metrics off  |
 | `test/unit/like-escape.test.ts` (extended, or new if absent)                                             | `like-escape.ts`                                                                                                                                                                     | the `!` form escapes `!`, `%`, `_` and leaves `\`                                                                                                                                                                                                           |
 | `test/unit/idempotency/readme-ddl.test.ts` (extended)                                                    | README DDL                                                                                                                                                                           | the MySQL DDL blocks match the fixtures                                                                                                                                                                                                                     |
 | `test/unit/nosql-commit-conflict.test.ts` (new)                                                          | `dynamo-adapter.ts`, `cosmos-data-source.ts`, `bigtable-transaction.ts`                                                                                                              | §3.10 mapping table: Put → `DuplicateKeyError`; Update/Delete/`TransactionConflict` → `SerializationConflictError`; Cosmos 412 → `SerializationConflictError`, other codes unchanged; Bigtable `!matched` → `SerializationConflictError`; same-row refusals |
@@ -873,7 +883,7 @@ pnpm run test:deno-lane
 #   M-2: SERVER_CORES=8-15 LOAD_CORES=16-23 PASSES=15 PAIR=setu-prisma-single,setu-prisma-count \
 #        deno run -A db-bench.ts   (in a new dated copy of ~/setu-benchmarks/2026-11-02-db-m128)
 # guarded backends, each with a positive control that the suite did not skip:
-MYSQL_URL=mysql://root:root@127.0.0.1:3307/setu_test \
+MYSQL_URL=mysql://root:setu@127.0.0.1:3307/setu_test \
   DYNAMODB_ENDPOINT=http://127.0.0.1:8000 COSMOS_ENDPOINT=… COSMOS_KEY=… \
   BIGTABLE_EMULATOR_ENDPOINT=127.0.0.1:8086 pnpm test database-plugin
 pnpm run release:publish --dry-run
@@ -979,13 +989,26 @@ letter ("database errors a client can act on, and store signals"), takes it, wit
 ## 12. Open decisions for the maintainer
 
 D-2 (which Prisma connectors take the count path) was decided by the maintainer on 2026-11-22 and is
-recorded in §3.1.0; it is no longer open. D-11 is new with that decision; D-13 is new from the
-2026-11-23 plan review.
+recorded in §3.1.0. **Every decision below was decided by the maintainer on 2026-11-23**: D-1, D-5,
+D-6, D-7, D-8 (option a), D-9, D-10, D-11 and D-13 as recommended; D-3 and D-4 **changed** from the
+recommendation:
+
+- **D-3 decided: `requestTimeoutMs`** (not `callTimeoutMs`), Setu's existing name for a whole-call
+  bound (M143r, #614, for storage, secrets and mail, after the Vault provider's sibling option). Its
+  JSDoc and README say it bounds the whole call, retries included, unlike the SDKs' per-HTTP-request
+  `requestTimeout`.
+- **D-4 decided: 15 000 ms by default, and `0` disables the bound** (as Redis `commandTimeoutMs`
+  does); negative, `NaN` and non-integer values are refused (§3.8). Reason: a long scan or a large
+  Bigtable read (its SDK allows 12 h) would otherwise fail with 504 after upgrading, with no way
+  out.
+- **D-6 decided: keep the 501, plus a register row** for memory-adapter parity (§13).
+
+The table keeps the options and evidence as they were put to the maintainer.
 
 | #    | Decision                                                                                                                              | Options and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Recommendation                                                                                                                                                                                                                   |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | D-1  | One pull request or two (§0.2)                                                                                                        | One: fewer merges of shared files. Two: each High row reviewed with its own family; the MySQL CI service lands alone. Two pull requests means two `feat/` branches for one letter, which CLAUDE.md's "exactly ONE feature branch" rule forbids unless recorded as an approved exception. No framework analogue (a process question).                                                                                                                                                                                                                                                            | One branch and one pull request, as briefed; Part 1 before Part 2 in commit order.                                                                                                                                               |
-| D-3  | Name of the per-call bound                                                                                                            | `callTimeoutMs` (README heading "Bounding a call"); `commandTimeoutMs` (the Redis siblings here; ioredis `commandTimeout`); `requestTimeoutMs` (AWS `requestTimeout`, Cosmos `requestTimeout`, both per HTTP request, not per call). Table §12.1 Q7.                                                                                                                                                                                                                                                                                                                                            | `callTimeoutMs`: it bounds the whole call (retries included), which the SDKs' `requestTimeout` does not.                                                                                                                         |
+| D-3  | Name of the per-call bound                                                                                                            | `requestTimeoutMs` (README heading "Bounding a call"); `commandTimeoutMs` (the Redis siblings here; ioredis `commandTimeout`); `requestTimeoutMs` (AWS `requestTimeout`, Cosmos `requestTimeout`, both per HTTP request, not per call). Table §12.1 Q7.                                                                                                                                                                                                                                                                                                                                         | `requestTimeoutMs`: it bounds the whole call (retries included), which the SDKs' `requestTimeout` does not.                                                                                                                      |
 | D-4  | Default bound                                                                                                                         | No compared framework sets a per-call default for these stores: they inherit the SDK's (AWS SDK v3: none; Cosmos JS: 60 s per HTTP request, nothing per query; Cosmos .NET/EF Core: 6 s; Bigtable Node: ReadRows 12 h, CheckAndMutateRow 20 s; AWS Java v2, Quarkus, Spring Cloud AWS: none; Cassandra driver under Spring Boot: 2 s). Table §12.1 Q1. The sibling for a backend this repository constructs is Redis `commandTimeoutMs` 15 000 ms (three packages). Options: 15 000 ms; 5 000 ms; none (today, and the outcome sentence says a call ends within a bound).                       | 15 000 ms. A departure from "inherit the SDK", justified because two of the three SDK defaults are none or 12 h, and V13-238's outcome requires a bound by default.                                                              |
 | D-5  | Readiness probe target without configuration                                                                                          | Mapped entity read (§3.9: the application's own data permission; no probe on an empty mapping, which is what the CLI scaffolds today). Compared: Xabaril's DynamoDB check calls `ListTables` (account-wide `dynamodb:ListTables`); its Cosmos check `ReadAccountAsync` (the `readMetadata` permission every client holds); its Azure Tables check runs a `filter:"false"` query precisely because the metadata call fails under a data-only role; Spring Cloud GCP Datastore runs a key-only query; Quarkus has no DynamoDB check and nothing has a Bigtable one (no analogue). Table §12.1 Q2. | Mapped entity read for DynamoDB and Bigtable (the Azure Tables precedent: a data-plane read the app's role can make), `database.read()` for Cosmos (the Xabaril precedent), plus the CLI hand-over so scaffolds carry an entity. |
 | D-6  | Memory adapter: conditional writes inside a unit of work                                                                              | Keep the 501 (no row asks). Add them for parity with the test double: EF Core's InMemory provider does enforce concurrency tokens and throws `DbUpdateConcurrencyException`; spring-data-keyvalue does not honour `@Version`. Table §12.1 Q4.                                                                                                                                                                                                                                                                                                                                                   | Keep the refusal in this letter and open a register row for parity: with §3.10 shipped, a unit-of-work test that runs on memory would refuse what production allows.                                                             |
@@ -1023,15 +1046,44 @@ recorded in §3.1.0; it is no longer open. D-11 is new with that decision; D-13 
   change, the conditional-write rule "decided from the write's affected rows", transactional
   conditional writes on the three NoSQL stores, the readiness probe.
 - `CHANGELOG.md` (one `0.14.0` entry for the letter): `Fixed` V13-230, V13-242, V13-243, V13-244,
-  V13-251, V13-231, V13-239, V13-240, V13-249; `Added` `callTimeoutMs`, `readinessEntity`,
+  V13-251, V13-231, V13-239, V13-240, V13-249; `Added` `requestTimeoutMs`, `readinessEntity`,
   `clientOptions`, conditional writes in NoSQL units of work, NoSQL readiness probes; `BREAKING` the
   Bigtable facade filter variant. Each entry names its PR number after `gh pr create`.
-- `docs/upgrading.md`: the default call bound on the three stores (a call that used to wait now ends
-  at the bound with 504); `/ready` can now report the three stores down; an injected Bigtable facade
-  must handle the new filter variant; Drizzle with MySQL now writes.
+- `docs/upgrading.md` and the `CHANGELOG.md` entry list **every behaviour an existing application
+  meets, each with its way out** (maintainer, 2026-11-23):
+  - DynamoDB, Cosmos and Bigtable calls end at 15 s with 504 (`DatabaseTimeoutError`) where they
+    used to wait: raise `requestTimeoutMs`, or set `0` to restore the SDK's own behaviour;
+  - Bigtable client-side metrics are off whenever `apiEndpoint` is set, a real private endpoint
+    included, or `BIGTABLE_EMULATOR_HOST` is set: `clientOptions: { metricsEnabled: true }` keeps
+    them;
+  - a NoSQL unit of work whose commit loses a precondition now answers 409
+    (`SerializationConflictError`) where it was a masked 500, and a buffered plain update of a row
+    deleted meanwhile does the same; a retry loop keyed on 409 now retries it;
+  - a conditional write in a NoSQL unit of work to a row already written there (or any write after
+    one) is refused by name (`CosmosTransactionScopeError` / `BigtableTransactionScopeError`): write
+    the row once per unit of work;
+  - `/ready` can now report the three stores down (the probe reads `readinessEntity`, default the
+    first mapped entity; an application with no entity mapped gets one `warn` and no probe): set
+    `readinessEntity` to a table the application's role can read;
+  - an injected Bigtable facade must accept the new `{ column: { cellLimit } }` filter variant and
+    the optional `{ timeoutMs }` argument; every read now asks for the latest cell only;
+  - Prisma conditional and versioned writes on a connector other than PostgreSQL (Branch B) or on
+    every connector (Branch A) run `updateMany`/`deleteMany` in a short transaction: a lost race on
+    MySQL now answers 409/404 instead of reporting success; a misconfigured `keyColumns` that
+    matches several rows throws and rolls back;
+  - Drizzle with MySQL now writes through the repository (it was a masked 500), and the MySQL
+    `contains` filter escapes with `!`;
+  - a Prisma `P2010` carrying a duplicate key or a write conflict through `query()` now answers 409
+    where it was 500; mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed mysql2 connection answers 503.
 - `packages/database-plugin/README.md`: C1–C7, §3.6, a Drizzle-on-MySQL section (pool and bridge
   example, `FOUND_ROWS`, `dialect: 'mysql'`), the MySQL DDL for the outbox, inbox and idempotency
   stores (pinned by `readme-ddl.test.ts`, extended to the MySQL DDL).
 - `packages/database-plugin/AGENT_CARD.md`: one line each for the call bound and the readiness
   entity, within the card's byte budget.
 - `CLAUDE.md` status line and the ROADMAP Progress Tracking row, in the letter's own PR.
+- `smoke/DEFECTS.md`: a new register row (D-6) — the memory adapter refuses a conditional write
+  inside a unit of work while DynamoDB, Cosmos and Bigtable accept it, so a test on the memory
+  double refuses what production allows (EF Core's InMemory provider enforces concurrency tokens).
+  Unowned, for a later letter.
+- `ROADMAP.md` lanes table: name `scripts/node-dependency-ranges.ts`, `pnpm-lock.yaml` and
+  `.github/workflows/ci.yml` under Data for this change, before the code (D-10).
