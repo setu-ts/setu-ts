@@ -30,7 +30,7 @@ dead-lettered.
 A consumer role now needs `sqs:GetQueueAttributes` on the source queue, plus `sqs:GetQueueUrl` and
 `sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` for a customer-managed KMS
 key). With a redrive policy whose `maxReceiveCount` is at or below a job's `maxAttempts`, attempts
-are lowered to `maxReceiveCount - 1` and a warning says so; set `maxReceiveCount` to
+are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set `maxReceiveCount` to
 `maxAttempts + 1` to keep them all.
 
 Other changes you may notice: a job longer than `visibilityTimeoutSeconds` now runs once instead of

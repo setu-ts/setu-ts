@@ -403,6 +403,25 @@ describe('messaging backplane independent delivery and frame age', () => {
     await backplane.close();
   });
 
+  it('rethrows a hostile publish rejection unchanged and logs no warning', async () => {
+    const broker = new FakeBroker();
+    const warn = vi.fn();
+    const backplane = new MessagingBackplane(
+      broker,
+      'node-a',
+      'frames',
+      { failed: vi.fn(), succeeded: vi.fn(), warn },
+      () => 0,
+    );
+    await backplane.connect();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    vi.spyOn(broker, 'publish').mockRejectedValueOnce(proxy);
+    await expect(backplane.publish(FRAME)).rejects.toBe(proxy);
+    expect(warn).not.toHaveBeenCalled();
+    await backplane.close();
+  });
+
   it('a connect after close does not reuse the stale pending open', async () => {
     const broker = new FakeBroker();
     const stale = Promise.withResolvers<ISubscription>();

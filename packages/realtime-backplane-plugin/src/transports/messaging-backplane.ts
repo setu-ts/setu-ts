@@ -46,6 +46,29 @@ export function isRealtimeFrame(value: unknown): value is RealtimeFrame {
 }
 
 /**
+ * Whether a rejected publish may still reach the broker: a publish timeout or an
+ * outcome-unknown backend fault, including a raw connection error after the
+ * write. The name check also covers a `BackendOutcomeUnknownError` from a
+ * second installed copy of `@setu-ts/common`, which `instanceof` cannot
+ * recognise. Never throws: a hostile rejection value counts as known.
+ */
+function outcomeUnknown(error: unknown): boolean {
+  try {
+    if (
+      error instanceof Error &&
+      (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError')
+    )
+      return true;
+    return (
+      toBackendFault(error, 'realtime-backplane-plugin: messaging transport') instanceof
+      BackendOutcomeUnknownError
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Carries frames over whatever broker is registered under
  * `CAPABILITIES.MESSAGING`.
  *
@@ -189,14 +212,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
       // connection error after the write) means the broker may still deliver
       // the frame. PublishTimeoutError is matched by name: it belongs to the
       // messaging plugin, which this package cannot import.
-      // The name check also covers a BackendOutcomeUnknownError from a second
-      // installed copy of @setu-ts/common, which instanceof cannot recognise.
-      this.#frameAge.publishFailed(
-        (error instanceof Error &&
-          (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError')) ||
-          toBackendFault(error, 'realtime-backplane-plugin: messaging transport') instanceof
-            BackendOutcomeUnknownError,
-      );
+      this.#frameAge.publishFailed(outcomeUnknown(error));
       throw error;
     }
     this.#frameAge.publishSucceeded();

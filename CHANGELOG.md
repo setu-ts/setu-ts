@@ -60,7 +60,9 @@ All notable changes to this project are documented here. The format follows
   `'messaging'` and `'redis'` transports drops a frame older than the bound by the receiver's clock;
   frames carry the sender's `sentAtMs`. `BackplaneFanOutUnsupportedError` and `BackplaneReporter`
   are exported; `createBackplane`, `MessagingBackplane` and `RedisBackplane` take an optional `now`
-  clock.
+  clock. A publish whose outcome is unknown (it timed out, or the connection was lost after the
+  write) logs one `warn` per failing state, `publish failed; the frame may still arrive late`; a
+  RabbitMQ channel that closes before its confirm logs none.
 
 ### Changed
 

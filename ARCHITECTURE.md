@@ -1397,7 +1397,7 @@ queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue. `S
 AWS SQS with visibility timeouts, attempts counted from SQS's `ApproximateReceiveCount`, and DLQ
 promotion when
 `maxAttempts` is reached. Since 0.14.0 the target comes from `deadLetterQueues[name]` or the queue's
-own redrive policy (attempts are lowered to `maxReceiveCount - 1` when that is smaller); the adapter forwards the original
+own redrive policy (attempts are lowered to `maxReceiveCount - 1`, at least 1, when that is smaller); the adapter forwards the original
 body with three `setu-*` attributes (reason, attempts, source message id) and then deletes the
 source, `false` discards instead, and a consumed name with no target is refused before its first
 poll. The
