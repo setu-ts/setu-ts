@@ -45,6 +45,11 @@ export interface GcsFacadeFile {
   save(data: Uint8Array, options: Record<string, unknown>, cb: (error: Error | null) => void): void;
   delete(): Promise<boolean>;
   getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
+  /**
+   * The object's bytes as a stream. Cancelling a `getStream` result destroys
+   * it and waits for its iterator to finish, so `destroy()` must end a read
+   * still pending (a Node `Readable` does, unless it never emits `'close'`).
+   */
   createReadStream(): NodeJS.ReadableStream;
 }
 
@@ -76,6 +81,11 @@ export interface GcsFile {
   ): void;
   delete(callback: (error: Error | null) => void): void;
   getSignedUrl(config: { action: 'read'; expires: number }): Promise<[string]>;
+  /**
+   * The object's bytes as a stream. Cancelling a `getStream` result destroys
+   * it and waits for its iterator to finish, so `destroy()` must end a read
+   * still pending (a Node `Readable` does, unless it never emits `'close'`).
+   */
   createReadStream(): NodeJS.ReadableStream;
 }
 
@@ -623,11 +633,10 @@ export class GcsProvider implements StorageProvider {
   ): Promise<ReadableStream<Uint8Array> | null> {
     const iterator = readable[Symbol.asyncIterator]();
     let released = false;
-    let destroyed = false;
     const release = (): void => {
       if (released) return;
       released = true;
-      destroyed = destroySource(readable);
+      destroySource(readable);
     };
     let first: IteratorResult<unknown>;
     try {
@@ -654,11 +663,11 @@ export class GcsProvider implements StorageProvider {
       },
       async cancel(): Promise<void> {
         release();
-        // A destroyed source ends a pull in flight, so `return()` settles and is
-        // awaited. An injected source with no `destroy()` that stalls mid-pull
-        // would hold `return()` (and the kernel's wait on this cancel) forever.
-        const closing = Promise.resolve(iterator.return?.()).catch(() => undefined);
-        if (destroyed) await closing;
+        // Waits for the source, as the kernel's cancel contract asks: the real
+        // SDK stream's destroy ends a read in flight, so `return()` settles. An
+        // injected stream must do the same; one whose destroy leaves a read
+        // pending (or that has none) holds this cancel as long as that read.
+        await iterator.return?.();
       },
     });
   }
@@ -672,9 +681,7 @@ function toBytes(chunk: unknown): Uint8Array {
 }
 
 /** Destroys a node stream when it exposes `destroy`; a no-op otherwise. */
-function destroySource(source: unknown): boolean {
+function destroySource(source: unknown): void {
   const destroy = (source as { destroy?: unknown }).destroy;
-  if (typeof destroy !== 'function') return false;
-  (destroy as () => void).call(source);
-  return true;
+  if (typeof destroy === 'function') (destroy as () => void).call(source);
 }
