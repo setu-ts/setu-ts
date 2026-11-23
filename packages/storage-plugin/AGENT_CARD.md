@@ -52,4 +52,4 @@ const url = await storage.getSignedUrl('avatars/user-1', { expiresIn: 3600 });
 - `provider` selects `'local'`, `'s3'`, `'b2'`, `'gcs'` or `'azure'` instead of memory.
 - `allowedMimeTypes`, `maxFiles` and `maxBodyBytes` constrain upload parsing.
 - `getStream` streams reads; providers without native streaming wrap buffered bytes.
-- Outages reject (503/504); only a backend's named object miss reads as `null`/`false`.
+- Outages reject (503/504); a HEAD or GCS 404 cannot tell a missing bucket from an object.

@@ -200,8 +200,10 @@ of the live service.
   `apiEndpoint` turns the SDK's authentication off (§1), the adapter passes
   `useAuthWithCustomEndpoint: options.endpointAuth ?? true`: credentials are sent to a custom
   endpoint by default (a private endpoint in production needs them), and `endpointAuth: false` is
-  the documented setting for an emulator that has no credentials to check. The README also says
-  `STORAGE_EMULATOR_HOST` overrides `endpoint` when both are set.
+  the documented setting for an emulator that has no credentials to check. An `endpoint` set while
+  `STORAGE_EMULATOR_HOST` is set is refused with `RangeError` (PR #614 review): SDK 7.22.0 sends
+  JSON requests to the variable's raw value and uploads to `endpoint`, so the pair would split one
+  object's reads and writes. An injected `client` is not checked.
 - **Test home:** `gcs-provider.test.ts` (fake module records `apiEndpoint` and
   `useAuthWithCustomEndpoint` for unset/`true`/`false`); `gcs-standin.test.ts` (with
   `endpointAuth: false`); the refused-credential case (§3.2, 403 → named plain Error) on an in-test

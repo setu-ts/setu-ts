@@ -108,9 +108,13 @@ describe('real GCS SDK drip download stops at its deadline', () => {
       await provider.connect();
       const started = performance.now();
       await expect(provider.get('k')).rejects.toBeInstanceOf(BackendUnavailableError);
-      // The server sees the socket close: the SDK request was destroyed, not
-      // left dripping (it would otherwise run for the full drip, seconds).
-      await closed;
+      // The server sees the socket close: the SDK request was destroyed. The
+      // drip never ends on its own, so a request left running fails here.
+      const outcome = await Promise.race([
+        closed.then(() => 'closed'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('still dripping'), 2_000)),
+      ]);
+      expect(outcome).toBe('closed');
       expect(mediaRequests).toBe(1);
       expect(closedAt! - started).toBeLessThan(2_000);
       await provider.disconnect();

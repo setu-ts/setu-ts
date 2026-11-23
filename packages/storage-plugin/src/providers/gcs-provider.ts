@@ -375,8 +375,9 @@ export class GcsProvider implements StorageProvider {
    * @param timing - The runtime timer surface for the bound (ambient timers
    *   when absent)
    * @param env - Runtime environment for checking `STORAGE_EMULATOR_HOST`
-   * @throws {RangeError} When `requestTimeoutMs` is out of range or the
-   *   runtime's `STORAGE_EMULATOR_HOST` differs from `endpoint`
+   * @throws {RangeError} When `requestTimeoutMs` is out of range, or an
+   *   `endpoint` is given while the runtime's `STORAGE_EMULATOR_HOST` is set
+   *   (and no `client` is injected)
    */
   constructor(
     options?: GcsProviderOptions,
