@@ -12,6 +12,67 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Pass `waitUntil` to `RuntimePlugin` on Workers (`@setu-ts/runtime`, `@setu-ts/cloudflare-plugin`)
+
+```typescript
+import { env, waitUntil } from 'cloudflare:workers';
+
+createApplication({ plugins: [RuntimePlugin({ env, waitUntil }), CloudflarePlugin({ env })] });
+```
+
+`RuntimePlugin({ waitUntil })` keeps the kernel's asynchronous `ctx.defer` cleanups alive after a
+client leaves (without it workerd may cut them off), and `CloudflarePlugin` uses the same function
+when its own `waitUntil` is omitted. An existing `CloudflarePlugin({ waitUntil })` keeps working and
+wins. Pass the module import, never one request's `ctx.waitUntil`.
+
+### Workers queue consumers need a dead-letter target (`@setu-ts/cloudflare-plugin`)
+
+A Worker that calls `queue.process()` now throws `CloudflareUnsupportedError` at startup unless the
+queue arm says where an exhausted job goes:
+
+```typescript
+CloudflarePlugin({
+  env,
+  waitUntil,
+  queue: { binding: 'JOBS', maxRetries: 3, deadLetterQueue: 'JOBS_DLQ' }, // or deadLetterQueue: false
+});
+```
+
+`deadLetterQueue` names a Queues producer binding (add a `[[queues.producers]]` stanza for it), or
+`false` discards exhausted jobs with one warning each. `maxRetries` must equal the consumer's
+`max_retries` in `wrangler.toml` (both default to 3). A job's attempt budget is now
+`min(maxAttempts, maxRetries)`, one fewer than the platform's deliveries, so a failed dead-letter
+send can be retried; a larger `maxAttempts` is capped with one warning per job name. `onFailed` now
+runs once on the final attempt. Keeping a `dead_letter_queue` in `wrangler.toml` as well is
+recommended. A Worker that only adds jobs needs nothing.
+
+### The edge cache stores nothing per visitor (`@setu-ts/cloudflare-plugin`)
+
+`cacheApiMiddleware` follows `cacheMiddleware`'s rule. A response with `Cache-Control: private` or
+`no-store` is no longer stored, **including `private=Set-Cookie`**, which Cloudflare's own docs
+suggest for caching a response that sets a cookie; the middleware logs one warning naming that
+header. Drop `Set-Cookie` from cacheable responses instead. A request carrying `Authorization` or a
+cookie is served only an entry that says `public` and does not vary on `Cookie` or `Authorization`;
+set `credentialCookies` to the cookies that identify a visitor if an analytics cookie should not
+make a request uncacheable. `ttlSeconds` now writes `max-age=N` without `public`, so return
+`Cache-Control: public, …` yourself for a response a signed-in visitor may share.
+`assessCacheability` reports the new `'private'` refusal and reports `'set-cookie'` whenever
+`Set-Cookie` is present; an exhaustive `switch` over `CacheRefusal` needs the new member. Evict
+after a write with `purgeCacheApi({ url, locales })`.
+
+### WebSocket rooms on Workers need the Durable Object arm (`@setu-ts/websocket-plugin`)
+
+On Cloudflare Workers, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` unless
+`CloudflarePlugin({ durableObject: { binding } })` is registered with its exported hub class (see
+the cloudflare-plugin README). Before, rooms on Workers silently reached only one member per Worker.
+
+### Durable Object lock TTL, binding kinds (`@setu-ts/cloudflare-plugin`)
+
+`DurableObjectLock.acquire` throws a `RangeError` for a TTL that is not a whole number of
+milliseconds from 1 to 2147483647 (it used to grant every caller for `Infinity`, `NaN`, zero or a
+negative value). `isKvNamespace` refuses an R2-shaped binding, and `bindings.d1()` and
+`bindings.service()` throw `CloudflareBindingMissingError` for a binding of another kind.
+
 ### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
 
 `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.

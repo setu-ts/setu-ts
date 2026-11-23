@@ -80,14 +80,15 @@ RuntimePlugin({ platform: 'node' });
 
 ## Options
 
-| Option         | Type                      | Default           | Description                                                                   |
-| -------------- | ------------------------- | ----------------- | ----------------------------------------------------------------------------- |
-| `platform`     | `RuntimePlatform`         | `detectRuntime()` | Force a platform instead of auto-detecting.                                   |
-| `env`          | `Record<string, unknown>` | —                 | Cloudflare Workers `env`. Only its **string** entries populate `runtime.env`. |
-| `adapters`     | `RuntimeAdapterFactories` | —                 | Internal: override runtime adapter factories.                                 |
-| `httpAdapters` | `HttpAdapterFactories`    | built-in four     | Internal: override HTTP adapter factories.                                    |
-| `maxBodyBytes` | `number`                  | — (unbounded)     | Cap on the request-body read, enforced where the body is consumed.            |
-| `http2`        | `true \| Http2TlsOptions` | — (HTTP/1.1)      | Serve HTTP/2 beside HTTP/1.1 on one port; see [HTTP/2](#http2).               |
+| Option         | Type                      | Default           | Description                                                                                                                                                                                                                                                                                                                                                         |
+| -------------- | ------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform`     | `RuntimePlatform`         | `detectRuntime()` | Force a platform instead of auto-detecting.                                                                                                                                                                                                                                                                                                                         |
+| `env`          | `Record<string, unknown>` | —                 | Cloudflare Workers `env`. Only its **string** entries populate `runtime.env`.                                                                                                                                                                                                                                                                                       |
+| `waitUntil`    | `(promise) => void`       | —                 | Cloudflare Workers: `waitUntil` from `cloudflare:workers` (the module import, never one request's `ctx.waitUntil`). Becomes `runtime.waitUntil`, which keeps the kernel's `ctx.defer` cleanups alive after a client leaves, up to the platform's 30 s; `CloudflarePlugin` uses it when its own `waitUntil` is omitted. Ignored on Deno, Node and Bun. Since 0.14.0. |
+| `adapters`     | `RuntimeAdapterFactories` | —                 | Internal: override runtime adapter factories.                                                                                                                                                                                                                                                                                                                       |
+| `httpAdapters` | `HttpAdapterFactories`    | built-in four     | Internal: override HTTP adapter factories.                                                                                                                                                                                                                                                                                                                          |
+| `maxBodyBytes` | `number`                  | — (unbounded)     | Cap on the request-body read, enforced where the body is consumed.                                                                                                                                                                                                                                                                                                  |
+| `http2`        | `true \| Http2TlsOptions` | — (HTTP/1.1)      | Serve HTTP/2 beside HTTP/1.1 on one port; see [HTTP/2](#http2).                                                                                                                                                                                                                                                                                                     |
 
 ### Bounding the request body
 
@@ -317,6 +318,14 @@ native runtime's own limit.
 | WebSocket per-message ceiling                   | none (the sink's limit)               | 16 MiB, reported once if the limit is higher | 64 MiB, reported once if the limit is higher |
 | Quiet response stream                           | stays open                            | stays open (idle timeout off for streams)    | stays open                                   |
 | Response stream that fails                      | connection cut, nothing printed       | connection cut, nothing printed              | connection cut, nothing printed              |
+
+On Cloudflare Workers an invocation may end with its response, and work still pending is cancelled.
+`runtime.waitUntil` (present only when `RuntimePlugin({ waitUntil })` was given the module import)
+keeps the kernel's cleanups alive after the response: asynchronous `ctx.defer` cleanups when a
+client leaves mid-stream, a late `defer`, and a handler still running after an early response.
+Without it an asynchronous cleanup after a client leaves may be cut off. The platform caps that
+extra time at 30 seconds, the same as the kernel's 30 s warning for a `cancel()` that does not
+settle, so on Workers that warning may not fire first.
 
 A failed stream is logged once by the kernel, `Response stream failed`, through the application's
 logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (internal); the exported

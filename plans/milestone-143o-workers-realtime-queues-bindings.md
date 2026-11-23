@@ -366,10 +366,10 @@ Looked up 2026-11-22. A cell marked "not verified" was not read at a primary sou
   that broadcasts after an `await`, still inside its own request); (3) none, so the frame goes
   through `publishViaHub`. A `link.publish` that throws (rule 2 called from another request, such as
   a route) returns `false` and the frame falls to (3); this is counted and logged once per service
-  at `debug`. Local self-delivery (§3.1 step 4) happens only under rule (1), and never together with
-  a POST: when rule (1) self-delivered and its `link.publish` then fails, the POST carries
-  `exceptId` set to the sender when the caller gave no `except`, so the sender is not delivered
-  twice.
+  at `debug`. Local self-delivery (§3.1 step 4) happens only under rule (1), and only after the link
+  accepted the frame (`link.publish` returned `true`); otherwise the frame goes to the hub POST with
+  no local delivery, and the POST reaches the sender's own link, so the sender receives it exactly
+  once in both cases (as built; this replaces an earlier `exceptId` stamp).
 - **Why:** frames on one WebSocket arrive in order; the stub API documents no order between stubs,
   so POSTs from different calls may reorder. Rule (1) covers the usual chat handler
   (`setu g ws-route` writes `broadcast(data, { except: connection })`,
@@ -378,9 +378,9 @@ Looked up 2026-11-22. A cell marked "not verified" was not read at a primary sou
   no order relative to members' frames, which is what any cross-replica backplane gives. The README
   states it.
 - **Test home:** `request-bound-rooms.test.ts` (rule order; rule 2 from a foreign request falls back
-  and logs once at debug; self-delivery only under rule 1; rule-1 fallback POST carries the sender's
-  `exceptId` and the sender receives the frame once); `request-bound-backplane.test.ts` (200 frames
-  from one member arrive in order at another).
+  and logs once at debug; self-delivery only under rule 1; a rule-1 fallback POST reaches the sender
+  once, through its own link); `request-bound-backplane.test.ts` (200 frames from one member arrive
+  in order at another).
 
 ### 3.3 The isolate-level backplane path (V13-196 defects 2 to 4)
 
@@ -758,7 +758,10 @@ capped, with one warning per job name, never refused.
        streamed body is wrapped with `[]` cleanups and its `aborting` promise does not wait for the
        handler. The buffered path with an asynchronous cleanup (~2241) holds the response until the
        cleanup settles, so it needs no registration; a stream's normal end runs its cleanups inside
-       `pull` before `close()`, while the response is still live.
+       `pull` before `close()`, while the response is still live. 3a. **D12 (b).**
+       `CloudflarePlugin` resolves its `WaitUntilHost` as the explicit `waitUntil` option, else
+       `ctx.runtime.waitUntil` when the runtime has one, else none (the hostless registry and its
+       one startup warning on Workers). `cloudflare-plugin/src/plugin/cloudflare-plugin.ts`.
   4. **Bounds.** Cloudflare extends an invocation "for up to 30 seconds after the response is sent
      or the client disconnects" and cancels what is still pending then (workers runtime-apis context
      page). Each asynchronous cleanup is already bounded at 5,000 ms (`deferred.ts:12`); an abort
@@ -1154,8 +1157,9 @@ payload-free queue logs.
   (Core for the JSDoc, Messaging for the README).
 - **Core lane (D3, informational).** `IRuntimeServices.waitUntil?`, `RuntimePlugin({ waitUntil })`
   and the kernel's `keepAlive` were built here by the maintainer's decision (§3.18); Core owns them
-  from the merge on. **M143j:** the Workers entry passes `waitUntil` from `cloudflare:workers` to
-  `RuntimePlugin` as well as to `CloudflarePlugin`.
+  from the merge on. **M143j:** the generated Workers entry passes `waitUntil` from
+  `cloudflare:workers` to `RuntimePlugin` once (D12: `CloudflarePlugin` falls back to it, so it need
+  not be passed twice).
 - **M143h (Data).** V13-218: the D1 message anchors are `FOREIGN KEY constraint failed` and
   `NOT NULL constraint failed: <table>.<column>`; M143o maps them once M143h's classes exist (D6).
 - **Maintainer (ROADMAP and lanes).** M143o's "Half of a row owned elsewhere" should read V13-218
@@ -1177,6 +1181,21 @@ first time a response carrying `private=Set-Cookie` is refused, and a README lin
 note is required** in `docs/upgrading.md` and the CHANGELOG with the way out, beside every other
 behaviour an existing application meets (§13). Implementation is inline. The text below keeps each
 decision's options and evidence as they were put to the maintainer.
+
+**D12, recorded 2026-11-23 (maintainer): (b).** `CloudflarePlugin` falls back to `runtime.waitUntil`
+from `CAPABILITIES.RUNTIME` when its own `waitUntil` option is absent; an explicit option still
+wins; the startup warning fires only when neither is present. One option on `RuntimePlugin` then
+covers the kernel's cleanups and the plugin's background work. Compared with: Next.js `after()`
+reads one platform `waitUntil` from a single request context
+(nextjs.org/docs/app/api-reference/functions/after); Nitro has one `event.waitUntil`, which its own
+cache refresh also uses (nitro.build cache docs); SvelteKit 3 imports it once from
+`cloudflare:workers` (kit migrating-to-sveltekit-3); Hono exposes `c.executionCtx.waitUntil` for the
+application only, with no framework consumer (hono.dev/docs/api/context). Every framework that does
+its own after-response work has a single sink. Tests: one drives the plugin's background work and
+the kernel's cleanup through the single `RuntimePlugin({ waitUntil })` (the "one capability, one
+implementation" rule); one shows an explicit `CloudflarePlugin({ waitUntil })` winning over the
+runtime's. Upgrade note: pass `waitUntil` to `RuntimePlugin`; an existing
+`CloudflarePlugin({ waitUntil })` keeps working.
 
 - **D1: where a room's sockets live on Workers.** **DECIDED by the maintainer, 2026-11-22: (a).**
   Terminating client sockets in a Durable Object per room, (b), is not built in this letter; it

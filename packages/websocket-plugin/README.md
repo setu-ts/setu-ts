@@ -20,12 +20,12 @@ the cost of all of that.
 
 ## Runtime support
 
-| Runtime            | Backing primitive                                 | Upgrade arrives on | Extra dependency |
-| ------------------ | ------------------------------------------------- | ------------------ | ---------------- |
-| Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none             |
-| Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none             |
-| Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none             |
-| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`             |
+| Runtime            | Backing primitive                                 | Upgrade arrives on | Extra dependency                                |
+| ------------------ | ------------------------------------------------- | ------------------ | ----------------------------------------------- |
+| Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none                                            |
+| Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none (rooms: the Durable Object arm, see below) |
+| Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none                                            |
+| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`                                            |
 
 On Node, install `ws` (`npm install ws` / `deno add npm:ws`). It is an **optional** dependency
 loaded lazily on the first accepted upgrade, so a plain HTTP application never pulls it in; if it is
@@ -385,7 +385,35 @@ WebSocketPlugin({ scalingNotice: false });
 
 That suppresses the message only. Room delivery is identical either way.
 
+### Rooms on Cloudflare Workers
+
+workerd ties every socket to the request that accepted it, and touching a socket from another
+request throws (`Cannot perform I/O on behalf of a different request`). A room that kept its members
+in one isolate-wide set and wrote to all of them from whichever request broadcast would therefore
+fail for every member but the sender. On Workers this plugin runs in **request-bound mode**:
+
+- Rooms need `CloudflarePlugin({ durableObject: { binding } })` from `@setu-ts/cloudflare-plugin`.
+  Each connection opens its own link to the topic's hub Durable Object from its own request, and a
+  broadcast reaches every member through its own link, on one Worker or across Workers sharing the
+  namespace. Without the arm, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` and
+  the startup notice names the arm; `ws.route()` keeps working for single-socket routes.
+- **Ordering.** A broadcast from inside a member's handler (`onOpen`, `onMessage`, `onClose`), or
+  after an `await` in it with `except: connection`, goes over that member's link, so one member's
+  frames arrive in order. A broadcast from a route is published through the hub with no order
+  relative to members' frames, as with any cross-replica backplane.
+- **`room.size`** counts this isolate's open members, without touching any socket.
+- **Heartbeats** run per connection, each from its own request, instead of one shared interval.
+- **A clean close is answered at once.** The Workers adapter replies to the peer's close frame
+  itself, so a client does not wait for its own timeout on a Worker whose `compatibility_date` is
+  before `web_socket_auto_reply_to_close` (2026-04-07).
+- **A message above 32 MiB** is refused by workerd itself (close 1009); a `maxMessageBytes` of `0`
+  or above that is reported once at startup through the runtime's error sink.
+
 ## Errors
+
+`WebSocketRoomsUnavailableError` is thrown by `room()` and `peek()` on Cloudflare Workers when no
+Durable Object backplane is registered (see
+[Rooms on Cloudflare Workers](#rooms-on-cloudflare-workers)).
 
 `WebSocketUnavailableError` is exported for `instanceof` handling. It is thrown by `route()` when
 the registered `IHttpAdapter` implements no `setUpgradeRouter` seam — which happens only with a
@@ -416,52 +444,49 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `buildContext`               | function  |
-| `frameByteLength`            | function  |
-| `parseRequestedProtocols`    | function  |
-| `resolveOptions`             | function  |
-| `selectProtocol`             | function  |
-| `WebSocketPlugin`            | function  |
-| `HeartbeatSweeper`           | class     |
-| `Room`                       | class     |
-| `RoomRegistry`               | class     |
-| `WebSocketConnection`        | class     |
-| `WebSocketService`           | class     |
-| `WebSocketUnavailableError`  | class     |
-| `WsRouteTable`               | class     |
-| `CAPABILITIES`               | const     |
-| `HeartbeatOptions`           | interface |
-| `IWebSocketConnection`       | interface |
-| `IWebSocketService`          | interface |
-| `IWebSocketTransport`        | interface |
-| `LocalBroadcastOptions`      | interface |
-| `RealtimeDiagnosticsOptions` | interface |
-| `RoomBroadcastOptions`       | interface |
-| `RoomMembershipListener`     | interface |
-| `WebSocketCloseEvent`        | interface |
-| `WebSocketConnectionContext` | interface |
-| `WebSocketEventSink`         | interface |
-| `WebSocketHandlers`          | interface |
-| `WebSocketPluginOptions`     | interface |
-| `WebSocketRoom`              | interface |
-| `WebSocketRouteDefinition`   | interface |
-| `WebSocketRouteOptions`      | interface |
-| `WsRoute`                    | interface |
-| `RoomPublisher`              | type      |
-| `WebSocketReadyState`        | type      |
-| `WebSocketRouteEntry`        | type      |
-| `WebSocketUpgradeDecision`   | type      |
-| `WebSocketUpgradeRouter`     | type      |
-| `WsRouteMatch`               | type      |
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `buildContext`                   | function  |
+| `frameByteLength`                | function  |
+| `parseRequestedProtocols`        | function  |
+| `resolveOptions`                 | function  |
+| `selectProtocol`                 | function  |
+| `WebSocketPlugin`                | function  |
+| `HeartbeatSweeper`               | class     |
+| `Room`                           | class     |
+| `RoomRegistry`                   | class     |
+| `WebSocketConnection`            | class     |
+| `WebSocketRoomsUnavailableError` | class     |
+| `WebSocketService`               | class     |
+| `WebSocketUnavailableError`      | class     |
+| `WsRouteTable`                   | class     |
+| `CAPABILITIES`                   | const     |
+| `HeartbeatOptions`               | interface |
+| `IWebSocketConnection`           | interface |
+| `IWebSocketService`              | interface |
+| `IWebSocketTransport`            | interface |
+| `LocalBroadcastOptions`          | interface |
+| `RealtimeDiagnosticsOptions`     | interface |
+| `RoomBroadcastOptions`           | interface |
+| `RoomMembershipListener`         | interface |
+| `WebSocketCloseEvent`            | interface |
+| `WebSocketConnectionContext`     | interface |
+| `WebSocketEventSink`             | interface |
+| `WebSocketHandlers`              | interface |
+| `WebSocketPluginOptions`         | interface |
+| `WebSocketRoom`                  | interface |
+| `WebSocketRouteDefinition`       | interface |
+| `WebSocketRouteOptions`          | interface |
+| `WsRoute`                        | interface |
+| `RoomPublisher`                  | type      |
+| `WebSocketReadyState`            | type      |
+| `WebSocketRouteEntry`            | type      |
+| `WebSocketUpgradeDecision`       | type      |
+| `WebSocketUpgradeRouter`         | type      |
+| `WsRouteMatch`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
-
-The message limit is enforced at the transport while reading on Node. Bun retains its per-server 16
-MB transport cap; Bun and Deno apply the plugin limit after buffering. Connection caps, idle
-timeouts and application heartbeats remain off by default.
 
 ## Full API
 

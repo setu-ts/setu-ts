@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/cloudflare-plugin` (M143o;
+  V13-200).** Optional `IRuntimeServices.waitUntil` keeps an invocation alive after its response;
+  Workers sets it from `waitUntil` passed to `RuntimePlugin` (also `CreateRuntimeServicesOptions`
+  and `CloudflareRuntimeOptions`). The kernel hands it the `ctx.defer` cleanups that run after the
+  response, so an asynchronous cleanup is no longer cut off on workerd when a client leaves.
+  `CloudflarePlugin` falls back to it when its own `waitUntil` is omitted; an explicit option wins.
+
+- **`@setu-ts/common`, `@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin` (M143o).**
+  `IRealtimeConnectionLink`, `IRealtimeLinkBackplane` and `hasConnectionLinks` let a backplane give
+  each WebSocket connection its own link; `DurableObjectBackplane` implements them
+  (`openConnectionLink`, `publishViaHub`) and the hub object answers `POST /publish`.
+  `WebSocketRoomsUnavailableError` is thrown by `ws.room()`/`ws.peek()` on Workers without the
+  Durable Object arm. `cacheApiKey` and `purgeCacheApi` (with `CacheApiKeyInput`,
+  `PurgeCacheApiTarget`) name and evict the edge-cache entry the middleware stored, in the current
+  data center (V13-202). `isServiceBinding` checks a service binding. The queue arm gains
+  `maxRetries`, `deadLetterQueue` and `retryDelaySeconds` (`RetryDelaySeconds` type on
+  `WorkersQueueOptions`, which also gains `deadLetter` and `now`), and `cacheApiMiddleware` gains
+  `credentialCookies`.
+
 - **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
@@ -47,6 +66,27 @@ All notable changes to this project are documented here. The format follows
   through pages.
 
 ### Changed
+
+- **`@setu-ts/cloudflare-plugin` (M143o, breaking behaviour).** A Workers queue consumer now refuses
+  to start without a dead-letter target: `queue.process()` throws `CloudflareUnsupportedError`
+  unless the queue arm sets `deadLetterQueue` to a producer binding name or to `false`, because the
+  platform deletes an exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the
+  adapter cannot see. A job that exhausts its attempts calls `onFailed` once and is forwarded to
+  that producer (or discarded with a warning for `false`) instead of being acked away; `maxRetries`
+  (default 3) must equal `max_retries`, and a larger `maxAttempts` is capped with one warning per
+  job name (V13-197). `cacheApiMiddleware` no longer stores or serves per-visitor responses, the
+  same rule as `cacheMiddleware`: `private` (qualified or not) and `no-store` are refused, including
+  `private=Set-Cookie`, which now logs one warning naming the header; a credentialed request is
+  served only a `public` entry that does not vary on a credential; the session plugin's per-visitor
+  and cookie-dependent flags are honoured; `ttlSeconds` writes `max-age` without `public`;
+  `CacheRefusal` gains `'private'` (V13-111). `DurableObjectLock.acquire` throws a `RangeError` for
+  a TTL that is not a whole number of milliseconds from 1 to 2147483647, and the lock object answers
+  400 for one (V13-204). `isKvNamespace` refuses an R2-shaped binding, and `d1()` and `service()`
+  check the binding's kind (V13-201).
+- **`@setu-ts/websocket-plugin` (M143o).** On Cloudflare Workers the service runs in request-bound
+  mode: rooms deliver through per-connection links of the Durable Object backplane, each connection
+  runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the arm, `ws.room()`
+  and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the arm.
 
 - **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
   cause containing both address-family failures in A-then-AAAA order; migrate readers of
@@ -119,6 +159,27 @@ All notable changes to this project are documented here. The format follows
   Existing modules are untouched.
 
 ### Fixed
+
+- **`@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin`, `@setu-ts/runtime` (M143o).** A
+  WebSocket room on Workers works for any number of members, on one Worker and across Workers
+  sharing a Durable Object namespace, and keeps working after members leave; proved on local workerd
+  with 200 members (V13-195, V13-196). The isolate-level Durable Object backplane reconnects after a
+  settled connect, resends a frame once when its socket is dead, and closes a retired socket instead
+  of leaving it open at the hub (V13-196). The Workers adapter answers a peer's close frame at once,
+  so a clean close no longer waits 30 seconds at a compatibility date before 2026-04-07, and tracks
+  the socket's state without reading the native object (V13-203); it reports a `maxMessageBytes` of
+  0 or above workerd's 32 MiB ceiling once (V13-41).
+- **`@setu-ts/cloudflare-plugin` (M143o).** A trace crosses Workers messaging: with a telemetry
+  service, `WorkersBroker` writes the producer span's `traceparent` into the envelope's framework
+  `trace` field and runs subscribers and responders in a consumer span parented from it (V13-210). A
+  cron handler that throws reports the expression and the first error in the `AggregateError`
+  message (V13-219). A failed job can be redelivered after `retryDelaySeconds` (V13-220, Workers
+  half). The README documents service bindings (V13-209), the lock's use from Worker code (V13-206),
+  `max_batch_size = 10` for request/reply (V13-205) and that KV is outside the session revocation
+  guarantee (V13-135).
+- **`@setu-ts/static-plugin` (M143o).** A static asset served with CORS keeps `Vary: Origin`: the
+  handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no longer
+  replays one origin's `Access-Control-Allow-Origin` to another.
 
 - **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
   a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with

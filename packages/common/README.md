@@ -286,6 +286,7 @@ package fits the plugin architecture.
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
+| `hasConnectionLinks`                  | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
 | `idempotencyMetadataOf`               | function  |
@@ -598,8 +599,10 @@ package fits the plugin architecture.
 | `IQueue`                              | interface |
 | `IQueueDiagnosticsSource`             | interface |
 | `IRealtimeBackplane`                  | interface |
+| `IRealtimeConnectionLink`             | interface |
 | `IRealtimeDiagnosticsSource`          | interface |
 | `IRealtimeHandlerErrorReporter`       | interface |
+| `IRealtimeLinkBackplane`              | interface |
 | `IRealtimeObservationCollector`       | interface |
 | `IRedactionService`                   | interface |
 | `IRequest`                            | interface |

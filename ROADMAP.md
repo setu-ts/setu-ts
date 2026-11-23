@@ -17880,7 +17880,12 @@ lock's real use are documented, and a trace crosses Workers messaging. The proof
 - **V13-219** — A throwing cron handler is logged without its message.
 
 Half of a row owned elsewhere: V13-218 (owned by M143h); V13-220 (owned by M143m); V13-111, V13-135
-(owned by M143a).
+(owned by M143a); V13-41, V13-200 (owned by M143i).
+
+Out-of-lane edits by the maintainer's decision (2026-11-23): V13-200's Core half (optional
+`IRuntimeServices.waitUntil` in `common/src/runtime.ts`, the kernel's cleanup hand-off in `kernel`,
+and `waitUntil` through `runtime/src/plugin`, `src/adapters/shared` and `src/services`) is built in
+this letter rather than as a Core-lane PR; `static-plugin`'s `Vary` fix joins this letter (D10).
 
 ### Milestone 143p: Queued Work and Frames That Are Lost or Repeated
 
