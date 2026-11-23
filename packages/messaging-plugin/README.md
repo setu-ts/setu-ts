@@ -495,7 +495,7 @@ own policies when it creates a subscription:
 
 | Option                      | Default           | Mapping                                                                                                                                                                                                      |
 | --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `consumerRetry.delaysMs`    | `[10000, 600000]` | `retryPolicy`: the first entry is the minimum backoff, the last the maximum; one or two entries, each 0 to 600,000 ms                                                                                        |
+| `consumerRetry.delaysMs`    | `[10000, 600000]` | `retryPolicy`: the first entry is the minimum backoff, the last the maximum; one or two nondecreasing entries, each 0 to 600,000 ms                                                                          |
 | `consumerRetry.maxAttempts` | `5`               | `deadLetterPolicy.maxDeliveryAttempts`, 5 to 100, used only with `deadLetterTopic`                                                                                                                           |
 | `consumerRetry.isRetryable` | absent            | `false` forwards the message to `deadLetterTopic` with `setu-dead-letter-reason: not-retryable` and acks it once the forward is published (bounded by `publishTimeoutMs`); refused without `deadLetterTopic` |
 | `deadLetterTopic`           | absent            | `deadLetterPolicy.deadLetterTopic`; without it a failing message is redelivered without limit, and `connect()` warns once                                                                                    |
@@ -539,11 +539,11 @@ message for the delay while the SDK renews its lock, then abandons it; on the fi
 `isRetryable` returns `false`, it dead-letters it with reason `setu-attempts-exhausted` or
 `setu-not-retryable`.
 
-| Option                      | Default                       | Rule                                                                                                |
-| --------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- |
-| `consumerRetry.maxAttempts` | `5`                           | Lowered, with one warning, to the subscription's `maxDeliveryCount` when that is smaller            |
-| `consumerRetry.delaysMs`    | `[1000, 5000, 30000, 120000]` | Later attempts reuse the last; a delay of 240,000 ms or more is refused (the lock renews for 300 s) |
-| `consumerRetry`             | enabled                       | `false` restores the immediate abandon                                                              |
+| Option                      | Default                       | Rule                                                                                                                                   |
+| --------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `consumerRetry.maxAttempts` | `5`                           | Lowered, with one warning, to the subscription's `maxDeliveryCount` when that is smaller                                               |
+| `consumerRetry.delaysMs`    | `[1000, 5000, 30000, 120000]` | Nondecreasing, each at least 1 ms; later attempts reuse the last; a delay of 240,000 ms or more is refused (the lock renews for 300 s) |
+| `consumerRetry`             | enabled                       | `false` restores the immediate abandon                                                                                                 |
 
 The attempt number is the message's `deliveryCount` plus one (the count starts at 0). A hold never
 outlives the lock budget: when less than the delay remains of 300 s minus a 60 s margin, the message

@@ -85,8 +85,8 @@ All notable changes to this project are documented here. The format follows
   - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
     of logging and returning. A dead letter whose copy already reached its target still deletes the
     source and warns when its claim lapsed during the forward.
-  - Consuming needs `sqs:GetQueueAttributes`, and `sqs:GetQueueUrl` and `sqs:SendMessage` on a
-    policy target.
+  - Consuming needs `sqs:GetQueueAttributes` (not for a `false` entry; with an explicit target URL a
+    refused read only warns), and `sqs:GetQueueUrl` and `sqs:SendMessage` on a policy target.
 - **`@setu-ts/queue-plugin`, every adapter (M143p).** `queue_jobs_total` counts an outcome only
   after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle that
   fails is no longer counted.

@@ -27,7 +27,8 @@ are not checked. Pick one per consumed name:
 Before 0.14.0 an exhausted job with no `deadLetterQueues` entry was deleted and counted as
 dead-lettered.
 
-A consumer role now needs `sqs:GetQueueAttributes` on the source queue, plus `sqs:GetQueueUrl` and
+A consumer role now needs `sqs:GetQueueAttributes` on the source queue (not for a name set to
+`false`; with an explicit target URL a refused read only warns), plus `sqs:GetQueueUrl` and
 `sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` for a customer-managed KMS
 key). With a redrive policy whose `maxReceiveCount` is at or below a job's `maxAttempts`, attempts
 are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set `maxReceiveCount` to
