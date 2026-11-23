@@ -216,6 +216,16 @@ export function createBigtableDataSource(
   target: BigtableTarget,
   options: BigtableDataSourceOptions = {},
 ): IDataSource {
+  const nativeTable = table;
+  table = {
+    readRows: (read, callOptions) => nativeTable.readRows({
+      ...read,
+      filter: read.filter === undefined
+        ? { column: { cellLimit: 1 } }
+        : { chain: [{ column: { cellLimit: 1 } }, read.filter] },
+    }, callOptions),
+    row: (key) => nativeTable.row(key),
+  };
   const index = buildFieldIndex(target);
   const maxPageFetches = options.maxPageFetches ?? DEFAULT_MAX_PAGE_FETCHES;
   const buffer = options.buffer;
@@ -352,9 +362,7 @@ export function createBigtableDataSource(
       });
     },
 
-    ...(buffer !== undefined
-      ? {}
-      : ({
+
           async updateWhere(id, where, data) {
             const checked = checkWritePrecondition(where, data);
             if (!checked.ok) {
@@ -368,9 +376,17 @@ export function createBigtableDataSource(
             data = checked.data;
             assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
             const rowKey = composeRowKey(target, id, 'updateWhere');
+            buffer?.claim(target.table, rowKey, 'updateWhere');
             const test = preconditionTest(target, where);
             if (test === null) return null;
             const cells = buildCells(target, index, data, 'update');
+            if (buffer !== undefined) {
+              const committed = await readOne(rowKey);
+              if (committed === null || !matchesWhere(committed, where)) return null;
+              buffer.condition(test);
+              buffer.insert(cells, false);
+              return { ...committed, ...writtenFields(data) };
+            }
             const matched = await table.row(rowKey).conditionalMutate(test, {
               onMatch: [{ method: 'insert', data: cells }],
             });
@@ -387,13 +403,21 @@ export function createBigtableDataSource(
             }
             where = checked.where;
             const rowKey = composeRowKey(target, id, 'deleteWhere');
+            buffer?.claim(target.table, rowKey, 'deleteWhere');
             const test = preconditionTest(target, where);
             if (test === null) return false;
+            if (buffer !== undefined) {
+              const committed = await readOne(rowKey);
+              if (committed === null || !matchesWhere(committed, where)) return false;
+              buffer.condition(test);
+              buffer.remove();
+              return true;
+            }
             return await table
               .row(rowKey)
               .conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
           },
-        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
+
 
     async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       const needsValues = Object.keys(where).length > 0 || filter !== undefined;

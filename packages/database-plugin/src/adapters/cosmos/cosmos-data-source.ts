@@ -1,3 +1,4 @@
+import { SerializationConflictError } from '../../errors.ts';
 /**
  * Data-source factory and transaction handle for the Cosmos adapter.
  *
@@ -375,12 +376,18 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     return payload;
   };
 
+  const assertScope = (id: EntityKey, conditional = false): void => {
+    const value = typeof id === 'object' ? id[target.primaryKey] : id;
+    buffer?.assertWrite(target.container, String(value), conditional);
+  };
+
   /** Re-check after contention, guarding every write against the exact version read. */
   const guardedWrite = async (
     id: EntityKey,
     where: WritePrecondition,
     data?: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown> | null> => {
+    assertScope(id, true);
     for (let round = 0; round < 3; round += 1) {
       const address = await addressOf(id, 'conditional-write');
       if (address === null) return null;
@@ -391,6 +398,16 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         throw new Error(
           `Cosmos conditional write on '${target.container}' requires the read document's _etag.`,
         );
+      }
+      if (buffer !== undefined) {
+        if (data === undefined) {
+          buffer.add({ container: target.container, partitionKey: address.partitionKey, operation: { operationType: 'Delete', id: address.id, ifMatch: etag } });
+          return fromDocument(existing, target);
+        }
+        const resolved = await partitionKeys.resolve(target);
+        const merged = { ...existing, ...updatePayload(address, resolved, data) };
+        buffer.add({ container: target.container, partitionKey: address.partitionKey, operation: { operationType: 'Replace', id: address.id, resourceBody: merged, ifMatch: etag } });
+        return fromDocument(merged, target);
       }
       const item = container().item(address.id, address.partitionKey);
       const options = { accessCondition: { type: 'IfMatch' as const, condition: etag } };
@@ -452,6 +469,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     ): Promise<Record<string, unknown>> => {
       data = { ...data };
       assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
+      assertScope(id);
       const address = await addressOf(id, 'update');
       if (address === null) throw missingRow(target, id);
       const resolved = await partitionKeys.resolve(target);
@@ -540,6 +558,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     },
 
     delete: async (id: EntityKey): Promise<boolean> => {
+      assertScope(id);
       const address = await addressOf(id, 'delete');
       if (address === null) return false;
       if (buffer !== undefined) {
@@ -565,9 +584,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
     },
 
-    ...(buffer !== undefined
-      ? {}
-      : ({
+
           async updateWhere(id, where, data) {
             const checked = checkWritePrecondition(where, data);
             if (!checked.ok) {
@@ -594,7 +611,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
             where = checked.where;
             return (await guardedWrite(id, where)) !== null;
           },
-        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
+
     count: async (where: Record<string, unknown>, filter?: FilterExpression): Promise<number> => {
       const spec = buildCountQuery(where, filter, target);
       const response = await container().items.query(spec).fetchAll();
@@ -920,11 +937,13 @@ export class CosmosTransaction implements IAdapterTransaction {
       const failureCode =
         operationStatuses.find((status) => status >= 300 && status !== 424) ?? code;
       const statuses = operationStatuses.join(', ');
-      throw new CosmosTransactionBatchError(
+      const error = new CosmosTransactionBatchError(
         failureCode,
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
           `(per-operation: ${statuses}). The batch is atomic, so no operation was applied.`,
       );
+      if (failureCode === 412) throw new SerializationConflictError('Cosmos transaction lost a write precondition; all writes were rolled back.', { cause: error });
+      throw error;
     }
   }
 

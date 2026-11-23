@@ -44,6 +44,14 @@ export interface BufferedWrite {
 export class BatchBuffer {
   readonly #writes: BufferedWrite[] = [];
 
+  /** Refuses same-row conditional interleavings before a committed read can become stale. */
+  assertWrite(container: string, id: string, conditional = false): void {
+    const previous = this.#writes.filter((write) => write.container === container && itemIdOf(write.operation) === id);
+    if (previous.some((write) => write.operation.ifMatch !== undefined) || (conditional && previous.length > 0)) {
+      throw new CosmosTransactionScopeError('A Cosmos conditional write must be the only write to its row in a unit of work. Write the row once per unit of work.');
+    }
+  }
+
   /**
    * Buffers one write, refusing it when it leaves the batch's reach.
    *
@@ -53,6 +61,8 @@ export class BatchBuffer {
    *   100-operation cap
    */
   add(write: BufferedWrite): void {
+    const id = itemIdOf(write.operation);
+    if (id !== undefined) this.assertWrite(write.container, id, write.operation.ifMatch !== undefined);
     const first = this.#writes[0];
     if (first !== undefined) {
       if (first.container !== write.container) {

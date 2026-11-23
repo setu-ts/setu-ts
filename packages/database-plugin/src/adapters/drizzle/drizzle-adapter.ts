@@ -8,6 +8,7 @@
  * @module
  */
 import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+import type { SQL } from 'drizzle-orm';
 
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import type { FilterComparison, TransactionOptions } from '@setu-ts/common';
@@ -99,7 +100,7 @@ type DrizzleSelect = {
 type DrizzleSelectQuery = PromiseLike<Record<string, unknown>[]> & {
   where(expr: unknown): DrizzleSelectQuery;
   orderBy(...expressions: unknown[]): DrizzleSelectQuery;
-  limit(value: number): DrizzleSelectQuery;
+  limit(value: number | SQL): DrizzleSelectQuery;
   offset(value: number): DrizzleSelectQuery;
 };
 
@@ -108,8 +109,10 @@ type DrizzleInsert = {
 };
 
 type DrizzleWriteQuery = {
+  then?: PromiseLike<unknown>['then'];
   where?(expr: unknown): DrizzleWriteQuery;
-  returning(): PromiseLike<Record<string, unknown>[]>;
+  returning?(): PromiseLike<Record<string, unknown>[]>;
+  $returningId?(): PromiseLike<Record<string, unknown>[]>;
 };
 
 type DrizzleUpdate = {
@@ -157,6 +160,8 @@ class Deferred<T> {
 
 /** Drizzle operator functions loaded once at connect. */
 export type DrizzleOperators = {
+  /** Whether the database is Drizzle's transactionless MySQL proxy. */
+  mysqlProxy?: boolean;
   eq: (col: unknown, val: unknown) => unknown;
   and: (...exprs: unknown[]) => unknown;
   or?: (...exprs: unknown[]) => unknown;
@@ -272,7 +277,12 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    */
   isHealthy?: () => Promise<boolean>;
 
-  constructor(options?: DatabaseAdapterOptions) {
+  private readonly _warn: ((message: string) => void) | undefined;
+  private _proxyWarned = false;
+
+  /** Creates the adapter; warn reports a transactionless MySQL proxy read-back once. */
+  constructor(options?: DatabaseAdapterOptions | DrizzleAdapterOptions, warn?: (message: string) => void) {
+    this._warn = warn;
     this._options = options ?? undefined;
     // The application owns the pool callback; the adapter only publishes
     // what it returns, validated at read time by the plugin.
@@ -306,6 +316,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
     try {
       const orm = await import('drizzle-orm');
+      const { MySqlRemoteDatabase } = await import('drizzle-orm/mysql-proxy');
       const ns = orm as Record<string, unknown>;
       // The explicit option wins; otherwise the instance's own dialect object
       // names it. Drizzle publishes no dialect discriminant, so the class name
@@ -318,6 +329,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
             ?.constructor?.name,
         );
       const operators: DrizzleOperators = {
+        mysqlProxy: orm.is(this._db, MySqlRemoteDatabase),
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
         or: ns.or as (...exprs: unknown[]) => unknown,
@@ -355,6 +367,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         throw new Error('drizzle-orm did not export the required query operators');
       }
       this._operators = operators;
+      if (operators.mysqlProxy && !this._proxyWarned) {
+        this._proxyWarned = true;
+        this._warn?.('Drizzle mysql-proxy writes read back committed data outside a transaction; a later writer may already have changed the row.');
+      }
     } catch (error) {
       throw new Error(
         `Failed to load Drizzle query operators: ${
@@ -509,7 +525,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
       createDataSource: (entity: string): DataSource =>
         this.#countingCompletions(
-          createDrizzleDataSourceInner(tx, entity, tables, operators, entities),
+          createDrizzleDataSourceInner(tx, entity, tables, operators, entities, 'transaction'),
         ),
 
       async commit(): Promise<void> {
@@ -717,6 +733,7 @@ function createDrizzleDataSourceInner(
   tables: Record<string, unknown>,
   operators: DrizzleOperators,
   entities?: Readonly<Record<string, { primaryKey?: string | readonly string[] }>>,
+  scope: 'root' | 'transaction' = 'root',
 ): DataSource & { [FIELD_FOR_COLUMN]: (name: string) => string | undefined } {
   const table = tables[entity];
   if (table == null || typeof table !== 'object') {
@@ -736,6 +753,34 @@ function createDrizzleDataSourceInner(
         throw new UnknownPayloadFieldError(entity, field);
       }
     }
+  };
+
+  const pair = async <T>(run: (db: DrizzleInstance) => Promise<T>): Promise<T> =>
+    scope === 'transaction' || operators.mysqlProxy === true
+      ? await run(instance)
+      : await instance.transaction(run);
+  const readBack = async (db: DrizzleInstance, id: import('@setu-ts/common').EntityKey): Promise<Record<string, unknown> | null> => {
+    const values = keyValues(id, keyColumns, `read-back on '${entity}'`);
+    const predicates = keyColumns.map((column, index) => operators.eq(columnFor(drizzleTable, entity, column), values[index]));
+    const rows = await db.select().from(drizzleTable).where(operators.and(...predicates));
+    return rows[0] ?? null;
+  };
+  const write = async (
+    operation: 'create' | 'update' | 'delete',
+    make: (db: DrizzleInstance) => DrizzleWriteQuery,
+    id: import('@setu-ts/common').EntityKey,
+    conditional = false,
+  ): Promise<Record<string, unknown>[]> => {
+    const query = make(instance);
+    if (typeof query.returning === 'function') return await query.returning();
+    const run = async (db: DrizzleInstance): Promise<Record<string, unknown>[]> => {
+      const count = affectedRowsOf(await (make(db) as unknown), entity, operation);
+      if (operation === 'delete') return count > 0 ? [{}] : [];
+      if (conditional && count === 0) return [];
+      const row = await readBack(db, id);
+      return row === null ? [] : [row];
+    };
+    return operation === 'delete' ? await run(instance) : await pair(run);
   };
 
   return {
@@ -763,6 +808,8 @@ function createDrizzleDataSourceInner(
       }
       if (query.limit > 0) {
         builder = builder.limit(query.limit);
+      } else if (query.offset > 0 && operators.jsonDialect === 'mysql') {
+        builder = builder.limit(operators.sql!.raw('18446744073709551615') as SQL);
       }
       if (query.offset > 0) {
         builder = builder.offset(query.offset);
@@ -778,11 +825,26 @@ function createDrizzleDataSourceInner(
       // caller's object cannot show the check one value and the write another.
       data = { ...data };
       assertPayloadColumns(data);
-      const rows = await returningRows(
-        instance.insert(drizzleTable).values(data),
-        entity,
-        'create',
-      );
+      const query = instance.insert(drizzleTable).values(data);
+      if (typeof query.returning === 'function') return oneReturnedRow(entity, 'create', await query.returning());
+      const missing = keyColumns.filter((column) => data[column] === undefined);
+      const generated = missing.length === 1 ? drizzleTable[missing[0]!] as { primary?: boolean; autoIncrement?: boolean; defaultFn?: unknown } : undefined;
+      if (missing.length > 0 && !(generated?.primary === true && (generated.autoIncrement === true || typeof generated.defaultFn === 'function') && typeof query.$returningId === 'function' && operators.mysqlProxy !== true)) {
+        throw new UnsupportedQueryFeatureError('create', 'drizzle', `Drizzle create on ${entity} cannot learn the new key: the key is filled by a database default and the driver has no RETURNING`);
+      }
+      const rows = await pair(async (db) => {
+        const insert = db.insert(drizzleTable).values(data);
+        let key = { ...data };
+        if (missing.length > 0) {
+          const ids = await insert.$returningId!();
+          if (ids[0] === undefined) throw new Error(`Drizzle create on '${entity}' returned no generated key`);
+          key = { ...key, ...ids[0] };
+        } else {
+          affectedRowsOf(await (insert as unknown), entity, 'create');
+        }
+        const row = await readBack(db, Object.fromEntries(keyColumns.map((column) => [column, key[column]])) as import('@setu-ts/common').EntityKey);
+        return row === null ? [] : [row];
+      });
       return oneReturnedRow(entity, 'create', rows);
     },
 
@@ -795,11 +857,7 @@ function createDrizzleDataSourceInner(
         operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
-      const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(predicate),
-        entity,
-        'update',
-      );
+      const rows = await write('update', (db) => db.update(drizzleTable).set(data).where!(predicate), id);
       return oneReturnedRow(entity, 'update', rows);
     },
 
@@ -809,11 +867,7 @@ function createDrizzleDataSourceInner(
         operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
-      const rows = await returningRows(
-        instance.delete(drizzleTable).where(predicate),
-        entity,
-        'delete',
-      );
+      const rows = await write('delete', (db) => db.delete(drizzleTable).where(predicate), id);
       return rows.length > 0;
     },
 
@@ -837,11 +891,7 @@ function createDrizzleDataSourceInner(
         ...keyPredicates,
         predicateFor(drizzleTable, entity, where, operators),
       );
-      const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(predicate),
-        entity,
-        'update',
-      );
+      const rows = await write('update', (db) => db.update(drizzleTable).set(data).where!(predicate), id, true);
       return rows[0] ?? null;
     },
     async deleteWhere(id, where) {
@@ -859,11 +909,7 @@ function createDrizzleDataSourceInner(
         ...keyPredicates,
         predicateFor(drizzleTable, entity, where, operators),
       );
-      const rows = await returningRows(
-        instance.delete(drizzleTable).where(predicate),
-        entity,
-        'delete',
-      );
+      const rows = await write('delete', (db) => db.delete(drizzleTable).where(predicate), id, true);
       return rows.length > 0;
     },
     async count(where, filter) {
@@ -1160,9 +1206,7 @@ function filterPredicateFor(
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${baseColumn} like ${`%${escapeLikePattern(
-        filter.value,
-      )}%`} escape '\\'`;
+      return containsExpression(baseColumn, filter.value, filterOperators.sql, operators.jsonDialect);
     case 'gt':
       return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
@@ -1264,7 +1308,7 @@ function jsonPathPredicate(
         ? ops.sql`${text()} is null`
         : ops.sql`${text()} = ${String(filter.value)}`;
     case 'contains':
-      return ops.sql`${text()} like ${`%${escapeLikePattern(filter.value)}%`} escape '\\'`;
+      return containsExpression(text(), filter.value, ops.sql, dialect);
     case 'gt':
       return ops.sql`${ordered} > ${filter.value}`;
     case 'gte':
@@ -1369,15 +1413,22 @@ function oneReturnedRow(
   );
 }
 
-function returningRows(
-  query: DrizzleWriteQuery,
-  entity: string,
-  operation: 'create' | 'update' | 'delete',
-): PromiseLike<Record<string, unknown>[]> {
-  if (typeof query.returning !== 'function') {
-    throw new Error(
-      `Drizzle ${operation} for entity '${entity}' requires a driver that supports RETURNING.`,
-    );
-  }
-  return query.returning();
+/** Reads only the mysql2 matched-row result shapes established by the MySQL conformance cell. */
+function affectedRowsOf(result: unknown, entity: string, operation: string): number {
+  const header: unknown = Array.isArray(result) ? result[0] : result;
+  const count = typeof header === 'object' && header !== null ? (header as { affectedRows?: unknown }).affectedRows : undefined;
+  if (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0) return count;
+  throw new UnsupportedQueryFeatureError('write', 'drizzle', `Drizzle ${operation} on ${entity}: the driver reported no affected-row count this adapter can read (no RETURNING either)`);
+}
+
+/** Builds the same literal-substring predicate for scalar and nested fields. */
+function containsExpression(column: unknown, value: string, sql: NonNullable<DrizzleOperators['sql']>, dialect: SqlJsonDialect | undefined): unknown {
+  const pattern = `%${escapeLikePattern(value, dialect === 'mysql' ? '!' : '\\')}%`;
+  if (dialect !== 'mysql') return sql`${column} like ${pattern} escape '\\'`;
+  // mysql2.query interpolates bound strings with backslashes even under
+  // NO_BACKSLASH_ESCAPES. Keep those bytes out of bound literals altogether.
+  const segments = pattern.split('\\');
+  let expression: unknown = segments[0];
+  for (const segment of segments.slice(1)) expression = sql`concat(${expression}, char(92), ${segment})`;
+  return sql`${column} like ${expression} escape '!'`;
 }

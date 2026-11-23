@@ -23,8 +23,10 @@
 import type { IAdapterTransaction, IDataSource } from '@setu-ts/common';
 import { DuplicateKeyError } from '@setu-ts/common';
 import { BigtableTransactionScopeError } from '../../errors.ts';
+import { SerializationConflictError } from '../../errors.ts';
 import type {
   BigtableMutation,
+  BigtableFilter,
   IBigtableInstance,
   IBigtableTable,
 } from './bigtable-client-types.ts';
@@ -39,6 +41,8 @@ export type BigtableCellBag = Readonly<Record<string, Readonly<Record<string, st
  * @internal
  */
 export interface IBigtableWriteBuffer {
+  /** Carries a conditional first write's predicate to CheckAndMutateRow at commit. */
+  condition(test: readonly BigtableFilter[]): void;
   /**
    * Claims the transaction's single (table, row key) pair.
    *
@@ -81,6 +85,7 @@ type RowPrecondition = 'absent' | 'present' | 'any';
  * @internal
  */
 interface BufferState {
+  condition: readonly BigtableFilter[] | null;
   /** The claimed table id. */
   table: string;
   /** The claimed row key. */
@@ -151,7 +156,7 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
       );
     }
     const state = this.#state;
-    if (state === null) {
+    if (state === null || !state.touched) {
       this.#state = {
         table,
         rowKey,
@@ -159,8 +164,12 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
         cells: {},
         expects: 'any',
         touched: false,
+        condition: null,
       };
       return;
+    }
+    if (state.condition !== null || operation === 'updateWhere' || operation === 'deleteWhere') {
+      throw new BigtableTransactionScopeError('A Bigtable conditional write must be the only write in its unit of work. Write the row once per unit of work.');
     }
     if (state.table === table && state.rowKey === rowKey) return;
     throw new BigtableTransactionScopeError(
@@ -169,6 +178,11 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
         `Bigtable's only atomicity unit is the single row, so a second row would need a second ` +
         `transaction.`,
     );
+  }
+
+  /** @inheritdoc */
+  condition(test: readonly BigtableFilter[]): void {
+    this.#requireState().condition = test;
   }
 
   /** @inheritdoc */
@@ -229,6 +243,11 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     if (mutations.length === 0) return;
 
     const row = this.#instance.table(state.table).row(state.rowKey);
+    if (state.condition !== null) {
+      const matched = await row.conditionalMutate(state.condition, { onMatch: mutations });
+      if (!matched) throw new SerializationConflictError('Bigtable transaction lost a write precondition; all writes were rolled back.', { cause: new Error('CheckAndMutateRow reported no match') });
+      return;
+    }
     // The predicate is not decoration: it is what carries each operation's own
     // precondition to the moment the write lands. Applying the mutations on
     // BOTH branches — which is what this used to do outside the create case —
@@ -248,9 +267,10 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     if (state.expects === 'present') {
       const matched = await row.conditionalMutate([{ all: true }], { onMatch: mutations });
       if (!matched) {
-        throw new Error(
+        throw new SerializationConflictError(
           `Bigtable row '${state.table}'/'${state.rowKey}' no longer exists; the transaction's ` +
             `update was not applied.`,
+          { cause: new Error('CheckAndMutateRow reported no match') },
         );
       }
       return;

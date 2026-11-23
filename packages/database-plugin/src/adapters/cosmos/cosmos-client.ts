@@ -1,3 +1,4 @@
+import { requestBound } from '../request-bound.ts';
 /**
  * Injection seam for the `@azure/cosmos` SDK — the structural
  * {@linkcode ICosmosClient} facade the adapter operates against, plus the
@@ -15,6 +16,7 @@
  * @module
  */
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import type {
   CosmosAccessCondition,
   CosmosBatchDeleteOperation,
@@ -244,7 +246,12 @@ export function createInjectedClientLoader(client: ICosmosClient): CosmosClientL
 export async function createLazyClientLoader(
   endpoint: string,
   key: string,
+  clientOptions?: Readonly<Record<string, unknown>>,
 ): Promise<CosmosClientLoader> {
+  const url = new URL(endpoint);
+  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname) && !url.hostname.endsWith('.localhost')) {
+    throw new UnsupportedQueryFeatureError('endpoint', 'cosmos', `CosmosAdapter refuses a plaintext HTTP endpoint on remote host '${url.hostname}'; use HTTPS for credentialed requests.`);
+  }
   let mod: CosmosSdkModule;
   try {
     mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
@@ -256,6 +263,33 @@ export async function createLazyClientLoader(
   }
   return {
     createClient: (): Promise<ICosmosClient> =>
-      Promise.resolve(new mod.CosmosClient({ endpoint, key })),
+      Promise.resolve(new mod.CosmosClient({ ...clientOptions, endpoint, key })),
+  };
+}
+
+/** Bounds all database, metadata, item, query and batch calls on the same facade. @internal */
+export function boundCosmosDatabase(database: ICosmosDatabase, timeout: number): ICosmosDatabase {
+  return {
+    read: (options) => requestBound(timeout, (signal) => database.read({ ...options, ...signal })),
+    container: (name) => {
+      const container = database.container(name);
+      return {
+        read: (options) => requestBound(timeout, (signal) => container.read({ ...options, ...signal })),
+        item: (id, key) => {
+          const item = container.item(id, key);
+          return {
+            read: (options) => requestBound(timeout, (signal) => item.read({ ...options, ...signal })),
+            replace: (body, options) => requestBound(timeout, (signal) => item.replace(body, { ...options, ...signal })),
+            patch: (ops, options) => requestBound(timeout, (signal) => item.patch(ops, { ...options, ...signal })),
+            delete: (options) => requestBound(timeout, (signal) => item.delete({ ...options, ...signal })),
+          };
+        },
+        items: {
+          create: (body, options) => requestBound(timeout, (signal) => container.items.create(body, { ...options, ...signal })),
+          batch: (ops, key, options) => requestBound(timeout, (signal) => container.items.batch(ops, key, { ...options, ...signal })),
+          query: (spec, options) => ({ fetchAll: () => requestBound(timeout, (signal) => container.items.query(spec, { ...options, ...signal }).fetchAll()) }),
+        },
+      };
+    },
   };
 }

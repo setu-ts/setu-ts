@@ -68,6 +68,18 @@ function approval(): AgentRunApprovalRow {
   };
 }
 describe('database agent run store', () => {
+  for (const adapter of ['dynamodb', 'bigtable']) it(`names the ordered-query limitation for ${adapter} in the verify cause chain`, async () => {
+    const db = await memoryService();
+    const refusal = new UnsupportedQueryFeatureError('ordering', adapter, 'sort key missing');
+    const repo = db.getRepository('AgentRunApproval');
+    const read = vi.spyOn(repo, 'findAll').mockRejectedValue(refusal);
+    try {
+      const error: unknown = await new DatabaseAgentRunStore(db).verify().catch((error: unknown) => error);
+      expect(error).toMatchObject({ reason: 'query-unsupported', cause: { feature: 'agent-runs', adapter, cause: refusal } });
+      expect(((error as Error).cause as Error).message).toContain('needs ordered multi-field queries');
+      expect(((error as Error).cause as Error).message).toContain('Use PostgreSQL, SQLite or MongoDB');
+    } finally { read.mockRestore(); await db.close(); }
+  });
   it('round-trips timeout keys and counts through the factory and rejects malformed fields', async () => {
     const db = await memoryService();
     const registry = new MockServiceRegistry();

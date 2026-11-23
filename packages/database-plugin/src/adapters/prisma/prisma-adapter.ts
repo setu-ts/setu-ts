@@ -84,6 +84,11 @@ const PROVIDERS: ReadonlySet<string> = new Set<string>([
   'sqlite',
 ]);
 
+/** Only PostgreSQL's single-statement conditional path has a guarded race proof. */
+function conditionalPathFor(provider: PrismaSqlProvider | undefined): 'single' | 'count' {
+  return provider === 'postgresql' || provider === 'postgres' ? 'single' : 'count';
+}
+
 function prismaIsolationLevel(
   level: TransactionIsolationLevel | undefined,
 ): 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable' | undefined {
@@ -162,6 +167,11 @@ type ModelDelegate = {
     data: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<{ count: number }>;
+  deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
 };
 
@@ -216,6 +226,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
   private readonly _options: DatabaseAdapterOptions | PrismaAdapterOptions | undefined;
   /** The resolved connector, or `undefined` when it could not be determined. */
   private _provider: PrismaSqlProvider | undefined;
+  private _conditionalPath: 'single' | 'count' = 'count';
 
   /** Portable levels available from the resolved Prisma connector. */
   get transactionIsolationLevels(): readonly TransactionIsolationLevel[] {
@@ -228,7 +239,8 @@ export class PrismaAdapter implements IDatabaseAdapter {
     return PRISMA_ALL_ISOLATION_LEVELS;
   }
 
-  constructor(options?: DatabaseAdapterOptions) {
+  /** Creates an adapter over the application's generated client and entity key mappings. */
+  constructor(options?: DatabaseAdapterOptions | PrismaAdapterOptions) {
     this._options = options ?? undefined;
   }
 
@@ -236,6 +248,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
   async connect(): Promise<void> {
     this._client = await this.resolveClient();
     this._provider = this.resolveProvider();
+    this._conditionalPath = conditionalPathFor(this._provider);
     await this._client.$connect();
     this._connected = true;
   }
@@ -283,6 +296,8 @@ export class PrismaAdapter implements IDatabaseAdapter {
     // Capture for the returned transaction's data-source factory, whose `this`
     // is the transaction object, not this adapter.
     const provider = this._provider;
+    const conditionalPath = this._conditionalPath;
+    const transactionTimeout = this._options?.transactionTimeout ?? 30_000;
     const entities = (this._options as PrismaAdapterOptions | undefined)?.entities;
 
     const txReady = new Deferred<PrismaClient>();
@@ -325,6 +340,9 @@ export class PrismaAdapter implements IDatabaseAdapter {
           provider,
           entities?.[entity]?.keyColumns ?? ['id'],
           entities?.[entity]?.compositeKeyName,
+          'transaction',
+          conditionalPath,
+          transactionTimeout,
         );
       },
 
@@ -390,6 +408,9 @@ export class PrismaAdapter implements IDatabaseAdapter {
       this._provider,
       entities?.[entity]?.keyColumns ?? ['id'],
       entities?.[entity]?.compositeKeyName,
+      'root',
+      this._conditionalPath,
+      this._options?.transactionTimeout ?? 30_000,
     );
   }
 
@@ -780,6 +801,9 @@ function createPrismaDataSourceInner(
   provider?: PrismaSqlProvider,
   keyColumns: readonly string[] = ['id'],
   compoundKeyField?: string,
+  scope: 'root' | 'transaction' = 'root',
+  conditionalPath: 'single' | 'count' = conditionalPathFor(provider),
+  transactionTimeout = 30_000,
 ): DataSource {
   // Resolve delegate: 'User' → client.user
   const delegateKey = entity.charAt(0).toLowerCase() + entity.slice(1);
@@ -818,6 +842,32 @@ function createPrismaDataSourceInner(
         'Prisma write preconditions may not name operators or the compound-key field.',
       );
     }
+  };
+
+  const countedWrite = async (
+    operation: 'updateWhere' | 'deleteWhere',
+    id: EntityKey,
+    where: Readonly<Record<string, string | number>>,
+    data?: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null | boolean> => {
+    const values = keyValues(id, keyColumns, `${operation} on '${entity}'`);
+    const columnsWhere = Object.fromEntries(keyColumns.map((column, index) => [column, values[index]]));
+    const args = { where: { ...columnsWhere, AND: [where] } };
+    const run = async (tx: PrismaClient): Promise<Record<string, unknown> | null | boolean> => {
+      const model = (tx as unknown as Record<string, ModelDelegate>)[delegateKey]!;
+      const { count } = operation === 'updateWhere'
+        ? await model.updateMany({ ...args, data: data! })
+        : await model.deleteMany(args);
+      if (count > 1) {
+        throw new Error(`Prisma ${operation} on '${entity}' matched ${count} rows for one key; keyColumns do not name the table's key`);
+      }
+      if (operation === 'deleteWhere') return count === 1;
+      if (count === 0) return null;
+      return await model.findUnique({ where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation) });
+    };
+    return scope === 'transaction'
+      ? await run(client)
+      : await client.$transaction(run, { maxWait: 2000, timeout: transactionTimeout });
   };
 
   return {
@@ -907,6 +957,9 @@ function createPrismaDataSourceInner(
       data = withoutKeyColumns(id, checked.data);
       assertPreconditionFields(where);
       try {
+        if (conditionalPath === 'count') {
+          return await countedWrite('updateWhere', id, where, data) as Record<string, unknown> | null;
+        }
         return await delegate.update({
           where: {
             ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'updateWhere'),
@@ -929,6 +982,7 @@ function createPrismaDataSourceInner(
       where = checked.where;
       assertPreconditionFields(where);
       try {
+        if (conditionalPath === 'count') return await countedWrite('deleteWhere', id, where) as boolean;
         await delegate.delete({
           where: {
             ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'deleteWhere'),

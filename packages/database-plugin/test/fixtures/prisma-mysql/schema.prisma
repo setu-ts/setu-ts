@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client"
+  output = "../prisma-client-generated/mysql"
+  runtime = "nodejs"
+  moduleFormat = "esm"
+  generatedFileExtension = "ts"
+}
+datasource db {
+  provider = "mysql"
+}
+
+model Row {
+  id String @id @db.VarChar(191)
+  name String? @db.VarChar(191)
+  tenant_id String? @db.VarChar(191)
+  version Int 
+  balance Int 
+  profile Json? 
+  @@map("rows")
+}
+
+model Compound {
+  tenantId String @db.VarChar(191)
+  id String @db.VarChar(191)
+  name String? @db.VarChar(191)
+  version Int 
+  balance Int 
+  @@id([tenantId, id])
+  @@map("compound_rows")
+}
+
+model Outbox {
+  id String @id @db.VarChar(191)
+  kind String @db.VarChar(191)
+  topic String @db.VarChar(191)
+  envelope String @db.LongText
+  options String @db.LongText
+  orderingKey String? @db.VarChar(191) @map("ordering_key")
+  tenantId String? @db.VarChar(191) @map("tenant_id")
+  traceparent String? @db.VarChar(191)
+  position String @db.VarChar(191)
+  createdAt BigInt @map("created_at")
+  status String @db.VarChar(191)
+  attempts Int 
+  availableAt BigInt @map("available_at")
+  claimVersion BigInt @map("claim_version")
+  leaseUntil BigInt @map("lease_until")
+  lastError String? @db.LongText @map("last_error")
+  settledAt BigInt? @map("settled_at")
+  sentBy String? @db.VarChar(191) @map("sent_by")
+  @@map("setu_outbox")
+}
+
+model Inbox {
+  id String @id @db.VarChar(191)
+  kind String @db.VarChar(191)
+  consumer String @db.VarChar(191)
+  topic String @db.VarChar(191)
+  envelopeId String? @db.VarChar(191) @map("envelope_id")
+  status String @db.VarChar(191)
+  attempts Int 
+  updatedAt BigInt @map("updated_at")
+  lastError String? @db.LongText @map("last_error")
+  envelope String? @db.LongText
+  @@map("setu_inbox")
+}
+
+model Idempotency {
+  id String @id @db.VarChar(191)
+  kind String @db.VarChar(191)
+  role String @db.VarChar(191)
+  fingerprint String @db.VarChar(191)
+  createdAt BigInt @map("created_at")
+  expiresAt BigInt @map("expires_at")
+  result String? @db.LongText
+  @@map("setu_idempotency")
+}
+
+model Grant {
+  id String @id @db.VarChar(191)
+  subject String @db.VarChar(191)
+  role String @db.VarChar(191)
+  scopeType String? @db.VarChar(191)
+  scopeId String? @db.VarChar(191)
+  @@map("grants")
+}
+
+model Role {
+  id String @id @db.VarChar(191)
+  scopeType String? @db.VarChar(191)
+  scopeId String? @db.VarChar(191)
+  role String @db.VarChar(191)
+  permission String @db.VarChar(191)
+  @@map("roles")
+}
+
+model AgentRun {
+  id String @id @db.VarChar(191)
+  tenantId String? @db.VarChar(191)
+  principalId String? @db.VarChar(191)
+  definition String? @db.VarChar(191)
+  version String? @db.VarChar(191)
+  status String? @db.VarChar(191)
+  input Json? 
+  leaseOwner String? @db.VarChar(191)
+  leaseVersion BigInt? 
+  leaseUntil BigInt? 
+  entryCount Int? 
+  approvalIds Json? 
+  chunkCount Int? 
+  stepChunkStart Int? 
+  toolTimeoutKey String? @db.VarChar(191)
+  toolTimeouts Int? 
+  cancelRequested Boolean? 
+  error String? @db.LongText
+  createdAt BigInt? 
+  updatedAt BigInt? 
+  @@map("agent_run")
+}
+
+model AgentRunEntry {
+  id String @id @db.VarChar(191)
+  runId String? @db.VarChar(191)
+  tenantId String? @db.VarChar(191)
+  seq Int? 
+  kind String? @db.VarChar(191)
+  messages Json? 
+  finishReason String? @db.VarChar(191)
+  usage Json? 
+  toolCallId String? @db.VarChar(191)
+  stepChunkStart Int? 
+  leaseVersion BigInt? 
+  @@map("agent_entry")
+}
+
+model AgentRunChunks {
+  id String @id @db.VarChar(191)
+  runId String? @db.VarChar(191)
+  tenantId String? @db.VarChar(191)
+  seq Int? 
+  chunks Json? 
+  leaseVersion BigInt? 
+  @@map("agent_chunks")
+}
+
+model AgentRunApproval {
+  id String @id @db.VarChar(191)
+  runId String? @db.VarChar(191)
+  tenantId String? @db.VarChar(191)
+  seq Int? 
+  toolCallId String? @db.VarChar(191)
+  toolName String? @db.VarChar(191)
+  input Json? 
+  status String? @db.VarChar(191)
+  deadline BigInt? 
+  decidedBy String? @db.VarChar(191)
+  decidedAt BigInt? 
+  reason String? @db.LongText
+  leaseVersion BigInt? 
+  @@map("agent_approval")
+}
+
+model Business {
+  id String @id @db.VarChar(191)
+  name String? @db.VarChar(191)
+  @@map("business")
+}

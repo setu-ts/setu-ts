@@ -28,6 +28,8 @@ import type {
   TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
+import { requestTimeout } from '../request-bound.ts';
+import { boundBigtableClient } from './bigtable-client.ts';
 import type { BigtableAdapterOptions } from '../../interfaces/index.ts';
 import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
 import type { IBigtableClient, IBigtableInstance } from './bigtable-client-types.ts';
@@ -85,6 +87,12 @@ export class BigtableAdapter implements IDatabaseAdapter {
   #connected = false;
   /** Bumped by `disconnect()`, so a superseded attempt discards its result. */
   #generation = 0;
+  readonly #timeout: number;
+  readonly #warn: ((message: string) => void) | undefined;
+  #warned = false;
+  #rawClient: IBigtableClient | null = null;
+  /** A bounded data-plane read when a readiness entity is available. */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * Creates the adapter and validates its configuration.
@@ -105,7 +113,7 @@ export class BigtableAdapter implements IDatabaseAdapter {
    *   `instance` is absent or blank, or when `maxPageFetches` is not a
    *   positive integer
    */
-  constructor(options: BigtableAdapterOptions, loader?: BigtableClientLoader) {
+  constructor(options: BigtableAdapterOptions, loader?: BigtableClientLoader, warn?: (message: string) => void) {
     if (options.client === undefined && (options.projectId ?? '').trim() === '') {
       throw new Error('BigtableAdapter requires either options.client or options.projectId');
     }
@@ -128,6 +136,8 @@ export class BigtableAdapter implements IDatabaseAdapter {
       );
     }
     this.#options = options;
+    this.#timeout = requestTimeout(options.requestTimeoutMs);
+    this.#warn = warn;
     this.#mapping = options.tables;
     this.#loader =
       loader ??
@@ -136,21 +146,41 @@ export class BigtableAdapter implements IDatabaseAdapter {
         : createLazyBigtableLoader({
             projectId: options.projectId as string,
             ...(options.apiEndpoint === undefined ? {} : { apiEndpoint: options.apiEndpoint }),
+            ...(options.clientOptions === undefined ? {} : { clientOptions: options.clientOptions }),
+            ...((options as BigtableAdapterOptions & { emulatorFromEnvironment?: boolean }).emulatorFromEnvironment ? { emulatorFromEnvironment: true } : {}),
           }));
+    const entity = options.readinessEntity ?? Object.keys(options.tables ?? {})[0];
+    if (entity !== undefined) {
+      const target = this.#target(entity);
+      this.isHealthy = async () => {
+        if (!this.#connected) return false;
+        try {
+          await boundBigtableClient(this.#rawClient!, Math.min(this.#timeout || 2000, 2000))
+            .instance(options.instance).table(target.table).readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
+          return true;
+        } catch (error) {
+          const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+          if (code === 5 || code === 7 || code === 14 || code === 16) return false;
+          throw error;
+        }
+      };
+    }
   }
 
   /**
    * Resolves the client and the instance handle.
    *
-   * **No RPC is issued.** A missing table or instance already answers
-   * `5 NOT_FOUND` quoting the full resource path (measured), so a probe would
-   * buy no diagnostic — while `instance.getTables()` is a table-ADMIN call a
-   * data-plane service account commonly cannot make, so probing would refuse a
-   * working configuration.
+   * A data-plane warm-up pays the SDK's first-use discovery cost at boot,
+   * bounded to two seconds. An outage leaves startup usable and is reported
+   * by readiness; no administrative permission is needed.
    *
    * @inheritdoc
    */
   async connect(): Promise<void> {
+    if (this.isHealthy === undefined && !this.#warned) {
+      this.#warned = true;
+      this.#warn?.('Bigtable readiness has no table to read; configure readinessEntity or tables.');
+    }
     if (this.#client !== null) return;
     const inFlight = this.#connecting;
     if (inFlight !== null && inFlight.generation === this.#generation) {
@@ -173,7 +203,8 @@ export class BigtableAdapter implements IDatabaseAdapter {
   async #establish(): Promise<void> {
     const generation = this.#generation;
     const client = await this.#loader.load();
-    const instance = client.instance(this.#options.instance);
+    const bounded = boundBigtableClient(client, this.#timeout);
+    const instance = bounded.instance(this.#options.instance);
     if (generation !== this.#generation) {
       // A `disconnect()` landed during this attempt, so its result is dropped
       // rather than resurrecting a closed adapter — and a client this attempt
@@ -181,7 +212,20 @@ export class BigtableAdapter implements IDatabaseAdapter {
       if (this.#loader.owned) await client.close();
       return;
     }
-    this.#client = client;
+    const entity = this.#options.readinessEntity ?? Object.keys(this.#mapping ?? {})[0];
+    const warmTable = entity === undefined ? '__setu_readiness__' : this.#target(entity).table;
+    try {
+      await boundBigtableClient(client, Math.min(this.#timeout || 2000, 2000))
+        .instance(this.#options.instance).table(warmTable).readRows({ keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } });
+    } catch {
+      // A failed warm-up is deliberately handled by the bounded readiness probe.
+    }
+    if (generation !== this.#generation) {
+      if (this.#loader.owned) await client.close();
+      return;
+    }
+    this.#rawClient = client;
+    this.#client = bounded;
     this.#instance = instance;
     this.#connected = true;
   }
@@ -198,6 +242,7 @@ export class BigtableAdapter implements IDatabaseAdapter {
     this.#generation += 1;
     const client = this.#client;
     this.#client = null;
+    this.#rawClient = null;
     this.#instance = null;
     this.#connected = false;
     if (client !== null && this.#loader.owned) await client.close();

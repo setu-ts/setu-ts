@@ -134,7 +134,11 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const adapter = await createAdapter(options, adapterType, adapterOptions);
+      const logger = resolveLogger(ctx);
+      const runtimeOptions = adapterType === 'bigtable' && ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
+        ? { ...adapterOptions, emulatorFromEnvironment: true }
+        : adapterOptions;
+      const adapter = await createAdapter(options, adapterType, runtimeOptions, (message) => logger?.warn(message));
 
       // Connect the adapter.
       await adapter.connect();
@@ -145,7 +149,6 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       const createDataSource = (entity: string): DataSource => adapter.createDataSource(entity);
 
       // Optional logger resolution.
-      const logger = resolveLogger(ctx);
       if (adapterType === 'drizzle') {
         const identity = (adapterOptions as DrizzleAdapterOptions).drizzleInstance;
         const database = readDrizzleDatabase(identity).database;
@@ -347,6 +350,7 @@ function createAdapter(
   options: DatabasePluginOptions | undefined,
   adapterType: DatabaseAdapterType,
   adapterOptions: DatabaseAdapterOptions,
+  warn?: (message: string) => void,
 ): Promise<IDatabaseAdapter> {
   switch (adapterType) {
     case 'custom':
@@ -358,7 +362,7 @@ function createAdapter(
         new PrismaAdapter(adapterOptions as import('../interfaces/index.ts').PrismaAdapterOptions),
       );
     case 'drizzle':
-      return Promise.resolve(new DrizzleAdapter(adapterOptions));
+      return Promise.resolve(new DrizzleAdapter(adapterOptions, warn));
     case 'cosmos':
       // The Cosmos arm's options ride the same shared bag; `buildAdapterOptions`
       // carries them through, so the arm is built from `adapterOptions` exactly
@@ -369,7 +373,7 @@ function createAdapter(
       // carries through, so the arm is built from `adapterOptions` exactly as
       // the others are — no cast to a concrete adapter.
       return Promise.resolve(
-        new BigtableAdapter(adapterOptions as unknown as BigtableAdapterOptions),
+        new BigtableAdapter(adapterOptions as unknown as BigtableAdapterOptions, undefined, warn),
       );
     case 'mongodb':
       // Mongo's options share the `DatabaseAdapterOptions` bag the other built-in
@@ -380,7 +384,7 @@ function createAdapter(
       // Dynamo mirrors Mongo: the options ride the same shared bag
       // `buildAdapterOptions` carries through, so the arm is built from
       // `adapterOptions` just like the others.
-      return Promise.resolve(new DynamoAdapter(adapterOptions as DynamoAdapterOptions));
+      return Promise.resolve(new DynamoAdapter(adapterOptions as DynamoAdapterOptions, warn));
     case 'memory':
     default:
       return Promise.resolve(new MemoryAdapter());
@@ -448,6 +452,9 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('instance');
   carry('apiEndpoint');
   carry('tables');
+  carry('requestTimeoutMs');
+  carry('readinessEntity');
+  carry('clientOptions');
   return result as DatabaseAdapterOptions;
 }
 

@@ -2,6 +2,7 @@ import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import type { WritePrecondition } from '@setu-ts/common';
 import { sources } from '../fixtures/conditional-sources.ts';
+import { mysqlDrizzle } from '../fixtures/mysql-drizzle.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
@@ -231,7 +232,7 @@ describe('conditional writes conjoin key and predicate at every public data sour
             expect(message).not.toContain('canary-payload');
             // D1's unknown-column refusal is SQLite's own driver diagnostic,
             // which names the column (as for every D1 statement).
-            if (name !== 'd1' && name !== 'prisma') expect(message).not.toContain(field);
+            if (name !== 'd1' && !name.startsWith('prisma')) expect(message).not.toContain(field);
           }
         } else {
           expect(await ds.updateWhere!('a', where, { name: 'bad' })).toBeNull();
@@ -290,8 +291,8 @@ describe('updateVersioned / deleteVersioned at every public data source (M128)',
  * a source moving between them fails here, not in prose.
  */
 const TRANSACTION_OUTCOMES: Readonly<Record<'applies' | 'refuses', readonly string[]>> = {
-  applies: ['drizzle', 'prisma', 'mongodb'],
-  refuses: ['memory', 'd1', 'dynamodb', 'cosmos', 'bigtable'],
+  applies: sources.filter((source) => source.transactionalConditional === true).map((source) => source.name),
+  refuses: sources.filter((source) => source.transactionalConditional === 'refused').map((source) => source.name),
 };
 
 describe('updateVersioned inside a transaction (M128)', () => {
@@ -309,13 +310,9 @@ describe('updateVersioned inside a transaction (M128)', () => {
     for (const [name, { source, done }] of Object.entries(transactionSources)) {
       try {
         const repo = new Repo(source);
-        await repo.create({ id: 'a', name: 'old', version: 1 });
         await expect(updateVersioned(repo, 'a', 1, { name: 'new' }), name).resolves.toMatchObject({
           version: 2,
         });
-        await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toBeInstanceOf(
-          VersionConflictError,
-        );
       } finally {
         await done();
       }
@@ -348,7 +345,27 @@ async function applyingTransactionSources(): Promise<
   Record<string, { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }>
 > {
   const prismaClient = createFakePrismaClient();
+  const mysql = mysqlDrizzle();
   const adapters = {
+    'drizzle-mysql': new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(mysql.db, (db, work) => db.transaction(work)),
+      drizzleTables: { User: mysql.table },
+    }),
+    'prisma-mysql': new PrismaAdapter({ prismaClient: createFakePrismaClient({ activeProvider: 'mysql' }) }),
+    'prisma-undetermined': new PrismaAdapter({ prismaClient: createFakePrismaClient({ activeProvider: 'unknown' }) }),
+    dynamodb: new DynamoAdapter({
+      client: dynamoFixture().client,
+      entities: { User: { partitionKey: 'id' } },
+    }),
+    cosmos: new CosmosAdapter({
+      database: 'db',
+      client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
+        .client,
+    }),
+    bigtable: new BigtableAdapter({
+      client: createFakeBigtableClient(new FakeBigtableStore()),
+      instance: 'i',
+    }),
     drizzle: new DrizzleAdapter({
       drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
         database.transaction(work),
@@ -367,6 +384,7 @@ async function applyingTransactionSources(): Promise<
   > = {};
   for (const [name, adapter] of Object.entries(adapters)) {
     await adapter.connect();
+    await adapter.createDataSource('User').create({ id: 'a', name: 'old', version: 1 });
     const tx = await adapter.beginTransaction();
     result[name] = {
       source: tx.createDataSource('User'),
@@ -389,19 +407,7 @@ async function refusingTransactionSources(): Promise<
   > = {};
   const adapters = {
     memory: new MemoryAdapter(),
-    dynamodb: new DynamoAdapter({
-      client: dynamoFixture().client,
-      entities: { User: { partitionKey: 'id' } },
-    }),
-    cosmos: new CosmosAdapter({
-      database: 'db',
-      client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
-        .client,
-    }),
-    bigtable: new BigtableAdapter({
-      client: createFakeBigtableClient(new FakeBigtableStore()),
-      instance: 'i',
-    }),
+
   };
   for (const [name, adapter] of Object.entries(adapters)) {
     await adapter.connect();

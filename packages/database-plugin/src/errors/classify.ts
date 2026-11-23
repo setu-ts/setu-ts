@@ -151,6 +151,7 @@ const MONGO_NOT_WRITABLE_PRIMARY = 10107;
 
 /** node-postgres refuses a statement on a client whose connection already failed. */
 const PG_NOT_QUERYABLE_ANCHORS: ReadonlySet<string> = new Set([
+  "Can't add new command when connection is in closed state",
   'Client has encountered a connection error and is not queryable',
   'Client was closed and is not queryable',
 ]);
@@ -274,6 +275,7 @@ function prismaAdapterCause(node: object): DriverErrorMembers | undefined {
       name: undefined,
       labels: undefined,
       message: originalMessage,
+      kind,
       ...(kind === 'mysql' ? { namespace: 'mysql-adapter' as const } : {}),
     };
   } catch {
@@ -499,6 +501,8 @@ type DriverErrorMembers = {
   message: unknown;
   /** Set when the code comes from Prisma's MySQL adapter, whose codes are numeric strings. */
   namespace?: 'mysql-adapter';
+  /** Prisma's portable driver-adapter discriminant, independent of numeric code namespaces. */
+  kind?: unknown;
 };
 
 /**
@@ -508,9 +512,11 @@ type DriverErrorMembers = {
  * and messages from wrappers elsewhere in the cause chain.
  */
 function classifyStructured(
-  { code, labels, namespace }: DriverErrorMembers,
+  { code, labels, namespace, kind }: DriverErrorMembers,
   adapterType: DatabaseAdapterType | undefined,
 ): DriverErrorClass | null {
+  if (kind === 'UniqueConstraintViolation') return 'duplicate';
+  if (kind === 'TransactionWriteConflict') return 'conflict';
   // 1. Numeric codes have backend-local namespaces: Mongo's `10` means
   //    CannotMutateObject while Bigtable's gRPC `10` means ABORTED. Only read
   //    them when the active adapter identifies the namespace. An unmatched
@@ -546,6 +552,7 @@ function classifyStructured(
     if (code === MYSQL_CONNECTION_LOST) return 'timeout';
     if (code === PG_CANNOT_CONNECT_NOW) return 'unavailable';
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
+    if (code === 'ER_LOCK_DEADLOCK') return 'conflict';
     if (code === '40001' || code === '40P01') return 'conflict';
     if (code.startsWith('08')) return 'unavailable';
     // A bare net error (e.g. DynamoDB Local refusing a connection) carries

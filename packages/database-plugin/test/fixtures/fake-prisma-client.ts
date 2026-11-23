@@ -234,6 +234,8 @@ function createDelegate(
     data: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  updateMany(args: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<{ count: number }>;
+  deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
 } {
   return {
@@ -355,6 +357,28 @@ function createDelegate(
       return deleted;
     },
 
+    async updateMany(args) {
+      recordedCalls.push({ model: modelName, action: 'updateMany', args });
+      let count = 0;
+      for (const [key, row] of store.records) {
+        if (!matchesPrismaWhere(row, args.where)) continue;
+        store.records.set(key, { ...row, ...args.data });
+        count += 1;
+      }
+      return { count };
+    },
+
+    async deleteMany(args) {
+      recordedCalls.push({ model: modelName, action: 'deleteMany', args });
+      let count = 0;
+      for (const [key, row] of store.records) {
+        if (!matchesPrismaWhere(row, args.where)) continue;
+        store.records.delete(key);
+        count += 1;
+      }
+      return { count };
+    },
+
     async count(args) {
       recordedCalls.push({ model: modelName, action: 'count', args: args ?? {} });
       let rows = Array.from(store.records.values());
@@ -450,8 +474,15 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
       options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
       transactionOptions = options;
-      // Pass the same client as the tx handle (real Prisma does this)
-      return fn(client);
+      const snapshots = Object.fromEntries(Object.entries(stores).map(([name, store]) => [name, new Map(store.records)]));
+      try {
+        return await fn(client);
+      } catch (error) {
+        for (const [name, records] of Object.entries(snapshots)) {
+          stores[name]!.records = records;
+        }
+        throw error;
+      }
     },
     async $queryRawUnsafe<T>(sql: string, ...params: unknown[]): Promise<T[]> {
       recordedCalls.push({

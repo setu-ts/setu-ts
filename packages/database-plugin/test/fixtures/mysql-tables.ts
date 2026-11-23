@@ -1,0 +1,136 @@
+/** MySQL table mappings shared by both real adapter cells. */
+import { mysqlTable, varchar, text, int, bigint, json, boolean, primaryKey } from 'drizzle-orm/mysql-core';
+
+const Row = mysqlTable('rows', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  name: varchar('name', { length: 191 }),
+  tenant_id: varchar('tenant_id', { length: 191 }),
+  version: int('version').notNull(),
+  balance: int('balance').notNull(),
+  profile: json('profile'),
+});
+const Compound = mysqlTable('compound_rows', {
+  tenantId: varchar('tenantId', { length: 191 }).notNull(),
+  id: varchar('id', { length: 191 }).notNull(),
+  name: varchar('name', { length: 191 }),
+  version: int('version').notNull(),
+  balance: int('balance').notNull(),
+}, (table) => [primaryKey({ columns: [table.tenantId, table.id] })]);
+const Outbox = mysqlTable('setu_outbox', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  kind: varchar('kind', { length: 191 }).notNull(),
+  topic: varchar('topic', { length: 191 }).notNull(),
+  envelope: text('envelope').notNull(),
+  options: text('options').notNull(),
+  orderingKey: varchar('ordering_key', { length: 191 }),
+  tenantId: varchar('tenant_id', { length: 191 }),
+  traceparent: varchar('traceparent', { length: 191 }),
+  position: varchar('position', { length: 191 }).notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  status: varchar('status', { length: 191 }).notNull(),
+  attempts: int('attempts').notNull(),
+  availableAt: bigint('available_at', { mode: 'number' }).notNull(),
+  claimVersion: bigint('claim_version', { mode: 'number' }).notNull(),
+  leaseUntil: bigint('lease_until', { mode: 'number' }).notNull(),
+  lastError: text('last_error'),
+  settledAt: bigint('settled_at', { mode: 'number' }),
+  sentBy: varchar('sent_by', { length: 191 }),
+});
+const Inbox = mysqlTable('setu_inbox', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  kind: varchar('kind', { length: 191 }).notNull(),
+  consumer: varchar('consumer', { length: 191 }).notNull(),
+  topic: varchar('topic', { length: 191 }).notNull(),
+  envelopeId: varchar('envelope_id', { length: 191 }),
+  status: varchar('status', { length: 191 }).notNull(),
+  attempts: int('attempts').notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  lastError: text('last_error'),
+  envelope: text('envelope'),
+});
+const Idempotency = mysqlTable('setu_idempotency', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  kind: varchar('kind', { length: 191 }).notNull(),
+  role: varchar('role', { length: 191 }).notNull(),
+  fingerprint: varchar('fingerprint', { length: 191 }).notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  result: text('result'),
+});
+const Grant = mysqlTable('grants', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  subject: varchar('subject', { length: 191 }).notNull(),
+  role: varchar('role', { length: 191 }).notNull(),
+  scopeType: varchar('scopeType', { length: 191 }),
+  scopeId: varchar('scopeId', { length: 191 }),
+});
+const Role = mysqlTable('roles', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  scopeType: varchar('scopeType', { length: 191 }),
+  scopeId: varchar('scopeId', { length: 191 }),
+  role: varchar('role', { length: 191 }).notNull(),
+  permission: varchar('permission', { length: 191 }).notNull(),
+});
+const AgentRun = mysqlTable('agent_run', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  tenantId: varchar('tenantId', { length: 191 }),
+  principalId: varchar('principalId', { length: 191 }),
+  definition: varchar('definition', { length: 191 }),
+  version: varchar('version', { length: 191 }),
+  status: varchar('status', { length: 191 }),
+  input: json('input'),
+  leaseOwner: varchar('leaseOwner', { length: 191 }),
+  leaseVersion: bigint('leaseVersion', { mode: 'number' }),
+  leaseUntil: bigint('leaseUntil', { mode: 'number' }),
+  entryCount: int('entryCount'),
+  approvalIds: json('approvalIds'),
+  chunkCount: int('chunkCount'),
+  stepChunkStart: int('stepChunkStart'),
+  toolTimeoutKey: varchar('toolTimeoutKey', { length: 191 }),
+  toolTimeouts: int('toolTimeouts'),
+  cancelRequested: boolean('cancelRequested'),
+  error: text('error'),
+  createdAt: bigint('createdAt', { mode: 'number' }),
+  updatedAt: bigint('updatedAt', { mode: 'number' }),
+});
+const AgentRunEntry = mysqlTable('agent_entry', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  runId: varchar('runId', { length: 191 }),
+  tenantId: varchar('tenantId', { length: 191 }),
+  seq: int('seq'),
+  kind: varchar('kind', { length: 191 }),
+  messages: json('messages'),
+  finishReason: varchar('finishReason', { length: 191 }),
+  usage: json('usage'),
+  toolCallId: varchar('toolCallId', { length: 191 }),
+  stepChunkStart: int('stepChunkStart'),
+  leaseVersion: bigint('leaseVersion', { mode: 'number' }),
+});
+const AgentRunChunks = mysqlTable('agent_chunks', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  runId: varchar('runId', { length: 191 }),
+  tenantId: varchar('tenantId', { length: 191 }),
+  seq: int('seq'),
+  chunks: json('chunks'),
+  leaseVersion: bigint('leaseVersion', { mode: 'number' }),
+});
+const AgentRunApproval = mysqlTable('agent_approval', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  runId: varchar('runId', { length: 191 }),
+  tenantId: varchar('tenantId', { length: 191 }),
+  seq: int('seq'),
+  toolCallId: varchar('toolCallId', { length: 191 }),
+  toolName: varchar('toolName', { length: 191 }),
+  input: json('input'),
+  status: varchar('status', { length: 191 }),
+  deadline: bigint('deadline', { mode: 'number' }),
+  decidedBy: varchar('decidedBy', { length: 191 }),
+  decidedAt: bigint('decidedAt', { mode: 'number' }),
+  reason: text('reason'),
+  leaseVersion: bigint('leaseVersion', { mode: 'number' }),
+});
+const Business = mysqlTable('business', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  name: varchar('name', { length: 191 }),
+});
+export const mysqlTables = { Row, Compound, Outbox, Inbox, Idempotency, Grant, Role, AgentRun, AgentRunEntry, AgentRunChunks, AgentRunApproval, Business };

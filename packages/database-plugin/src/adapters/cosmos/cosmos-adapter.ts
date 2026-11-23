@@ -21,6 +21,9 @@
  * @module
  */
 import { serializeError } from '@setu-ts/common';
+import { requestTimeout } from '../request-bound.ts';
+import { boundCosmosDatabase } from './cosmos-client.ts';
+import { classifyDriverError } from '../../errors/classify.ts';
 import type {
   IAdapterTransaction,
   IDatabaseAdapter,
@@ -91,6 +94,8 @@ export class CosmosAdapter implements IDatabaseAdapter {
    * although shutdown has already run — with no second `disconnect()` coming.
    */
   #generation = 0;
+  readonly #timeout: number;
+  #rawDatabase: ICosmosDatabase | null = null;
 
   /**
    * Creates the adapter.
@@ -119,6 +124,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
       );
     }
     this.#options = options;
+    this.#timeout = requestTimeout(options.requestTimeoutMs);
     this.#mapping = options.containers;
   }
 
@@ -166,9 +172,11 @@ export class CosmosAdapter implements IDatabaseAdapter {
         : await createLazyClientLoader(
             this.#options.endpoint as string,
             this.#options.key as string,
+            this.#options.clientOptions,
           );
     const client = await loader.createClient();
-    const database = client.database(this.#options.database as string);
+    const rawDatabase = client.database(this.#options.database as string);
+    const database = boundCosmosDatabase(rawDatabase, this.#timeout);
     // A database read is the cheapest proof that the endpoint, the key and the
     // database name are all usable. Failing here beats failing on the first
     // request, and it names the database rather than the operation.
@@ -187,6 +195,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
     if (generation !== this.#generation) return;
     this.#client = client;
     this.#database = database;
+    this.#rawDatabase = rawDatabase;
     this.#partitionKeys = new PartitionKeyResolver(database);
     this.#connected = true;
   }
@@ -205,6 +214,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
     this.#generation += 1;
     this.#client = null;
     this.#database = null;
+    this.#rawDatabase = null;
     this.#partitionKeys = null;
     this.#connected = false;
     return Promise.resolve();
@@ -213,6 +223,19 @@ export class CosmosAdapter implements IDatabaseAdapter {
   /** Reports whether the adapter is connected. @inheritdoc */
   isReady(): boolean {
     return this.#connected;
+  }
+
+  /** Probes the same database metadata permission already required by connect. */
+  async isHealthy(): Promise<boolean> {
+    if (!this.#connected) return false;
+    try {
+      await boundCosmosDatabase(this.#rawDatabase!, Math.min(this.#timeout || 2000, 2000)).read();
+      return true;
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+      if (code === 401 || code === 403 || code === 404 || classifyDriverError(error, 'cosmos') === 'unavailable') return false;
+      throw error;
+    }
   }
 
   /** Returns a data source for the named entity's container. @inheritdoc */

@@ -23,6 +23,7 @@
  * caller emits — the escaping is inert without it.
  *
  * @param value - The raw search value
+ * @param escape - The SQL escape character; MySQL uses `!` independently of sql_mode
  * @returns The escaped value
  * @example
  * ```typescript
@@ -30,6 +31,6 @@
  * escapeLikePattern('back\\slash'); // 'back\\\\slash'
  * ```
  */
-export function escapeLikePattern(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+export function escapeLikePattern(value: string, escape: '\\' | '!' = '\\'): string {
+  return value.replaceAll(escape, escape + escape).replaceAll('%', escape + '%').replaceAll('_', escape + '_');
 }

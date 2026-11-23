@@ -17,6 +17,8 @@ import type {
   FilterExpression,
 } from '@setu-ts/common';
 import type { IDatabaseService, IRepository } from '../interfaces/index.ts';
+import { UnsupportedQueryFeatureError } from '../errors.ts';
+import { causeChain } from '../errors/classify.ts';
 
 /** Entity and named-connection mapping for durable runs. @since 0.12.0 */
 export interface DatabaseAgentRunStoreOptions {
@@ -148,7 +150,11 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
       for (const [kind, query] of probes) await this.#repo(kind).findAll(query);
     } catch (cause) {
       if (cause instanceof AgentRunStoreUnavailableError) throw cause;
-      throw new AgentRunStoreUnavailableError('query-unsupported', { cause });
+      const refusal = causeChain(cause).find((error) => error instanceof UnsupportedQueryFeatureError && (error.adapter === 'dynamodb' || error.adapter === 'bigtable'));
+      const detail = refusal instanceof UnsupportedQueryFeatureError
+        ? new UnsupportedQueryFeatureError('agent-runs', refusal.adapter, `The agent-run store needs ordered multi-field queries, which the ${refusal.adapter} adapter cannot serve. Use PostgreSQL, SQLite or MongoDB for agent runs.`, { cause })
+        : cause;
+      throw new AgentRunStoreUnavailableError('query-unsupported', { cause: detail });
     }
   }
   /** @inheritdoc */

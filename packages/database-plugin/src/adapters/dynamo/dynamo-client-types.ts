@@ -211,21 +211,21 @@ export type DynamoTransactWriteItemsCommandOutput = Record<never, never>;
  */
 export interface IDynamoClient {
   /** Sends a key-constrained query. */
-  query(input: DynamoQueryCommandInput): Promise<DynamoReadCommandOutput>;
+  query(input: DynamoQueryCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoReadCommandOutput>;
   /** Scans a table or index when no key-constrained query is possible. */
-  scan(input: DynamoScanCommandInput): Promise<DynamoReadCommandOutput>;
+  scan(input: DynamoScanCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoReadCommandOutput>;
   /** Reads a single item by its complete key. */
-  getItem(input: DynamoGetItemCommandInput): Promise<DynamoGetItemCommandOutput>;
+  getItem(input: DynamoGetItemCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoGetItemCommandOutput>;
   /** Creates one item. */
-  putItem(input: DynamoPutItemCommandInput): Promise<DynamoPutItemCommandOutput>;
+  putItem(input: DynamoPutItemCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoPutItemCommandOutput>;
   /** Updates one existing item. */
-  updateItem(input: DynamoUpdateItemCommandInput): Promise<DynamoUpdateItemCommandOutput>;
+  updateItem(input: DynamoUpdateItemCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoUpdateItemCommandOutput>;
   /** Deletes one item. */
-  deleteItem(input: DynamoDeleteItemCommandInput): Promise<DynamoDeleteItemCommandOutput>;
+  deleteItem(input: DynamoDeleteItemCommandInput, options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoDeleteItemCommandOutput>;
   /** Commits a bounded set of writes atomically. */
   transactWriteItems(
     input: DynamoTransactWriteItemsCommandInput,
-  ): Promise<DynamoTransactWriteItemsCommandOutput>;
+    options?: { readonly abortSignal?: AbortSignal }): Promise<DynamoTransactWriteItemsCommandOutput>;
   /** Releases resources held by a client constructed through the lazy path. */
   destroy(): void;
 }

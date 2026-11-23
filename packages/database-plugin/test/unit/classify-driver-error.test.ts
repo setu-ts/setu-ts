@@ -26,6 +26,27 @@ import {
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
 
+describe('M143q MySQL driver signals', () => {
+  for (const [kind, originalCode, expected] of [
+    ['UniqueConstraintViolation', '1062', 'duplicate'],
+    ['UniqueConstraintViolation', '23505', 'duplicate'],
+    ['TransactionWriteConflict', '1213', 'conflict'],
+    ['TransactionWriteConflict', '40P01', 'conflict'],
+    ['mysql', '1213', null],
+  ] as const) {
+    it(`classifies Prisma P2010 ${kind}/${originalCode}`, () => {
+      expect(classifyDriverError({ code: 'P2010', meta: { driverAdapterError: { cause: { kind, originalCode } } } }, 'prisma')).toBe(expected);
+    });
+  }
+  it('classifies a deadlock and a command refused by a closed mysql2 connection', () => {
+    expect(classifyDriverError({ code: 'ER_LOCK_DEADLOCK' }, 'drizzle')).toBe('conflict');
+    const message = "Can't add new command when connection is in closed state";
+    expect(classifyDriverError(new Error(message), 'drizzle')).toBe('unavailable');
+    expect(classifyDriverError({ message: 'prefix ' + message }, 'drizzle')).toBeNull();
+    expect(classifyDriverError({ message, code: 'UNRECOGNIZED' }, 'drizzle')).toBeNull();
+  });
+});
+
 describe('classifyDriverError — conflict signals (409)', () => {
   it('PostgreSQL SQLSTATE class 40 (40001 serialization_failure)', () => {
     expect(classifyDriverError({ code: '40001' })).toBe('conflict');

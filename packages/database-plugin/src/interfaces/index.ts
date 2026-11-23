@@ -757,7 +757,7 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
   readonly drizzleInstance: DrizzleDatabaseIdentity;
 
   /**
-   * The SQL dialect, used only to translate a **nested JSON filter path**
+   * The SQL dialect, used to translate MySQL LIKE escapes, offset-only limits and a **nested JSON filter path**
    * (`field: ['profile', 'city']`). No two dialects spell JSON extraction
    * alike: PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
    * SQLite `json_extract`.
@@ -969,6 +969,13 @@ export type MongoAdapterOptions =
  * @since 0.2.0
  */
 export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  readonly requestTimeoutMs?: number;
+  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+  /** Entity whose mapped table readiness reads; defaults to the first mapping. @since 0.14.0 */
+  readonly readinessEntity?: string;
+
   /**
    * Per-entity table and key mappings, keyed by the entity name passed to
    * `getRepository()`.
@@ -1140,6 +1147,11 @@ export interface CosmosDatabaseOptions extends DatabaseConnectionOptions {
  * @since 0.2.0
  */
 export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  readonly requestTimeoutMs?: number;
+  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+
   /**
    * The database the containers live in. Required on both arms: a Cosmos
    * endpoint encodes no database name, so unlike a MongoDB URI there is
@@ -1263,6 +1275,13 @@ export interface BigtableDatabaseOptions extends DatabaseConnectionOptions {
  * @since 0.2.0
  */
 export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /** Whole-call driver deadline, retries included. Default 15000 ms; 0 disables. @since 0.14.0 */
+  readonly requestTimeoutMs?: number;
+  /** SDK constructor options, spread first and ignored with an injected client. @since 0.14.0 */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+  /** Entity whose mapped table readiness reads; defaults to the first mapping. @since 0.14.0 */
+  readonly readinessEntity?: string;
+
   /**
    * The Bigtable instance the tables live in. Required on both arms: a table
    * is addressed as `project/instance/table`, and neither an injected client

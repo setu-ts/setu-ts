@@ -122,6 +122,9 @@ function toRow(record: InboxRecord): Row {
 function fromRow(row: Row): InboxRecord {
   const record: Row = {};
   for (const field of REQUIRED_FIELDS) record[field] = row[field];
+  for (const field of ['attempts', 'updatedAt']) {
+    if (typeof record[field] === 'bigint') record[field] = Number(record[field]);
+  }
   for (const field of OPTIONAL_FIELDS) {
     const value = row[field];
     if (value !== null && value !== undefined) record[field] = value;
