@@ -531,12 +531,14 @@ export class RedisBackplane implements IRealtimeBackplane {
     try {
       await publisher.publish(this.#topic, JSON.stringify(this.#frameAge.stamp(frame)));
     } catch (error) {
-      this.#frameAge.publishFailed();
+      // A command timeout leaves the PUBLISH possibly on the wire (X3-3).
+      this.#frameAge.publishFailed(error instanceof Error && /timed out/i.test(error.message));
       // M131a X88-5: a backend fault says whether the frame was applied.
       const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
       if (fault !== undefined) throw fault;
       throw error;
     }
+    this.#frameAge.publishSucceeded();
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {

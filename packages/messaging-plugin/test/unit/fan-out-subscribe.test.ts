@@ -207,7 +207,7 @@ describe('Redis Streams independent reader', () => {
     expect(Object.hasOwn(handler.mock.calls[1]![1].headers!, '__proto__')).toBe(true);
     expect(handler.mock.calls[1]![1].headers?.['__proto__']).toBe('prototype-header');
     expect(error).toHaveBeenCalledExactlyOnceWith(
-      'Redis fanOut read failed; retaining last stream ID',
+      'Redis fanOut read failed (unknown error); retaining last stream ID',
     );
     await sub.unsubscribe();
     await clock.advance(1000);
@@ -288,5 +288,39 @@ describe('Redis Streams independent reader', () => {
     await broker.disconnect();
     range.resolve([]);
     await expect(subscription).rejects.toThrow('disconnected while subscribing');
+  });
+  it('logs a persistent read failure once with its Redis code, and survives a throwing logger', async () => {
+    const clock = clockRuntime();
+    const client = new FakeRedisStreamsClient();
+    const error = vi.fn(() => {
+      throw new Error('sink down');
+    });
+    const broker = new RedisStreamsBroker(clock.runtime, new JsonSerializer(), {
+      client,
+      logger: { error },
+      reclaimIntervalMs: 100,
+    });
+    await broker.connect();
+    const handler = vi.fn(() => {
+      throw new Error('handler failed');
+    });
+    const sub = await broker.subscribe('frames', handler, { fanOut: true });
+    const read = vi
+      .spyOn(client, 'xread')
+      .mockRejectedValue(new Error('NOPERM this user has no permissions to run the xread command'));
+    for (let n = 0; n < 5; n++) await clock.advance(100);
+    expect(error).toHaveBeenCalledExactlyOnceWith(
+      'Redis fanOut read failed (NOPERM); retaining last stream ID',
+    );
+    read.mockRestore();
+    await clock.advance(100);
+    vi.spyOn(client, 'xread').mockRejectedValueOnce(new Error('NOPERM again'));
+    await clock.advance(100);
+    expect(error).toHaveBeenCalledTimes(2);
+    await client.xadd('frames', '20-0', 'payload', '1');
+    await clock.advance(100);
+    expect(handler).toHaveBeenCalledOnce();
+    await sub.unsubscribe();
+    await broker.disconnect();
   });
 });

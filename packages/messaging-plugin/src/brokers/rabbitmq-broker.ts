@@ -708,17 +708,6 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Publishes a message to a topic.
-   *
-   * @typeParam T - The message payload type
-   * @param topic - The topic to publish to
-   * @param message - The message payload
-   * @param options - Caller headers, ordering key and de-duplication id
-   * @returns Resolves when published
-   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
-   * @since 0.1.0
-   */
-  /**
    * Whether this connection can confirm a required route.
    * @returns True only with confirms and return listeners
    * @throws Never
@@ -729,6 +718,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     return this.#confirmed && isCloseObservable(this.#channel);
   }
 
+  /**
+   * Publishes a message to a topic.
+   *
+   * @typeParam T - The message payload type
+   * @param topic - The topic to publish to
+   * @param message - The message payload
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when published
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @since 0.1.0
+   */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }

@@ -62,10 +62,15 @@ describe('Service Bus independent subscription names', () => {
       await expect(broker.subscribe('orders', () => {}, { fanOut: true })).rejects.toBe(failure);
       expect(fake.transport.createSubscription).toHaveBeenCalledTimes(kind === 'collision' ? 2 : 1);
       expect(fake.transport.open).not.toHaveBeenCalled();
-      if (kind !== 'collision')
+      if (kind === 'forbidden')
         expect(warn).toHaveBeenCalledWith(
-          'Service Bus fanOut subscription creation failed; the identity needs Manage rights',
+          'Service Bus fanOut subscription creation was refused; the identity needs Manage rights',
         );
+      if (kind === 'generic-conflict')
+        expect(warn).toHaveBeenCalledWith(
+          'Service Bus fanOut subscription creation failed (status 409)',
+        );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('secret');
       await broker.disconnect();
     },
   );

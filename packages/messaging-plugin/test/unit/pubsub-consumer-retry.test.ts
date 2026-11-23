@@ -43,7 +43,7 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
       deadLetterPolicy: { deadLetterTopic: 'dead', maxDeliveryAttempts: 5 },
     });
     const nack = vi.fn();
-    h.opens[0]!.deliver({ payload: '{}', ack: vi.fn(), nack, deliveryAttempt: 1 });
+    h.opens[0]!.deliver({ payload: '{}', ack: vi.fn(), nack });
     await flushCloud();
     expect(nack).toHaveBeenCalledOnce();
     expect(
@@ -116,6 +116,29 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
     expect(
       JSON.stringify([...h.logger.warn.mock.calls, ...h.logger.error.mock.calls]),
     ).not.toContain('secret');
+    await h.broker.disconnect();
+  });
+
+  it('bounds a hung not-retryable forward by publishTimeoutMs and then nacks', async () => {
+    const h = harness({
+      deadLetterTopic: 'dead',
+      publishTimeoutMs: 1000,
+      consumerRetry: { isRetryable: () => false },
+    });
+    await h.broker.connect();
+    await h.broker.subscribe('orders', () => {
+      throw new Error('failed');
+    });
+    vi.mocked(h.transport.publish).mockReturnValueOnce(new Promise<void>(() => {}));
+    const ack = vi.fn();
+    const nack = vi.fn();
+    h.opens[0]!.deliver({ payload: '{}', ack, nack });
+    await flushCloud();
+    expect(nack).not.toHaveBeenCalled();
+    await h.advance(1000);
+    await flushCloud();
+    expect(nack).toHaveBeenCalledOnce();
+    expect(ack).not.toHaveBeenCalled();
     await h.broker.disconnect();
   });
 

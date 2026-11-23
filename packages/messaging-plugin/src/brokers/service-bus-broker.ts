@@ -365,6 +365,37 @@ const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
  * @param error - The caught probe error
  * @returns `true` reachable, `false` positively absent, `undefined` unknown
  */
+/**
+ * A log-safe label for an admin or SDK failure: its code or status, never its
+ * message text (remote text stays out of logs).
+ */
+function errorName(error: unknown): string {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    if (typeof value?.code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value.code))
+      return value.code;
+    if (typeof value?.statusCode === 'number' && Number.isInteger(value.statusCode))
+      return `status ${value.statusCode}`;
+  } catch {
+    /* fall through */
+  }
+  return 'unknown error';
+}
+
+/** Whether an admin failure is an authorization refusal (401/403 or an Unauthorized code). */
+function unauthorized(error: unknown): boolean {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    return (
+      value?.statusCode === 401 ||
+      value?.statusCode === 403 ||
+      (typeof value?.code === 'string' && value.code.startsWith('Unauthorized'))
+    );
+  } catch {
+    return false;
+  }
+}
+
 function classifyProbeFailure(error: unknown): boolean | undefined {
   if (typeof error !== 'object' || error === null) {
     return undefined;
@@ -906,9 +937,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#generation++;
     await this.#rr.close();
 
-    for (const sub of this.#subscriptions.values()) {
-      await sub.close();
-    }
+    // Every subscription is closed even when one close fails.
+    await Promise.allSettled([...this.#subscriptions.values()].map((sub) => sub.close()));
     this.#subscriptions.clear();
 
     if (this.#transport) {
@@ -1121,7 +1151,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const deleteCreated = async (): Promise<void> => {
       if (!created) return;
       created = false;
-      await transport.deleteSubscription(topic, queue);
+      // Best effort: the subscription also deletes itself after 5 idle minutes,
+      // so a failed delete never stops the close.
+      await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
+        this.#write(
+          `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
+        );
+      });
     };
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {
@@ -1267,7 +1303,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     } catch (error) {
       if (independent && !created && !(error instanceof SubscriptionNameExistsError))
         this.#write(
-          'Service Bus fanOut subscription creation failed; the identity needs Manage rights',
+          unauthorized(error)
+            ? 'Service Bus fanOut subscription creation was refused; the identity needs Manage rights'
+            : `Service Bus fanOut subscription creation failed (${errorName(error)})`,
         );
       await close().catch(() => {});
       throw error;

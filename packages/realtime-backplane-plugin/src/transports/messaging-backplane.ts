@@ -185,9 +185,12 @@ export class MessagingBackplane implements IRealtimeBackplane {
     try {
       await this.#broker.publish(this.#topic, this.#frameAge.stamp(frame));
     } catch (error) {
-      this.#frameAge.publishFailed();
+      // Only a publish timeout leaves the outcome unknown (the broker may
+      // still deliver); the messaging plugin names that error.
+      this.#frameAge.publishFailed(error instanceof Error && error.name === 'PublishTimeoutError');
       throw error;
     }
+    this.#frameAge.publishSucceeded();
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {
@@ -199,6 +202,8 @@ export class MessagingBackplane implements IRealtimeBackplane {
 
   async close(): Promise<void> {
     this.#generation++;
+    // A stale open must not be handed to a later connect().
+    this.#opening = undefined;
     this.#handlers.clear();
     const subscription = this.#subscription;
     this.#subscription = undefined;

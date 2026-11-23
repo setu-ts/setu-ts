@@ -355,9 +355,15 @@ describe('messaging backplane independent delivery and frame age', () => {
       broker.deliver({ ...FRAME, sentAtMs: now });
       expect(delivered).toHaveBeenLastCalledWith(FRAME);
       expect(warn).toHaveBeenCalledTimes(max === 0 ? 0 : 2);
+      const before = warn.mock.calls.length;
       vi.spyOn(broker, 'publish').mockRejectedValueOnce(new Error('remote-secret'));
       await expect(backplane.publish(FRAME)).rejects.toThrow('remote-secret');
+      expect(warn).toHaveBeenCalledTimes(before);
+      const timeout = Object.assign(new Error('timed out'), { name: 'PublishTimeoutError' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(timeout);
+      await expect(backplane.publish(FRAME)).rejects.toBe(timeout);
       expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
+      expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(max > 0);
       await backplane.close();
     },
   );
@@ -376,6 +382,22 @@ describe('messaging backplane independent delivery and frame age', () => {
     await a;
     expect(unsubscribe).toHaveBeenCalledOnce();
     await backplane.connect();
+    await backplane.close();
+  });
+
+  it('a connect after close does not reuse the stale pending open', async () => {
+    const broker = new FakeBroker();
+    const stale = Promise.withResolvers<ISubscription>();
+    const subscribe = vi.spyOn(broker, 'subscribe').mockReturnValueOnce(stale.promise);
+    const backplane = new MessagingBackplane(broker, 'a', 'frames');
+    const first = backplane.connect();
+    await backplane.close();
+    const second = backplane.connect();
+    expect(second).not.toBe(first);
+    stale.resolve({ fanOut: true, unsubscribe: vi.fn(() => Promise.resolve()) });
+    await first;
+    await second;
+    expect(subscribe).toHaveBeenCalledTimes(2);
     await backplane.close();
   });
 });

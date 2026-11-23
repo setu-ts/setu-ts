@@ -258,8 +258,6 @@ export interface PubSubSdkModule {
           attributes?: Record<string, string>;
           /** Native ordering key. @since 0.14.0 */
           orderingKey?: string;
-          /** Platform attempt number, present with a dead-letter policy. @since 0.14.0 */
-          deliveryAttempt?: number;
         }) => void,
       ): void;
       on(event: 'error', handler: (err: unknown) => void): void;
@@ -347,8 +345,6 @@ export interface IPubSubTransport {
       timestamp?: Date;
       /** Native ordering key. @since 0.14.0 */
       orderingKey?: string;
-      /** Platform attempt number when a dead-letter policy exists. @since 0.14.0 */
-      deliveryAttempt?: number;
     }) => void,
     options?: PubSubOpenOptions,
   ): Promise<IPubSubSubscription>;
@@ -696,7 +692,6 @@ export function adaptPubSubModule(
         publishTime?: Date;
         attributes?: Record<string, string>;
         orderingKey?: string;
-        deliveryAttempt?: number;
       }): void => {
         const text = new TextDecoder().decode(raw.data);
         // X28-4: the platform assigns both fields, so the adapter reads them
@@ -710,7 +705,6 @@ export function adaptPubSubModule(
           nack: () => raw.nack(),
           attributes: raw.attributes ?? {},
           ...(raw.orderingKey === undefined ? {} : { orderingKey: raw.orderingKey }),
-          ...(raw.deliveryAttempt === undefined ? {} : { deliveryAttempt: raw.deliveryAttempt }),
           ...(raw.id !== undefined && raw.id !== '' ? { messageId: raw.id } : {}),
           ...(raw.publishTime !== undefined ? { timestamp: new Date(raw.publishTime) } : {}),
         });
@@ -944,6 +938,11 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         'unlimited',
         'Pub/Sub failing messages are redelivered without limit until deadLetterTopic is set',
       );
+    if (!this.#retry.retry && this.#deadLetterTopic !== undefined)
+      this.#warnOnce(
+        'dead-letter-unused',
+        'Pub/Sub deadLetterTopic is ignored because consumerRetry is false',
+      );
     if (this.#enableMessageOrdering && this.#deadLetterTopic !== undefined)
       this.#warnOnce(
         'ordered-dead-letter',
@@ -956,9 +955,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     this.#probe = null;
     await this.#rr.close();
 
-    for (const sub of this.#subscriptions.values()) {
-      await sub.close();
-    }
+    // Every subscription is closed even when one close fails.
+    await Promise.allSettled([...this.#subscriptions.values()].map((sub) => sub.close()));
     this.#subscriptions.clear();
 
     if (this.#transport) {
@@ -1107,7 +1105,14 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
           try {
             await current?.close();
           } finally {
-            if (independent && opened) await transport.deleteSubscription(queue);
+            // Best effort: a fan-out subscription also expires on its own after
+            // one idle day, so a failed delete never stops the close.
+            if (independent && opened)
+              await transport.deleteSubscription(queue).catch((error: unknown) => {
+                this.#write(
+                  `Pub/Sub fan-out subscription ${JSON.stringify(queue)} was not deleted (code ${errorCode(error)}); it expires after one idle day`,
+                );
+              });
           }
         })().finally(() => {
           this.#subscriptions.delete(subscriptionId);
@@ -1145,11 +1150,26 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         }
       }
       if (!independent && !retryable && this.#deadLetterTopic !== undefined) {
+        const deadLetterTopic = this.#deadLetterTopic;
         try {
-          await transport.publish(
-            this.#deadLetterTopic,
-            msg.bytes ?? new TextEncoder().encode(msg.payload),
-            { ...msg.attributes, 'setu-dead-letter-reason': 'not-retryable' },
+          // Bounded like every publish: a hung forward must not hold the
+          // message's lease (and, when ordered, its key) indefinitely.
+          await withDeadline(
+            () =>
+              transport.publish(
+                deadLetterTopic,
+                msg.bytes ?? new TextEncoder().encode(msg.payload),
+                { ...msg.attributes, 'setu-dead-letter-reason': 'not-retryable' },
+              ),
+            {
+              timeoutMs: this.#publishTimeoutMs,
+              onTimeout: () =>
+                new PublishTimeoutError(
+                  `Pub/Sub dead-letter forward to ${JSON.stringify(deadLetterTopic)} timed out`,
+                  { topic: deadLetterTopic, timeoutMs: this.#publishTimeoutMs },
+                ),
+              timing: resolveProbeTiming(this.#runtime),
+            },
           );
         } catch {
           if (!ended && deliveryGeneration === streamGeneration) msg.nack();
@@ -1343,7 +1363,9 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
           const permission = errorCode(error) === '7';
           this.#warnOnce(
             'target:' + target,
-            `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code ${errorCode(error)}); grant pubsub.topics.get and pubsub.topics.listSubscriptions (roles/pubsub.viewer); roles/pubsub.subscriber lacks pubsub.topics.get`,
+            permission
+              ? `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code 7); grant pubsub.topics.get and pubsub.topics.listSubscriptions (roles/pubsub.viewer) to run the check; roles/pubsub.subscriber lacks pubsub.topics.get`
+              : `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code ${errorCode(error)})`,
             permission,
           );
         }

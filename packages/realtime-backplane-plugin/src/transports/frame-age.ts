@@ -20,6 +20,7 @@ export class FrameAge {
   readonly #warn: ((message: string) => void) | undefined;
   #dropped = 0;
   #oldest = 0;
+  #publishUncertain = false;
 
   /**
    * @param max - Maximum age in milliseconds; zero disables filtering
@@ -90,18 +91,33 @@ export class FrameAge {
   }
 
   /**
-   * Reports an uncertain publication without claiming that it was lost.
+   * Reports a failed publication whose outcome is unknown (a timeout: the
+   * command may already be on the wire), once per failing state. A failure
+   * whose frame never left the process is not reported here.
+   * @param uncertain - Whether the frame may still reach the broker
    * @returns Nothing
    * @throws Never
    * @since 0.14.0
    */
-  publishFailed(): void {
+  publishFailed(uncertain: boolean): void {
+    if (!uncertain || this.#publishUncertain) return;
+    this.#publishUncertain = true;
     this.#write(
       'realtime-backplane publish failed; the frame may still arrive late' +
         (this.#max > 0
           ? `; receivers configured with maxFrameAgeMs drop frames older than ${this.#max} ms`
           : ''),
     );
+  }
+
+  /**
+   * Ends the failing state after a publication succeeded.
+   * @returns Nothing
+   * @throws Never
+   * @since 0.14.0
+   */
+  publishSucceeded(): void {
+    this.#publishUncertain = false;
   }
 
   #write(message: string): void {

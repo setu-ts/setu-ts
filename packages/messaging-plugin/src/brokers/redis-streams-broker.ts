@@ -203,6 +203,16 @@ interface ConsumerLoopDeps {
  * Builds the per-subscription consumer loop (poll, reclaim, in-flight guards,
  * stop flag and drain) that one shared timer tick drives.
  */
+/** The leading Redis error code (`NOPERM`, `WRONGTYPE`, …) of a failure, never its text. */
+function redisErrorCode(error: unknown): string {
+  try {
+    const message = error instanceof Error ? error.message : '';
+    return /^([A-Z][A-Z_]{1,31})\b/.exec(message)?.[1] ?? 'unknown error';
+  } catch {
+    return 'unknown error';
+  }
+}
+
 function createConsumerLoop(deps: ConsumerLoopDeps): ConsumerLoop {
   const {
     runtime,
@@ -790,7 +800,16 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     let lastId = latest[0]?.[0] ?? '0-0';
     let stopped = false;
     let flight: Promise<void> | undefined;
+    let readFailing = false;
     const id = this.#runtime.uuid();
+    // A throwing logger must never escape the reader (it would reject unhandled).
+    const log = (message: string): void => {
+      try {
+        this.#logger?.error(message);
+      } catch {
+        /* Diagnostic sinks cannot stop the reader. */
+      }
+    };
     const poll = async (): Promise<void> => {
       const result = await client.xread!(
         'COUNT',
@@ -801,6 +820,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
         topic,
         lastId,
       );
+      readFailing = false;
       if (stopped || result === null) return;
       for (const stream of result) {
         for (const [entryId, fields] of stream[1] as Array<[string, string[]]>) {
@@ -820,7 +840,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
               headers: Object.fromEntries(headers),
             });
           } catch {
-            this.#logger?.error('Redis fanOut handler failed; frame is not redelivered');
+            log('Redis fanOut handler failed; frame is not redelivered');
           }
         }
       }
@@ -839,8 +859,11 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       pollTick: () => {
         if (stopped || flight !== undefined) return;
         flight = poll()
-          .catch(() => {
-            if (!stopped) this.#logger?.error('Redis fanOut read failed; retaining last stream ID');
+          .catch((error: unknown) => {
+            // Once per failing state, with the Redis error code, not every tick.
+            if (stopped || readFailing) return;
+            readFailing = true;
+            log(`Redis fanOut read failed (${redisErrorCode(error)}); retaining last stream ID`);
           })
           .finally(() => {
             flight = undefined;

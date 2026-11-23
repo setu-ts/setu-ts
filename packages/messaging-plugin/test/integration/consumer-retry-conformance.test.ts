@@ -284,7 +284,6 @@ describe('consumer retry budget and dead payload conformance', () => {
             const policy = fake.opens[0]!.options?.create;
             fake.opens[0]!.deliver({
               payload: serialized,
-              deliveryAttempt: deliveries,
               messageId: 'one',
               ack: () => {},
               nack: () => {

@@ -444,11 +444,19 @@ export interface MemoryMessagingOptions extends MessagingCommonOptions {
  * @since 0.9.0
  */
 export interface ConsumerRetryOptions {
-  /** Positive safe integer delivery budget, including the initial attempt. @since 0.9.0 */
+  /**
+   * Positive safe integer delivery budget, including the initial attempt. Pub/Sub uses it as
+   * the platform's `maxDeliveryAttempts` and requires 5 to 100 when `deadLetterTopic` is set.
+   * @since 0.9.0
+   */
   readonly maxAttempts?: number;
   /** Nonempty, nondecreasing integer milliseconds. RabbitMQ and Redis require positive delays ≤2147483647; Pub/Sub accepts one or two bounds from 0 to 600000, and Service Bus requires delays below 240000. @since 0.9.0 */
   readonly delaysMs?: readonly number[];
-  /** False dead-letters immediately; a throwing classifier is logged and retries. @since 0.9.0 */
+  /**
+   * False dead-letters immediately; a throwing classifier is logged and retries. Pub/Sub refuses
+   * `isRetryable` without `deadLetterTopic` (a not-retryable message is forwarded there).
+   * @since 0.9.0
+   */
   readonly isRetryable?: (error: unknown) => boolean;
 }
 

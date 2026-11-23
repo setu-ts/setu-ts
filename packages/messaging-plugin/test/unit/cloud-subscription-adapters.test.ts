@@ -116,11 +116,10 @@ describe('Pub/Sub optional subscription policies and stream lifecycle', () => {
       nack,
       id: 'm',
       orderingKey: 'key',
-      deliveryAttempt: 2,
       publishTime: new Date(1),
     });
     expect(delivery).toHaveBeenCalledWith(
-      expect.objectContaining({ orderingKey: 'key', deliveryAttempt: 2, messageId: 'm' }),
+      expect.objectContaining({ orderingKey: 'key', messageId: 'm' }),
     );
     h.emit('close', { code: 5 });
     expect(closed).toHaveBeenCalledOnce();

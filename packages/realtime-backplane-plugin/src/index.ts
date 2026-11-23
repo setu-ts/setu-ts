@@ -51,6 +51,7 @@ export { createBackplane } from './transports/backplane-factory.ts';
 export { MemoryBackplane } from './transports/memory-backplane.ts';
 export { isRealtimeFrame, MessagingBackplane } from './transports/messaging-backplane.ts';
 export { RedisBackplane } from './transports/redis-backplane.ts';
+export type { BackplaneReporter } from './transports/frame-age.ts';
 export { adaptRedisModule, loadRedisModule, RedisModuleError } from './transports/redis-module.ts';
 
 // ── Types ───────────────────────────────────────────────────────────────────

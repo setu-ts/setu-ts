@@ -60,12 +60,19 @@ describe('frame timestamp and receiver age limit', () => {
   it('reports uncertainty, mentioning dropping only with the option on', () => {
     const warn = vi.fn();
     const defaultPolicy = new FrameAge(0, () => 0, warn);
-    defaultPolicy.publishFailed();
+    defaultPolicy.publishFailed(false);
+    expect(warn).not.toHaveBeenCalled();
+    defaultPolicy.publishFailed(true);
+    defaultPolicy.publishFailed(true);
+    expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]![0]).toBe(
       'realtime-backplane publish failed; the frame may still arrive late',
     );
-    new FrameAge(100, () => 0, warn).publishFailed();
-    expect(warn.mock.calls[1]![0]).toContain(
+    defaultPolicy.publishSucceeded();
+    defaultPolicy.publishFailed(true);
+    expect(warn).toHaveBeenCalledTimes(2);
+    new FrameAge(100, () => 0, warn).publishFailed(true);
+    expect(warn.mock.calls[2]![0]).toContain(
       'receivers configured with maxFrameAgeMs drop frames older than 100 ms',
     );
   });

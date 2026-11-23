@@ -164,6 +164,8 @@ export type {
 export type {
   IPubSubSubscription,
   IPubSubTransport,
+  PubSubCreateOptions,
+  PubSubOpenOptions,
   PubSubOptions,
 } from './brokers/pubsub-broker.ts';
 export type {

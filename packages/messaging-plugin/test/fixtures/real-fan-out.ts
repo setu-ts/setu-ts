@@ -153,6 +153,9 @@ export async function realFanOutPair(
       return count;
     };
     cleanup = async () => {
+      // The brokers do not close an injected connection; close both here so a
+      // test relay torn down afterwards cannot surface an unhandled close.
+      await Promise.allSettled(clients.map((client) => client.close()));
       try {
         await channel.deleteExchange(prefix);
       } finally {
