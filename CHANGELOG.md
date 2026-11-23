@@ -115,6 +115,52 @@ All notable changes to this project are documented here. The format follows
   WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
   has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
   descriptor, and a status outside 200–599 is answered as 500.
+- **`@setu-ts/session-plugin` (M143a, #609; V13-135, V13-136, V13-137).** On the store strategy a
+  `destroy()` or `regenerate()` stays in force whatever request on the session was already in
+  flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every
+  commit to a restored session checks it after its write and deletes its own write when present,
+  sending no cookie. A regeneration whose source was signed out meanwhile is refused, and a sign-out
+  that lands after a regeneration's check also ends the regenerated session. A commit whose request
+  loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), a
+  regeneration or `clear()` sign-out refused that way still revokes the old id, and a commit that
+  reaches its marker check that late ends its session (deleting its row under a `revoked` marker,
+  which every commit and regeneration that checks its markers afterwards refuses (one that committed
+  during the stall keeps its new id), without following its successor links; a stalled regeneration
+  deletes only its new row). `restoreRevocationCheck: true` also checks the markers on every
+  store-held restore. Store commits write this request's changes onto the current row
+  (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload write), so a
+  concurrent request's keys survive. `SessionService.commit` takes an optional `SessionCommitPolicy`
+  and returns a `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
+- **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
+  V13-20).** A signed-in visitor's response, a response setting the session cookie and one carrying
+  a CSRF token answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as
+  each is known; an anonymous response that read the session varies on `Cookie`. An explicit
+  shared-cacheable directive set by the handler is kept, with one bounded warning per route, unless
+  the response sets the session cookie; one set by a middleware outside the session middleware
+  before it runs is replaced by `private, no-store` for a signed-in visitor; on a `public` response
+  a refresh-only commit and a new visitor's CSRF-token-only session are not committed, so a form on
+  a page marked `public` fails CSRF. A missing asset starts no session. The React Router bridge sets
+  a route's `Cache-Control` instead of appending it.
+- **`@setu-ts/cache-plugin` (M143a, #609; V13-111).** `cacheMiddleware` stores no response marked
+  `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
+  from a `public` entry that does not vary on `Cookie`/`Authorization`, storing only such a
+  response. A response varying on either is stored and served only for requests carrying no cookie
+  and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
+  `Authorization` never joins or leads a coalesced flight, and a response captured after the session
+  plugin set `PER_VISITOR_RESPONSE_STATE_KEY` (new in `@setu-ts/common`; set at a request's first
+  application write, a CSRF token read and a read of a restored session holding application data) is
+  never stored; one captured after it set `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` (new in
+  `@setu-ts/common`, set at the first application read) is stored only for a request carrying no
+  cookie and no `Authorization`, with `Cookie` added to the stored `Vary`, whatever the handler did
+  to its headers. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
+  arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
+  uses too; a value with an unclosed quote is never stored.
+- **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
+  CORS at 125, so the request-size 400 and 413 carry them.
+- **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out
+  sends the form-CSRF token on same-origin unsafe calls, from a new `GET <docs>/csrf-token` route
+  read through `ICsrfTokenAccess` (`CSRF_TOKEN_ACCESS_STATE_KEY`, new in `@setu-ts/common`). The
+  docs page, spec and assets commit no session.
 - **`@setu-ts/cli` (M143b; V13-36, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161,
   V13-168, #610).** A built-in option given with no value (`--template` at the end, `--template=`)
   is refused by name with exit 2, where it silently meant the default. `setu new` refuses a target

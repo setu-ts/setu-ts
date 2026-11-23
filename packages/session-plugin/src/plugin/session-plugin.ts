@@ -27,7 +27,7 @@ import { VERSION } from '../version.ts';
 
 /** Middleware priorities this plugin registers at. */
 const MIDDLEWARE_PRIORITY = {
-  /** After security headers (250), before authentication (300). */
+  /** After CORS (125) and request size (180), before authentication (300). */
   SESSION: 260,
   /**
    * After the session loads (260), after authentication (300) and before

@@ -177,6 +177,27 @@ export interface CacheMiddlewareOptions {
    * HTTP status codes eligible for caching. Defaults to `[200]`.
    */
   cacheableStatuses?: number[];
+  /**
+   * The cookie names that make a request credentialed. A credentialed request
+   * is served a HIT only from an entry stored with `Cache-Control: public`
+   * whose `Vary` names neither `Cookie` nor `Authorization`, never shares an
+   * origin run with another request, and its own response is stored only when
+   * it says `public` and varies on neither. A response varying on `Cookie` or
+   * `Authorization` is stored and served only for requests carrying no cookie
+   * and no `Authorization`, whatever this option names, and a request carrying
+   * any cookie never shares an origin run with another request. A response
+   * that read the session (`COOKIE_DEPENDENT_RESPONSE_STATE_KEY`) counts as
+   * varying on `Cookie` whatever its own `Vary` says.
+   * `Authorization` always makes a request credentialed.
+   *
+   * Omitted, ANY cookie counts: the middleware cannot know which cookie
+   * identifies a visitor. An application whose every visitor carries an
+   * unrelated cookie (analytics, consent) gets nothing shared-cached until it
+   * names its session cookie here (for example `['setu_session']`) or marks
+   * responses `public`. `[]` means only `Authorization` counts.
+   * @since 0.14.0
+   */
+  credentialCookies?: readonly string[];
 }
 
 /**

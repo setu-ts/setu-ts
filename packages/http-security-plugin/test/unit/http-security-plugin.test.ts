@@ -126,7 +126,7 @@ describe('HttpSecurityPlugin', () => {
 
       expect(middlewareAdded).toHaveLength(1);
       expect(middlewareAdded[0].options.name).toBe('SecurityHeadersMiddleware');
-      expect(middlewareAdded[0].options.priority).toBe(250);
+      expect(middlewareAdded[0].options.priority).toBe(10);
     });
   });
 
@@ -138,7 +138,7 @@ describe('HttpSecurityPlugin', () => {
 
       const corsEntry = middlewareAdded.find((m) => m.options.name === 'CorsMiddleware');
       expect(corsEntry).toBeDefined();
-      expect(corsEntry!.options.priority).toBe(200);
+      expect(corsEntry!.options.priority).toBe(125);
     });
 
     it('registers CSRF when csrf option present', () => {
@@ -217,8 +217,8 @@ describe('HttpSecurityPlugin', () => {
       const byName = new Map(middlewareAdded.map((m) => [m.options.name, m.options.priority]));
       expect(byName.get('IpSecurityMiddleware')).toBe(120);
       expect(byName.get('RequestSizeMiddleware')).toBe(180);
-      expect(byName.get('CorsMiddleware')).toBe(200);
-      expect(byName.get('SecurityHeadersMiddleware')).toBe(250);
+      expect(byName.get('CorsMiddleware')).toBe(125);
+      expect(byName.get('SecurityHeadersMiddleware')).toBe(10);
       expect(byName.get('CsrfMiddleware')).toBe(270);
     });
   });

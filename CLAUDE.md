@@ -866,6 +866,11 @@ here.
   GOAWAY at drain start, `StartCancelledError`, implicit `HEAD`, abort-time `defer`, refused-upgrade
   and stream-failure parity; 13 V13 rows and the V13-110 logger half; ships in `0.14.0`) — complete
   (PR #611).
+- **Milestone 143a** (`session-plugin` + `cache-plugin` + `http-security-plugin` + `openapi-plugin`
+  - `react-router-plugin` + `common` — sessions and shared caches: revocation markers and a commit
+    fence, `storeCommit`, per-visitor `Cache-Control`, `cacheMiddleware` credentialed rule, security
+    headers at 10 and CORS at 125, Swagger UI Try-it-out CSRF token; V13-111, V13-112, V13-135,
+    V13-136, V13-137, V13-20, V13-34, V13-60) — complete (PR #609).
 - **Milestone 143b** (`packages/cli` + `packages/create` + `telemetry-plugin` README — a first
   command that fails: `--env-file` renamed `--dotenv`, valued flags refused when empty, the `new`
   target checked, a project write lock, a Node 22.9.0 floor through `@setu-ts/cli/node-version`,

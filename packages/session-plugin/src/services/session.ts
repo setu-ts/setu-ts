@@ -13,7 +13,23 @@
  * @module
  */
 import type { ISession, SessionData } from '@setu-ts/common';
+import { SESSION_TENANT_BINDING_KEY } from '@setu-ts/common';
 import { CSRF_SESSION_KEY } from '../csrf/token.ts';
+
+/**
+ * The reserved keys the framework itself writes: the form-CSRF token and the tenant binding. On the
+ * store strategy a session holding only these is sealed into the cookie (M113e, V9-46). Reading or
+ * writing them does not make a response per-visitor: only the application's own keys do.
+ */
+export const RESERVED_SESSION_KEYS: ReadonlySet<string> = new Set([
+  CSRF_SESSION_KEY,
+  SESSION_TENANT_BINDING_KEY,
+]);
+
+/** Whether every key of `data` is a {@linkcode RESERVED_SESSION_KEYS} entry. */
+export function holdsOnlyReservedKeys(data: SessionData): boolean {
+  return Object.keys(data).every((key) => RESERVED_SESSION_KEYS.has(key));
+}
 
 /** The serialized session payload carried in the cookie. */
 export interface SessionSnapshot {
@@ -49,6 +65,17 @@ export class Session implements ISession {
   #regenerated = false;
   #destroyed = false;
   #previousId: string | null = null;
+  // The keys this request set or deleted, and whether it cleared the payload, so a store commit can
+  // apply only this request's changes to the current row (`storeCommit: 'changes'`).
+  readonly #changed = new Set<string>();
+  #cleared = false;
+  // Whether the application read a key of its own, and whether a CSRF token was read: the signals
+  // the session middleware's cache marking reads.
+  #applicationRead = false;
+  #csrfRead = false;
+  #onFirstWrite: (() => void) | undefined;
+  #onFirstRead: (() => void) | undefined;
+  readonly #loadedId: string;
   readonly #isNew: boolean;
   readonly #storeHeld: boolean;
   readonly #uuid: () => string;
@@ -66,6 +93,7 @@ export class Session implements ISession {
     storeHeld: boolean = false,
   ) {
     this.#id = snapshot.id;
+    this.#loadedId = snapshot.id;
     this.#data = { ...snapshot.data };
     this.#exp = snapshot.exp;
     this.#seen = snapshot.seen;
@@ -84,6 +112,48 @@ export class Session implements ISession {
 
   get id(): string {
     return this.#id;
+  }
+
+  /** The id this session was created or restored with, before any `regenerate()` or rotation. */
+  get loadedId(): string {
+    return this.#loadedId;
+  }
+
+  /** Whether the application read one of its own keys (`get`, `has` or `toJSON`). */
+  get wasReadByApplication(): boolean {
+    return this.#applicationRead;
+  }
+
+  /** Whether a CSRF token was read for this request. */
+  get csrfTokenRead(): boolean {
+    return this.#csrfRead;
+  }
+
+  /** Whether the session holds any key other than the reserved ones. */
+  get holdsApplicationData(): boolean {
+    return !holdsOnlyReservedKeys(this.#data);
+  }
+
+  /** Records that a CSRF token was read for this request. */
+  markCsrfTokenRead(): void {
+    this.#csrfRead = true;
+  }
+
+  /**
+   * Registers a callback run once, at the first write that will make the response carry the
+   * session cookie: a `set`/`delete`/`clear` of a non-reserved key, a `regenerate()` or a
+   * `destroy()`. Writes of reserved keys do not run it.
+   */
+  onFirstWrite(callback: () => void): void {
+    this.#onFirstWrite = callback;
+  }
+
+  /**
+   * Registers a callback run once, at the first application read (`get`/`has` of a non-reserved
+   * key, or `toJSON()`). Reads of reserved keys do not run it.
+   */
+  onFirstRead(callback: () => void): void {
+    this.#onFirstRead = callback;
   }
 
   get isNew(): boolean {
@@ -135,6 +205,7 @@ export class Session implements ISession {
    * @returns The value, or `undefined` when absent
    */
   get<T = unknown>(key: string): T | undefined {
+    this.#noteRead(key);
     return this.#data[key] as T | undefined;
   }
 
@@ -158,9 +229,12 @@ export class Session implements ISession {
     }
     this.#data[key] = value;
     this.#dirty = true;
+    this.#changed.add(key);
+    this.#noteWrite(key);
   }
 
   has(key: string): boolean {
+    this.#noteRead(key);
     return Object.hasOwn(this.#data, key);
   }
 
@@ -170,12 +244,16 @@ export class Session implements ISession {
     }
     delete this.#data[key];
     this.#dirty = true;
+    this.#changed.add(key);
+    this.#noteWrite(key);
     return true;
   }
 
   clear(): void {
     this.#data = {};
     this.#dirty = true;
+    this.#cleared = true;
+    this.#noteWrite(undefined);
   }
 
   regenerate(): void {
@@ -187,6 +265,7 @@ export class Session implements ISession {
     }
     this.#id = this.#uuid();
     this.#regenerated = true;
+    this.#noteWrite(undefined);
   }
 
   /** Rotates a cookie-held id for promotion without recording a store row to revoke. */
@@ -197,13 +276,32 @@ export class Session implements ISession {
   destroy(): void {
     this.#data = {};
     this.#destroyed = true;
+    this.#noteWrite(undefined);
   }
 
   toJSON(): SessionData {
-    // A JSON round-trip rather than a spread, so the copy is genuinely detached
-    // at every depth. Session values must be JSON-serializable anyway, since
-    // both strategies serialize them.
-    return JSON.parse(JSON.stringify(this.#data)) as SessionData;
+    this.#markApplicationRead();
+    return this.#copy();
+  }
+
+  /**
+   * Applies this request's changes to `current`, the row as it is now: every key it set or deleted,
+   * or its whole payload after a `clear()`. Keys it never touched keep their current values.
+   */
+  applyChangesTo(current: SessionData): SessionData {
+    const own = this.#copy();
+    if (this.#cleared) {
+      return own;
+    }
+    const merged: Record<string, unknown> = { ...current };
+    for (const key of this.#changed) {
+      if (Object.hasOwn(own, key)) {
+        merged[key] = own[key];
+      } else {
+        delete merged[key];
+      }
+    }
+    return merged;
   }
 
   /** Records activity at `now`, for the idle-timeout check on the next load. */
@@ -218,7 +316,40 @@ export class Session implements ISession {
 
   /** The snapshot to serialize into the cookie. */
   snapshot(): SessionSnapshot {
-    return { id: this.#id, data: this.toJSON(), exp: this.#exp, seen: this.#seen };
+    return { id: this.#id, data: this.#copy(), exp: this.#exp, seen: this.#seen };
+  }
+
+  // A JSON round-trip rather than a spread, so the copy is genuinely detached at every depth.
+  // Session values must be JSON-serializable anyway, since both strategies serialize them.
+  #copy(): SessionData {
+    return JSON.parse(JSON.stringify(this.#data)) as SessionData;
+  }
+
+  #noteRead(key: string): void {
+    if (!RESERVED_SESSION_KEYS.has(key)) {
+      this.#markApplicationRead();
+    }
+  }
+
+  #markApplicationRead(): void {
+    this.#applicationRead = true;
+    const callback = this.#onFirstRead;
+    if (callback !== undefined) {
+      this.#onFirstRead = undefined;
+      callback();
+    }
+  }
+
+  /** Runs the first-write callback once; `key` is `undefined` for a whole-session write. */
+  #noteWrite(key: string | undefined): void {
+    if (key !== undefined && RESERVED_SESSION_KEYS.has(key)) {
+      return;
+    }
+    const callback = this.#onFirstWrite;
+    if (callback !== undefined) {
+      this.#onFirstWrite = undefined;
+      callback();
+    }
   }
 }
 

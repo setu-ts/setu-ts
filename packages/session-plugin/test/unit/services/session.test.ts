@@ -277,3 +277,108 @@ describe('parseSnapshot', () => {
     }
   });
 });
+
+describe('Session change and read tracking', () => {
+  function restored(data: Record<string, unknown>): Session {
+    return new Session(
+      { id: 'sid', data, exp: NOW + HOUR, seen: NOW },
+      false,
+      () => 'new-id',
+      true,
+    );
+  }
+
+  it('applies only the keys this request set or deleted to the current row', () => {
+    const session = restored({ a: 1, b: 2, c: 3 });
+    session.set('a', 10);
+    session.delete('b');
+    session.delete('missing');
+    expect(session.applyChangesTo({ a: 1, b: 2, c: 30, d: 4 })).toEqual({ a: 10, c: 30, d: 4 });
+  });
+
+  it('writes the payload whole after clear()', () => {
+    const session = restored({ a: 1 });
+    session.clear();
+    session.set('k', 1);
+    expect(session.applyChangesTo({ a: 1, z: 9 })).toEqual({ k: 1 });
+  });
+
+  it('counts get, has and toJSON of application keys as reads, not of reserved keys', () => {
+    for (const read of [
+      (s: Session) => s.get('userId'),
+      (s: Session) => s.has('userId'),
+      (s: Session) => s.toJSON(),
+    ]) {
+      const session = restored({ userId: 'u1' });
+      expect(session.wasReadByApplication).toBe(false);
+      read(session);
+      expect(session.wasReadByApplication).toBe(true);
+    }
+    const reserved = restored({ __csrf: 't', __setu_tenant: 'acme' });
+    reserved.get('__csrf');
+    reserved.has('__setu_tenant');
+    expect(reserved.wasReadByApplication).toBe(false);
+  });
+
+  it('does not count the internal snapshot() as a read', () => {
+    const session = restored({ userId: 'u1' });
+    session.snapshot();
+    expect(session.wasReadByApplication).toBe(false);
+  });
+
+  it('records a CSRF token read and whether the session holds application data', () => {
+    const session = restored({ __csrf: 't' });
+    expect(session.csrfTokenRead).toBe(false);
+    session.markCsrfTokenRead();
+    expect(session.csrfTokenRead).toBe(true);
+    expect(session.holdsApplicationData).toBe(false);
+    expect(restored({ userId: 'u1' }).holdsApplicationData).toBe(true);
+  });
+
+  it('remembers the loaded id across regenerate() and rotateId()', () => {
+    const session = restored({});
+    session.regenerate();
+    session.rotateId('other');
+    expect(session.loadedId).toBe('sid');
+    expect(session.id).toBe('other');
+  });
+
+  it('runs the first-write hook once, at the first non-reserved write', () => {
+    const writes: Array<(s: Session) => void> = [
+      (s) => s.set('a', 1),
+      (s) => s.delete('present'),
+      (s) => s.clear(),
+      (s) => s.regenerate(),
+      (s) => s.destroy(),
+    ];
+    for (const write of writes) {
+      const session = restored({ present: true });
+      let calls = 0;
+      session.onFirstWrite(() => {
+        calls += 1;
+      });
+      session.set('__csrf', 'token');
+      session.set('__setu_tenant', 'acme');
+      session.delete('__csrf');
+      session.delete('missing');
+      expect(calls).toBe(0);
+      write(session);
+      session.set('b', 2);
+      expect(calls).toBe(1);
+    }
+  });
+
+  it('runs the first-read hook once, at the first application read', () => {
+    const session = restored({ userId: 'u1', __csrf: 't' });
+    let calls = 0;
+    session.onFirstRead(() => {
+      calls += 1;
+    });
+    session.get('__csrf');
+    session.has('__setu_tenant');
+    expect(calls).toBe(0);
+    session.toJSON();
+    session.get('userId');
+    expect(calls).toBe(1);
+  });
+});

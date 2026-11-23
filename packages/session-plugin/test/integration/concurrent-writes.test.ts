@@ -23,9 +23,16 @@ class SnapshotStore implements ISessionStore {
   }
 }
 
-async function createService(store?: ISessionStore): Promise<SessionService> {
+async function createService(
+  store?: ISessionStore,
+  storeCommit?: 'changes' | 'snapshot',
+): Promise<SessionService> {
   const clock = makeClock();
-  const config = resolveSessionConfig({ mode: 'encrypt' });
+  const config = resolveSessionConfig({
+    mode: 'encrypt',
+    ...(store === undefined ? {} : { store }),
+    ...(storeCommit === undefined ? {} : { storeCommit }),
+  });
   const ring = await deriveKeyRing(crypto.subtle, [SECRET], 'encrypt');
   return new SessionService(
     config,
@@ -68,7 +75,26 @@ describe('session concurrent writes', () => {
     expect(restored.get('second')).toBe(true);
   });
 
-  it('overwrites the shared snapshot for overlapping store-backed sessions too', async () => {
+  it("overwrites the shared snapshot for overlapping store-backed sessions under 'snapshot'", async () => {
+    const store = new SnapshotStore();
+    const service = await createService(store, 'snapshot');
+    const cookie = await seededCookie(service);
+    const first = makeContext({ headers: { cookie } });
+    const second = makeContext({ headers: { cookie } });
+    const firstSession = await service.load(first.ctx);
+    const secondSession = await service.load(second.ctx);
+
+    firstSession.set('first', true);
+    secondSession.set('second', true);
+    await service.commit(first.ctx, firstSession);
+    await service.commit(second.ctx, secondSession);
+
+    const restored = await service.load(makeContext({ headers: { cookie } }).ctx);
+    expect(restored.get('first')).toBeUndefined();
+    expect(restored.get('second')).toBe(true);
+  });
+
+  it("keeps both requests' keys for overlapping store-backed sessions under 'changes' (the default)", async () => {
     const store = new SnapshotStore();
     const service = await createService(store);
     const cookie = await seededCookie(service);
@@ -83,7 +109,7 @@ describe('session concurrent writes', () => {
     await service.commit(second.ctx, secondSession);
 
     const restored = await service.load(makeContext({ headers: { cookie } }).ctx);
-    expect(restored.get('first')).toBeUndefined();
+    expect(restored.get('first')).toBe(true);
     expect(restored.get('second')).toBe(true);
   });
 });

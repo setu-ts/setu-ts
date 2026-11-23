@@ -768,6 +768,10 @@ export type {
 
 // Session contracts
 export { SESSION_TENANT_BINDING_KEY, tenantBindingMismatch } from './services/session.ts';
+export { CSRF_TOKEN_ACCESS_STATE_KEY } from './services/csrf-token-access.ts';
+export { PER_VISITOR_RESPONSE_STATE_KEY } from './services/per-visitor-response.ts';
+export { COOKIE_DEPENDENT_RESPONSE_STATE_KEY } from './services/cookie-dependent-response.ts';
+export type { ICsrfTokenAccess } from './services/csrf-token-access.ts';
 export type {
   ISession,
   ISessionService,
@@ -787,6 +791,7 @@ export type {
 
 // Cookie codec (shared by the session plugin and the decorator plugin's @Cookie)
 export { parseCookie, serializeCookie } from './cookie.ts';
+export { cacheControlDirectives } from './cache-control.ts';
 export type { CookieAttributes } from './cookie.ts';
 
 // Worker pool contracts

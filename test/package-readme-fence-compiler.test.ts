@@ -130,7 +130,7 @@ const READMES: Readonly<Record<string, number>> = {
   // unchecked. These are the ones that compiled clean once the harness stopped
   // producing false failures of its own. M119i gated the last eight and
   // deleted the ungated list, so this record is now every package README.
-  'packages/cache-plugin/README.md': 2,
+  'packages/cache-plugin/README.md': 3,
   // M101h: the events README is born gated — installation, usage, the
   // aggregate-local recorder and the new dispatch-diagnostics example.
   'packages/events-plugin/README.md': 4,
