@@ -88,6 +88,9 @@ async function serve(h: Harness, requestPath: string): Promise<void> {
       header() {
         return this;
       },
+      appendHeader() {
+        return this;
+      },
       send() {
         return { kind: 'sent' };
       },

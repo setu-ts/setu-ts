@@ -233,3 +233,34 @@ describe('WorkersCron.dispatch', () => {
     expect(unmatchedFailure).toBeInstanceOf(Error);
   });
 });
+
+describe('WorkersCron failure message (V13-219)', () => {
+  it('names the expression and the first error, and counts the rest', async () => {
+    const cron = new WorkersCron();
+    cron.on('*/5 * * * *', () => {
+      throw new Error('first\r\nfailure');
+    });
+    cron.on('*/5 * * * *', () => Promise.reject(new Error('second')));
+    cron.on('*/5 * * * *', () => Promise.reject(new Error('third')));
+
+    const failure = (await cron
+      .dispatch(firing('*/5 * * * *'))
+      .catch((e: unknown) => e)) as AggregateError;
+
+    expect(failure.message).toBe(
+      "cloudflare-cron: 3 handler(s) failed for '*/5 * * * *': Error: first failure; …and 2 more",
+    );
+    expect(failure.errors).toHaveLength(3);
+  });
+
+  it('carries no count suffix for a single failure', async () => {
+    const cron = new WorkersCron();
+    cron.on('0 0 * * *', () => {
+      throw new Error('only');
+    });
+    const failure = (await cron.dispatch(firing('0 0 * * *')).catch((e: unknown) => e)) as Error;
+    expect(failure.message).toBe(
+      "cloudflare-cron: 1 handler(s) failed for '0 0 * * *': Error: only",
+    );
+  });
+});

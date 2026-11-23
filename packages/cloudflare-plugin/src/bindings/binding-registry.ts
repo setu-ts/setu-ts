@@ -15,7 +15,14 @@ import type {
   IR2Bucket,
   IServiceBinding,
 } from './facades.ts';
-import { isDurableObjectNamespace, isKvNamespace, isQueueProducer, isR2Bucket } from './facades.ts';
+import {
+  isD1Database,
+  isDurableObjectNamespace,
+  isKvNamespace,
+  isQueueProducer,
+  isR2Bucket,
+  isServiceBinding,
+} from './facades.ts';
 
 /**
  * Typed access to a Cloudflare Worker's platform bindings.
@@ -202,7 +209,11 @@ export class BindingRegistry implements ICloudflareBindings {
   }
 
   d1(name: string): ID1Database {
-    return this.#require(name) as ID1Database;
+    const binding = this.#require(name);
+    if (!isD1Database(binding)) {
+      throw CloudflareBindingMissingError.wrongShape(name, 'a D1 database');
+    }
+    return binding;
   }
 
   queue(name: string): IQueueProducer {
@@ -214,7 +225,11 @@ export class BindingRegistry implements ICloudflareBindings {
   }
 
   service(name: string): IServiceBinding {
-    return this.#require(name) as IServiceBinding;
+    const binding = this.#require(name);
+    if (!isServiceBinding(binding)) {
+      throw CloudflareBindingMissingError.wrongShape(name, 'a service binding');
+    }
+    return binding;
   }
 
   durableObject(name: string): IDurableObjectNamespace {

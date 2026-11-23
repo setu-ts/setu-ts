@@ -48,7 +48,9 @@ async function appWith(token: string, service: object): Promise<IApplication> {
 
 describe('createQueueHandler', () => {
   it('dispatches a batch into the queue registered under the bare token', async () => {
-    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      deadLetter: false,
+    });
     const app = await appWith(CAPABILITIES.QUEUE, queue);
 
     const seen: unknown[] = [];
@@ -66,7 +68,9 @@ describe('createQueueHandler', () => {
   });
 
   it('resolves the derived token for a named instance', async () => {
-    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      deadLetter: false,
+    });
     const app = await appWith('queue.reports', queue);
 
     let ran = false;
@@ -86,7 +90,9 @@ describe('createQueueHandler', () => {
   });
 
   it("treats an explicit name of 'default' as the bare token", async () => {
-    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      deadLetter: false,
+    });
     const app = await appWith(CAPABILITIES.QUEUE, queue);
 
     let ran = false;
@@ -105,7 +111,9 @@ describe('createQueueHandler', () => {
   });
 
   it('resolves lazily, so the export can be built before start()', async () => {
-    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      deadLetter: false,
+    });
     const app = createApplication({
       plugins: [RuntimePlugin(), providing(CAPABILITIES.QUEUE, queue)],
     });

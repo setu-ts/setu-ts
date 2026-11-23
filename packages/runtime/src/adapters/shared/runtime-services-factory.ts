@@ -75,6 +75,13 @@ export interface CreateRuntimeServicesOptions {
    * @since 0.2.0
    */
   readonly env?: Readonly<Record<string, unknown>>;
+  /**
+   * The platform's `waitUntil` on Cloudflare Workers, from `import { waitUntil }
+   * from 'cloudflare:workers'`; becomes {@linkcode IRuntimeServices.waitUntil}.
+   * Ignored on Deno, Node and Bun, whose processes outlive their requests.
+   * @since 0.14.0
+   */
+  readonly waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /**
@@ -86,14 +93,18 @@ export interface CreateRuntimeServicesOptions {
  */
 function defaultRuntimeAdapters(
   env: Readonly<Record<string, unknown>> | undefined,
+  waitUntil: ((promise: Promise<unknown>) => void) | undefined,
 ): RuntimeAdapterFactories {
   return {
     deno: createDenoRuntimeServices,
     node: createNodeRuntimeServices,
     bun: createBunRuntimeServices,
     'cloudflare-workers': (): IRuntimeServices =>
-      // `exactOptionalPropertyTypes`: omit `env` rather than pass undefined.
-      createCloudflareRuntimeServices(env === undefined ? undefined : { env }),
+      // `exactOptionalPropertyTypes`: omit each rather than pass undefined.
+      createCloudflareRuntimeServices({
+        ...(env === undefined ? {} : { env }),
+        ...(waitUntil === undefined ? {} : { waitUntil }),
+      }),
   };
 }
 
@@ -141,7 +152,7 @@ function defaultRuntimeAdapters(
  */
 export function createRuntimeServices(options?: CreateRuntimeServicesOptions): IRuntimeServices {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
-  const adapters = options?.adapters ?? defaultRuntimeAdapters(options?.env);
+  const adapters = options?.adapters ?? defaultRuntimeAdapters(options?.env, options?.waitUntil);
 
   const factory = (adapters as Record<string, (() => IRuntimeServices) | undefined>)[platform];
   if (factory === undefined) {

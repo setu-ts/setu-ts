@@ -145,3 +145,25 @@ describe('DistributedLockObjectCore', () => {
     expect(held.expiresAt).toBeGreaterThanOrEqual(before + 30_000);
   });
 });
+
+describe('DistributedLockObjectCore TTL refusal (V13-204)', () => {
+  it.each([
+    ['null (Infinity or NaN after JSON)', { token: 't', ttlMs: null }],
+    ['zero', { token: 't', ttlMs: 0 }],
+    ['a string', { token: 't', ttlMs: '1000' }],
+    ['a fraction', { token: 't', ttlMs: 0.5 }],
+    ['above the bound', { token: 't', ttlMs: 2_147_483_648 }],
+    ['no token', { ttlMs: 1000 }],
+  ])('answers 400 for %s', async (_label, body) => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    const response = await call(core, '/acquire', body);
+    expect(response.status).toBe(400);
+  });
+
+  it('still grants 1 and 2147483647', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await acquire(core, 'a', 2_147_483_647)).toBe('a');
+    const other = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await acquire(other, 'b', 1)).toBe('b');
+  });
+});

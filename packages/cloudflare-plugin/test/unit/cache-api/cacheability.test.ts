@@ -82,30 +82,32 @@ describe('assessCacheability', () => {
     expect(assess({ headers: { 'set-cookie': 'session=abc' } })).toEqual(['set-cookie']);
   });
 
-  it("clears the Set-Cookie refusal for the platform's private=Set-Cookie opt-in", () => {
+  it('refuses private=Set-Cookie as both set-cookie and private (D9: no escape hatch)', () => {
     expect(
       assess({
         headers: { 'set-cookie': 'session=abc', 'cache-control': 'private=Set-Cookie' },
       }),
-    ).toEqual([]);
-  });
-
-  it('matches the opt-in case-insensitively and among other directives', () => {
+    ).toEqual(['set-cookie', 'private']);
     expect(
       assess({
-        headers: {
-          'set-cookie': 'session=abc',
-          'cache-control': 'max-age=60, PRIVATE=SET-COOKIE',
-        },
+        headers: { 'set-cookie': 'session=abc', 'cache-control': 'max-age=60, PRIVATE=SET-COOKIE' },
       }),
-    ).toEqual([]);
+    ).toEqual(['set-cookie', 'private']);
   });
 
-  it('does not treat a bare private directive as the opt-in', () => {
-    // `private` alone does NOT strip Set-Cookie, so the put would still throw.
-    expect(
-      assess({ headers: { 'set-cookie': 'session=abc', 'cache-control': 'private' } }),
-    ).toEqual(['set-cookie']);
+  it.each([
+    'private',
+    'PRIVATE',
+    'no-store',
+    'public, no-store',
+    'private="x-a, set-cookie"',
+    'max-age=60, x="unclosed',
+  ])("refuses '%s' as private", (cacheControl) => {
+    expect(assess({ headers: { 'cache-control': cacheControl } })).toEqual(['private']);
+  });
+
+  it('does not read a private inside a quoted argument as the directive', () => {
+    expect(assess({ headers: { 'cache-control': 'public, x="a,private"' } })).toEqual([]);
   });
 
   it('reports every applicable refusal at once', () => {

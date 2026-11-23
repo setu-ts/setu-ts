@@ -209,13 +209,15 @@ const HAND_OFFS: readonly Row[] = [
     evidence: /return ctx\.response\.stream\(stream\);/,
   },
   {
-    // The Workers Cache API's stored body (workerd's own stream).
+    // The Workers Cache API's stored body (workerd's own stream). Measured on
+    // local workerd (M143o): a client that leaves mid-body on a HIT has the
+    // body cancelled and the request's ctx.defer cleanup runs ~64 ms later, so
+    // the platform's cancel() settles.
     file: 'packages/cloudflare-plugin/src/cache-api/cache-api-middleware.ts',
     count: 1,
-    cancelSettles: 'unknown',
+    cancelSettles: 'always',
     kind: 'pass-through',
     evidence: /response\.stream\(cached\.body\);/,
-    handOver: "M143o (Workers lane): confirm workerd's cached body needs no cancel() wait",
   },
   {
     file: 'packages/graphql-plugin/src/transports/sse/graphql-sse-handler.ts',

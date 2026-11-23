@@ -192,3 +192,32 @@ describe('BindingRegistry', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+describe('BindingRegistry wrong-kind accessors (V13-201)', () => {
+  const fn = (): void => {};
+  const bindings = new BindingRegistry(
+    {
+      KV: new FakeKv(),
+      R2: { get: fn, put: fn, delete: fn, list: fn, head: fn, createMultipartUpload: fn },
+      QUEUE: { send: fn, sendBatch: fn },
+      DB: { prepare: fn, batch: fn },
+      SVC: { fetch: fn },
+    },
+    {},
+    noopWaitUntil,
+  );
+
+  it.each([
+    ['kv', 'R2', 'a KV namespace'],
+    ['d1', 'KV', 'a D1 database'],
+    ['service', 'QUEUE', 'a service binding'],
+  ] as const)('refuses %s(%s) by name', (accessor, name, kind) => {
+    expect(() => bindings[accessor](name)).toThrow(CloudflareBindingMissingError);
+    expect(() => bindings[accessor](name)).toThrow(new RegExp(`${name}[\\s\\S]*${kind}`));
+  });
+
+  it('returns a binding of the right kind', () => {
+    expect(bindings.d1('DB')).toBeDefined();
+    expect(bindings.service('SVC')).toBeDefined();
+  });
+});

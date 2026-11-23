@@ -44,6 +44,10 @@ function makeCtx(
       captured.headers.set(k, v);
       return response;
     },
+    appendHeader(k: string, v: string) {
+      captured.headers.append(k, v);
+      return response;
+    },
     send(body?: Uint8Array) {
       captured.bodyLength = body?.length;
       return captured;

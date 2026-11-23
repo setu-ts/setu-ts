@@ -409,6 +409,12 @@ export interface IDurableObjectNamespace {
  */
 export type CloudflareWorkerEnv = Readonly<Record<string, unknown>>;
 
+/** Reports whether any named member of `value` is a function. */
+function hasAnyMethod(value: unknown, methods: readonly string[]): boolean {
+  const record = value as Record<string, unknown>;
+  return methods.some((method) => typeof record[method] === 'function');
+}
+
 /** Reports whether every named member of `value` is a function. */
 function hasMethods(value: unknown, methods: readonly string[]): boolean {
   if (typeof value !== 'object' || value === null) return false;
@@ -428,7 +434,24 @@ function hasMethods(value: unknown, methods: readonly string[]): boolean {
  * @since 0.2.0
  */
 export function isKvNamespace(value: unknown): value is IKvNamespace {
-  return hasMethods(value, ['get', 'put', 'delete', 'list']);
+  // An R2 bucket also has get/put/delete/list, so the members only R2 has are
+  // what tell the two apart (V13-201).
+  return (
+    hasMethods(value, ['get', 'put', 'delete', 'list']) &&
+    !hasAnyMethod(value, ['head', 'createMultipartUpload'])
+  );
+}
+
+/**
+ * Reports whether a binding is a service binding (or any object with a
+ * `fetch` method, which is all the platform's service-binding surface needs).
+ *
+ * @param value - The binding to check
+ * @returns `true` when it carries `fetch`
+ * @since 0.14.0
+ */
+export function isServiceBinding(value: unknown): value is IServiceBinding {
+  return hasMethods(value, ['fetch']);
 }
 
 /**

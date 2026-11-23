@@ -65,7 +65,7 @@ import type { RouteEntry } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
-import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
+import { keepAlive, runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { StallWatch } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { DispatchedRequest } from './dispatched-request.ts';
@@ -2175,11 +2175,13 @@ class Application implements IKernelApplication {
       if (streamed === undefined) {
         // The buffered response has already been returned. Settle against it:
         // a stream the handler sets later is never read, so cleanup must not
-        // wait for it to be consumed.
-        void this.#drainTracked(handle, pendingHandler).then(finish);
+        // wait for it to be consumed. The handler still running and its
+        // cleanups are kept alive past the response where the platform would
+        // end the invocation with it.
+        keepAlive(this.#registry, this.#drainTracked(handle, pendingHandler).then(finish));
       } else {
         const complete = (): void => {
-          void this.#drainTracked(handle, pendingHandler).then(finish);
+          keepAlive(this.#registry, this.#drainTracked(handle, pendingHandler).then(finish));
         };
         // The signal lets a client that leaves cancel the source even on a
         // runtime that never cancels the body; the cleanups still wait for the

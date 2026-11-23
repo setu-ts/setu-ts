@@ -2,14 +2,18 @@
  * The Cache API's refusal rules, evaluated before a write is attempted.
  *
  * `caches.default.put` **throws** for a non-GET request, a 206 response, a
- * `Vary: *` response, and a response carrying `Set-Cookie` without the
- * platform's `Cache-Control: private=Set-Cookie` escape hatch. Discovering
+ * `Vary: *` response, and a response carrying `Set-Cookie`. The platform's
+ * `Cache-Control: private=Set-Cookie` escape hatch is not used: any `private`
+ * marks a response as one visitor's, and it is refused (`'private'`), the
+ * same rule `cache-plugin`'s `cacheMiddleware` applies. Discovering
  * those by letting `put` reject inside a `waitUntil`-ed background task turns
  * an ordinary uncacheable response into a logged failure on every request;
  * checking first turns it into a documented skip.
  *
  * @module
  */
+
+import { cacheControlDirectives } from '@setu-ts/common';
 
 /**
  * Why the edge cache would refuse a response.
@@ -25,8 +29,14 @@ export type CacheRefusal =
   | 'partial-content'
   /** The response carries `Vary: *`, which the platform refuses. */
   | 'vary-star'
-  /** The response carries `Set-Cookie` without `Cache-Control: private=Set-Cookie`. */
-  | 'set-cookie';
+  /** The response carries `Set-Cookie`. */
+  | 'set-cookie'
+  /**
+   * `Cache-Control` holds `private` (qualified or not) or `no-store`, or cannot
+   * be read (an unclosed quote): the response belongs to one visitor.
+   * @since 0.14.0
+   */
+  | 'private';
 
 /** What {@linkcode assessCacheability} needs to decide. */
 export interface CacheabilityInput {
@@ -76,9 +86,8 @@ export function assessCacheability(input: CacheabilityInput): readonly CacheRefu
   if (!input.cacheableStatuses.includes(input.status)) refusals.push('status');
   if (input.status === PARTIAL_CONTENT) refusals.push('partial-content');
   if (varyIsStar(input.headers)) refusals.push('vary-star');
-  if (input.headers.has('set-cookie') && !allowsSetCookie(input.headers)) {
-    refusals.push('set-cookie');
-  }
+  if (input.headers.has('set-cookie')) refusals.push('set-cookie');
+  if (isPrivate(input.headers.get('cache-control'))) refusals.push('private');
 
   return refusals;
 }
@@ -97,15 +106,14 @@ function varyIsStar(headers: Headers): boolean {
 }
 
 /**
- * Reports whether the response opts into being cached despite `Set-Cookie`.
- *
- * The platform's documented escape hatch is `Cache-Control: private=Set-Cookie`,
- * which tells the edge to strip the cookie from the stored copy.
+ * Whether a `Cache-Control` value marks the response as one visitor's:
+ * `private` (with or without a field list) or `no-store`, read quote-aware;
+ * an unreadable value (an unclosed quote) counts, failing safe. The same rule
+ * as `cache-plugin`'s `cacheMiddleware`.
  */
-function allowsSetCookie(headers: Headers): boolean {
-  const control = headers.get('cache-control');
-  if (control === null) return false;
-  return control
-    .split(',')
-    .some((directive) => directive.trim().toLowerCase() === 'private=set-cookie');
+export function isPrivate(cacheControl: string | null): boolean {
+  if (cacheControl === null) return false;
+  const directives = cacheControlDirectives(cacheControl);
+  if (directives === undefined) return true;
+  return directives.includes('private') || directives.includes('no-store');
 }

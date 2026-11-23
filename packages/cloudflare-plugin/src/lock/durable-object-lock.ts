@@ -9,6 +9,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { IDurableObjectNamespace } from '../bindings/facades.ts';
 import { CloudflareUnsupportedError } from '../errors.ts';
+import { isValidLockTtl, MAX_LOCK_TTL_MS } from './lock-ttl.ts';
 
 /** The synthetic origin the stub is fetched with. Only the path is meaningful. */
 const LOCK_ORIGIN = 'https://distributed-lock.internal';
@@ -59,20 +60,35 @@ export interface DurableObjectLockOptions {
  * {@linkcode DistributedLockObjectCore} is atomic with no transaction and no
  * Redlock-style quorum.
  *
+ * A Durable Object binding exists only inside a Worker, so the lock is taken
+ * from Worker code: a route, a queue or cron handler, or another Durable
+ * Object. A Node or Deno process cannot hold the binding; a replica set
+ * outside Workers uses the scheduler's Redis lock. `SchedulerPlugin` itself
+ * refuses to register on Workers, so this lock is not handed to it there.
+ *
  * @example
  * ```typescript
- * import { env } from 'cloudflare:workers';
- * import { DurableObjectLock } from '@setu-ts/cloudflare-plugin';
- * import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+ * import { CAPABILITIES, type IRuntimeServices } from '@setu-ts/common';
+ * import { DurableObjectLock, type ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
  *
- * const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, {
- *   runtime,
- *   keyPrefix: 'reports:',
+ * app.router.post('/reports/run', {
+ *   handler: async (ctx) => {
+ *     const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+ *     const lock = new DurableObjectLock(bindings.durableObject('LOCKS'), {
+ *       runtime: ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
+ *       keyPrefix: 'reports:',
+ *       binding: 'LOCKS',
+ *     });
+ *     const token = await lock.acquire('nightly', 60_000);
+ *     if (token === null) return ctx.response.status(409).text('already running');
+ *     try {
+ *       // ... the work only one caller may do at a time ...
+ *       return ctx.response.status(204).send();
+ *     } finally {
+ *       await lock.release('nightly', token);
+ *     }
+ *   },
  * });
- *
- * // `enabled: true` is NOT needed: resolveLock consults `lock` before it
- * // consults `enabled`, so an injected lock always wins.
- * app.register(SchedulerPlugin({ distributedLock: { lock } }));
  * ```
  * @since 0.2.0
  */
@@ -97,13 +113,23 @@ export class DurableObjectLock {
    * Attempts to acquire the lock.
    *
    * @param key - The lock key
-   * @param ttlMs - How long the claim lasts, in milliseconds
+   * @param ttlMs - How long the claim lasts: a whole number of milliseconds from
+   * 1 to 2,147,483,647
    * @returns The token when acquired, or `null` when another holder is live
+   * @throws {RangeError} For any other `ttlMs` (`Infinity`, `NaN`, zero, a
+   * negative or fractional value), before any I/O; such a value cannot be a
+   * lease, and `Infinity`/`NaN` do not survive JSON
    * @throws {CloudflareUnsupportedError} When the Durable Object answers with a
    * non-2xx status — a misconfigured binding or a class that is not the lock
    * object, neither of which may be reported as "someone else holds it"
    */
   async acquire(key: string, ttlMs: number): Promise<string | null> {
+    if (!isValidLockTtl(ttlMs)) {
+      throw new RangeError(
+        `DurableObjectLock: ttlMs must be a whole number of milliseconds from 1 to ` +
+          `${MAX_LOCK_TTL_MS}, got ${String(ttlMs)}`,
+      );
+    }
     const token = this.#runtime.uuid();
     const body = await this.#call<{ token: string | null }>(key, '/acquire', { token, ttlMs });
     return body.token;

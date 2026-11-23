@@ -27,10 +27,16 @@ import type {
   PublishOptions,
   RequestHandler,
   RequestOptions,
+  ITelemetryService,
   SubscribeOptions,
   TimerHandle,
 } from '@setu-ts/common';
-import { parsePublishOptions } from '@setu-ts/common';
+import {
+  contextToTraceparent,
+  parsePublishOptions,
+  parseTraceparentToContext,
+  TELEMETRY_CONTEXT_OPAQUE,
+} from '@setu-ts/common';
 
 import type { LoggerSource } from '../background/wait-until.ts';
 import type {
@@ -47,6 +53,7 @@ import {
   encodeReplyEnvelope,
   encodeRequestEnvelope,
   envelopeHeaders,
+  envelopeTrace,
   isQueueEnvelope,
   isReplyEnvelope,
   isRequestEnvelope,
@@ -142,6 +149,16 @@ export interface WorkersBrokerOptions {
    * {@linkcode CloudflareUnsupportedError} naming the arm to add.
    */
   readonly replyInbox?: ReplyInboxBinding;
+  /**
+   * Resolves the telemetry service when a trace should cross the queue
+   * (V13-210). A **thunk**, like `logger`. With telemetry, `publish` and
+   * `request` run inside a `producer` span whose `traceparent` rides the
+   * envelope's framework `trace` field, and each subscriber and responder runs
+   * inside a `consumer` span parented from it. Omitted, or answering
+   * `undefined`, nothing is traced and no `trace` field is written.
+   * @since 0.14.0
+   */
+  readonly telemetry?: () => ITelemetryService | undefined;
 }
 
 /**
@@ -179,6 +196,7 @@ export class WorkersBroker implements IMessageBroker {
   readonly #subscribers = new SubscriptionTable<MessageHandler<unknown>>();
   readonly #responders = new SubscriptionTable<StoredResponder>();
   readonly #correlation: RequestCorrelation;
+  readonly #telemetry: (() => ITelemetryService | undefined) | undefined;
 
   /** The in-flight or settled inbox open, so overlapping requests share one. */
   #inboxInit: Promise<ReplyInbox> | null = null;
@@ -201,6 +219,7 @@ export class WorkersBroker implements IMessageBroker {
     this.#runtime = runtime;
     this.#logger = options.logger;
     this.#replyInbox = options.replyInbox;
+    this.#telemetry = options.telemetry;
     this.#correlation = new RequestCorrelation({
       setTimeout: (fn, ms) => runtime.setTimeout(fn, ms),
       clearTimeout: (handle) => runtime.clearTimeout(handle),
@@ -257,9 +276,54 @@ export class WorkersBroker implements IMessageBroker {
    * @returns Resolves once the platform has accepted the message
    */
   async publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
-    await this.#producer.send(
-      encodePublishEnvelope(topic, this.#runtime.uuid(), message, this.#optionFields(options)),
+    const fields = this.#optionFields(options);
+    await this.#produce(`publish ${topic}`, topic, async (trace) => {
+      await this.#producer.send(
+        encodePublishEnvelope(topic, this.#runtime.uuid(), message, {
+          ...fields,
+          ...(trace === undefined ? {} : { trace }),
+        }),
+      );
+    });
+  }
+
+  /**
+   * Runs `send` inside a `producer` span when telemetry is registered, handing
+   * it the span's `traceparent`; otherwise runs it untraced.
+   */
+  #produce<R>(
+    name: string,
+    topic: string,
+    send: (trace: string | undefined) => Promise<R>,
+  ): Promise<R> {
+    const telemetry = this.#telemetry?.();
+    if (telemetry === undefined) return send(undefined);
+    return telemetry.withSpan(
+      name,
+      (span) =>
+        send(
+          contextToTraceparent({ _opaque: TELEMETRY_CONTEXT_OPAQUE, ...span.spanContext() }) ??
+            undefined,
+        ),
+      { kind: 'producer', attributes: traceAttributes(topic, 'publish') },
     );
+  }
+
+  /**
+   * Runs a subscriber or responder inside a `consumer` span parented from the
+   * envelope's `trace` when telemetry is registered; otherwise runs it as is.
+   */
+  #consume<R>(envelope: QueueEnvelope, run: () => Promise<R>): Promise<R> {
+    const telemetry = this.#telemetry?.();
+    if (telemetry === undefined) return run();
+    return telemetry.withSpan(`receive ${envelope.topic}`, run, {
+      kind: 'consumer',
+      attributes: {
+        ...traceAttributes(envelope.topic, 'receive'),
+        'messaging.message.id': envelope.id,
+      },
+      parentContext: parseTraceparentToContext(envelopeTrace(envelope)),
+    });
   }
 
   /**
@@ -340,9 +404,18 @@ export class WorkersBroker implements IMessageBroker {
     const reply = this.#correlation.register<TRes>(correlationId, topic, timeoutMs);
 
     try {
-      await this.#producer.send(
-        encodeRequestEnvelope(topic, this.#runtime.uuid(), correlationId, inbox.address, message),
-      );
+      await this.#produce(`publish rr.req.${topic}`, `rr.req.${topic}`, async (trace) => {
+        await this.#producer.send(
+          encodeRequestEnvelope(
+            topic,
+            this.#runtime.uuid(),
+            correlationId,
+            inbox.address,
+            message,
+            trace,
+          ),
+        );
+      });
     } catch (error: unknown) {
       // The caller receives this failure directly, so the pending entry would
       // otherwise hold a timer for a request that never left.
@@ -461,7 +534,9 @@ export class WorkersBroker implements IMessageBroker {
     const metadata = this.#metadataFor(envelope);
     try {
       for (const subscription of selected) {
-        await subscription.handler(envelope.payload, metadata);
+        await this.#consume(envelope, async () => {
+          await subscription.handler(envelope.payload, metadata);
+        });
       }
     } catch (error: unknown) {
       this.#logger?.()?.error('cloudflare-messaging: subscriber failed, message retried', {
@@ -509,7 +584,10 @@ export class WorkersBroker implements IMessageBroker {
 
     const metadata = this.#metadataFor(envelope);
     try {
-      const result = await responder.handler(envelope.payload, metadata);
+      const result = await this.#consume(
+        envelope,
+        async () => await responder.handler(envelope.payload, metadata),
+      );
       await this.#sendReply(envelope, { ok: true, payload: result });
     } catch (error: unknown) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -640,4 +718,16 @@ export class WorkersBroker implements IMessageBroker {
 
     return this.#inboxInit;
   }
+}
+
+/** The messaging span attributes, as `messaging-plugin`'s `TracedBroker` writes them. */
+function traceAttributes(
+  topic: string,
+  operation: 'publish' | 'receive',
+): Readonly<Record<string, string>> {
+  return {
+    'messaging.system': 'cloudflare_queues',
+    'messaging.destination.name': topic,
+    'messaging.operation': operation,
+  };
 }

@@ -5,6 +5,7 @@
  * @since 0.2.0
  */
 
+import { isValidLockTtl } from '../lock/lock-ttl.ts';
 import type { IDurableObjectState } from './do-facades.ts';
 
 /** The persisted holder record, one per lock key. */
@@ -89,7 +90,15 @@ export class DistributedLockObjectCore {
   async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === '/acquire') {
-      const body = (await request.json()) as { token: string; ttlMs: number };
+      const body = (await request.json()) as { token?: unknown; ttlMs?: unknown };
+      // The client refuses the same values; this is defence in depth for a
+      // caller that is not DurableObjectLock (a JSON body turns Infinity and
+      // NaN into null, and `now + null` would expire at once).
+      if (typeof body.token !== 'string' || !isValidLockTtl(body.ttlMs)) {
+        return new Response('ttlMs must be a whole number of milliseconds from 1 to 2147483647', {
+          status: 400,
+        });
+      }
       return Response.json({ token: await this.#acquire(body.token, body.ttlMs) });
     }
     if (pathname === '/release') {

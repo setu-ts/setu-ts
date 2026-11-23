@@ -21,6 +21,7 @@ import type {
 } from '@setu-ts/common';
 import type { LoggerSource } from '../background/wait-until.ts';
 import type { IQueueMessage, IQueueMessageBatch, IQueueProducer } from '../bindings/facades.ts';
+import { describeError } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import { runBounded } from './bounded-map.ts';
 import type { JobEnvelope } from './job-envelope.ts';
@@ -31,6 +32,19 @@ const PLATFORM_MAX_DELAY_SECONDS = 86_400;
 
 /** Default per-processor concurrency, matching `ProcessOptions`' documented default. */
 const DEFAULT_CONCURRENCY = 1;
+
+/** The platform's default `max_retries`, and this queue's default `maxRetries`. */
+const DEFAULT_MAX_RETRIES = 3;
+
+/** The platform's largest `max_retries`. */
+const MAX_RETRIES_LIMIT = 100;
+
+/**
+ * Retry spacing: a fixed number of seconds, or a function of the attempt that
+ * just failed (1 on the first delivery).
+ * @since 0.14.0
+ */
+export type RetryDelaySeconds = number | ((attempts: number) => number);
 
 /**
  * The id source this queue needs. {@linkcode IRuntimeServices} satisfies it.
@@ -78,12 +92,45 @@ export interface WorkersQueueOptions {
    * silently truncated by the platform.
    */
   readonly maxDelaySeconds?: number;
+  /**
+   * The consumer's `max_retries` from `wrangler.toml`, which the binding does
+   * not expose: a whole number from 1 to 100, default 3 (the platform's
+   * default). The two must match. A job's attempt budget is
+   * `min(maxAttempts, maxRetries)`, which keeps the platform's last delivery
+   * (`maxRetries + 1`) in reserve for a dead-letter send that failed; 0 is
+   * refused because it leaves no such reserve.
+   * @since 0.14.0
+   */
+  readonly maxRetries?: number;
+  /**
+   * Where an exhausted job goes: a Queues producer for the dead-letter queue,
+   * or `false` to discard exhausted jobs (one warning per discard, never the
+   * payload). Required before `process()`: the adapter cannot see a
+   * `dead_letter_queue` in `wrangler.toml`, and without one the platform
+   * deletes an exhausted job.
+   * @since 0.14.0
+   */
+  readonly deadLetter?: IQueueProducer | false;
+  /**
+   * Seconds before a failed job is redelivered: a number, or a function of
+   * the attempt that failed. Bounded to 0 to `maxDelaySeconds`. Omitted, the
+   * queue's own `retry_delay` applies.
+   * @since 0.14.0
+   */
+  readonly retryDelaySeconds?: RetryDelaySeconds;
+  /**
+   * Wall clock for the dead-letter copy's `failedAt`. The plugin passes
+   * `runtime.now`; omitted, the copy carries no `failedAt`.
+   * @since 0.14.0
+   */
+  readonly now?: () => number;
 }
 
-/** A registered processor and the concurrency its registration asked for. */
+/** A registered processor and the options its registration asked for. */
 interface Registration {
   readonly processor: JobProcessor<unknown>;
   readonly concurrency: number;
+  readonly onFailed: ProcessOptions['onFailed'];
 }
 
 /** A message paired with the envelope `dispatch` already read out of it. */
@@ -124,7 +171,15 @@ export class WorkersQueue implements IQueue {
   readonly #ids: JobIdSource;
   readonly #logger: LoggerSource | undefined;
   readonly #maxDelaySeconds: number;
+  readonly #maxRetries: number;
+  readonly #deadLetter: IQueueProducer | false | undefined;
+  readonly #retryDelay: RetryDelaySeconds | undefined;
+  readonly #now: (() => number) | undefined;
   readonly #processors = new Map<string, Registration>();
+  /** Job names already warned about, so each warning fires once per isolate. */
+  readonly #capWarned = new Set<string>();
+  readonly #pastBudgetWarned = new Set<string>();
+  #retryDelayWarned = false;
 
   /**
    * @param producer - The Queues producer binding
@@ -136,6 +191,23 @@ export class WorkersQueue implements IQueue {
     this.#ids = ids;
     this.#logger = options?.logger;
     this.#maxDelaySeconds = options?.maxDelaySeconds ?? PLATFORM_MAX_DELAY_SECONDS;
+    const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+    if (!Number.isInteger(maxRetries) || maxRetries < 1 || maxRetries > MAX_RETRIES_LIMIT) {
+      throw new RangeError(
+        `WorkersQueue: maxRetries must be a whole number from 1 to ${MAX_RETRIES_LIMIT} ` +
+          `(the consumer's max_retries in wrangler.toml), got ${String(maxRetries)}`,
+      );
+    }
+    const delay = options?.retryDelaySeconds;
+    if (typeof delay === 'number' && (!Number.isFinite(delay) || delay < 0)) {
+      throw new RangeError(
+        `WorkersQueue: retryDelaySeconds must be a finite number of seconds from 0, got ${String(delay)}`,
+      );
+    }
+    this.#maxRetries = maxRetries;
+    this.#deadLetter = options?.deadLetter;
+    this.#retryDelay = delay;
+    this.#now = options?.now;
   }
 
   /**
@@ -179,12 +251,25 @@ export class WorkersQueue implements IQueue {
    * @param name - Job name
    * @param processor - Invoked per delivered job
    * @param options - `concurrency` bounds how many of one batch's messages for
-   * this name run at a time
+   * this name run at a time; `onFailed` runs once when a job of this name
+   * exhausts its attempts, before it is dead-lettered or discarded
+   * @throws {CloudflareUnsupportedError} When the queue has no dead-letter
+   * producer and no `deadLetterQueue: false`
    */
   process<T>(name: string, processor: JobProcessor<T>, options?: ProcessOptions): void {
+    if (this.#deadLetter === undefined) {
+      throw new CloudflareUnsupportedError(
+        `WorkersQueue cannot consume '${name}' without a dead-letter target: the platform ` +
+          'deletes a job that exhausts max_retries unless wrangler.toml configures a ' +
+          "dead_letter_queue, and the adapter cannot see that setting. Set the queue arm's " +
+          "deadLetterQueue to a producer binding name (deadLetterQueue: 'JOBS_DLQ'), or to " +
+          'false to discard exhausted jobs.',
+      );
+    }
     this.#processors.set(name, {
       processor: processor as JobProcessor<unknown>,
       concurrency: options?.concurrency ?? DEFAULT_CONCURRENCY,
+      onFailed: options?.onFailed,
     });
   }
 
@@ -228,6 +313,8 @@ export class WorkersQueue implements IQueue {
    * @returns Resolves once every message has been acked or retried
    */
   async dispatch(batch: IQueueMessageBatch): Promise<void> {
+    // Unroutable messages settled on their last attempt, awaited with the rest.
+    const pending: Promise<void>[] = [];
     // Grouped by name first so each processor's own `concurrency` bounds only
     // its own messages — a batch legitimately mixes names, and one name's
     // limit must not throttle another's. The envelope is carried alongside the
@@ -241,7 +328,14 @@ export class WorkersQueue implements IQueue {
 
       if (envelope === undefined || registration === undefined) {
         this.#reportUnroutable(batch.queue, message, envelope);
-        message.retry();
+        if (message.attempts >= this.#maxRetries) {
+          // The platform's next exhaustion would delete it: keep it instead.
+          const reason =
+            envelope === undefined ? 'body is not a job envelope' : 'no processor registered';
+          pending.push(this.#settleExhausted(batch.queue, message, envelope, reason));
+        } else {
+          this.#retry(message);
+        }
         continue;
       }
 
@@ -253,13 +347,14 @@ export class WorkersQueue implements IQueue {
       }
     }
 
-    await Promise.all(
-      [...routable].map(([name, group]) =>
+    await Promise.all([
+      ...pending,
+      ...[...routable].map(([name, group]) =>
         runBounded(group.work, group.at.concurrency, (delivery) =>
           this.#runOne(batch.queue, name, group.at, delivery),
         ),
       ),
-    );
+    ]);
   }
 
   /** Runs one message through its processor and settles its disposition. */
@@ -270,36 +365,50 @@ export class WorkersQueue implements IQueue {
     delivery: Delivery,
   ): Promise<void> {
     const { message, envelope } = delivery;
+    const budget = this.#budget(name, envelope);
 
-    if (envelope.maxAttempts !== undefined && message.attempts > envelope.maxAttempts) {
-      this.#logger?.()?.warn('cloudflare-queue: job exhausted its attempts', {
-        queue,
-        job: name,
-        id: envelope.id,
-        attempts: message.attempts,
-        maxAttempts: envelope.maxAttempts,
-      });
-      message.ack();
+    if (message.attempts > budget) {
+      // A redelivery after a failed dead-letter send, an older message, or a
+      // budget lowered by a deploy: onFailed already ran, or cannot be told
+      // apart from a job whose final attempt did, so it is not run again.
+      if (!this.#pastBudgetWarned.has(name)) {
+        this.#pastBudgetWarned.add(name);
+        this.#logger?.()?.warn('cloudflare-queue: job arrived past its attempt budget', {
+          queue,
+          job: name,
+          id: envelope.id,
+          attempts: message.attempts,
+          budget,
+        });
+      }
+      await this.#settleExhausted(queue, message, envelope, 'attempt budget exhausted');
       return;
     }
 
-    // A malformed header map is dropped and the job still runs, untraced: the
-    // envelope guard above RETRIES what it refuses, so rejecting here would
-    // lose the work to protect the record of it.
     const headers = readEnvelopeHeaders(envelope.headers);
     const job: IJob = {
       id: envelope.id,
       name,
       data: envelope.data,
       attempts: message.attempts,
-      // Conditional spread: ABSENT reports "this job carried no channel", which
-      // a present-but-`undefined` own property would contradict.
       ...(headers === undefined ? {} : { headers }),
     };
 
     try {
       await registration.processor(job);
     } catch (error: unknown) {
+      if (message.attempts >= budget) {
+        this.#logger?.()?.warn('cloudflare-queue: job exhausted its attempts', {
+          queue,
+          job: name,
+          id: envelope.id,
+          attempts: message.attempts,
+          budget,
+        });
+        await this.#notifyFailed(registration, job, error);
+        await this.#settleExhausted(queue, message, envelope, error);
+        return;
+      }
       this.#logger?.()?.error('cloudflare-queue: processor failed, message retried', {
         queue,
         job: name,
@@ -307,15 +416,133 @@ export class WorkersQueue implements IQueue {
         attempts: message.attempts,
         error: error instanceof Error ? error.message : String(error),
       });
-      message.retry();
+      this.#retry(message);
       return;
     }
 
-    // Outside the try, deliberately. Inside it, a throwing `ack()` would be
-    // caught by the handler above — reporting a processor failure that did not
-    // happen and then also calling `retry()`, so one message would carry two
-    // dispositions instead of the exactly-one this method promises.
     message.ack();
+  }
+
+  /**
+   * A job's attempt budget: `maxRetries`, or the job's own `maxAttempts` when
+   * lower. A larger `maxAttempts` is capped (the platform stops first), with
+   * one warning per job name.
+   */
+  #budget(name: string, envelope: JobEnvelope): number {
+    const requested = envelope.maxAttempts;
+    if (requested === undefined) return this.#maxRetries;
+    if (requested > this.#maxRetries && !this.#capWarned.has(name)) {
+      this.#capWarned.add(name);
+      this.#logger?.()?.warn('cloudflare-queue: maxAttempts above what the queue retries; capped', {
+        job: name,
+        maxAttempts: requested,
+        maxRetries: this.#maxRetries,
+        budget: this.#maxRetries,
+        advice: "raise max_retries in wrangler.toml and the queue arm's maxRetries together",
+      });
+    }
+    return Math.min(requested, this.#maxRetries);
+  }
+
+  /** Runs the registration's `onFailed`, guarded: a throw is logged, never rethrown. */
+  async #notifyFailed(registration: Registration, job: IJob, error: unknown): Promise<void> {
+    if (registration.onFailed === undefined) return;
+    try {
+      await registration.onFailed(job, error);
+    } catch (callbackError: unknown) {
+      this.#logger?.()?.error('cloudflare-queue: onFailed callback threw', {
+        job: job.name,
+        id: job.id,
+        error: callbackError instanceof Error ? callbackError.name : typeof callbackError,
+      });
+    }
+  }
+
+  /**
+   * Settles an exhausted message: forwards it to the dead-letter producer and
+   * acks, or acks and warns when the target is `false`. A failed send retries,
+   * so the payload is not lost while a delivery remains; on the platform's
+   * last delivery the job leaves the adapter's hands (the platform writes it
+   * to `dead_letter_queue` or deletes it), which is logged.
+   * @param reason - The processor's error, or the reason no processor ran
+   */
+  async #settleExhausted(
+    queue: string,
+    message: IQueueMessage,
+    envelope: JobEnvelope | undefined,
+    reason: unknown,
+  ): Promise<void> {
+    const where =
+      envelope === undefined ? { messageId: message.id } : { job: envelope.name, id: envelope.id };
+    const target = this.#deadLetter;
+    if (target === false || target === undefined) {
+      message.ack();
+      this.#logger?.()?.warn(
+        `cloudflare-queue: job discarded after ${message.attempts} attempts; deadLetterQueue is false`,
+        { queue, ...where, attempts: message.attempts },
+      );
+      return;
+    }
+    // On a delivery past the processor's last attempt the copy carries no
+    // error text, so a payload near the Queues size limit is not pushed over it.
+    const lastChance = message.attempts > this.#maxRetries;
+    const now = this.#now;
+    const copy = {
+      ...(envelope === undefined ? { body: message.body } : envelope),
+      ...(now === undefined ? {} : { failedAt: now() }),
+      attempts: message.attempts,
+      ...(lastChance ? {} : { error: describeError(reason) }),
+    };
+    try {
+      await target.send(copy);
+    } catch (error: unknown) {
+      this.#logger?.()?.error(
+        lastChance
+          ? 'cloudflare-queue: dead-letter send failed on the last delivery; the job leaves the ' +
+              "adapter (the platform's dead_letter_queue, or deleted)"
+          : 'cloudflare-queue: dead-letter send failed, message retried',
+        {
+          queue,
+          ...where,
+          attempts: message.attempts,
+          error: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      message.retry();
+      return;
+    }
+    message.ack();
+  }
+
+  /** Retries a message with the configured spacing, or the queue's own `retry_delay`. */
+  #retry(message: IQueueMessage): void {
+    const delay = this.#retryDelay;
+    if (delay === undefined) {
+      message.retry();
+      return;
+    }
+    let seconds: number;
+    try {
+      seconds = typeof delay === 'number' ? delay : delay(message.attempts);
+    } catch {
+      seconds = Number.NaN;
+    }
+    if (!Number.isFinite(seconds)) {
+      if (!this.#retryDelayWarned) {
+        this.#retryDelayWarned = true;
+        this.#logger?.()?.warn(
+          'cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried without a delay',
+        );
+      }
+      message.retry();
+      return;
+    }
+    const bounded = Math.min(this.#maxDelaySeconds, Math.max(0, Math.ceil(seconds)));
+    if (bounded === 0) {
+      message.retry();
+      return;
+    }
+    message.retry({ delaySeconds: bounded });
   }
 
   /**

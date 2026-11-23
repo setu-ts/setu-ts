@@ -21,6 +21,7 @@ import type { IJob, IQueue } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/errors.ts';
 import { WorkersQueue } from '../../../src/queues/workers-queue.ts';
+import type { WorkersQueueOptions } from '../../../src/queues/workers-queue.ts';
 import { isJobEnvelope } from '../../../src/queues/job-envelope.ts';
 import {
   AckFailsQueueMessage,
@@ -32,16 +33,23 @@ import {
 } from '../../fakes.ts';
 
 /** Builds a queue over fresh fakes, typed as the committed port where it matters. */
-function build(): {
+function build(options?: WorkersQueueOptions): {
   readonly queue: WorkersQueue;
   readonly producer: FakeQueueProducer;
+  readonly dlq: FakeQueueProducer;
   readonly logger: RecordingLogger;
 } {
   const producer = new FakeQueueProducer();
+  const dlq = new FakeQueueProducer();
   const logger = new RecordingLogger();
   return {
-    queue: new WorkersQueue(producer, new SequentialIds(), { logger: () => logger }),
+    queue: new WorkersQueue(producer, new SequentialIds(), {
+      logger: () => logger,
+      deadLetter: dlq,
+      ...options,
+    }),
     producer,
+    dlq,
     logger,
   };
 }
@@ -246,8 +254,8 @@ describe('WorkersQueue.dispatch', () => {
     expect(logger.records.at(0)?.meta).toMatchObject({ error: 'a bare string' });
   });
 
-  it('ACKS without running the processor once attempts pass maxAttempts', async () => {
-    const { queue, logger } = build();
+  it('forwards to the dead-letter producer, without running the processor, once attempts pass maxAttempts', async () => {
+    const { queue, logger, dlq } = build();
     let ran = 0;
     queue.process('j', () => {
       ran += 1;
@@ -258,7 +266,8 @@ describe('WorkersQueue.dispatch', () => {
 
     expect(ran).toBe(0);
     expect(message.disposition).toBe('acked');
-    expect(logger.messages()).toEqual(['cloudflare-queue: job exhausted its attempts']);
+    expect(dlq.sends).toHaveLength(1);
+    expect(logger.messages()).toEqual(['cloudflare-queue: job arrived past its attempt budget']);
   });
 
   it('still runs the processor on the final permitted attempt', async () => {
@@ -366,7 +375,9 @@ describe('WorkersQueue.dispatch', () => {
   it('is silent on every path when no logger was supplied', async () => {
     // The logger is optional, so its absence must not become a TypeError on the
     // reporting paths — which are exactly the paths a production Worker hits.
-    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds(), {
+      deadLetter: new FakeQueueProducer(),
+    });
     queue.process('boom', () => {
       throw new Error('x');
     });
@@ -511,5 +522,245 @@ describe('WorkersQueue header channel (M90i)', () => {
 
     expect(seen?.id).toBe(id);
     expect(seen?.headers).toEqual({ traceparent: 'tp' });
+  });
+});
+
+describe('WorkersQueue exhausted jobs (V13-197)', () => {
+  const always = (): never => {
+    throw new Error('always fails');
+  };
+
+  it('refuses process() with no dead-letter target, naming both ways past it', () => {
+    const queue = new WorkersQueue(new FakeQueueProducer(), new SequentialIds());
+    expect(() => {
+      queue.process('j', () => {});
+    }).toThrow(CloudflareUnsupportedError);
+    expect(() => {
+      queue.process('j', () => {});
+    }).toThrow(/deadLetterQueue.*false/s);
+  });
+
+  it('lets a producer-only queue add without any dead-letter target', async () => {
+    const producer = new FakeQueueProducer();
+    const queue = new WorkersQueue(producer, new SequentialIds());
+    await queue.add('j', {});
+    expect(producer.sends).toHaveLength(1);
+  });
+
+  it.each([0, 101, 1.5, Number.NaN])('refuses maxRetries %s', (maxRetries) => {
+    expect(() => build({ maxRetries })).toThrow(/maxRetries must be a whole number from 1 to 100/);
+  });
+
+  it.each([-1, Infinity, Number.NaN])('refuses retryDelaySeconds %s', (retryDelaySeconds) => {
+    expect(() => build({ retryDelaySeconds })).toThrow(/retryDelaySeconds/);
+  });
+
+  it('calls onFailed once on the final attempt, never earlier, then forwards and acks', async () => {
+    const now = 1_700_000_000_000;
+    const { queue, dlq } = build({ now: () => now });
+    const failed: { id: string; attempts: number; error: unknown }[] = [];
+    queue.process('j', always, {
+      onFailed: (job, error) => void failed.push({ id: job.id, attempts: job.attempts, error }),
+    });
+
+    const deliveries = [1, 2, 3].map((attempts) => delivered('j', { n: 1 }, { attempts }));
+    for (const message of deliveries) await queue.dispatch(new FakeQueueBatch('q', [message]));
+
+    expect(deliveries.map((m) => m.disposition)).toEqual(['retried', 'retried', 'acked']);
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.attempts).toBe(3);
+    expect(dlq.sends.at(0)?.body).toEqual({
+      v: 1,
+      name: 'j',
+      id: 'id-1',
+      data: { n: 1 },
+      failedAt: now,
+      attempts: 3,
+      error: 'Error: always fails',
+    });
+  });
+
+  it('honours a lower maxAttempts, and caps a higher one with one warning per name', async () => {
+    const { queue, dlq, logger } = build();
+    queue.process('j', always);
+
+    await queue.dispatch(
+      new FakeQueueBatch('q', [delivered('j', {}, { attempts: 2, maxAttempts: 2 })]),
+    );
+    expect(dlq.sends).toHaveLength(1);
+
+    const capped = [
+      delivered('j', {}, { attempts: 2, maxAttempts: 9 }),
+      delivered('j', {}, { attempts: 3, maxAttempts: 9 }),
+    ];
+    for (const message of capped) await queue.dispatch(new FakeQueueBatch('q', [message]));
+    expect(capped.map((m) => m.disposition)).toEqual(['retried', 'acked']);
+    expect(logger.records.filter((r) => r.message.includes('capped'))).toHaveLength(1);
+    expect(logger.records.find((r) => r.message.includes('capped'))?.meta).toMatchObject({
+      maxAttempts: 9,
+      maxRetries: 3,
+      budget: 3,
+    });
+  });
+
+  it('retries a failed dead-letter send without logging the payload, keeping the job', async () => {
+    const { queue, dlq, logger } = build();
+    dlq.send = () => Promise.reject(new TypeError('queue unavailable'));
+    queue.process('j', always);
+
+    const message = delivered('j', { secret: 's3cr3t' }, { attempts: 3 });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+
+    expect(message.disposition).toBe('retried');
+    const record = logger.records.find((r) => r.message.includes('dead-letter send failed'));
+    expect(record?.meta).toMatchObject({ error: 'TypeError', attempts: 3 });
+    expect(JSON.stringify(logger.records)).not.toContain('s3cr3t');
+  });
+
+  it('forwards on the reserve delivery without the error text or a second onFailed', async () => {
+    const { queue, dlq, logger } = build();
+    let calls = 0;
+    queue.process('j', always, { onFailed: () => void calls++ });
+
+    const reserve = delivered('j', {}, { attempts: 4 });
+    await queue.dispatch(new FakeQueueBatch('q', [reserve]));
+
+    expect(calls).toBe(0);
+    expect(reserve.disposition).toBe('acked');
+    expect(dlq.sends.at(0)?.body).not.toHaveProperty('error');
+    expect(logger.messages()).toContain('cloudflare-queue: job arrived past its attempt budget');
+  });
+
+  it('logs that the job leaves the adapter when the reserve-delivery send fails too', async () => {
+    const { queue, dlq, logger } = build();
+    dlq.send = () => Promise.reject('down');
+    queue.process('j', always);
+
+    const reserve = delivered('j', {}, { attempts: 4 });
+    await queue.dispatch(new FakeQueueBatch('q', [reserve]));
+
+    expect(reserve.disposition).toBe('retried');
+    expect(logger.records.at(-1)?.message).toContain('the job leaves the adapter');
+    expect(logger.records.at(-1)?.meta).toMatchObject({ error: 'string' });
+  });
+
+  it('discards with one warning per discard, never the payload, when deadLetter is false', async () => {
+    const { queue, logger } = build({ deadLetter: false });
+    let calls = 0;
+    queue.process('j', always, { onFailed: () => void calls++ });
+
+    const message = delivered('j', { secret: 'p' }, { attempts: 3 });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+
+    expect(message.disposition).toBe('acked');
+    expect(calls).toBe(1);
+    expect(logger.messages()).toContain(
+      'cloudflare-queue: job discarded after 3 attempts; deadLetterQueue is false',
+    );
+    expect(JSON.stringify(logger.records)).not.toContain('"secret"');
+  });
+
+  it('logs and swallows an onFailed that throws, still forwarding the job', async () => {
+    const { queue, dlq, logger } = build();
+    queue.process('j', always, {
+      onFailed: () => {
+        throw new RangeError('callback bug');
+      },
+    });
+
+    const message = delivered('j', {}, { attempts: 3 });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+
+    expect(message.disposition).toBe('acked');
+    expect(dlq.sends).toHaveLength(1);
+    expect(
+      logger.records.find((r) => r.message.includes('onFailed callback threw'))?.meta,
+    ).toMatchObject({
+      error: 'RangeError',
+    });
+  });
+
+  it('forwards an unroutable message on its last processor attempt instead of letting it be deleted', async () => {
+    const { queue, dlq } = build();
+    queue.process('known', () => {});
+
+    const unknown = delivered('unknown', {}, { attempts: 3 });
+    const garbage = new FakeQueueMessage('cf-g', 'not an envelope', 3);
+    await queue.dispatch(new FakeQueueBatch('q', [unknown, garbage]));
+
+    expect([unknown.disposition, garbage.disposition]).toEqual(['acked', 'acked']);
+    expect(dlq.sends.map((s) => (s.body as { error?: string }).error)).toEqual([
+      'Error: no processor registered',
+      'Error: body is not a job envelope',
+    ]);
+    expect(dlq.sends.at(1)?.body).toMatchObject({ body: 'not an envelope' });
+  });
+
+  it('discards an unroutable message on its last attempt when deadLetter is false', async () => {
+    const { queue } = build({ deadLetter: false });
+    queue.process('known', () => {});
+    const message = new FakeQueueMessage('cf-g', 'not an envelope', 3);
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+    expect(message.disposition).toBe('acked');
+  });
+});
+
+describe('WorkersQueue retry spacing (V13-220, Workers half)', () => {
+  const always = (): never => {
+    throw new Error('x');
+  };
+
+  async function retryOf(options: WorkersQueueOptions, attempts = 1) {
+    const { queue, logger } = build(options);
+    queue.process('j', always);
+    const message = delivered('j', {}, { attempts });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+    return { options: message.retryOptions, logger };
+  }
+
+  it('keeps the queue retry_delay when unset', async () => {
+    expect((await retryOf({})).options).toBeUndefined();
+  });
+
+  it('passes a fixed delay, rounded up and bounded by maxDelaySeconds', async () => {
+    expect((await retryOf({ retryDelaySeconds: 2.2 })).options).toEqual({ delaySeconds: 3 });
+    expect((await retryOf({ retryDelaySeconds: 500, maxDelaySeconds: 60 })).options).toEqual({
+      delaySeconds: 60,
+    });
+    expect((await retryOf({ retryDelaySeconds: 0 })).options).toBeUndefined();
+  });
+
+  it('calls a function with the attempt that failed', async () => {
+    expect((await retryOf({ retryDelaySeconds: (n) => n * 10 }, 2)).options).toEqual({
+      delaySeconds: 20,
+    });
+    expect((await retryOf({ retryDelaySeconds: () => -5 })).options).toBeUndefined();
+  });
+
+  it('falls back to no delay, warning once, for a function that throws or returns non-finite', async () => {
+    const throwing = await retryOf({
+      retryDelaySeconds: () => {
+        throw new Error('bug');
+      },
+    });
+    expect(throwing.options).toBeUndefined();
+    expect(throwing.logger.messages()).toContain(
+      'cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried without a delay',
+    );
+
+    const { queue, logger } = build({ retryDelaySeconds: () => Number.NaN });
+    queue.process('j', always);
+    await queue.dispatch(
+      new FakeQueueBatch('q', [delivered('j', {}), delivered('j', {}, { id: 'b' })]),
+    );
+    expect(logger.messages().filter((m) => m.includes('retryDelaySeconds'))).toHaveLength(1);
+  });
+
+  it('spaces an unroutable retry the same way', async () => {
+    const { queue } = build({ retryDelaySeconds: 7 });
+    queue.process('known', () => {});
+    const message = delivered('unknown', {});
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+    expect(message.retryOptions).toEqual({ delaySeconds: 7 });
   });
 });

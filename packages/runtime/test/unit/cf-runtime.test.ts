@@ -204,3 +204,23 @@ describe('cf-runtime | onSignal', () => {
     expect('onSignal' in services).toBe(false);
   });
 });
+
+describe('cf-runtime | waitUntil (V13-200)', () => {
+  it('exposes the injected waitUntil and hands it the promise', () => {
+    const held: Promise<unknown>[] = [];
+    const services = createCloudflareRuntimeServices({
+      waitUntil: (promise) => {
+        held.push(promise);
+      },
+    });
+    const work = Promise.resolve();
+    services.waitUntil?.(work);
+    expect(held).toEqual([work]);
+  });
+
+  it('omits waitUntil entirely without one, and omits onFatalError always', () => {
+    const services = createCloudflareRuntimeServices({ env: {} });
+    expect('waitUntil' in services).toBe(false);
+    expect('onFatalError' in services).toBe(false);
+  });
+});

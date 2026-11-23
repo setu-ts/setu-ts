@@ -39,6 +39,39 @@ export interface StallWatch {
  */
 export type DeferredCleanup = () => void | Promise<void>;
 
+/**
+ * Hands work that may outlive the response to the platform, so an invocation
+ * that ends once its response is done (Cloudflare Workers) does not cut it off.
+ *
+ * Called once per promise chain, at the site that creates the chain — never
+ * per step of {@linkcode runDeferred}'s recursion, whose result already
+ * settles after every remaining cleanup: registering steps separately would
+ * race the platform ending the invocation between one step and the next. The
+ * runtime is read through `has`, so a registry without one (tests, a bare
+ * kernel) skips it. A missing or throwing `waitUntil` loses only the
+ * extension, never the cleanup, which already runs. The promise handed over
+ * never rejects, so the platform reports nothing for it.
+ *
+ * @param registry - Where the runtime services are registered
+ * @param promise - Work that must not be cut off
+ * @since 0.14.0
+ * @internal
+ */
+export function keepAlive(registry: IServiceRegistry, promise: Promise<unknown>): void {
+  try {
+    if (!registry.has(CAPABILITIES.RUNTIME)) return;
+    const runtime = registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    runtime.waitUntil?.(
+      promise.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+  } catch {
+    // The extension is lost; the cleanup itself still runs.
+  }
+}
+
 /** Reports a cleanup failure once through the sanctioned optional logger. */
 function report(registry: IServiceRegistry, error: unknown): void {
   try {
@@ -199,6 +232,9 @@ export function wrapDeferredStream(
         completed = true;
         return finish();
       });
+    // Registered now, while the request is live: the cancel wait has no time
+    // limit, and the cleanups may run after the invocation would have ended.
+    keepAlive(registry, aborting);
   }
   // Every wrapped body with a signal listens: on a runtime that never cancels
   // the body (workerd), the signal is the only notice the client left.
