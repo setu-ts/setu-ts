@@ -397,9 +397,21 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   Core member owns the mapping to each runtime (stated in the hand-over, §11): on Node and Bun a
   `Resolver` with `tries: 1` (Node's default is 4, which would multiply the bound) and
   `timeout: timeoutMs`, with `0` mapped to Node's `-1` (the c-ares default); on Deno `nameServer`
-  plus a signal (Deno then forces a 1 s, one-attempt resolver timeout, Q11). The record TTL is not
-  read: `resolveSrv` returns none on Node (Q11), so `cacheTtlMs` stays the freshness bound and the
-  README says so.
+  plus a signal (Q11 read Deno's source as forcing a 1 s, one-attempt resolver timeout; the Core
+  session measured Deno 2.9.6's signalled lookup ending on its own about 2 s after the abort). The
+  resolver's `timeoutMs` bounds the whole lookup by the resolver's own timer, surfacing as code
+  `'ETIMEOUT'` on every runtime (measured on Node 24, Bun 1.4.5 and Deno 2.9.6 by the Core session,
+  2026-11-23). The record TTL is not read: `resolveSrv` returns none on Node (Q11), so `cacheTtlMs`
+  stays the freshness bound and the README says so.
+- **Core follow-up status (2026-11-23).** The maintainer approved the Core half; it is being built
+  on `feat/m143-core-dns-drain` and is not on `develop` yet, so this section is built after it
+  merges. Two facts it brings, measured by the Core session: `resolveHost` will reject with an
+  `AggregateError` cause holding every failed lookup (A and AAAA), so `isNameAbsent` must walk
+  `.errors` and count a name absent only when EVERY member says so (a timeout on one family is not
+  absence); and on Deno a `SERVFAIL` throws `NotFound` with the same message as NXDOMAIN and no
+  records (no code field), so on Deno a `SERVFAIL` reads as an absent name, a limit the README
+  states. `createDnsResolver({ servers, timeoutMs })` refuses an empty list, host names and IPv6
+  zones with a `RangeError`.
 - **Why:** a name-server option is the report's own remedy, and both runtimes support it natively
   (Node `Resolver` instances with `timeout`/`tries` and per-instance `setServers`; Deno
   `nameServer`). The plugin may not import `node:dns` (runtime-specific APIs live in
@@ -424,9 +436,9 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     a call whose signal was already aborted is not recorded (`circuit-breaker.ts:69-71`); a call
     aborted mid-flight is recorded as a failure (`:88-92`). Half-open is unchanged.
   - `ResilienceService` validates a breaker policy at `wrap()` and `ResiliencePlugin()` with a
-    `RangeError` naming the field (new `validateCircuitBreakerPolicy` in
-    `patterns/circuit-breaker.ts`, the shape `validateRetryPolicy` has in `patterns/retry.ts:27`):
-    `failureRateThreshold` in 1 to 100, `minimumCalls` a positive integer, `timeout` and
+    `RangeError` naming the field, through `common`'s `breakerPolicyRangeError(policy)` (exported by
+    the Core PR; `validateCircuitBreakerPolicy` in `patterns/circuit-breaker.ts` becomes a call to
+    it): `failureRateThreshold` in 1 to 100, `minimumCalls` a positive integer, `timeout` and
     `resetTimeout` in the timer range, `threshold` a positive integer.
   - No default changes: `defaultCircuitBreaker` stays caller-supplied.
   - **The trip rule lives once, in `common` (maintainer condition on OD4b).** Today the count rule
@@ -453,6 +465,11 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     therefore breaks the SDK's compile unless the SDK narrows it. The SDK is in the CLI lane, so its
     half is a hand-over (§11), and it must land in the same window as the Core union, since the Core
     PR cannot merge with the SDK failing to compile. The SDK's choice is OD4b.
+- **Core follow-up status (2026-11-23).** Approved and being built on `feat/m143-core-breaker`, not
+  on `develop` yet. That PR adds a guard in `resilience-plugin/src/patterns/circuit-breaker.ts` that
+  refuses the rate arm with a `RangeError` (the union would otherwise break this package's build);
+  this section deletes that guard when it moves `CircuitBreaker` onto `createBreakerWindow`. The SDK
+  half (OD4b) ships in the Core PR, so the CLI-lane hand-over for it is done.
 - **Why:** every compared library trips on a rate over a minimum volume (Q9); the plugin's sibling
   cap is already a percentage (`maxEjectionPercent`), and Resilience4j, opossum and Hystrix use
   percent (default 50), Polly a ratio (0.1). Buckets bound memory at any traffic, as opossum and
@@ -591,10 +608,14 @@ because the drain answer is written through the application's error responder wh
   without the marker is never resent and is reported per §3.8 (`Unavailable`, so `failure`).
 - **The marker is not reserved by the client.** A gRPC handler can set response headers (connect's
   `ctx.responseHeader`), so an application that copies the marker onto its own `Unavailable` gets
-  one resend of that unary call. The client cannot tell the two apart; the Core hand-over (§11) asks
-  the kernel to delete the header from every response that is not its drain answer, which makes the
-  guarantee the kernel's to keep. The cost without it is one extra send of one unary call to another
-  instance of the same service, within the deadline (§13).
+  one resend of that unary call. The client cannot tell the two apart. **The kernel does not strip
+  the marker (maintainer decision, 2026-11-23):** it sets `x-setu-unprocessed: shutdown` on its
+  pre-pipeline drain 503 only and does not delete the header from other responses; no compared
+  framework strips its marker (Finagle's `finagle-http-nack` included), and the cost is one extra
+  send of one unary call to another instance of the same service, within the deadline (§13). The
+  README states that the header is reserved and that an application setting it makes the claim
+  itself. The constants stay `UNPROCESSED_HEADER` / `UNPROCESSED_SHUTDOWN`. The Core half is being
+  built on `feat/m143-core-dns-drain` and is not on `develop` yet.
 - **Order of work (gated).** The client half is built only after the Core PR carrying the marker and
   its constant has merged into `develop` and this branch has merged `develop`. Until then the branch
   ships no resend rule for 503 at all: a drain 503 fails the call as it does today, and is reported
@@ -972,7 +993,10 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   `createBreakerWindow(policy, now)` (count arm with exact timestamps, rate arm over ten buckets,
   `recordSuccess`/`recordFailure(): boolean`/`reset`/`failures`, no clearing on a closed-state
   success) with a conformance table test covering both arms; export it; update `PUBLIC_API.md`
-  Resilience." `resilience-plugin` (this letter) and the SDK (CLI lane) then both import it.
+  Resilience." `resilience-plugin` (this letter) and the SDK then both import it. **Approved
+  2026-11-23, being built on `feat/m143-core-breaker`**; it also exports
+  `breakerPolicyRangeError(policy)`, adds a temporary rate-arm `RangeError` guard in
+  `resilience-plugin` (deleted by §3.7), and carries the SDK half itself.
 - **Core lane (same PR; OD3):** `packages/common/src/runtime.ts` and
   `packages/runtime/src/adapters/{shared/node-dns-resolver.ts,deno/deno-dns-resolver.ts}`: "add an
   optional
@@ -981,7 +1005,8 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   and `timeout` (`0` mapped to `-1`), and on Deno by `resolveDns` with `nameServer` and an abort
   signal; absent on Workers. Also make `resolveHost` reject with every failed lookup (an
   `AggregateError` cause), not only the first, so a caller can tell 'no such name' from 'one family
-  timed out'."
+  timed out'." **Approved 2026-11-23, being built on `feat/m143-core-dns-drain`** (facts it brings:
+  §3.6).
 - **Core lane (OD6, decided C; a small PR after M143i merges, and before §3.9 is built):**
   `packages/common` (a new file and its export line, additive) and
   `packages/kernel/src/application/application.ts` (`#handleRequest`'s `#stopping` branch): "add
@@ -991,18 +1016,18 @@ against the Consul container of X83, before the rows close on `0.14.0`.
   `builder.header(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN)` so the header is present whatever the
   error responder writes; no other site sets it; test that the drain 503 carries it with and without
   a registered `errorHandler`, and that an in-pipeline 503 does not; update `PUBLIC_API.md` (Common
-  constants, kernel shutdown notes) and `docs/upgrading.md`. Also delete the header from every
-  response that is not the drain answer (a handler or middleware cannot set it), and test that." The
-  constant names are this plan's proposal; Core may rename them, and §3.9 follows. On the `connect`
-  protocol the default drain body is JSON and parses as a wire error; §3.9's rule does not depend on
-  that, so Core need not change the body.
+  constants, kernel shutdown notes) and `docs/upgrading.md`. " (The request to also delete the
+  header from every other response is **withdrawn**: the maintainer decided on 2026-11-23 that the
+  kernel does not strip it, §3.9.) **Approved 2026-11-23, being built on
+  `feat/m143-core-dns-drain`.** The constant names are this plan's proposal; Core may rename them,
+  and §3.9 follows. On the `connect` protocol the default drain body is JSON and parses as a wire
+  error; §3.9's rule does not depend on that, so Core need not change the body.
 - **CLI lane, `@setu-ts/sdk` (OD4b; must land with the Core union):**
   `packages/sdk/src/circuit-breaker/circuit-breaker.ts` and `sdk/src/http/contracts.ts`: "narrow the
   `CircuitBreakerPolicy` union by moving the SDK breaker onto `common`'s `createBreakerWindow` (OD4b
   A, decided), which gives it the rate arm and drops its clear-on-success behaviour; update the SDK
-  README, `PUBLIC_API.md` SDK section and a CHANGELOG line for that behaviour change." Owning
-  letter: the CLI-lane letter that holds `sdk` (M143k per the lane table), to be confirmed by the
-  maintainer.
+  README, `PUBLIC_API.md` SDK section and a CHANGELOG line for that behaviour change." **Done by the
+  Core PR (`feat/m143-core-breaker`, 2026-11-23)**: no CLI-lane letter takes it.
 - **CLI lane (V13-24; M143d, whose ROADMAP section lists "Half of a row owned elsewhere: V13-24
   (owned by M143c)"):** `packages/cli/src/workspace/k8s.ts` and
   `packages/cli/src/workspace/discovery-module.ts`: "for a member whose transport is gRPC, emit a
@@ -1086,10 +1111,11 @@ and §3.9.
   spoofed UDP answer can therefore take a service out after the grace. Mitigations: the grace,
   `degraded` during it, `servers` for a trusted resolver, the README's warning. A Consul or
   Kubernetes answer that is empty follows the same rule.
-- **The marker is a convention until Core strips it.** A gRPC handler can set `x-setu-unprocessed`
+- **The marker is a reserved convention, not stripped.** A gRPC handler can set `x-setu-unprocessed`
   on its own `Unavailable` (connect's `ctx.responseHeader`); the effect is bounded to one extra send
-  of one unary call (§3.9), and the Core hand-over makes the kernel delete the header from every
-  non-drain response.
+  of one unary call (§3.9). The maintainer decided on 2026-11-23 that the kernel does not strip it
+  (no compared framework strips its marker); the README states the header is reserved and that an
+  application setting it makes the claim itself.
 - **Bounds.** The per-name reporters and retry state are keyed by service names the application
   resolves (not request input), and are cleared by `close()`; the DNS watch never holds more than
   one lookup per name.
