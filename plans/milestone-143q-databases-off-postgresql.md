@@ -598,11 +598,14 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
     `TimeoutError` rule, which M143h changes (V13-237), so the two letters cannot disagree.
   - **Range (maintainer decision D-4, 2026-11-23).** Default 15 000 ms. `0` **disables** the bound
     (no signal, no `gaxOptions.timeout`: the SDK's own defaults apply, as before this letter), as
-    the Redis `commandTimeoutMs` does. Refused at construction with a `RangeError` naming the
-    option: a negative value, `NaN`, a non-integer, or a value above 2 147 483 647 (the timer
-    ceiling). The range check reuses `deadlineRangeError('requestTimeoutMs', …)` from
-    `@setu-ts/common` (`packages/common/src/health/deadline.ts:77`, exported, same "0 disables the
-    bound" wording), plus a `Number.isInteger` check before it.
+    the Redis `commandTimeoutMs` does. Validated exactly as M143r validates its `requestTimeoutMs`
+    (maintainer, 2026-11-23: one name, one rule; `storage-plugin/src/providers/fault.ts:61`,
+    `mail-plugin/src/providers/bounded-send.ts:50` on `feat/m143r-provider-arms`):
+    `deadlineRangeError('requestTimeoutMs', value)` from `@setu-ts/common`
+    (`packages/common/src/health/deadline.ts:77`, already on `develop`), thrown at construction. It
+    refuses a non-finite value (`NaN`, `Infinity`), a negative value and a value above 2 147 483 647
+    with its own `RangeError` text ("… must be a finite number between 0 and 2147483647 milliseconds
+    (0 disables the bound)"); a non-integer is accepted.
   - **Name (D-3).** `requestTimeoutMs`: Setu's existing name for a whole-call bound (M143r ships it
     for storage, secrets and mail, following the Vault provider's sibling option). Its JSDoc and the
     README say it bounds the whole call, retries included, unlike the SDKs' per-HTTP-request
@@ -615,8 +618,9 @@ Cosmos `requestTimeout` bounds writes only (X119-4).
 - **Test home.** `test/unit/nosql-call-bound.test.ts` (each adapter with a fake facade that never
   settles until aborted: rejects `DatabaseTimeoutError` with the abort as cause; the option reaches
   the lazy arms: recording SDK fakes see `abortSignal` / `gaxOptions.timeout`; `0` passes no signal
-  and no `gaxOptions.timeout`; construction refuses negatives, `NaN`, non-integers and values above
-  the ceiling); guarded real cells in `real-dynamo-adapter.test.ts`, `real-cosmos-adapter.test.ts`,
+  and no `gaxOptions.timeout`; construction refuses exactly what `deadlineRangeError` refuses —
+  negatives, `NaN`, `Infinity`, values above the ceiling — and accepts a non-integer such as
+  `1500.5`); guarded real cells in `real-dynamo-adapter.test.ts`, `real-cosmos-adapter.test.ts`,
   `real-bigtable-adapter.test.ts` behind the frozen relay (§3.13): a point read, a page, a write and
   a unit of work each end within `requestTimeoutMs + 1 s` with 504.
 
@@ -859,7 +863,7 @@ the `scope` parameters and the frozen relay are internal.
 
 | Option                                                                      | Consumer                                                                                                                                         | Behavior (per implementation)                                                                                                                                                                                                                                                                                                   |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requestTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0` disables the bound; negative, `NaN`, non-integer or above 2 147 483 647 refused at construction                                                               |
+| `requestTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0` disables the bound; refused at construction exactly as `deadlineRangeError` refuses (non-finite, negative, above 2 147 483 647); non-integers accepted        |
 | `readinessEntity` (DynamoDB, Bigtable arms)                                 | carried by `buildAdapterOptions`; `isHealthy`, the Bigtable warm-up                                                                              | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn`                                                                                                                                                                                                                               |
 | `clientOptions` (the DynamoDB, Cosmos and Bigtable lazy arms; D-7)          | carried by `buildAdapterOptions`; each lazy loader → its SDK constructor (§3.11, §3.15)                                                          | spread first; the arm's own top-level options (Bigtable `projectId`/`apiEndpoint`; DynamoDB `region`/`endpoint`/`credentials`; Cosmos `endpoint`/`key`) win when set; Bigtable's derived `metricsEnabled: false` applies only when `clientOptions` does not set `metricsEnabled`; unread when `client` is injected (documented) |
 | `dialect: 'mysql'` (existing, wider consumer)                               | Drizzle `contains`, offset-only `findAll`                                                                                                        | `escape '!'` with the `!`-escaped pattern; `limit 18446744073709551615` as an `sql.raw` chunk                                                                                                                                                                                                                                   |
@@ -1052,15 +1056,15 @@ recommendation:
   JSDoc and README say it bounds the whole call, retries included, unlike the SDKs' per-HTTP-request
   `requestTimeout`.
 - **D-4 decided: 15 000 ms by default, and `0` disables the bound** (as Redis `commandTimeoutMs`
-  does); negative, `NaN` and non-integer values are refused (§3.8). Reason: a long scan or a large
-  Bigtable read (its SDK allows 12 h) would otherwise fail with 504 after upgrading, with no way
-  out.
+  does); invalid values are refused by M143r's rule, `deadlineRangeError` (non-integers accepted;
+  maintainer, 2026-11-23, §3.8). Reason: a long scan or a large Bigtable read (its SDK allows 12 h)
+  would otherwise fail with 504 after upgrading, with no way out.
 - **D-6 decided: keep the 501, plus a register row** for memory-adapter parity (§13).
 
 The table keeps the options and evidence as they were put to the maintainer.
 
-**Settled by precedent after the 2026-11-23 review of the changed sections** (no new maintainer
-decision; each follows a rule or decision already made):
+**Decided by the maintainer on 2026-11-23, after the review of the changed sections** (proposed from
+existing precedent; confirmed as listed):
 
 - Prisma root conditional writes use the unit of work's own `{ maxWait: 2000, timeout }` (§3.1.1):
   the adapter's existing setting, not a new one.
@@ -1074,8 +1078,7 @@ decision; each follows a rule or decision already made):
 - A probe past its bound rejects, read as `degraded` (§3.9): what the service already reports when
   it stops waiting at 2 s, and the Drizzle probe's rule.
 - Bigtable's bound covers the whole read, retries included (§3.8): required by D-3's wording.
-- Non-integer `requestTimeoutMs` is refused here as the maintainer decided; M143r's packages accept
-  non-integers for the same option name, which is noted for the Docs lane (M143n).
+- `requestTimeoutMs` follows M143r's validation exactly (§3.8): one option name, one rule.
 
 | #    | Decision                                                                                                                              | Options and evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Recommendation                                                                                                                                                                                                                   |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
