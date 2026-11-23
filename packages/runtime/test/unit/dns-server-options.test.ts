@@ -50,11 +50,18 @@ describe('DNS server options', () => {
     ['a Symbol', Symbol('dns'), '(symbol)'],
     ['a null-prototype object', Object.create(null) as unknown, '(object)'],
     ['a number', 53, '(number)'],
-    ['an empty slot', undefined, '(undefined)'],
+    ['an undefined entry', undefined, '(undefined)'],
   ])('refuses %s with a RangeError naming its type', (_label, entry, shown) => {
     const run = () => parseDnsResolverOptions({ servers: [entry as never], timeoutMs: 0 });
     expect(run).toThrow(RangeError);
     expect(run).toThrow(`servers[0] ${shown}`);
+  });
+  it('reads entries by index, not through a replaced iterator', () => {
+    const servers = ['not-an-ip'];
+    Object.defineProperty(servers, Symbol.iterator, { value: function* () {} });
+    expect(() => parseDnsResolverOptions({ servers, timeoutMs: 10 })).toThrow(
+      "servers[0] 'not-an-ip'",
+    );
   });
   it('refuses a sparse array at its first hole', () => {
     // eslint-disable-next-line no-sparse-arrays -- the hole is the input under test

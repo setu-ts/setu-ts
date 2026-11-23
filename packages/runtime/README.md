@@ -272,8 +272,8 @@ adapter implements `IHttpAdapter` and is registered under `CAPABILITIES.HTTP_ADA
 `RuntimePlugin`; `app.start({ port })` throws when none is registered for the detected platform.
 
 Platform coverage is not uniform, and the gaps are deliberate rather than pending: on Cloudflare
-Workers `fs` is `undefined` (no edge filesystem), `workers` and `dns` are omitted, and `exit()`
-throws — there is no process to end.
+Workers `fs` is `undefined` (no edge filesystem), `workers`, `dns` and `createDnsResolver` are
+omitted, and `exit()` throws — there is no process to end.
 
 See the repository's
 [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#runtimeplugin-setu-tsruntime)

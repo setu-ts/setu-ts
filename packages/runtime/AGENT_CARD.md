@@ -36,8 +36,6 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
 
 ## Behaviour the types do not show
 
-- `createDnsResolver({ servers, timeoutMs })` on Node/Bun/Deno bounds a whole lookup; absent on
-  Workers; `resolveHost` failures carry an AggregateError cause.
 - `RuntimePlugin` detects the platform unless `platform` is supplied.
 - `maxBodyBytes` counts bytes actually read, including chunked bodies. Omitted means unbounded; zero
   refuses bodies. Negative, fractional or unsafe-integer limits throw at construction.
@@ -50,7 +48,7 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
   failure. The default Node host waits for listening/error.
 - `runtime.hrtime()` and `ctx.startTime` are monotonic milliseconds; `runtime.now()` is epoch time.
 - On Workers, only string entries from `env` populate `runtime.env`; the option is ignored on Node,
-  Deno and Bun. Workers omit `fs`, `workers`, `dns` and `onSignal`.
+  Deno and Bun. Workers omit `fs`, `workers`, `dns`, `createDnsResolver` and `onSignal`.
 
 ## Other options
 
