@@ -223,7 +223,7 @@ export function withQueueArgs(
  * name with an EMPTY value automatically, so one row serves both files.
  *
  * @param spec - The selected transport
- * @returns The variable row, empty when the transport has no connection
+ * @returns The connection and SDK emulator rows, empty without a connection
  */
 export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
   const connection = spec.connection;
@@ -236,6 +236,15 @@ export function brokerEnvVariables(spec: BrokerSpec): readonly EnvVariable[] {
         `read this value; a deployment sets it in its own environment.`,
       develop: connection.localDefault,
     },
+    ...(connection.emulator === undefined
+      ? []
+      : [
+          {
+            name: connection.emulator.variable,
+            description: `${connection.emulator.variable} points the SDK at the emulator and skips authentication. Remove it to reach real Google Cloud.`,
+            develop: connection.emulator.localDefault,
+          },
+        ]),
   ];
 }
 

@@ -38,6 +38,7 @@ import {
   withDevtool,
 } from '../devtool/planner.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
+import { TELEMETRY_PEERS } from '../templates/client-dependencies.ts';
 import {
   cliInvocation,
   projectFiles,
@@ -47,6 +48,7 @@ import {
 import { resolveTemplateChoice, type TemplateChoice } from '../templates/choice.ts';
 import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
+import { planWorkspacePeers } from '../utils/peer-dependencies.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
@@ -192,7 +194,7 @@ function printUsage(log: (message: string) => void): void {
     '  --devtool           Enable the local diagnostics connector for this member (Deno or Node)',
   );
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
-  log('  --env-file <path>   Store local configuration in this ignored relative path');
+  log('  --dotenv <path>     Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
   log(
     `  --rpc <style>       ${RPC_STYLES.join(' | ')} (default http): grpc co-serves Connect/gRPC`,
@@ -310,7 +312,7 @@ function planMember(
       readonly ok: false;
       readonly message: string;
     } {
-  const envFile = readEnvFilePath(args.flags);
+  const envFile = readEnvFilePath(args.flags['dotenv']);
   if (!envFile.ok) return { ok: false, message: envFile.message };
 
   const extra: GeneratedFile[] = [];
@@ -354,7 +356,7 @@ function planMember(
       // `readWorkspaceManifest` refuses a manifest naming it, so a Workers
       // member cannot exist and a branch for one would be unreachable.
       message:
-        '--env-file requires a template that registers ConfigPlugin ' +
+        '--dotenv requires a template that registers ConfigPlugin ' +
         '(rest, microservice, class-based, or full-stack).',
     };
   }
@@ -787,7 +789,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     .map((variable) => variable.name);
   // A custom dotenv name the generated `.env`/`.env.*` rules miss is recorded,
   // so the managed root .dockerignore lists it on every regeneration.
-  const envFlag = readEnvFilePath(args.flags);
+  const envFlag = readEnvFilePath(args.flags['dotenv']);
   const envFilePath =
     envFlag.ok &&
     envFlag.path !== undefined &&
@@ -950,6 +952,22 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     ...modules,
     ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
+
+  if (profile.manifestKind === 'npm') {
+    try {
+      const peers = Object.entries(portHost.manifest?.npmDependencies ?? {})
+        .filter(([name]) => Object.hasOwn(TELEMETRY_PEERS, name))
+        .map(([name, range]) => ({ name, range }));
+      const root = await planWorkspacePeers(deps.fs, deps.dir, peers, deps.log);
+      if (root !== undefined)
+        files.push({ path: root.path, contents: root.contents, managed: true });
+    } catch (cause) {
+      deps.error(
+        `Cannot record template peers in ${escapeName(joinPath(deps.dir, 'package.json'))}: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      );
+      return EXIT_ERROR;
+    }
+  }
 
   if (generatedSecrets.length > 0) {
     try {

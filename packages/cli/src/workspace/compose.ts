@@ -391,12 +391,12 @@ export function renderDockerignore(envFilePaths: readonly string[] = []): string
     `${MEMBERS_DIR}/*/main.dev.ts`,
     // Dotenv files never reach an image, wherever a member keeps them.
     '# Dotenv files whose names are .env or .env.*, except .env.example, which is',
-    '# kept for the image. A custom --env-file name such as local.env is listed',
+    '# kept for the image. A custom --dotenv name such as local.env is listed',
     '# after them from the project or workspace record, so it is never copied.',
     '**/.env',
     '**/.env.*',
     '!**/.env.example',
-    // A custom dotenv file (`--env-file local.vars`) holds a generated secret
+    // A custom dotenv file (`--dotenv local.vars`) holds a generated secret
     // too, and Bun and Deno images copy the source tree.
     ...envFilePaths,
     // Registry credentials never reach an image either (M120 audit F2): Bun and

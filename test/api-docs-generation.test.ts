@@ -636,11 +636,11 @@ error[private-type-ref]: public type references private type
       const result = await collectApiEntrypoints(fs);
       // 54 published packages (M109a added idempotency-plugin, M111d added
       // create, M135 vector-store-plugin), runtime has 2 exports (./src/index.ts
-      // + ./worker), cli has 2 exports (./src/index.ts + ./main),
+      // + ./worker), cli has 3 exports (./src/index.ts + ./main + ./node-version),
       // localization-plugin has 2 (./src/index.ts + ./format, M103),
       // validation-plugin has 2 (./src/index.ts + ./zod, M137c), rest have 1 each:
-      // 55 published packages + runtime + cli + localization + validation = 59
-      expect(result.targets).toHaveLength(59);
+      // 55 published packages + runtime + 2 cli + localization + validation = 60
+      expect(result.targets).toHaveLength(60);
     });
 
     it('maps each target to its correct package name', async () => {

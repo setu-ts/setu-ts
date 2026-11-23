@@ -1066,6 +1066,7 @@ export function sourcePaths(prefix = './'): Record<string, string[]> {
     '@setu-ts/*': ['./packages/*/src/index.ts'],
     '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
     '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
+    '@setu-ts/cli/node-version': ['./packages/cli/src/utils/node-version.ts'],
     '@setu-ts/localization-plugin/format': ['./packages/localization-plugin/src/format/index.ts'],
     '@setu-ts/validation-plugin/zod': ['./packages/validation-plugin/src/zod/index.ts'],
   };

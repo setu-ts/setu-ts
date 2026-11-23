@@ -6,6 +6,8 @@ import {
 } from '../../../../test/node-helpers.ts';
 import { fileURLToPath } from 'node:url';
 import * as nodeFs from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 /**
  * The gate M63 exists for: a stock scaffold is installed, formatted, linted,
  * type-checked, BOOTED under its own declared permissions, and asked for the
@@ -30,7 +32,7 @@ import * as nodeFs from 'node:fs/promises';
  * @module
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
@@ -53,6 +55,302 @@ import {
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
+
+describe('first-command scaffold gates', () => {
+  const hasNpm = spawnSync('npm', ['--version']).status === 0;
+  const hasBun = spawnSync('bun', ['--version']).status === 0;
+  const hasDeno = spawnSync('deno', ['--version']).status === 0;
+  const noNpm = !hasNpm && process.env['CI'] !== 'true';
+  const workspace = fileURLToPath(new URL('../../../../', import.meta.url));
+
+  beforeAll(() => {
+    const built = spawnSync(
+      process.execPath,
+      [createRequire(import.meta.url).resolve('typescript/bin/tsc'), '-b', 'packages/cli'],
+      {
+        cwd: workspace,
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+  }, 150_000);
+
+  /** Runs member tooling and checks the generated root runner with that same configuration. */
+  async function checkTooling(project: string, installRoot = project): Promise<void> {
+    for (const script of ['format:check', 'lint']) {
+      const checked = await npmRun(project, script);
+      expect(checked.code, checked.output).toBe(0);
+    }
+    if (installRoot !== project) {
+      const config = project.slice(installRoot.length + 1);
+      const formatted = await runIn(installRoot, `${installRoot}/node_modules/.bin/prettier`, [
+        '--check',
+        'scripts/test.mjs',
+        '--config',
+        `${config}/.prettierrc.json`,
+        '--ignore-path',
+        `${config}/.prettierignore`,
+      ]);
+      expect(formatted.code, formatted.output).toBe(0);
+      const linted = await runIn(installRoot, `${installRoot}/node_modules/.bin/eslint`, [
+        '--config',
+        `${config}/eslint.config.js`,
+        'scripts/test.mjs',
+      ]);
+      expect(linted.code, linted.output).toBe(0);
+    }
+  }
+
+  /** Checks all CLI-emitted files before npm can reserialize the root manifest. */
+  async function checkWorkspaceFormat(project: string, installRoot: string): Promise<void> {
+    const config = project.slice(installRoot.length + 1);
+    const checked = await runIn(installRoot, process.execPath, [
+      `${workspace}node_modules/prettier/bin/prettier.cjs`,
+      '--check',
+      '.',
+      '--config',
+      `${config}/.prettierrc.json`,
+      '--ignore-path',
+      `${config}/.prettierignore`,
+    ]);
+    expect(checked.code, checked.output).toBe(0);
+  }
+
+  it('V13-140 built Node launcher accepts a custom dotenv path', async () => {
+    const result = await runIn(root, process.execPath, [
+      `${workspace}packages/cli/dist/bin.js`,
+      'new',
+      'chosen',
+      '--template',
+      'rest',
+      '--dotenv',
+      'config/.env.local',
+      '--yes',
+    ]);
+    expect(result.code, result.output).toBe(0);
+    expect(await nodeFs.readFile(`${root}/chosen/setu.config.ts`, 'utf8')).toContain(
+      "envFilePath: 'config/.env.local'",
+    );
+    await nodeFs.stat(`${root}/chosen/config/.env.local`);
+  });
+
+  it.skipIf(!hasBun)('Bun test accepts a custom dotenv file before its test path', async () => {
+    await nodeFs.writeFile(`${root}/custom.env`, 'DOTENV_PROBE=chosen-file\n');
+    await nodeFs.writeFile(
+      `${root}/probe.test.ts`,
+      "import { expect, test } from 'bun:test';\ntest('dotenv probe', () => { expect(process.env.DOTENV_PROBE).toBe('chosen-file'); });\n",
+    );
+    const result = await runIn(root, 'bun', ['test', '--env-file=custom.env', 'probe.test.ts']);
+    expect(result.code, result.output).toBe(0);
+  });
+
+  it.skipIf(!hasBun).each([
+    ['a custom dotenv', ['--dotenv', 'local.env'], 'local.env'],
+    ['the default dotenv', [], '.env'],
+  ] as const)(
+    'generated Bun test scripts layer %s, .env.test and .env.test.local, the last winning',
+    async (_, flags, appFile) => {
+      expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'bun', ...flags])).toBe(0);
+      const manifest = JSON.parse(await nodeFs.readFile(`${root}/svc/package.json`, 'utf8')) as {
+        scripts: Record<string, string>;
+      };
+      // The generated commands themselves, run where only probes and the two dotenv files exist.
+      const probe = `${root}/probe`;
+      await nodeFs.mkdir(probe);
+      await nodeFs.writeFile(`${probe}/${appFile}`, 'APP_VALUE=app\nSHARED=app\n');
+      await nodeFs.writeFile(`${probe}/.env.test`, 'TEST_VALUE=test\nSHARED=test\nLOCAL=test\n');
+      await nodeFs.writeFile(`${probe}/.env.test.local`, 'LOCAL=test-local\n');
+      const body =
+        "import { expect, test } from 'bun:test';\n" +
+        "test('dotenv layers', () => { expect([process.env.APP_VALUE, process.env.TEST_VALUE, process.env.SHARED, process.env.LOCAL]).toEqual(['app', 'test', 'test', 'test-local']); });\n";
+      await nodeFs.writeFile(`${probe}/layers.test.ts`, body);
+      await nodeFs.writeFile(`${probe}/layers.e2e.test.ts`, body);
+      for (const name of ['test', 'test:e2e']) {
+        const result = await runIn(probe, 'sh', ['-c', manifest.scripts[name]!]);
+        expect(result.code, `${name}: ${manifest.scripts[name]}\n${result.output}`).toBe(0);
+        expect(result.output).toContain('1 pass');
+      }
+    },
+  );
+
+  it(
+    'V13-36 Workers telemetry registration passes the project own workerd tests',
+    { skip: noNpm, timeout: 900_000 },
+    async () => {
+      expect(
+        await run(['new', 'edge', '--template', 'rest', '--runtime', 'cloudflare-workers']),
+      ).toBe(0);
+      const project = `${root}/edge`;
+      const output: string[] = [];
+      expect(
+        await runCli(['add', 'telemetry'], {
+          fs,
+          cwd: project,
+          now: () => 0,
+          log: (line) => output.push(line),
+          error: (line) => output.push(line),
+        }),
+        output.join('\n'),
+      ).toBe(0);
+      const registration = /Register (TelemetryPlugin\(.+\)) in setu.config.ts\./.exec(
+        output.join('\n'),
+      )?.[1];
+      expect(registration).toBeDefined();
+      const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+      const registered =
+        "import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';\n" +
+        config.replace('plugins: [', `plugins: [\n      ${registration},`);
+      expect(registered).toContain(`${registration},`);
+      await nodeFs.writeFile(`${project}/setu.config.ts`, registered);
+      const overlay = await startOverlay();
+      try {
+        const installed = await npmInstall(project, overlay);
+        expect(installed.code, installed.output).toBe(0);
+        const tested = await npmRun(project, 'test');
+        expect(tested.code, tested.output).toBe(0);
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+
+  for (const member of [false, true]) {
+    it(
+      `V13-142 microservice Bigtable installs with telemetry, workspace member ${member}`,
+      { skip: noNpm, timeout: 900_000 },
+      async () => {
+        expect(
+          await run(['new', 'svc', ...(member ? ['--workspace'] : ['--template', 'microservice'])]),
+        ).toBe(0);
+        const installRoot = `${root}/svc`;
+        const project = member ? `${installRoot}/apps/api` : installRoot;
+        if (member)
+          expect(
+            await run(['g', 'app', 'api', '--template', 'microservice', '--dir', installRoot]),
+          ).toBe(0);
+        expect(await run(['add', 'database', '--type', 'bigtable', '--dir', project])).toBe(0);
+        if (member) {
+          const manifest = JSON.parse(await nodeFs.readFile(`${installRoot}/package.json`, 'utf8'));
+          expect(manifest.dependencies?.['@opentelemetry/resources']).toBe('^2.9.0');
+          await checkWorkspaceFormat(project, installRoot);
+        }
+        const overlay = await startOverlay();
+        try {
+          const installed = await npmInstall(installRoot, overlay);
+          expect(installed.code, installed.output).toBe(0);
+          await checkTooling(project, installRoot);
+        } finally {
+          await overlay.close();
+        }
+      },
+    );
+  }
+
+  for (const target of ['node', 'deno'] as const) {
+    it(
+      `V13-141 ${target} view tests build CSS from a clean tree`,
+      { skip: target === 'deno' ? !hasDeno : noNpm, timeout: 900_000 },
+      async () => {
+        expect(await run(['new', 'views', '--template', 'rest', '--runtime', target])).toBe(0);
+        const project = `${root}/views`;
+        expect(await run(['add', 'view', '--dir', project])).toBe(0);
+        await nodeFs.rm(`${project}/build`, { recursive: true, force: true });
+        if (target === 'deno') {
+          await useWorkspacePackages(project);
+          const result = await denoRun(project, ['task', 'test']);
+          expect(result.code, result.output).toBe(0);
+        } else {
+          const overlay = await startOverlay();
+          try {
+            const installed = await npmInstall(project, overlay);
+            expect(installed.code, installed.output).toBe(0);
+            const tested = await npmRun(project, 'test');
+            expect(tested.code, tested.output).toBe(0);
+          } finally {
+            await overlay.close();
+          }
+        }
+        await nodeFs.stat(`${project}/build/assets/app.css`);
+      },
+    );
+  }
+
+  for (const add of [false, true]) {
+    it(
+      `V13-143 Pub/Sub dotenv reaches the project own tests, add ${add}`,
+      { skip: noNpm, timeout: 900_000 },
+      async () => {
+        expect(
+          await run([
+            'new',
+            'pubsub',
+            '--template',
+            add ? 'rest' : 'microservice',
+            ...(add ? [] : ['--broker', 'pubsub']),
+          ]),
+        ).toBe(0);
+        const project = `${root}/pubsub`;
+        if (add)
+          expect(await run(['add', 'messaging', '--broker', 'pubsub', '--dir', project])).toBe(0);
+        expect(await nodeFs.readFile(`${project}/.env`, 'utf8')).toContain(
+          'PUBSUB_EMULATOR_HOST=127.0.0.1:8085\n',
+        );
+        // The generated tests boot the app against the broker, and no emulator runs
+        // here: the row proves only that the project's own test script loads the dotenv.
+        await nodeFs.rm(`${project}/test`, { recursive: true, force: true });
+        await nodeFs.writeFile(
+          `${project}/dotenv-probe.test.ts`,
+          "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\ntest('emulator dotenv', () => { assert.equal(process.env.PUBSUB_EMULATOR_HOST, '127.0.0.1:8085'); });\n",
+        );
+        const overlay = await startOverlay();
+        try {
+          const installed = await npmInstall(project, overlay);
+          expect(installed.code, installed.output).toBe(0);
+          const tested = await runIn(project, 'npm', ['run', '--silent', 'test'], undefined, {
+            PUBSUB_EMULATOR_HOST: undefined,
+            PUBSUB_PROJECT_ID: undefined,
+          });
+          expect(tested.code, tested.output).toBe(0);
+        } finally {
+          await overlay.close();
+        }
+      },
+    );
+  }
+
+  for (const target of ['node', 'bun'] as const) {
+    it(
+      `V13-154 ${target} workspace root skips an empty tree and propagates a member failure`,
+      { skip: noNpm || (target === 'bun' && !hasBun), timeout: 900_000 },
+      async () => {
+        expect(await run(['new', 'ws', '--workspace', '--runtime', target])).toBe(0);
+        const workspace = `${root}/ws`;
+        const command = target === 'bun' ? 'bun' : 'npm';
+        const empty = await runIn(workspace, command, ['run', 'test']);
+        expect(empty.code, empty.output).toBe(0);
+        expect(empty.output).toContain('No members or libraries yet; nothing to test.');
+        expect(await run(['g', 'app', 'api', '--template', 'rest', '--dir', workspace])).toBe(0);
+        await checkWorkspaceFormat(`${workspace}/apps/api`, workspace);
+        const overlay = await startOverlay();
+        try {
+          const installed = await npmInstall(workspace, overlay);
+          expect(installed.code, installed.output).toBe(0);
+          await checkTooling(`${workspace}/apps/api`, workspace);
+          await nodeFs.writeFile(
+            `${workspace}/apps/api/root-failure.test.ts`,
+            "throw new Error('intentional member failure');\n",
+          );
+          const failed = await runIn(workspace, command, ['run', 'test']);
+          expect(failed.code, failed.output).not.toBe(0);
+          expect(failed.output).toContain('intentional member failure');
+        } finally {
+          await overlay.close();
+        }
+      },
+    );
+  }
+});
 
 it('the full-stack Node production preload defaults NODE_ENV before imports and preserves a preset value', async () => {
   expect(
@@ -113,6 +411,7 @@ import assert from 'node:assert/strict';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApp } from '../setu.config.ts';
 it('boots JWT from dotenv configuration without process JWT_SECRET', async () => {
+  delete process.env.JWT_SECRET;
   assert.equal(process.env.JWT_SECRET, undefined);
   const app = createApp();
   await app.start();

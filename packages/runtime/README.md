@@ -144,6 +144,10 @@ RuntimePlugin({
 }); // TLS, ALPN h2 or HTTP/1.1
 ```
 
+A streamed body that fails on an HTTP/2 stream resets that stream with `INTERNAL_ERROR`, so the
+client sees a failure rather than a clean end of a truncated response; on HTTP/1.1 the connection is
+destroyed.
+
 With `http2: true`, each new connection is classified by its first bytes: the HTTP/2 client preface
 goes to an HTTP/2 server, anything else to HTTP/1.1 at the first byte that differs, the way
 `Deno.serve` and Go's `http.Server` with unencrypted HTTP/2 behave. Browsers, plain `fetch`, health
@@ -240,6 +244,40 @@ the response body. Existing configured-cap detail is unchanged. Even without `er
 kernel now serves 4xx hints with standard titles and explicit details at warn; unhinted and
 5xx-hinted failures retain its opaque 500/error fallback. The body cap's omission does not remove a
 native runtime's own limit.
+
+## Runtime differences, stated (since 0.14.0)
+
+| Behaviour                                       | Node                                  | Bun                                          | Deno                                         |
+| ----------------------------------------------- | ------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| Uncaught exception or rejection                 | `onFatalError` observes, crash kept   | `onFatalError` observes, crash kept          | `onFatalError` observes, crash kept          |
+| A pending timer and process exit (`unrefTimer`) | the handle's `unref()`                | the handle's `unref()`                       | the handle's `unref()`                       |
+| Drain start (`beginDrain`)                      | HTTP/2 `GOAWAY`, idle HTTP/1.1 closed | through the Node adapter when `http2` is set | none; stated once at `listen` with `http2`   |
+| Refused WebSocket upgrade                       | the pipeline's response, whole        | the pipeline's response                      | the pipeline's response                      |
+| WebSocket per-message ceiling                   | none (the sink's limit)               | 16 MiB, reported once if the limit is higher | 64 MiB, reported once if the limit is higher |
+| Quiet response stream                           | stays open                            | stays open (idle timeout off for streams)    | stays open                                   |
+| Response stream that fails                      | connection cut, nothing printed       | connection cut, nothing printed              | connection cut, nothing printed              |
+
+A failed stream is logged once by the kernel, `Response stream failed`, through the application's
+logger. On Node a refused upgrade is written by `writeRawUpgradeResponse` (internal); the exported
+`rejectRawUpgrade(socket, status)` still answers the fixed refusals, with the reason phrase from a
+status table and an empty one for a status the table does not name.
+
+On Deno, `request.signal` aborts after every successful response (Deno's legacy behaviour), and the
+first read of it prints Deno's own notice once per process ("Deno.serve: request.signal aborts on
+successful responses (legacy behavior)…"). Running Deno with `--unstable-no-legacy-abort` removes
+the notice and that post-response abort; the signal still aborts when a client disconnects before
+the response (measured on Deno 2.9.6). The kernel reads it for gRPC and Connect calls (which pass it
+to the call), for a request that calls `ctx.defer` (until the response is handed back), and for
+every streamed body, so a client that leaves cancels the source; the request logger reads it on
+every request it logs. A Deno application that logs requests or streams responses therefore prints
+the notice. On Node and Bun, an error the application handles itself is not reported by
+`onFatalError`: an `unhandledRejection` listener handles a rejection, an `uncaughtException`
+listener or a capture callback (`process.setUncaughtExceptionCaptureCallback`) a throw (on Node both
+a rejection too; Bun never hands either one, so that rejection still ends the process and is
+reported). Deno cannot tell, and reports it. On Bun the observer assumes the default
+`--unhandled-rejections` mode; under `warn` or `none` it reports the first rejection as fatal and
+observes no later one. The ceiling and Deno's drain statements go through the adapter's
+`reportError` channel.
 
 ## Exports
 

@@ -125,3 +125,36 @@ describe('LifecycleManager — onStopping', () => {
     await expect(lifecycle.runStopping()).rejects.toThrow('hook failed');
   });
 });
+
+describe('LifecycleManager after a cancelled start', () => {
+  it('runs a late close hook at once and drops every other registration', async () => {
+    const lifecycle = new LifecycleManager();
+    const late: (() => void | Promise<void>)[] = [];
+    lifecycle.cancelRegistrations((hook) => late.push(hook));
+    const ran: string[] = [];
+    lifecycle.onRegister(() => void ran.push('register'));
+    lifecycle.onInit(() => void ran.push('init'));
+    lifecycle.onBootstrap(() => void ran.push('bootstrap'));
+    lifecycle.onRequest(() => void ran.push('request'));
+    lifecycle.onResponse(() => void ran.push('response'));
+    lifecycle.onError(() => void ran.push('error'));
+    lifecycle.onStopping(() => void ran.push('stopping'));
+    lifecycle.onShutdown(() => void ran.push('shutdown'));
+    lifecycle.onClose(() => void ran.push('close'));
+
+    await lifecycle.runRegister();
+    await lifecycle.runInit();
+    await lifecycle.runBootstrap();
+    await lifecycle.runStopping();
+    await lifecycle.runShutdown();
+    await lifecycle.runClose();
+    expect(lifecycle.getRequestHooks()).toHaveLength(0);
+    expect(lifecycle.getResponseHooks()).toHaveLength(0);
+    expect(lifecycle.getErrorHooks()).toHaveLength(0);
+    expect(lifecycle.hasStopping()).toBe(false);
+    expect(ran).toEqual([]);
+    expect(late).toHaveLength(1);
+    await late[0]!();
+    expect(ran).toEqual(['close']);
+  });
+});

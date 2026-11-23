@@ -25,6 +25,11 @@ import * as nodeFs from 'node:fs/promises';
 import { createReadStream as nodeCreateReadStream } from 'node:fs';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import {
+  createNodeFatalErrorObserver,
+  processFatalErrors,
+} from '../shared/fatal-error-observer.ts';
+import type { FatalErrorHandler } from '../shared/fatal-error-observer.ts';
 import { createNodeWorkerHost } from './node-worker-host.ts';
 import { createNodeDnsResolver } from '../shared/node-dns-resolver.ts';
 
@@ -96,6 +101,12 @@ export interface NodeHost {
   exit: (code?: number) => never;
   /** Registers a process-termination signal listener. */
   onSignal: (signal: RuntimeSignal, handler: () => void) => void;
+  /**
+   * Observes an error about to end the process (see
+   * `IRuntimeServices.onFatalError`). Absent when the process object cannot
+   * remove a listener or count them.
+   */
+  onFatalError?: (handler: FatalErrorHandler) => () => void;
   /** Read file as bytes. */
   readFile: (path: string) => Promise<Uint8Array>;
   /** Resolve a path to its canonical absolute form, following symlinks. */
@@ -151,6 +162,7 @@ export function buildNodeHost(
     env: mods.proc.env,
     exit: (code?: number) => mods.proc.exit(code),
     onSignal: (signal: RuntimeSignal, handler: () => void) => mods.proc.on(signal, handler),
+    ...processFatalErrors(mods.proc, createNodeFatalErrorObserver),
     readFile: (path: string) => mods.fs.readFile(path) as Promise<Uint8Array>,
     realPath: (path: string) => mods.fs.realpath(path),
     writeFile: (path: string, data: Uint8Array) => mods.fs.writeFile(path, data) as Promise<void>,
@@ -245,6 +257,7 @@ export function createNodeRuntimeServices(
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
     onSignal: (signal: RuntimeSignal, handler: () => void) => host.onSignal(signal, handler),
+    ...(host.onFatalError === undefined ? {} : { onFatalError: host.onFatalError }),
     fs: fsImpl,
     workers,
     dns,

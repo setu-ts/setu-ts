@@ -151,8 +151,11 @@ describe('KvSessionStore behind SessionPlugin', () => {
     await app.inject({ method: 'POST', url: '/logout', headers: { cookie } });
 
     // The row is gone from KV, so the still-valid cookie authenticates nothing —
-    // the whole reason to run a server-side store.
-    expect([...kv.entries.keys()]).toEqual([]);
+    // the whole reason to run a server-side store. Only the session plugin's
+    // revocation marker for the signed-out id remains.
+    const keys = [...kv.entries.keys()];
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/revoked:/);
     const me = await app.inject({ method: 'GET', url: '/me', headers: { cookie } });
     expect(JSON.parse(me.body ?? '')).toEqual({ userId: null });
 

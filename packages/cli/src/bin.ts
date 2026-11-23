@@ -10,6 +10,28 @@
  */
 
 import process from 'node:process';
-import { nodeProcess, nodeRuntime, runMain } from './main.ts';
+import { nodeFloorRefusal } from './utils/node-version.ts';
 
-process.exitCode = await runMain(nodeRuntime(), nodeProcess());
+/**
+ * Writes the floor refusal.
+ *
+ * @param message - The refusal from nodeFloorRefusal
+ * @returns The exit code, 1
+ */
+function refuse(message: string): number {
+  process.stderr.write(`${message}\n`);
+  return 1;
+}
+
+/**
+ * Loads the command modules and runs one invocation.
+ *
+ * @returns The invocation's exit code
+ */
+async function start(): Promise<number> {
+  const { nodeProcess, nodeRuntime, runMain } = await import('./main.ts');
+  return await runMain(nodeRuntime(), nodeProcess());
+}
+
+const refusal = nodeFloorRefusal(process.versions, 'Deno' in globalThis);
+process.exitCode = refusal === undefined ? await start() : refuse(refusal);

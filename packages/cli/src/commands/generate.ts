@@ -4,6 +4,7 @@
  * @module
  */
 
+import { runWithProjectLock, type IProjectLockDependencies } from '../utils/project-lock.ts';
 import { reportAgentsHint } from '../utils/agents-hint.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import { moduleRouteBase } from '../schematics/module-route-base.ts';
@@ -85,7 +86,7 @@ import { cliInvocation } from '../templates/project-files.ts';
 /**
  * Everything `runGenerateCommand` reaches the outside world through.
  */
-export interface GenerateDependencies {
+export interface GenerateDependencies extends IProjectLockDependencies {
   /** Creates a fresh secret for a new workspace member. */
   readonly secret?: () => string;
   /** The filesystem to detect plugins on and write generated files through. */
@@ -179,6 +180,38 @@ export async function runGenerateCommand(
   args: ParsedArgs,
   deps: GenerateDependencies,
 ): Promise<number> {
+  const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
+  const kind = args.positionals[0];
+  const known =
+    kind === APP_VERB ||
+    kind === LIBRARY_VERB ||
+    kind === CUSTOM_SCHEMATIC ||
+    getSchematic(kind ?? '') !== undefined;
+  const complete = args.positionals.length >= (kind === CUSTOM_SCHEMATIC ? 3 : 2);
+  // A schematic's invalid `--runtime` is a usage error, reported unlocked so a held
+  // lock cannot turn it into a contention refusal; `app` and `library` own theirs.
+  const runtimeValue = args.flags['runtime'];
+  const usableRuntime =
+    kind === APP_VERB ||
+    kind === LIBRARY_VERB ||
+    runtimeValue === undefined ||
+    (typeof runtimeValue === 'string' && isTargetRuntime(runtimeValue));
+  return await runWithProjectLock(
+    deps,
+    dir,
+    args.flags['dry-run'] !== true &&
+      args.flags.help !== true &&
+      args.flags.h !== true &&
+      known &&
+      complete &&
+      usableRuntime,
+    'generate',
+    () => generateUnlocked(args, deps),
+  );
+}
+
+/** Generates with exactly one acquisition owned by its caller. */
+async function generateUnlocked(args: ParsedArgs, deps: GenerateDependencies): Promise<number> {
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
 
   // Dispatched FIRST, before `--help` and before the plugin scan: `app` adds a

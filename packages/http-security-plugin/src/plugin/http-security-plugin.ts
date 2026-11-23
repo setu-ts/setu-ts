@@ -21,12 +21,19 @@ import type { IpSecurityOptions } from '../middleware/ip-security-middleware.ts'
 import { ipSecurityMiddleware } from '../middleware/ip-security-middleware.ts';
 import { VERSION } from '../version.ts';
 
-/** Middleware execution priorities for each concern. */
+/**
+ * Middleware execution priorities for each concern.
+ *
+ * Security headers (10) and CORS (125) set their headers before `next()` and run before every
+ * refusal downstream, so a request-size 400 or 413 carries them like any other response. CORS stays
+ * after IP resolution (120), because an origin matcher may read the resolved client address or
+ * public origin.
+ */
 const MIDDLEWARE_PRIORITY = {
+  SECURITY_HEADERS: 10,
   IP_SECURITY: 120,
+  CORS: 125,
   REQUEST_SIZE: 180,
-  CORS: 200,
-  SECURITY_HEADERS: 250,
   CSRF: 270,
 } as const;
 

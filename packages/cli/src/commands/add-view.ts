@@ -153,9 +153,10 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
           }
         }
         const call = deno ? 'deno task css' : runtime === 'bun' ? 'bun run css' : 'npm run css';
-        for (const name of ['build', 'start:dev']) {
+        for (const name of ['build', 'start:dev', 'test', 'test:e2e']) {
           const current = scripts[name];
           if (current === undefined) {
+            if (name === 'test' || name === 'test:e2e') continue;
             scripts[name] = call;
             changed = true;
           } else if (typeof current !== 'string' || /\b(?:run|task)\s+css\b/.test(current))

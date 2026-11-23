@@ -19,6 +19,7 @@ import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profil
 import type { BrokerSpec } from './transport.ts';
 import { GRPC_CALLER_CLIENTS, GRPC_PLUGIN, type RpcSpec } from './rpc.ts';
 import { withClientDependencies } from '../templates/client-dependencies.ts';
+import { brokerEnvVariables } from '../templates/broker.ts';
 import { NODE_REDIS_MODULE_PATH, nodeRedisModuleFile } from '../templates/node-redis.ts';
 import {
   renderTransportModule,
@@ -157,8 +158,24 @@ function withTransportModule(
       ? [nodeRedisModuleFile()]
       : [];
   const note = broker.connection?.note;
+  const emulator = broker.connection?.emulator;
   const wired: ResolvedHost = {
     ...host,
+    ...(emulator === undefined || (!shape.messaging && !shape.queue)
+      ? {}
+      : {
+          manifest: {
+            ...host.manifest,
+            envVariables: [
+              ...(host.manifest?.envVariables ?? []),
+              ...brokerEnvVariables(broker).filter(
+                (row) =>
+                  row.name === emulator.variable &&
+                  !host.manifest?.envVariables?.some((existing) => existing.name === row.name),
+              ),
+            ],
+          },
+        }),
     ...(factory
       ? {
           appFactoryContext: {

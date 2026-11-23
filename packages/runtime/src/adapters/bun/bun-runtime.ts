@@ -36,6 +36,8 @@ import {
 import { hostname as osHostname } from 'node:os';
 import process from 'node:process';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import { createBunFatalErrorObserver, processFatalErrors } from '../shared/fatal-error-observer.ts';
+import type { FatalErrorHandler } from '../shared/fatal-error-observer.ts';
 import { createWebWorkerHost, readWebWorkerGlobals } from '../shared/web-worker-host.ts';
 import { createNodeDnsResolver } from '../shared/node-dns-resolver.ts';
 
@@ -59,6 +61,12 @@ export interface BunHost {
    * header for why the global cannot be trusted to carry these members.
    */
   onSignal: (signal: RuntimeSignal, handler: () => void) => void;
+  /**
+   * Observes an error about to end the process (see
+   * `IRuntimeServices.onFatalError`). Absent when the process object cannot
+   * remove a listener or count them.
+   */
+  onFatalError?: (handler: FatalErrorHandler) => () => void;
   /** Read file as bytes. */
   readFile: (path: string) => Uint8Array | null;
   /** Resolve a path to its canonical absolute form (null when it cannot be resolved). */
@@ -200,6 +208,7 @@ export function createBunRuntimeServices(
     env: host.env as Readonly<Record<string, string | undefined>>,
     exit: (code?: number) => host.exit(code),
     onSignal: (signal: RuntimeSignal, handler: () => void) => host.onSignal(signal, handler),
+    ...(host.onFatalError === undefined ? {} : { onFatalError: host.onFatalError }),
     fs,
     workers,
     dns,
@@ -284,6 +293,7 @@ export function buildBunHost(
     env: mods.proc.env,
     exit: (code?: number) => mods.proc.exit(code),
     onSignal: (signal: RuntimeSignal, handler: () => void) => mods.proc.on(signal, handler),
+    ...processFatalErrors(mods.proc, createBunFatalErrorObserver),
     readFile: (path: string) => {
       try {
         return mods.fs.readFileSync(path);

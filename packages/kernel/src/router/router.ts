@@ -320,6 +320,15 @@ function withoutTrailingSlash(path: string): string | undefined {
   return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : undefined;
 }
 
+/**
+ * One raw Hono match: `[[handler, routeInfo], params]`, where `routeInfo` is
+ * `{ basePath, path, method }` and the handler carries the kernel's entry.
+ */
+type HonoCandidate = [
+  handlerRouteTuple: [unknown, Record<string, unknown>],
+  params: Record<string, string>,
+];
+
 export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
@@ -517,20 +526,15 @@ export class Router implements IRouterApi {
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
     // Each candidate: [[handler, routeInfo], params] where routeInfo = {basePath, path, method}.
-    type HonoCandidate = [
-      handlerRouteTuple: [unknown, Record<string, unknown>],
-      params: Record<string, string>,
-    ];
-    let candidatesRaw = this.#hono.router.match(method, path)[0] as unknown as HonoCandidate[];
-    // A request may carry one extra trailing slash, as under LinearRouter: the
-    // routes matching the path without it join the SAME candidate set and are
-    // ranked together. Retrying only when nothing matched let a wildcard that
-    // happens to match `/admin/` win over the specific `/admin` (re-audit N1).
-    const trimmed = withoutTrailingSlash(path);
-    if (trimmed !== undefined) {
-      const lenient = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
-      if (lenient.length > 0) {
-        candidatesRaw = candidatesRaw.length === 0 ? lenient : [...candidatesRaw, ...lenient];
+    let candidatesRaw = this.#candidates(method, path);
+    // Every `GET` route answers `HEAD` too (RFC 9110 §9.1): its candidates join
+    // the `HEAD` set and are ranked together, so a specific `GET /assets/*`
+    // beats a catch-all `HEAD /*`; at equal rank an explicit `HEAD` route wins
+    // (the sort below). Only a `HEAD` request pays for the second lookup.
+    if (method === 'HEAD') {
+      const gets = this.#candidates('GET', path);
+      if (gets.length > 0) {
+        candidatesRaw = candidatesRaw.length === 0 ? gets : [...candidatesRaw, ...gets];
       }
     }
 
@@ -607,11 +611,41 @@ export class Router implements IRouterApi {
       if (a.entry.wildcards !== b.entry.wildcards) {
         return a.entry.wildcards - b.entry.wildcards;
       }
+      // Only a `HEAD` request mixes methods (its `GET` fallback): an explicit
+      // `HEAD` route wins over the `GET` it shadows.
+      if (a.entry.method !== b.entry.method) {
+        return a.entry.method === 'HEAD' ? -1 : 1;
+      }
       return a.entry.index - b.entry.index;
     });
 
     const best = candidates[0];
     return { definition: best.entry.definition, params: best.params, entry: best.entry };
+  }
+
+  /**
+   * Asks Hono for one method's candidates, joined by those that match the path
+   * without one trailing slash.
+   *
+   * A request may carry one extra trailing slash, as under LinearRouter: the
+   * routes matching the path without it join the SAME candidate set and are
+   * ranked together. Retrying only when nothing matched let a wildcard that
+   * happens to match `/admin/` win over the specific `/admin` (re-audit N1).
+   *
+   * @param method - HTTP method
+   * @param path - Request path
+   * @returns Hono's raw candidates
+   */
+  #candidates(method: HttpMethod, path: string): HonoCandidate[] {
+    let candidatesRaw = this.#hono.router.match(method, path)[0] as unknown as HonoCandidate[];
+    const trimmed = withoutTrailingSlash(path);
+    if (trimmed !== undefined) {
+      const lenient = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
+      if (lenient.length > 0) {
+        candidatesRaw = candidatesRaw.length === 0 ? lenient : [...candidatesRaw, ...lenient];
+      }
+    }
+    return candidatesRaw;
   }
 
   /**

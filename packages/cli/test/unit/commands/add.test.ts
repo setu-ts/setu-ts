@@ -13,6 +13,7 @@ import type { Config as DrizzleKitConfig } from 'drizzle-kit';
  */
 
 import { describe, expect, it } from 'vitest';
+import { brokerEnvVariables } from '../../../src/templates/broker.ts';
 
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
@@ -196,7 +197,7 @@ describe('M140a installed signing secrets', () => {
             ? Promise.resolve(path.replace('/app/ws/k8s', '/outside'))
             : original(path);
       }
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       const code = await runCli(['add', 'auth', ...(mode === 'dry' ? ['--dry-run'] : [])], {
         ...deps,
         cwd: '/app/ws/apps/api',
@@ -204,9 +205,9 @@ describe('M140a installed signing secrets', () => {
       expect(code, h.err.join('\n')).toBe(mode === 'link' ? 1 : 0);
       if (mode === 'existing') {
         expect(h.read(path) === 'JWT_SECRET=operator-owned\nOTHER=kept').toBe(true);
-        expect(h.fs.writes.slice(writes)).not.toContain(path);
+        expect(h.fs.projectWrites.slice(writes)).not.toContain(path);
         expect(h.out.join('\n')).not.toContain('Operator secrets for api:');
-      } else expect(h.fs.writes).toHaveLength(writes);
+      } else expect(h.fs.projectWrites).toHaveLength(writes);
       if (mode === 'dry')
         expect(h.out.join('\n')).toContain('Operator secrets for api: JWT_SECRET');
       if (mode === 'link') expect(h.err.join('\n')).toContain('link');
@@ -313,7 +314,7 @@ describe('M139d add request and backend contracts', () => {
     const h = harness({ '/app/package.json': '{}' });
     expect(await h.run(['cache', 'mail', '--provider', 'invalid'])).toBe(2);
     expect(h.err.join('\n')).toContain('@setu-ts/mail-plugin:');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
   it('V12-30 adds exceptions without importing or registering a plugin', async () => {
     const h = harness({
@@ -393,7 +394,7 @@ describe('M139d add request and backend contracts', () => {
     ]) {
       const h = harness({ '/app/package.json': '{}' });
       expect(await h.run(args)).toBe(2);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     }
   });
   it('gives the devtool guidance for diagnostics in a multi-add, and lists the addable names', async () => {
@@ -402,7 +403,7 @@ describe('M139d add request and backend contracts', () => {
       expect(await h.run([name, 'cache'])).toBe(2);
       expect(h.err.join('\n')).toContain('devtool enable');
       expect(h.err.join('\n')).not.toContain('is not a Setu-TS package');
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     }
     const h = harness({ '/app/package.json': '{}' });
     expect(await h.run(['cache', 'unknown'])).toBe(2);
@@ -413,7 +414,9 @@ describe('M139d add request and backend contracts', () => {
     const write = h.fs.writeFile;
     let writes = 0;
     h.fs.writeFile = (path, data) =>
-      ++writes === 2 ? Promise.reject(new Error('disk full')) : write(path, data);
+      !path.endsWith('/write.lock/owner.json') && ++writes === 2
+        ? Promise.reject(new Error('disk full'))
+        : write(path, data);
     expect(await h.run(['common', 'exceptions', 'sdk'])).toBe(1);
     expect(h.err.join('\n')).toContain('added common; stopped at exceptions; sdk not attempted');
   });
@@ -421,7 +424,9 @@ describe('M139d add request and backend contracts', () => {
     const h = harness({ '/app/package.json': '{}', '/app/src/modules/orders/index.ts': '' });
     expect(await h.run(['view', '--plugin-only'])).toBe(0);
     expect(
-      h.fs.writes.every((file) => !file.includes('/views/') && !file.includes('/controllers/')),
+      h.fs.projectWrites.every(
+        (file) => !file.includes('/views/') && !file.includes('/controllers/'),
+      ),
     ).toBe(true);
     expect(await h.run(['view', '--plugin-only', '--module', 'orders'])).toBe(2);
   });
@@ -854,13 +859,15 @@ export function createApp(): IKernelApplication {
             '--dir',
             '/app/portal',
           ];
-          const beforeDryRun = h.fs.writes.length;
+          const beforeDryRun = h.fs.projectWrites.length;
           expect(await h.run([...args, '--dry-run'])).toBe(0);
-          expect(h.fs.writes.length).toBe(beforeDryRun);
+          expect(h.fs.projectWrites.length).toBe(beforeDryRun);
           expect(h.out.join('\n')).toContain('docker/compose.yaml');
           expect(h.out.join('\n')).toContain('setu.config.ts');
           expect(h.out.join('\n')).toContain(
-            `Would add ${spec.connection!.variable} to .env and .env.example.`,
+            `Would add ${brokerEnvVariables(spec)
+              .map(({ name }) => name)
+              .join(', ')} to .env and .env.example.`,
           );
           expect(await h.run(args), h.err.join('\n')).toBe(0);
           const config = h.read('/app/portal/setu.config.ts');
@@ -880,15 +887,19 @@ export function createApp(): IKernelApplication {
           expect(envAfter).toContain(`\n${variable}=${localDefault}\n`);
           const example = h.read('/app/portal/.env.example');
           expect(example.match(new RegExp(`^${variable}=$`, 'gm'))?.length).toBe(1);
-          expect(h.out.join('\n')).toContain(`Added ${variable} to .env and .env.example.`);
+          expect(h.out.join('\n')).toContain(
+            `Added ${brokerEnvVariables(spec)
+              .map(({ name }) => name)
+              .join(', ')} to .env and .env.example.`,
+          );
           const compose = h.read('/app/portal/docker/compose.yaml');
-          const beforeReAdd = h.fs.writes.length;
+          const beforeReAdd = h.fs.projectWrites.length;
           expect(await h.run(args)).toBe(0);
           expect(h.read('/app/portal/setu.config.ts')).toBe(config);
           expect(h.read('/app/portal/docker/compose.yaml')).toBe(compose);
           expect(h.read('/app/portal/.env')).toBe(envAfter);
           expect(h.read('/app/portal/.env.example')).toBe(example);
-          expect(h.fs.writes.length).toBe(beforeReAdd);
+          expect(h.fs.projectWrites.length).toBe(beforeReAdd);
           expect(h.out.join('\n')).toContain(
             `Connection: ${variable} (local default ${localDefault}).`,
           );
@@ -910,7 +921,7 @@ export function createApp(): IKernelApplication {
     it(`refuses ${args.join(' ')} without writing`, async () => {
       const h = harness({ '/app/package.json': '{}' });
       expect(await h.run(args)).toBe(2);
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
       expect(h.err.join('\n')).toContain('--');
     });
   }
@@ -923,7 +934,7 @@ export function createApp(): IKernelApplication {
       expect(h.err.join('\n')).toContain(
         flag === 'queue' ? 'cloudflare-workers' : 'Cloudflare Workers',
       );
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
     it(`refuses --${flag} in a workspace member`, async () => {
       const h = harness();
@@ -931,7 +942,7 @@ export function createApp(): IKernelApplication {
         runCli(args, { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} });
       expect(await cli(['new', 'ws', '--workspace'])).toBe(0);
       expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
-      const before = h.fs.writes.length;
+      const before = h.fs.projectWrites.length;
       expect(
         await h.run([
           flag === 'broker' ? 'messaging' : 'queue',
@@ -942,14 +953,14 @@ export function createApp(): IKernelApplication {
         ]),
       ).toBe(2);
       expect(h.err.join('\n')).toContain('members share the workspace broker');
-      expect(h.fs.writes.length).toBe(before);
+      expect(h.fs.projectWrites.length).toBe(before);
     });
   }
   it('accepts explicit memory without a connection or Compose file', async () => {
     const h = harness({ '/app/package.json': '{}' });
     expect(await h.run(['messaging', '--broker', 'memory'])).toBe(0);
     expect(await h.run(['queue', '--queue', 'memory'])).toBe(0);
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/app/package.json',
       '/app/package.json',
       '/app/src/jobs/index.ts',
@@ -993,7 +1004,7 @@ export function createApp(): IKernelApplication {
     expect(h.err.join('\n')).toContain(
       `Run ${cliInvocation('node')} new <name> --template full-stack.`,
     );
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
     expect(
       await runNewCommand(parseArgs(['portal', '--template', 'full-stack']), {
         secret: generateSecret,
@@ -1015,7 +1026,7 @@ export function createApp(): IKernelApplication {
       '/app/setu.config.ts': config,
     });
     expect(await h.run(['react-router'])).toBe(0);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
   it('refuses react-router in a non-full-stack workspace with the member creation command', async () => {
     const h = harness();
@@ -1023,12 +1034,12 @@ export function createApp(): IKernelApplication {
       runCli(args, { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} });
     expect(await cli(['new', 'ws', '--workspace'])).toBe(0);
     expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
-    const before = h.fs.writes.length;
+    const before = h.fs.projectWrites.length;
     expect(await h.run(['react-router', '--dir', '/app/ws/apps/api'])).toBe(1);
     expect(h.err.join('\n')).toContain(
       `Run ${cliInvocation('node')} generate app <name> --template full-stack.`,
     );
-    expect(h.fs.writes.length).toBe(before);
+    expect(h.fs.projectWrites.length).toBe(before);
   });
 });
 
@@ -1083,7 +1094,7 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
           'node',
           '--template',
           'full-stack',
-          '--env-file',
+          '--dotenv',
           'config/app.env',
         ]),
         {
@@ -1409,9 +1420,9 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
         expect(h.out.join('\n')).toContain(`updated ${path}`);
       }
       expect(dependencies(h, '/app/ws/package.json')['@setu-ts/telemetry-plugin']).toBeUndefined();
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
-      expect(h.fs.writes.length).toBe(writes);
+      expect(h.fs.projectWrites.length).toBe(writes);
     });
   }
 
@@ -1714,9 +1725,9 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
 
   it('reports both paths in dry-run and writes nothing', async () => {
     const h = await workspace();
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api', '--dry-run'])).toBe(0);
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
     expect(h.out).toContain('would update /app/ws/package.json');
     expect(h.out).toContain('would update /app/ws/apps/api/package.json');
   });
@@ -1757,10 +1768,10 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     it(`refuses ${refusal} before writing either manifest`, async () => {
       const h = await workspace();
       await put(h, '/app/ws/package.json', source!);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
       expect(h.err.join('\n')).toContain(refusal);
-      expect(h.fs.writes.length).toBe(writes);
+      expect(h.fs.projectWrites.length).toBe(writes);
     });
   }
 
@@ -1769,10 +1780,10 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     const read = h.fs.readFile.bind(h.fs);
     h.fs.readFile = (path) =>
       path === '/app/ws/package.json' ? Promise.reject(new Error('access denied')) : read(path);
-    const writes = h.fs.writes.length;
+    const writes = h.fs.projectWrites.length;
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
     expect(h.err.join('\n')).toContain('Cannot read /app/ws/package.json as JSON');
-    expect(h.fs.writes.length).toBe(writes);
+    expect(h.fs.projectWrites.length).toBe(writes);
   });
 });
 
@@ -1844,7 +1855,7 @@ describe('resolveAddablePackage', () => {
       expect(h.err.join('\n')).toContain(
         `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`deno run -A --no-lock npm:@setu-ts/cli@${VERSION} devtool enable\`.`,
       );
-      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.projectWrites).toEqual([]);
     });
   }
   it("gives the devtool guidance despite another package's flags (review round 3)", async () => {
@@ -2689,7 +2700,7 @@ describe('runAddCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.join('\n')).toContain('Cannot read /app/wrangler.jsonc: EACCES');
-    expect(fs.writes).toEqual([]);
+    expect(fs.projectWrites).toEqual([]);
   });
 
   it('refuses plugins that cannot register on the detected runtime', async () => {
@@ -2698,7 +2709,7 @@ describe('runAddCommand', () => {
     });
     expect(await node.run(['cloudflare'])).toBe(2);
     expect(node.err.join('\n')).toContain('Cloudflare Workers');
-    expect(node.fs.writes).toEqual([]);
+    expect(node.fs.projectWrites).toEqual([]);
 
     const workers = harness({
       '/app/deno.json': DENO_MANIFEST,
@@ -2707,7 +2718,7 @@ describe('runAddCommand', () => {
     });
     expect(await workers.run(['scheduler'])).toBe(2);
     expect(workers.err.join('\n')).toContain('unavailable on Cloudflare Workers');
-    expect(workers.fs.writes).toEqual([]);
+    expect(workers.fs.projectWrites).toEqual([]);
   });
 
   it('refuses to rewrite JSONC and prints the exact entry to add', async () => {
@@ -2715,7 +2726,7 @@ describe('runAddCommand', () => {
     expect(await h.run(['auth'])).toBe(1);
     expect(h.err.join('\n')).toContain('rewriting it would discard');
     expect(h.err.join('\n')).toContain('"@setu-ts/auth-plugin"');
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('pins the package at the CLI own version', async () => {
@@ -3636,10 +3647,10 @@ describe('starter handler-arm wiring', () => {
       const source = h.read(path);
       expect(source).toContain('/* keep my options */');
       for (const [property, value] of entries) expect(source).toContain(`${property}: ${value}`);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
       expect(h.read(path)).toBe(source);
-      expect(h.fs.writes.length).toBe(writes);
+      expect(h.fs.projectWrites.length).toBe(writes);
     },
   );
   it.each([
@@ -3717,11 +3728,11 @@ describe('starter handler-arm wiring', () => {
         );
         if (rule === 4 && !present) expect(output).toContain('Its arm:');
       }
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       h.out.length = 0;
       expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
       expect(h.read(path)).toBe(after);
-      expect(h.fs.writes.length).toBe(writes);
+      expect(h.fs.projectWrites.length).toBe(writes);
       if (rule === 1 || rule === 2) {
         expect(h.out.filter((line) => line.startsWith('  '))).toEqual([
           bare === 'queue-plugin'
@@ -3757,11 +3768,11 @@ describe('starter handler-arm wiring', () => {
         ['sse', 'realtime.sse'],
       ] as const) {
         expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
-        const writes = h.fs.writes.length;
+        const writes = h.fs.projectWrites.length;
         h.out.length = 0;
         expect(await h.run([plugin, '--dir', '/app/shop'])).toBe(0);
         expect(h.read(path)).toBe(before);
-        expect(h.fs.writes.length).toBe(writes);
+        expect(h.fs.projectWrites.length).toBe(writes);
         if (plugin === 'metrics') {
           expect(h.out.join('\n')).toContain('Pass the generated artifacts through it: metrics:');
           expect(h.out.join('\n')).toContain("Import CUSTOM_METRICS from './src/metrics/index.ts'");
@@ -3782,7 +3793,7 @@ describe('starter handler-arm wiring', () => {
         const h = await fullStack();
         for (const { bare } of [...rules.filter(({ rule }) => rule === 2), entry])
           expect(await h.run([bare, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
-        const files = [...new Set(h.fs.writes)]
+        const files = [...new Set(h.fs.projectWrites)]
           .filter((path) => path.startsWith('/app/shop/'))
           .map((path) => ({ path: path.slice('/app/shop/'.length), contents: h.read(path) }));
         const directory = await tempDir({ prefix: 'full-stack-options-' });
@@ -3893,9 +3904,9 @@ describe('starter handler-arm wiring', () => {
         source.indexOf("from './src/plugins/index.ts'"),
       );
       expect(h.out.join('\n')).toContain(`wired ${arm} in setu.config.ts`);
-      const writes = h.fs.writes.length;
+      const writes = h.fs.projectWrites.length;
       expect(await h.run([name, '--dir', '/app/shop'])).toBe(0);
-      expect(h.fs.writes.length).toBe(writes);
+      expect(h.fs.projectWrites.length).toBe(writes);
       expect(h.read('/app/shop/setu.config.ts')).toBe(source);
     });
   }
@@ -4078,7 +4089,7 @@ describe('M140b Workers additions', () => {
         }),
       ).toBe(0);
       const before = h.read('/app/shop/package.json');
-      const writesBefore = [...h.fs.writes];
+      const writesBefore = [...h.fs.projectWrites];
       expect(await h.run(['queue', '--dir', '/app/shop'])).toBe(
         runtime === 'cloudflare-workers' ? 2 : 0,
       );
@@ -4086,7 +4097,7 @@ describe('M140b Workers additions', () => {
         expect(h.err.join('\n')).toContain("its default queue lives in one isolate's memory");
         expect(h.err.join('\n')).toContain('CloudflarePlugin({ queue: { binding } })');
         expect(h.read('/app/shop/package.json')).toBe(before);
-        expect(h.fs.writes).toEqual(writesBefore);
+        expect(h.fs.projectWrites).toEqual(writesBefore);
       } else {
         expect(h.read('/app/shop/package.json')).toContain('@setu-ts/queue-plugin');
       }

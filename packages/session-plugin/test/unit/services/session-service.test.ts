@@ -417,18 +417,20 @@ describe('SessionService.commit', () => {
       expect(store.entries.has(restored.id)).toBe(true);
     });
 
-    it('deletes the entry on destroy', async () => {
+    it('writes nothing on destroy of a session that never had a row', async () => {
       const store = new RecordingStore();
       const { service } = await makeService({}, store);
-      const { ctx } = makeContext();
+      const { ctx, response } = makeContext();
       const session = await service.load(ctx);
       session.destroy();
 
       await service.commit(ctx, session);
-      expect(store.calls).toContain(`destroy:${session.id}`);
+      expect(store.calls).toEqual([]);
+      // The clearing cookie is still sent.
+      expect(response.setCookies()).toHaveLength(1);
     });
 
-    it('deletes BOTH ids when a regenerated session is destroyed in the same request', async () => {
+    it('revokes the restored id when a regenerated session is destroyed in the same request', async () => {
       const store = new RecordingStore();
       const { service } = await makeService({}, store);
 
@@ -450,7 +452,9 @@ describe('SessionService.commit', () => {
       // would keep authenticating until the row's TTL expired.
       expect(store.calls).toContain(`destroy:${originalId}`);
       expect(store.entries.has(originalId)).toBe(false);
-      expect(store.entries.size).toBe(0);
+      // The never-written new id is not touched; only the revocation marker remains.
+      expect(store.calls).not.toContain(`destroy:${restored.id}`);
+      expect([...store.entries.keys()]).toEqual([`revoked:${originalId}`]);
     });
   });
 

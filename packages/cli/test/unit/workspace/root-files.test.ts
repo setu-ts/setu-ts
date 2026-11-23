@@ -88,14 +88,14 @@ describe('workspaceRootFiles', () => {
       node: {
         file: 'package.json',
         key: 'scripts',
-        test: 'npm run test --workspaces --if-present',
+        test: 'node scripts/test.mjs',
         build: 'setu workspace build',
         deploy: 'setu workspace deploy',
       },
       bun: {
         file: 'package.json',
         key: 'scripts',
-        test: "bun run --filter '*' test",
+        test: 'bun scripts/test.mjs',
         build: 'setu workspace build',
         deploy: 'setu workspace deploy',
       },
@@ -300,7 +300,7 @@ describe('the workspace README transport section', () => {
   // Both cloud arms carry an operational fact a developer cannot guess, and the
   // generated README is where they would look for it.
   it('carries the transport operational note when it has one', () => {
-    expect(readmeFor('pubsub')).toContain('Topics are NOT');
+    expect(readmeFor('pubsub').replace(/\s+/g, ' ')).toContain('Topics are NOT');
     expect(readmeFor('service-bus')).toContain('NO entities');
     // V9-17: the subject scope every member must use, stated where a workspace
     // developer will look before publishing.

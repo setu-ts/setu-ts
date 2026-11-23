@@ -47,6 +47,84 @@ cutting a release renames that heading to the version and is a rename, not a rec
 - **Slack.** A notification's `subject` is now part of the posted text.
 - **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`.
 
+### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
+
+- **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
+  bound. Keep it below the orchestrator's grace period minus any pre-stop delay and the time the
+  shutdown hooks need; `PUBLIC_API.md` ("The two drain numbers, in one place") gives the default and
+  the value that fits the generated deployment manifests, with the arithmetic.
+- **SIGHUP.** `RuntimeSignal` now includes `'SIGHUP'`. Add it to an entry's signal loop so a closed
+  terminal stops the application cleanly. An exhaustive `switch` over `RuntimeSignal` needs a new
+  arm.
+- **A stop during start.** `start()` rejects with `StartCancelledError` when `stop()` is called
+  before it finishes, and `stop()` resolves without running `onStopping` or `onShutdown` (the start
+  never finished); close hooks still run. An entry that logs every start failure should treat
+  `StartCancelledError` as a clean stop. A plugin that waits at startup can pass `ctx.signal` to the
+  wait. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
+  for it and stops normally.
+- **gRPC streams hold the drain.** A streamed RPC reply in flight at `stop()` now finishes before
+  the server closes, up to the drain bound, as a streamed body whose request registered `ctx.defer`
+  cleanups already did. Other streams (SSE) are released as before, but every streamed body is now
+  cancelled when its client leaves, and a Deno application that streams responses prints Deno's
+  legacy-abort notice (`--unstable-no-legacy-abort` removes it).
+- **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
+  `Process failed` (fatal), `Response stream failed`, `Response trailers failed` (Node),
+  `Request aborted before completion` and `Startup cancelled` come through the registered logger.
+  The request log records `101` (was `200`) for an accepted upgrade, and `499` with `aborted: true`
+  (was the handler's status) for a request whose client left before the response. Alerts that count
+  5xx request lines no longer count those requests; the kernel's error line still records a server
+  fault. In a Deno application that logs requests, request logging now reads `request.signal`, so
+  Deno prints its legacy-abort notice once per process; run Deno with `--unstable-no-legacy-abort`
+  to remove it.
+- **HEAD.** Every `GET` route answers `HEAD`. Remove a hand-written `HEAD` route that only repeated
+  its `GET`.
+- **Node refused upgrades.** A refused WebSocket upgrade on Node carries the response the pipeline
+  produced (for example a Problem Details 401) instead of a bare status line, and `rejectRawUpgrade`
+  writes `401 Unauthorized` (not `401 Bad Request`), with an empty reason phrase for a status it
+  does not name.
+- **Stream sources and `ctx.defer`.** When the request's signal aborts before a streamed response
+  ends (on Workers, where the body is not cancelled for you), the kernel now cancels the body and
+  runs the request's `ctx.defer` cleanups once its `cancel()` settles, with no time limit; on Node,
+  Bun and Deno the consumer's cancel already waited for `cancel()` the same way. On every runtime,
+  then, a custom `ReadableStream` source whose `cancel()` never settles keeps its request's
+  resources (a request scope, a concurrency slot) until it does: make `cancel()` settle, and make it
+  wait for any work the source still has running in `pull` or a pump it started. A source with no
+  `cancel()` gets no wait, so that work is not covered by a limit released through `defer`. New in
+  0.14.0: with a logger registered, a cleanup still waiting 30 s after the client left logs one
+  `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `requestId`, `method`, `path` and `waitedMs`, which names the route that stops admitting.
+- **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
+  signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
+  compatibility date is before 2026-11-17.
+
+### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
+
+Replace `setu new … --env-file <path>` and `setu generate app … --env-file <path>` with
+`--dotenv <path>`; the value is read exactly as before. Under Node the old flag never reached `setu`
+(Node read it itself and exited 9), so scripts that relied on it under Bun or Deno are the ones to
+change. Projects already generated are unaffected: the flag only chooses where `setu` writes the
+dotenv.
+
+### Node 22.9.0 or newer (`@setu-ts/cli`, `@setu-ts/create`)
+
+`setu` and `npm create @setu-ts` now refuse to start below Node 22.9.0. Upgrade to a supported
+release line (`^22.23.4 || ^24.22.1 || >=26.12.1`); versions between the two still run, with a
+warning.
+
+### `.setu-ts/write.lock` (`@setu-ts/cli`)
+
+`setu add`, `setu generate` and `setu sync` create `.setu-ts/write.lock/` while they write. New
+projects ignore it in `.gitignore`; add the line `.setu-ts/write.lock/` to an existing project's
+(and an existing workspace root's) `.gitignore`. If a command is killed, confirm no setu command is
+still running in the project, then delete the directory before running another.
+
+### Workspace root `test` (`@setu-ts/cli`)
+
+A new npm or Bun workspace's root `test` script runs `scripts/test.mjs`, which passes while the
+workspace has no members or libraries. To adopt it in an existing workspace, copy `scripts/test.mjs`
+and the root `test` script from a fresh `setu new <name> --workspace`.
+
 ### Module pages (`@setu-ts/cli`)
 
 `setu g module <name> --page` now writes a page with a loader, action and CSRF form, and no
@@ -83,6 +161,73 @@ header. An `openapi.exclude: ['/auth/logout']` entry is no longer needed.
 `setu check` warns when a page calls `fetch` on its own `/api/…`. Move the write to the page's
 action and the read to its loader, or silence `setu.W007` in `.setu-ts/check.json` for a page that
 calls an API it also publishes on purpose. `setu check --strict` fails on it.
+
+### Security headers at 10 and CORS at 125 (`@setu-ts/http-security-plugin`)
+
+Security headers moved from priority 250 to 10, and CORS from 200 to 125, so the request-size 400
+and 413 (and any refusal after priority 10) carry the security headers, and an allowed origin's CORS
+headers, like every other response. An application middleware registered between the new and the old
+numbers now runs after them: it sees their headers already set, and a CORS preflight is answered
+before it. Move such a middleware below 10 (or 125) if it must run first.
+
+### Sessions: revocation markers and `storeCommit` (`@setu-ts/session-plugin`)
+
+On the store strategy a sign-out or regeneration now writes a marker entry, `revoked:<id>` or
+`superseded:<id>`, beside the session rows, and a regeneration that stays in the store also writes a
+link, `successor:<id>`, naming the new id; all expire one second after `maxAge`, and an
+`ISessionStore` of your own sees those ids. A commit that finds its session revoked while it ran is
+refused and sends no cookie, and so is a commit whose request loaded the session `maxAge` or more
+ago (a regeneration or a `clear()` sign-out refused that way still revokes the old id); one that
+reaches its marker check that late ends its session (deleting its row under a `revoked` marker,
+which every commit and regeneration that checks its markers afterwards refuses (one that committed
+during the stall keeps its new id), without following its successor links; a stalled regeneration
+deletes only its new row). Use Redis with `noeviction` (or a dedicated instance) for sessions;
+cache-plugin's memory cache evicts at `maxSize` and is for development only.
+
+Store commits now default to `storeCommit: 'changes'`: a commit writes this request's changes onto
+the current row, and a commit whose row is gone is refused. Set `storeCommit: 'snapshot'` to keep
+writing the whole payload. `SessionService.commit` returns `'written' | 'refused' | 'skipped'`
+instead of `void` and takes an optional policy; a caller that awaited it is unaffected.
+
+### Session responses carry `Cache-Control` (`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin`)
+
+A response for a signed-in visitor, a response that sets the session cookie, and one that read a
+CSRF token now carry `Cache-Control: private, no-store` and `Vary: Cookie`; an anonymous response
+that read the session carries `Vary: Cookie`. A page that a CDN cached by accident stops being
+cached, which is the intent. To cache a page on purpose, set `Cache-Control` in the handler; the
+plugin keeps it unless the response sets the session cookie (a directive set by a middleware outside
+the session middleware before it runs is replaced by `private, no-store` for a signed-in visitor),
+and logs one warning per route when it is per-visitor. On such a `public` response the plugin
+withholds the session cookie for a commit that would only refresh the expiry (`rolling`,
+`idleTimeoutMs`) or only store a new visitor's CSRF token or tenant binding: a form on a page you
+mark `public` now fails CSRF on submit, so remove `public` from pages carrying a form. See the
+session plugin's Caching section. A React Router route's `headers` export now replaces
+`Cache-Control` rather than appending a second value. A new session holding only the CSRF token or
+tenant binding is no longer committed on a `404` that is not a page navigation.
+
+### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
+
+`cacheMiddleware` no longer stores a response marked `private` or `no-store` (or with a malformed
+`Cache-Control`), nor one for a request whose session was written (an application key set, deleted
+or cleared, or a `regenerate()` or `destroy()`), that read a CSRF token, or that read a restored
+session holding application data, even when the handler marks it `public`, and a request carrying
+`Authorization` or any cookie is served only an entry stored with `Cache-Control: public` that does
+not vary on `Cookie` or `Authorization`. A response varying on either is stored and served only for
+requests carrying no cookie and no `Authorization`, and so is a page that read the session even when
+its handler replaced `Vary` and set `public`; a `Vary: *` response is never stored. An application
+whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached until it marks
+responses `public` or names its session cookie:
+`cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
+`Authorization` no longer shares a handler run with concurrent misses for the same key. One
+exception stays the application's: a signed-in visitor's response that never touches the session API
+and that the handler marks `public` is stored and replayed, so never mark a personalised response
+`public`.
+
+### Docs routes start no session (`@setu-ts/openapi-plugin`)
+
+The Swagger UI page, the spec and the self-hosted assets no longer commit a session, so a `rolling`
+session is not refreshed by them. The plugin adds `GET <docs endpoint>/csrf-token`, which Swagger
+UI's Try-it-out calls read; an application route at that path now conflicts with it.
 
 ## 0.13.0
 
@@ -1161,13 +1306,14 @@ application without `DiPlugin` is unaffected.
 - **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
   disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
   `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
-  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
-  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
-  settle after the kernel's own 5 s bound.
+  hold `app.stop()` for about k × 5 s — longer than the drain bound (10 s unless `drainTimeoutMs`
+  sets it) once k exceeds 2. A request scope's disposal failures are logged at `warn` as
+  `Request scope disposal failed`, even when they settle after the kernel's own 5 s bound.
 - **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
   means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
-  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
+  in-flight until its body finishes, so `stop()` waits for it, up to the drain bound (10 s unless
+  `drainTimeoutMs` sets it).
 
 <!-- version:history -->
 

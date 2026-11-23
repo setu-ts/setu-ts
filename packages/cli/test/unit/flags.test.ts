@@ -228,7 +228,7 @@ describe('every documented flag is accepted', () => {
   const standalone: readonly (readonly [string, readonly string[]])[] = [
     ['template', ['--template', 'rest']],
     ['runtime', ['--runtime', 'bun']],
-    ['env-file', ['--template', 'rest', '--env-file', 'config/.env.local']],
+    ['dotenv', ['--template', 'rest', '--dotenv', 'config/.env.local']],
     ['broker', ['--template', 'microservice', '--broker', 'memory']],
     ['queue', ['--template', 'microservice', '--queue', 'memory']],
     ['yes', ['--yes']],
@@ -282,7 +282,7 @@ describe('every documented flag is accepted', () => {
         'rest',
         '--port',
         '3100',
-        '--env-file',
+        '--dotenv',
         'config/.env',
         '--depends-on',
         'orders',

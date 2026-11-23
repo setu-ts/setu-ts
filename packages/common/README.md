@@ -231,12 +231,14 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
+| `FatalErrorOrigin`                    | type      |
 | `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
 | `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
+| `cacheControlDirectives`              | function  |
 | `causeMessage`                        | function  |
 | `checkWritePrecondition`              | function  |
 | `compileRealtimeDiagnosticsAlias`     | function  |
@@ -383,8 +385,10 @@ package fits the plugin architecture.
 | `VectorVersionConflictError`          | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
+| `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` | const     |
 | `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
 | `CSRF_EXEMPT_STATE_KEY`               | const     |
+| `CSRF_TOKEN_ACCESS_STATE_KEY`         | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
@@ -403,6 +407,7 @@ package fits the plugin architecture.
 | `MCP_TOOL_METADATA`                   | const     |
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
+| `PER_VISITOR_RESPONSE_STATE_KEY`      | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `RATE_LIMIT_METADATA`                 | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
@@ -509,6 +514,7 @@ package fits the plugin architecture.
 | `IContainer`                          | interface |
 | `ICounter`                            | interface |
 | `ICqrsFacade`                         | interface |
+| `ICsrfTokenAccess`                    | interface |
 | `IDatabaseAdapter`                    | interface |
 | `IDataSource`                         | interface |
 | `IDecoratorApi`                       | interface |

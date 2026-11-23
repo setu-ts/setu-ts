@@ -37,6 +37,10 @@
     "./main": {
       "types": "./dist/main.d.ts",
       "default": "./dist/main.js"
+    },
+    "./node-version": {
+      "types": "./dist/utils/node-version.d.ts",
+      "default": "./dist/utils/node-version.js"
     }
   },
   "bin": {

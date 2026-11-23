@@ -44,6 +44,7 @@ import {
   createUpgradeRequest,
   NodeUpgradeCoordinator,
   rejectRawUpgrade,
+  writeRawUpgradeResponse,
 } from './node-ws-upgrader.ts';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +74,40 @@ export interface NodeOutgoing {
    * @param headers - The trailer fields
    */
   addTrailers?(headers: Readonly<Record<string, string>>): void;
+  /**
+   * Destroys the response's connection. Present on Node's responses; the
+   * adapter calls it when a streamed body fails, so the client sees the
+   * response cut off rather than ended.
+   * @since 0.14.0
+   */
+  destroy?(): void;
+  /**
+   * The HTTP/2 stream behind an `Http2ServerResponse`. A failed body resets
+   * it with an error code: `destroy()` sends `RST_STREAM(NO_ERROR)`, which an
+   * HTTP/2 client reads as a clean end of a truncated response.
+   * @since 0.14.0
+   */
+  readonly stream?: { close?(code?: number): void };
+}
+
+/** HTTP/2 `INTERNAL_ERROR` (RFC 9113 §7), the reset for a failed response body. */
+const HTTP2_INTERNAL_ERROR = 2;
+
+/**
+ * How a failed streamed body ends its response: an HTTP/2 stream is reset
+ * with `INTERNAL_ERROR`, so the client sees a failure rather than a clean
+ * end; an HTTP/1.1 response destroys its connection.
+ *
+ * @param outgoing - The Node response
+ * @returns The function that ends it, or `undefined` when it has neither
+ * @internal - Not exported from package index
+ */
+export function failedBodyEnd(outgoing: NodeOutgoing | undefined): (() => void) | undefined {
+  const stream = outgoing?.stream;
+  if (typeof stream?.close === 'function') {
+    return () => stream.close!(HTTP2_INTERNAL_ERROR);
+  }
+  return outgoing?.destroy?.bind(outgoing);
 }
 
 /**
@@ -170,6 +205,18 @@ export interface NodeServer {
    * Stops the server gracefully.
    */
   close(): void;
+  /**
+   * Starts the drain: GOAWAY to every HTTP/2 session, idle HTTP/1.1
+   * connections closed, in-flight requests left to finish. Present on the
+   * HTTP/2 listeners this adapter builds.
+   * @since 0.14.0
+   */
+  drain?(): void;
+  /**
+   * Closes keep-alive connections with no request in flight (`node:http`).
+   * @since 0.14.0
+   */
+  closeIdleConnections?(): void;
 }
 
 /**
@@ -270,6 +317,10 @@ async function serveHttp2(
         closeSessions();
         return closeServer(callback);
       }) as typeof server.close;
+      (server as unknown as NodeServer).drain = tlsDrain(
+        closeSessions,
+        server as unknown as NodeServer,
+      );
       function ready(): void {
         server.removeListener('error', failed);
         resolve(server);
@@ -301,6 +352,24 @@ async function serveHttp2(
 }
 
 /**
+ * The drain for the TLS HTTP/2 listener: GOAWAY to every HTTP/2 session, and
+ * idle HTTP/1.1 connections (`allowHTTP1`) closed too, since those never
+ * enter `trackHttp2Sessions` and `beginDrain` skips its own fallback when a
+ * listener has `drain`.
+ *
+ * @param closeSessions - Sends GOAWAY to the tracked HTTP/2 sessions
+ * @param server - The secure server
+ * @returns The listener's `drain`
+ * @internal - Not exported from package index
+ */
+export function tlsDrain(closeSessions: () => void, server: NodeServer): () => void {
+  return () => {
+    closeSessions();
+    server.closeIdleConnections?.();
+  };
+}
+
+/**
  * Wraps a streaming body so the trailers are queued on the Node response
  * after its last chunk and before node-server ends the stream (M139b §3.3).
  * A rejecting trailers promise errors the stream, which resets it rather than
@@ -309,12 +378,15 @@ async function serveHttp2(
  * @param body - The response body
  * @param trailers - The trailers, resolving once the body ends
  * @param addTrailers - The Node response's `addTrailers`
+ * @param onTrailersFailed - Reports a rejecting trailers promise, which no
+ *   kernel guard sees (a body failure is reported by the kernel, not here)
  * @returns The wrapping stream
  */
 export function streamWithTrailers(
   body: ReadableStream<Uint8Array>,
   trailers: Promise<Headers>,
   addTrailers: (headers: Readonly<Record<string, string>>) => void,
+  onTrailersFailed?: (error: unknown) => void,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
@@ -325,7 +397,18 @@ export function streamWithTrailers(
         return;
       }
       const fields: Record<string, string> = {};
-      (await trailers).forEach((value, name) => {
+      let resolved: Headers;
+      try {
+        resolved = await trailers;
+      } catch (error) {
+        try {
+          onTrailersFailed?.(error);
+        } catch {
+          // Reporting must not replace the failure that resets the stream.
+        }
+        throw error;
+      }
+      resolved.forEach((value, name) => {
         fields[name] = value;
       });
       if (Object.keys(fields).length > 0) addTrailers(fields);
@@ -335,6 +418,48 @@ export function streamWithTrailers(
       return reader.cancel(reason);
     },
   });
+}
+
+/**
+ * Wraps a streamed body so a source failure ends the connection without
+ * node-server seeing an error. node-server's `handleResponseError` answers a
+ * body error with `console.error(e)` — outside the application's logger and
+ * its redaction — and writes `Error: <message>` into a response whose headers
+ * are not yet sent. The kernel has already logged the failure through the
+ * logger, so here the connection is destroyed and the wrapper ends instead of
+ * erroring: node-server's writer finds a destroyed response, and the client
+ * sees a cut-off response, never a clean end.
+ *
+ * @param body - The response body
+ * @param destroy - Destroys this response's connection
+ * @returns The wrapping stream
+ * @internal - Not exported from package index
+ */
+export function destroyOnSourceError(
+  body: ReadableStream<Uint8Array>,
+  destroy: () => void,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch {
+          destroy();
+          controller.close();
+          return;
+        }
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -486,6 +611,9 @@ export class NodeHttpServerHandle {
         RawUpgradeSocket,
         unknown,
       ];
+      // A client that resets the connection emits 'error' on this raw socket;
+      // with no listener that event would end the process.
+      socket.on?.('error', () => socket.destroy());
       // The listener cannot be async — Node ignores a returned promise — so the
       // rejection is handled here rather than escaping as an unhandled one.
       void this.#handleUpgrade(incoming, socket, head).catch(() => {
@@ -537,8 +665,8 @@ export class NodeHttpServerHandle {
 
     if (intent === undefined) {
       // No upgrade intent — the handler returned a normal response (e.g. 401
-      // from auth middleware). Reject the raw upgrade with that status.
-      rejectRawUpgrade(socket, frameworkResponse.snapshot().status);
+      // from auth middleware). Send that response whole, as Bun and Deno do.
+      writeRawUpgradeResponse(socket, frameworkResponse.snapshot());
       return;
     }
 
@@ -680,19 +808,32 @@ export class NodeHttpServerHandle {
     }
     // Trailers only where the request said they reach the client — an HTTP/2
     // stream, whose node-server response is the one with `addTrailers`.
+    if (!snapshot.streaming) return mapSnapshotToWebResponse(snapshot);
+    let body = snapshot.body;
     if (
-      snapshot.streaming &&
       snapshot.trailers !== undefined &&
       frameworkRequest.responseTrailers === true &&
       outgoing?.addTrailers !== undefined
     ) {
-      const addTrailers = outgoing.addTrailers.bind(outgoing);
-      return mapSnapshotToWebResponse(
-        snapshot,
-        streamWithTrailers(snapshot.body, snapshot.trailers, addTrailers),
+      body = streamWithTrailers(
+        body,
+        snapshot.trailers,
+        outgoing.addTrailers.bind(outgoing),
+        (error) =>
+          this.#reportError?.({
+            level: 'error',
+            msg: 'Response trailers failed',
+            ...serializeError(error),
+          }),
       );
     }
-    return mapSnapshotToWebResponse(snapshot);
+    const end = failedBodyEnd(outgoing);
+    if (end !== undefined) {
+      body = destroyOnSourceError(body, end);
+    }
+    return body === snapshot.body
+      ? mapSnapshotToWebResponse(snapshot)
+      : mapSnapshotToWebResponse(snapshot, body);
   }
 
   /**
@@ -770,6 +911,22 @@ export class NodeHttpAdapter implements IHttpAdapter {
 
   fetch(request: Request): Response | Promise<Response> {
     return this.#handle.createFetchHandler()(request);
+  }
+
+  /**
+   * Starts the drain (see `IHttpAdapter.beginDrain`): GOAWAY to every HTTP/2
+   * session, idle HTTP/1.1 keep-alive connections closed.
+   *
+   * @param handle - The handle `listen` returned
+   */
+  beginDrain(handle: ServerHandle): void {
+    if (!isNodeHttpServerHandle(handle)) {
+      throw new Error('Invalid server handle for NodeHttpAdapter');
+    }
+    const server = handle.server;
+    if (server === null) return;
+    if (server.drain !== undefined) server.drain();
+    else server.closeIdleConnections?.();
   }
 
   close(handle: ServerHandle): Promise<void> {
