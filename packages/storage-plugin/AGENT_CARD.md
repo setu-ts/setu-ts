@@ -51,6 +51,5 @@ const url = await storage.getSignedUrl('avatars/user-1', { expiresIn: 3600 });
 
 - `provider` selects `'local'`, `'s3'`, `'b2'`, `'gcs'` or `'azure'` instead of memory.
 - `allowedMimeTypes`, `maxFiles` and `maxBodyBytes` constrain upload parsing.
-- Omit provider `getStream` for buffered fallback; returned null means a missing object (404).
-- Cloud object misses exclude S3 NoSuchBucket, Azure ContainerNotFound and GCS ENOENT.
-- A 502 write is outcome-unknown (504); GCS needs peer ^7.18.0 and matching env/option endpoints.
+- `getStream` streams reads; providers without native streaming wrap buffered bytes.
+- Outages reject (503/504); only a backend's named object miss reads as `null`/`false`.

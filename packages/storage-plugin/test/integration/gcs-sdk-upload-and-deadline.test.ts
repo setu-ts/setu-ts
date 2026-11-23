@@ -76,6 +76,10 @@ describe('real GCS SDK drip download stops at its deadline', () => {
   it('closes the server socket while it is still dripping bytes', async () => {
     let mediaRequests = 0;
     let closedAt: number | undefined;
+    let markClosed: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      markClosed = resolve;
+    });
     const server = createServer((req, res) => {
       if (req.url?.includes('alt=media')) {
         mediaRequests++;
@@ -85,6 +89,7 @@ describe('real GCS SDK drip download stops at its deadline', () => {
         res.once('close', () => {
           clearInterval(drip);
           closedAt = performance.now();
+          markClosed();
         });
       } else {
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -103,11 +108,11 @@ describe('real GCS SDK drip download stops at its deadline', () => {
       await provider.connect();
       const started = performance.now();
       await expect(provider.get('k')).rejects.toBeInstanceOf(BackendUnavailableError);
-      for (let i = 0; i < 20 && closedAt === undefined; i++)
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      // The server sees the socket close: the SDK request was destroyed, not
+      // left dripping (it would otherwise run for the full drip, seconds).
+      await closed;
       expect(mediaRequests).toBe(1);
-      expect(closedAt).toBeDefined();
-      expect(closedAt! - started).toBeLessThan(600);
+      expect(closedAt! - started).toBeLessThan(2_000);
       await provider.disconnect();
     } finally {
       server.closeAllConnections();

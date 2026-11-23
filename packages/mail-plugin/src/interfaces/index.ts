@@ -87,7 +87,9 @@ export interface ISmtpTransport {
   verify?(): Promise<unknown>;
   /**
    * Closes the transport's pooled connections. nodemailer's real transport
-   * exposes this; the provider calls it when `dnsTtlMs` replaces a transport.
+   * exposes this; the provider calls it on a transport it built itself, when
+   * `dnsTtlMs` replaces it or `disconnect()` retires it (after its sends settle).
+   * A transport passed in as `transport` is never closed.
    *
    * @since 0.14.0
    */

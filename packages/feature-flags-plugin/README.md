@@ -49,8 +49,8 @@ app.router.get('/beta', {
 });
 ```
 
-A startup snapshot timeout leaves LaunchDarkly `status().healthy` false with a detail until a
-successful snapshot refill clears the failure, even if SDK initialization succeeded.
+A failed or timed-out startup snapshot leaves LaunchDarkly `status().healthy` false with a detail
+until a successful snapshot refill clears the failure, even if SDK initialization succeeded.
 
 ## Options
 

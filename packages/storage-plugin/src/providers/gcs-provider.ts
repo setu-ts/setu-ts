@@ -118,9 +118,10 @@ export interface GcsProviderOptions {
   /**
    * API endpoint, such as a private endpoint or an emulator
    * (`http://127.0.0.1:4443`). Passed to the SDK as `apiEndpoint`; the SDK adds
-   * `/storage/v1` itself. A differing `STORAGE_EMULATOR_HOST` is refused with
-   * `RangeError` to prevent splitting JSON requests and uploads between hosts.
-   * Set `endpointAuth: false` with an emulator.
+   * `/storage/v1` itself. Setting it while `STORAGE_EMULATOR_HOST` is set is
+   * refused with `RangeError` (the SDK would send JSON requests to the variable
+   * and uploads here); an injected `client` is not checked. Set
+   * `endpointAuth: false` with an emulator.
    *
    * @since 0.14.0
    */
@@ -411,12 +412,20 @@ export class GcsProvider implements StorageProvider {
     this.#installProbe();
   }
 
+  /**
+   * Refuses `endpoint` beside `STORAGE_EMULATOR_HOST` for the SDK this provider
+   * builds: the SDK sends JSON API calls to the variable's raw value (no
+   * `/storage/v1`, no scheme added) and uploads to `endpoint`, so the two
+   * settings would split one object's reads and writes. An injected client
+   * never reads the variable, so it is not checked.
+   */
   #checkEndpoint(): void {
-    const endpoint = this.#options.endpoint;
+    if (this.#options.client !== undefined || this.#options.endpoint === undefined) return;
     const emulator = this.#env?.STORAGE_EMULATOR_HOST;
-    if (endpoint && emulator && normalizeEndpoint(endpoint) !== normalizeEndpoint(emulator)) {
+    if (emulator !== undefined && emulator !== '') {
       throw new RangeError(
-        'GcsProvider: endpoint and STORAGE_EMULATOR_HOST must name the same endpoint',
+        'GcsProvider: set either endpoint or STORAGE_EMULATOR_HOST, not both: the SDK sends ' +
+          'JSON requests to STORAGE_EMULATOR_HOST and uploads to endpoint',
       );
     }
   }
@@ -718,11 +727,6 @@ export class GcsProvider implements StorageProvider {
       },
     });
   }
-}
-
-/** Matches the SDK's scheme default and trailing-slash normalization. */
-function normalizeEndpoint(endpoint: string): string {
-  return (/^https?:\/\//.test(endpoint) ? endpoint : `https://${endpoint}`).replace(/\/+$/, '');
 }
 
 /** Converts a stream chunk to bytes (a node `Buffer` already is one). */

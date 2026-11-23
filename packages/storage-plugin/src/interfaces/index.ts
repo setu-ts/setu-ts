@@ -200,9 +200,9 @@ export interface GcsProviderOptions {
   /**
    * API endpoint, such as a private endpoint or an emulator
    * (`http://127.0.0.1:4443`), passed to the SDK as `apiEndpoint`.
-   * A differing `STORAGE_EMULATOR_HOST` is refused with `RangeError` (scheme-less
-   * hosts default to HTTPS; trailing slashes are ignored). Set `endpointAuth: false`
-   * with an emulator.
+   * Refused with `RangeError` while `STORAGE_EMULATOR_HOST` is set: the SDK
+   * sends JSON requests to the variable and uploads here. An injected `client`
+   * is not checked. Set `endpointAuth: false` with an emulator.
    *
    * @since 0.14.0
    */

@@ -435,8 +435,9 @@ export class SmtpProvider implements MailProvider {
     this.#address = undefined;
     this.#triedAt = Number.NEGATIVE_INFINITY;
     delete this.isHealthy;
+    // A transport the application passed in stays open: it owns that one.
     return Promise.resolve().then(() => {
-      if (transport !== null) this.#retire(transport);
+      if (transport !== null && this.#options.transport === undefined) this.#retire(transport);
     });
   }
 

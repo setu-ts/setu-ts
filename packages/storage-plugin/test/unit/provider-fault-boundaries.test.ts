@@ -184,7 +184,7 @@ describe('GCS local ENOENT is a fault', () => {
   });
 });
 
-describe('GCS refuses split endpoints through runtime.env', () => {
+describe('GCS refuses endpoint beside STORAGE_EMULATOR_HOST', () => {
   const runtime = (host?: string): IRuntimeServices =>
     ({
       now: () => 0,
@@ -193,36 +193,42 @@ describe('GCS refuses split endpoints through runtime.env', () => {
       clearTimeout,
       env: host === undefined ? {} : { STORAGE_EMULATOR_HOST: host },
     }) as unknown as IRuntimeServices;
-  const make = (endpoint: string, host?: string): StorageProvider =>
+  const make = (endpoint: string | undefined, host?: string, injected = false): StorageProvider =>
     createProvider(
-      { provider: 'gcs', options: { bucket: 'b', endpoint, client: { bucket: () => ({}) } } },
+      {
+        provider: 'gcs',
+        options: {
+          bucket: 'b',
+          ...(endpoint === undefined ? {} : { endpoint }),
+          ...(injected ? { client: { bucket: () => ({}) } } : {}),
+        },
+      },
       runtime(host),
     );
-  it('different env and endpoint refuse at construction', () => {
-    expect(() => make('http://one.test', 'http://two.test')).toThrow(
-      /endpoint.*STORAGE_EMULATOR_HOST/,
-    );
-  });
-  it('equal, scheme-less and trailing-slash variants are accepted', async () => {
+  it('refuses both at construction, even when they name the same host', () => {
     for (const [endpoint, host] of [
-      ['http://one.test/', 'http://one.test'],
-      ['one.test/', 'https://one.test/'],
-      ['http://one.test', undefined],
+      ['http://one.test', 'http://two.test'],
+      ['http://one.test', 'http://one.test'],
+      ['http://one.test', 'http://one.test/storage/v1'],
     ] as const) {
-      const provider = make(endpoint, host);
-      await provider.connect();
-      expect(provider.isReady()).toBe(true);
+      expect(() => make(endpoint, host)).toThrow(/either endpoint or STORAGE_EMULATOR_HOST/);
     }
   });
+  it('accepts either one alone, an empty variable, and any pair beside an injected client', () => {
+    expect(() => make('http://one.test')).not.toThrow();
+    expect(() => make(undefined, 'http://one.test')).not.toThrow();
+    expect(() => make('http://one.test', '')).not.toThrow();
+    expect(() => make('http://one.test', 'http://two.test', true)).not.toThrow();
+  });
   it('rechecks the environment on connect', async () => {
-    const env = { STORAGE_EMULATOR_HOST: 'https://one.test' };
+    const env: Record<string, string | undefined> = {};
     const provider = new GcsProvider(
-      { bucket: 'b', endpoint: 'one.test', client: { bucket: () => ({}) } },
+      { bucket: 'b', endpoint: 'http://one.test' },
       undefined,
       undefined,
       env,
     );
-    env.STORAGE_EMULATOR_HOST = 'https://two.test';
+    env.STORAGE_EMULATOR_HOST = 'http://two.test';
     await expect(provider.connect()).rejects.toBeInstanceOf(RangeError);
   });
 });

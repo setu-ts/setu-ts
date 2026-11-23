@@ -270,3 +270,24 @@ describe('SMTP DNS refresh coordination', () => {
     await provider.disconnect();
   });
 });
+
+describe('SMTP transport ownership', () => {
+  it('disconnect leaves a transport the application passed in open', async () => {
+    const close = vi.fn();
+    const provider = new SmtpProvider({
+      transport: { sendMail: () => Promise.resolve({}), close },
+    });
+    await provider.connect();
+    await provider.disconnect();
+    await tick();
+    expect(close).not.toHaveBeenCalled();
+  });
+  it('disconnect closes a transport the provider built', async () => {
+    const provider = new SmtpProvider({ host: '127.0.0.1' });
+    await provider.connect();
+    await provider.disconnect();
+    await tick();
+    expect(fake.created).toHaveLength(1);
+    expect(fake.created[0]!.closed).toBe(true);
+  });
+});

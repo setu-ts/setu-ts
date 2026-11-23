@@ -129,7 +129,7 @@ The cloud arms share one bound and take an endpoint:
 | ------------------ | -------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `requestTimeoutMs` | `s3`, `b2`, `gcs`, `azure` | `30000`                                       | Bound on each call, the SDK's own retries included. `0` disables it. Raise it for large `put`/`get`; `getStream` is bounded only until the stream is handed back.                                                                                                                                |
 | `endpoint`         | `s3`, `b2`                 | AWS                                           | S3-compatible endpoint (MinIO, R2, B2). Requests use path-style addressing.                                                                                                                                                                                                                      |
-| `endpoint`         | `gcs`                      | Google                                        | Passed to the SDK as `apiEndpoint`. A differing `STORAGE_EMULATOR_HOST` is refused with `RangeError`; scheme-less hosts default to HTTPS and trailing slashes are ignored. Set `endpointAuth: false` with an emulator.                                                                           |
+| `endpoint`         | `gcs`                      | Google                                        | Passed to the SDK as `apiEndpoint`. Refused with `RangeError` while `STORAGE_EMULATOR_HOST` is set (the SDK sends JSON requests to the variable and uploads here); set one or the other. An injected `client` is not checked. Set `endpointAuth: false` with an emulator.                        |
 | `endpointAuth`     | `gcs`                      | `true`                                        | Send credentials to a custom `endpoint`. The SDK sends none to one unless told to; set `false` only for an emulator that checks none. With it on, `put` uploads in one multipart request: the SDK's resumable upload sends no credential to a host outside Google's domain (measured on 7.22.0). |
 | `endpoint`         | `azure`                    | `https://<accountName>.blob.core.windows.net` | Blob service URL for the `accountName` + `accountKey` form. A `connectionString` carries its own endpoint.                                                                                                                                                                                       |
 
@@ -189,12 +189,13 @@ A presigned URL serves the object under whatever content type it was stored with
 takes one — see [Object metadata](#object-metadata).
 
 `GcsProvider` and `AzureBlobProvider` read the clock the plugin hands them (`runtime.now()`). A
-direct GCS caller passes the runtime environment as the fourth constructor argument to check
-`STORAGE_EMULATOR_HOST` against `endpoint`; the plugin supplies it automatically. A provider
-constructed directly needs `now` as its second argument; without one, `getSignedUrl` rejects by
-name. The Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob name and uses
-the client's own host; a client without an account key (a SAS connection string, managed identity)
-is refused. GCS signs with the credentials the SDK finds (`GOOGLE_APPLICATION_CREDENTIALS`).
+direct GCS caller passes the runtime environment as the fourth constructor argument so a set
+`STORAGE_EMULATOR_HOST` beside `endpoint` is refused; the plugin supplies it automatically. A
+provider constructed directly needs `now` as its second argument; without one, `getSignedUrl`
+rejects by name. The Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob
+name and uses the client's own host; a client without an account key (a SAS connection string,
+managed identity) is refused. GCS signs with the credentials the SDK finds
+(`GOOGLE_APPLICATION_CREDENTIALS`).
 
 ## Faults, `exists` and `delete`
 
@@ -235,6 +236,19 @@ An outage is an error, never "not there". On every cloud arm:
 The Azure SDK retries a refused connection with backoff, so on Azure an outage answers when
 `requestTimeoutMs` fires rather than at once.
 
+A miss reads as `null`/`false` only when the backend names a missing object. S3 `get`/`getStream`
+reject a `NoSuchBucket` answer and every Azure call rejects `ContainerNotFound`; a GCS error with
+code `ENOENT` (a local file error, such as a missing credential file) rejects too. Two answers
+cannot be told apart: an S3 `HEAD` (behind `exists` and `delete`) has no body, so a missing bucket
+reads as `NotFound`, and GCS answers `404` for a missing bucket as for a missing object; there
+`exists` and `delete` answer `false`. Azure downloads without a body reject unless
+`deleted === true`. Injected Azure operations receive `{ abortSignal }`; injected
+`IS3Backend.put(path, data, options?, signal?)`, `delete(path, signal?)` and `head(path, signal?)`
+receive the deadline signal. Buffered GCS downloads destroy their read stream on deadline; a failed
+first streaming read releases an iterator without waiting for `return()`. Omit a provider's
+`getStream` for the buffered fallback over `get`; an implemented `getStream` returning `null` makes
+the service throw `StorageObjectNotFoundError` with no fallback.
+
 The GCS, Azure and B2/S3 arms were run against local stand-ins (fake-gcs-server, Azurite, MinIO):
 upload, download, exists, delete, a signed URL fetched back, an outage and a refused credential. No
 live Google, Azure or Backblaze account was used, so behaviour that only the real services have
@@ -250,15 +264,6 @@ live Google, Azure or Backblaze account was used, so behaviour that only the rea
 The provider proves the root is writable at `connect()` and refuses to start with the flag named,
 rather than letting every upload fail against a health check that reports `up` — a `stat` probe only
 proves the root is READABLE.
-
-Only object misses become null/false: S3 `NoSuchBucket`, Azure `ContainerNotFound` and GCS local
-`ENOENT` reject. Azure downloads without a body reject unless `deleted === true`. Injected Azure
-operations receive `{ abortSignal }`; injected `IS3Backend.put(path, data, options?, signal?)`,
-`delete(path, signal?)` and `head(path, signal?)` receive the deadline signal. Buffered GCS
-downloads destroy their read stream on deadline; a failed first streaming read releases an iterator
-without waiting for `return()`. Omit a provider's `getStream` for the buffered fallback over `get`;
-an implemented `getStream` returning `null` makes the service throw `StorageObjectNotFoundError`
-with no fallback.
 
 ## Streaming
 

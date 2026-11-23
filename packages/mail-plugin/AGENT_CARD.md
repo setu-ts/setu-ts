@@ -51,9 +51,6 @@ export function registerWelcomeRoutes(router: IRouterApi): void {
   run on Workers too.
 - `provider` also selects `'log'`, `'smtp'` or `'ses'`; `send` sends an untemplated message.
 - SMTP: `host`, `port`, `secure`, `auth`, `*TimeoutMs`, `dnsTtlMs` or `transport`; SES: `region`,
-  keys, `endpoint` or `client`. SES/SendGrid `requestTimeoutMs` (15 s) gives a 504; injected SES
-  probes time out false.
-- SMTP `connectionTimeoutMs` also bounds DNS refresh; failed lookups respect the TTL and retain the
-  last transport.
+  keys, `endpoint` or `client`. SES/SendGrid `requestTimeoutMs` (15 s) gives a 504.
 - SendGrid's `options.http` replaces its HTTP transport; component templates use `{ view, text? }`
   and cannot mix `view` with `html`.
