@@ -250,10 +250,11 @@ across Node 22+, Deno, and Bun because they rely on web-standard APIs on `global
 framework's floor is Node 22; `globalThis.crypto` alone would have put it at 19). They are
 implemented once in `src/services/cross-runtime.ts`.
 
-Divergent operations (platform, version, hostname, env, exit, fs, workers, dns) are implemented
-per-adapter via dependency injection: each factory accepts a `*Host` interface describing only what
-it needs, defaulting to the real runtime global via a single boundary cast. This makes every adapter
-fully unit-testable on Deno by passing a fake host — no real Node/Bun, no OS permissions.
+Divergent operations (platform, version, hostname, env, exit, fs, workers, dns, createDnsResolver)
+are implemented per-adapter via dependency injection: each factory accepts a `*Host` interface
+describing only what it needs, defaulting to the real runtime global via a single boundary cast.
+This makes every adapter fully unit-testable on Deno by passing a fake host — no real Node/Bun, no
+OS permissions.
 
 ## Reserved drain response
 

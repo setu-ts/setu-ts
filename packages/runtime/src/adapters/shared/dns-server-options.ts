@@ -31,12 +31,14 @@ export function parseDnsResolverOptions(options: DnsResolverOptions): {
   ) {
     throw new RangeError('timeoutMs must be an integer from 0 to 2147483647');
   }
-  if (!Array.isArray(options.servers) || options.servers.length === 0) {
+  const list = options.servers;
+  // `length` is read once, so the check and the loop see the same count.
+  const count = Array.isArray(list) ? list.length : 0;
+  if (count === 0) {
     throw new RangeError('servers must be a non-empty array');
   }
   // Read by index over `length`: `map` skips holes and `Array.from` follows a replaced iterator.
-  const list = options.servers;
-  const servers = Array.from({ length: list.length }, (_, index): IDnsServer => {
+  const servers = Array.from({ length: count }, (_, index): IDnsServer => {
     const entry = list[index] as string;
     const invalid = (): never => {
       // A Symbol or a null-prototype object throws inside a template literal, so only a
