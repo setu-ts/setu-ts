@@ -95,16 +95,16 @@ const CONSTRUCTIONS: readonly Row[] = [
     kind: 'cancel-awaits-work',
     evidence: /async cancel\(reason\) \{[\s\S]{0,120}await iterator\?\.return\?\.\(\)/,
     handOver:
-      'M143c (Services lane): cancel() awaits iterator.return(), queued behind a next() a stuck handler generator never settles',
+      'M143c (Services lane): cancel() aborts the handler signal first, then awaits iterator.return() with no bound; a handler that ignores the signal still holds it (documented in the grpc-plugin README)',
   },
   {
     file: 'packages/grpc-plugin/src/transports/rpc-call.ts',
     count: 1,
     cancelSettles: 'may-hang',
     kind: 'cancel-awaits-work',
-    evidence: /async cancel\(\) \{\s*await iterator\.return\?\.\(\)/,
+    evidence: /async cancel\(reason\) \{[\s\S]{0,120}await iterator\.return\?\.\(\)/,
     handOver:
-      'M143c (Services lane): cancel() awaits iterator.return(), queued behind a next() a stuck handler generator never settles',
+      'M143c (Services lane): cancel() aborts the handler signal first, then awaits iterator.return() with no bound; a handler that ignores the signal still holds it (documented in the grpc-plugin README)',
   },
   {
     file: 'packages/kernel/src/context/deferred.ts',
