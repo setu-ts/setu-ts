@@ -18,9 +18,22 @@ All notable changes to this project are documented here. The format follows
   beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
   rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
   served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
-  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
-  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
-  the breaker. V13-104.
+  policy check. The SDK client's `circuitBreaker` takes either arm; the resilience plugin also
+  consumes the shared window in the M143c follow-up below. V13-104.
+- **`@setu-ts/resilience-plugin` (M143c).** Count and failure-rate breaker policies run through
+  `createBreakerWindow`; rate policies count successes toward `minimumCalls` and use ten buckets
+  with bucket-granular expiry. Invalid defaults fail at registration and invalid explicit policies
+  fail at `wrap()` through `breakerPolicyRangeError`. V13-104.
+- **`@setu-ts/service-discovery-plugin` (M143c).** DNS `servers` selects IP-literal name servers
+  through `runtime.createDnsResolver` (Node, Bun, Deno). `resolveTimeoutMs` bounds the whole lookup
+  across all servers with one attempt each; fractional bounds round up for the runtime. Record TTLs
+  are not read; `cacheTtlMs` stays the freshness bound. On Deno SERVFAIL reads as absence and an
+  underlying lookup may end about 2 s past the bound. V13-246.
+- **`@setu-ts/grpc-plugin` (M143c).** Unary `Unavailable` with exactly
+  `x-setu-unprocessed: shutdown` is resent once on a new pick within the remaining deadline,
+  regardless of wire status. Streaming calls and unmarked errors are not resent. The reserved header
+  claims no processing; applications setting it on their own `Unavailable` get the same resend. The
+  instance still reports failure; a second marked failure surfaces. V13-23.
 - **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
@@ -129,8 +142,8 @@ All notable changes to this project are documented here. The format follows
   and opens a failure run that the next success closes. Kubernetes probe timeouts name the API and
   bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
-  for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
-  delivery, the shared 5 s provider-health cache and instance-address requirements for registration.
+  for connection balancing, the marked drain-503 unary resend rule, grace-expiry watch delivery, the
+  shared 5 s provider-health cache and instance-address requirements for registration.
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).

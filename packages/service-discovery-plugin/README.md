@@ -262,6 +262,7 @@ working while the pod is still healthy.
 | `mode`               | dns                | —                            | `'srv'` or `'a'`                                                                                                           |
 | `domainTemplate`     | dns                | `'{service}.service.consul'` | `{service}` is substituted                                                                                                 |
 | `port`               | dns (`'a'` only)   | —                            | Mandatory: address records carry no port                                                                                   |
+| `servers`            | dns                | host resolver                | Nonempty IP literals with optional ports; IPv6 ports need brackets; needs `runtime.createDnsResolver`                      |
 | `secure`             | consul, k8s, dns   | `false`                      | Decides the `https` scheme                                                                                                 |
 | `http`               | consul, kubernetes | `fetch`                      | Injectable transport                                                                                                       |
 | `discovery`          | custom             | —                            | Your `DiscoveryProvider`, used as supplied                                                                                 |
@@ -291,9 +292,23 @@ cache; replacement and close clear the timer. An empty answer succeeded, so it d
 `staleForMs` or incur failure spacing.
 
 DNS NXDOMAIN/no-record answers (`ENOTFOUND`, `ENODATA`, Deno `NotFound`, including wrapped causes)
-resolve to `[]`. Other DNS errors reject. Use a trusted host resolver: a spoofed absent-name answer
-can empty the list after the grace. The runtime currently retains only the first failed address
-family, so an absent A answer can conceal a timed-out AAAA lookup. DNS record TTLs are not read.
+resolve to `[]` only when every failed address family says absent. Any timeout or other failure
+rejects and is reflected in health. Use a trusted resolver: a spoofed absent-name answer can empty
+the list after the grace. On Deno 2.9.6, SERVFAIL also reads as `NotFound`, so it becomes `[]` after
+the same grace rule.
+
+The DNS arm accepts `servers?: readonly string[]`, for example `['127.0.0.1:7853', '[::1]:53']`.
+Accepted entries are IPv4 (`127.0.0.1`), IPv4 with port (`127.0.0.1:7853`), bare IPv6 (`::1`), and
+IPv6 with a bracketed port (`[::1]:53`). Ports are decimal 1–65535; omitted ports use 53. An empty
+list, host names, empty strings, whitespace, malformed IPs and IPv6 zones are refused with
+`RangeError` naming the entry at `ServiceDiscoveryPlugin()` construction. A valid bare IPv6 literal
+such as `::1:5353` is an address on port 53; to specify a port use brackets. `servers` requires
+`runtime.createDnsResolver` (Node, Bun, Deno; not Workers); without it startup throws
+`DiscoveryUnavailableError` naming `servers`. Omitting `servers` uses `runtime.dns`.
+`resolveTimeoutMs` bounds the whole lookup across all servers, one attempt each; fractions are
+rounded up with `Math.ceil` for the runtime's integer bound. `0` adds no lookup timer. On Deno a
+lookup may run about 2 s past the bound before its underlying operation ends. DNS record TTLs are
+not read: `cacheTtlMs` stays the freshness bound.
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name

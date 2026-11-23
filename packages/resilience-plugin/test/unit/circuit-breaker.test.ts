@@ -128,17 +128,76 @@ describe('CircuitBreaker', () => {
 });
 
 describe('CircuitBreaker — the rate arm', () => {
-  it('refuses a rate policy until this plugin supports it', () => {
-    expect(
-      () =>
-        new CircuitBreaker(
-          { failureRateThreshold: 50, minimumCalls: 10, timeout: 1000, resetTimeout: 5000 },
-          () => 0,
+  const rate = { failureRateThreshold: 50, minimumCalls: 4, timeout: 1000, resetTimeout: 5000 };
+  const ok = () => Promise.resolve('ok');
+  it('waits for minimumCalls even with all failures, then trips at the minimum', async () => {
+    const breaker = new CircuitBreaker(rate, () => 0);
+    for (let n = 0; n < 3; n++) {
+      await expect(breaker.execute(boom)).rejects.toThrow('boom');
+      expect(breaker.state).toBe('closed');
+    }
+    await expect(breaker.execute(boom)).rejects.toThrow('boom');
+    expect(breaker.state).toBe('open');
+  });
+  it('records successes and trips at exactly the configured rate', async () => {
+    const breaker = new CircuitBreaker(rate, () => 0);
+    await breaker.execute(ok);
+    await expectReject(breaker.execute(boom));
+    await breaker.execute(ok);
+    expect(breaker.state).toBe('closed');
+    await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('open');
+  });
+  it('expires old buckets on the clock and clears the window after a successful probe', async () => {
+    const c = clock(99);
+    const breaker = new CircuitBreaker({ ...rate, resetTimeout: 50 }, c.hrtime);
+    for (let n = 0; n < 3; n++) await expectReject(breaker.execute(boom));
+    c.now = 1000; // bucket 0 expires, even though the calls are only 901 ms old
+    await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('closed');
+    for (let n = 0; n < 3; n++) await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('open');
+    c.now = 1050; // old failures are still fresh: recovery must reset them
+    expect(await breaker.execute(ok)).toBe('ok');
+    for (let n = 0; n < 3; n++) await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('closed');
+  });
+  it('does not trip at 50 percent with one failure in three at high volume', async () => {
+    const breaker = new CircuitBreaker(rate, () => 0);
+    for (let n = 0; n < 1000; n++) {
+      await breaker.execute(ok);
+      await breaker.execute(ok);
+      await expectReject(breaker.execute(boom));
+    }
+    expect(breaker.state).toBe('closed');
+  });
+  it('does not record an already aborted call, but records a mid-flight abort', async () => {
+    const breaker = new CircuitBreaker({ ...rate, minimumCalls: 2 }, () => 0);
+    const before = new AbortController();
+    const reason = new Error('cancelled');
+    before.abort(reason);
+    let invoked = 0;
+    await expect(
+      breaker.execute(() => {
+        invoked++;
+        return boom();
+      }, before.signal),
+    ).rejects.toBe(reason);
+    expect(invoked).toBe(0);
+    await expectReject(breaker.execute(boom));
+    expect(breaker.state).toBe('closed');
+    const active = new CircuitBreaker({ ...rate, minimumCalls: 2 }, () => 0);
+    await active.execute(ok);
+    const during = new AbortController();
+    const pending = active.execute(
+      (signal) =>
+        new Promise<never>((_resolve, reject) =>
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
         ),
-    ).toThrow(
-      new RangeError(
-        'circuitBreaker: the rate arm (failureRateThreshold) is not supported by this version of @setu-ts/resilience-plugin',
-      ),
+      during.signal,
     );
+    during.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(active.state).toBe('open');
   });
 });

@@ -18,11 +18,12 @@ import { create, createFileRegistry, fromBinary } from '@bufbuild/protobuf';
 import type { DescService } from '@bufbuild/protobuf';
 import { FileDescriptorProtoSchema, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { Code, ConnectError } from '@connectrpc/connect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import type { IPlugin, IServiceDiscovery, ITelemetryService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler } from '@setu-ts/exceptions';
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
 import type { EjectionOptions } from '@setu-ts/service-discovery-plugin';
 
@@ -463,6 +464,164 @@ interface Echo {
 }
 
 const fresh = (): Observed => ({ aborted: [], traceparents: [] });
+
+/**
+ * How a draining Setu server turns a new call away, by wire. Over HTTP/2 on
+ * Node the drain's GOAWAY refuses every new stream (REFUSED_STREAM), so the
+ * marked 503 never reaches the wire; over HTTP/1.1 the request reaches the
+ * kernel, which answers the marked drain 503. `grpc` has no HTTP/1.1 form.
+ */
+const DRAIN_WIRES = [
+  { protocol: 'connect', httpVersion: '1.1', turnedAway: 'marked 503' },
+  { protocol: 'grpc-web', httpVersion: '1.1', turnedAway: 'marked 503' },
+  { protocol: 'connect', httpVersion: '2', turnedAway: 'refused stream' },
+  { protocol: 'grpc', httpVersion: '2', turnedAway: 'refused stream' },
+  { protocol: 'grpc-web', httpVersion: '2', turnedAway: 'refused stream' },
+] as const;
+
+describeNode.each(DRAIN_WIRES)(
+  'kernel drain failover on $protocol over HTTP/$httpVersion',
+  ({ protocol, httpVersion, turnedAway }) => {
+    it.each([false, true])(
+      `resends the ${turnedAway} and every unary call succeeds (problem responder=%s)`,
+      async (problem) => {
+        let release!: () => void;
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        });
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let handlerCalls = 0;
+        const draining = createApplication({
+          plugins: [
+            RuntimePlugin({ http2: true }),
+            GrpcPlugin({
+              basePath: '/grpc',
+              services: [
+                {
+                  definition: SVC.echo,
+                  implementation: {
+                    echo: () => {
+                      handlerCalls++;
+                      return { response: 'should not run' };
+                    },
+                  },
+                },
+              ],
+            }),
+          ],
+        });
+        if (problem) draining.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }));
+        draining.router.get('/hold', async (ctx) => {
+          enter();
+          await held;
+          return ctx.response.text('released');
+        });
+        const port = await unusedPort();
+        await draining.start({ port, hostname: '127.0.0.1', drainTimeoutMs: 10000 });
+        apps.push(draining);
+        // A real admitted HTTP request holds the kernel in drain. No RPC sessions
+        // exist at stop(), so GOAWAY cannot substitute for the marked HTTP answer.
+        const hold = fetch(`http://127.0.0.1:${port}/hold`).then((reply) => reply.text());
+        await entered;
+        const stopping = draining.stop();
+        try {
+          const probe = await draining.inject({ method: 'GET', url: '/hold' });
+          expect(probe.statusCode).toBe(503);
+          expect(probe.headers.get(UNPROCESSED_HEADER)).toBe(UNPROCESSED_SHUTDOWN);
+          if (problem) expect(probe.headers.get('content-type')).toBe('application/problem+json');
+          const observed = fresh();
+          const live = await startServer(observed);
+          const caller = await startCaller(
+            [
+              { id: 'draining', port },
+              { id: 'live', port: live.port },
+            ],
+            {
+              ejection: {}, // retain both for repeated drain answers, below the five-failure trip
+              clients: { billing: { basePath: '/grpc', protocol, httpVersion, timeoutMs: 2000 } },
+            },
+          );
+          const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+          const reports = vi.spyOn(discovery, 'report');
+          const { Http2SessionManager } = await import('@connectrpc/connect-node');
+          const request = Http2SessionManager.prototype.request;
+          const refusals: number[] = [];
+          const requests = vi
+            .spyOn(Http2SessionManager.prototype, 'request')
+            .mockImplementation(async function (
+              this: InstanceType<typeof Http2SessionManager>,
+              ...args
+            ) {
+              const stream = await request.apply(this, args);
+              stream.on('close', () => {
+                if (stream.rstCode === 7) refusals.push(stream.rstCode);
+              });
+              return stream;
+            });
+          try {
+            const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+            for (let n = 0; n < 3; n++)
+              expect((await billing.echo({ message: 'ok' })).response).toBe('echo: ok');
+            expect(handlerCalls).toBe(0);
+            expect(observed.traceparents).toHaveLength(3);
+            // Over HTTP/1.1 no HTTP/2 stream exists, so a resend there can only
+            // come from the marker on the 503 the probe above read.
+            expect(refusals).toHaveLength(turnedAway === 'refused stream' ? 3 : 0);
+            expect(requests).toHaveBeenCalledTimes(httpVersion === '2' ? 6 : 0);
+            expect(reports.mock.calls.map(([peer, outcome]) => [peer.id, outcome])).toEqual(
+              Array.from({ length: 3 }, () => [
+                ['draining', 'failure'],
+                ['live', 'success'],
+              ]).flat(),
+            );
+          } finally {
+            reports.mockRestore();
+            requests.mockRestore();
+          }
+        } finally {
+          release();
+          await hold;
+          await stopping;
+        }
+      },
+    );
+
+    it('does not resend an unmarked 503 from a real Setu instance', async () => {
+      let answered = 0;
+      const control = createApplication({
+        plugins: [RuntimePlugin({ http2: true }), GrpcPlugin({ basePath: '/grpc' })],
+      });
+      control.middleware.add((ctx) => {
+        answered++;
+        return ctx.response
+          .status(503)
+          .json({ code: 'unavailable', message: 'application unavailable' });
+      });
+      const port = await unusedPort();
+      await control.start({ port, hostname: '127.0.0.1' });
+      apps.push(control);
+      const observed = fresh();
+      const live = await startServer(observed);
+      const caller = await startCaller(
+        [
+          { id: 'control', port },
+          { id: 'live', port: live.port },
+        ],
+        { clients: { billing: { basePath: '/grpc', protocol, httpVersion } } },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      const error = await failure(billing.echo({ message: 'first' }));
+      expect(error.code).toBe(Code.Unavailable);
+      expect(error.metadata.has(UNPROCESSED_HEADER)).toBe(false);
+      expect(answered).toBe(1);
+      expect(observed.traceparents).toHaveLength(0);
+      expect((await billing.echo({ message: 'next' })).response).toBe('echo: next');
+    });
+  },
+);
 
 describeNode('grpcClient scenarios', () => {
   it('a per-target deadline ends a slow call as DeadlineExceeded and aborts the handler; a per-call one overrides it', async () => {

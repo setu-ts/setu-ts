@@ -14,6 +14,62 @@ import { DnsProvider, lowestPriorityTier } from '../../src/providers/dns-provide
 import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 import { createFakeDns, createFakeRuntime, type FakeRuntime } from '../fixtures/fakes.ts';
 
+describe('DNS aggregate absence', () => {
+  const absent = (code: string) => Object.assign(new Error(code), { code });
+  const rows = [
+    ['lone absent', absent('ENOTFOUND'), true],
+    ['wrapped absent', new Error('wrapper', { cause: absent('ENOTFOUND') }), true],
+    ['both absent', new AggregateError([absent('ENOTFOUND'), absent('ENODATA')]), true],
+    ['mixed timeout', new AggregateError([absent('ENOTFOUND'), absent('ETIMEOUT')]), false],
+    ['both timeout', new AggregateError([absent('ETIMEOUT'), absent('ETIMEOUT')]), false],
+    [
+      'timeout code with absent name',
+      Object.assign(new Error(), { code: 'ETIMEOUT', name: 'NotFound' }),
+      false,
+    ],
+    ['empty aggregate', new AggregateError([]), false],
+    ['other code', new AggregateError([absent('ENOTFOUND'), absent('ESERVFAIL')]), false],
+    ['Deno absence', new AggregateError([Object.assign(new Error(), { name: 'NotFound' })]), true],
+    [
+      'failure wrapping absence',
+      Object.assign(new Error('timeout', { cause: absent('ENOTFOUND') }), { code: 'ETIMEOUT' }),
+      false,
+    ],
+    [
+      'member budget',
+      new AggregateError(Array.from({ length: 64 }, () => absent('ENOTFOUND'))),
+      false,
+    ],
+  ] as const;
+  it.each(rows)('%s is absent: %s', async (_label, error, expected) => {
+    expect(isNameAbsent(error)).toBe(expected);
+    const provider = srvProvider(createFakeDns({ srv: new Error('lookup', { cause: error }) }));
+    if (expected) {
+      expect(await provider.resolve('billing')).toEqual([]);
+      expect(await provider.isHealthy()).toBe(true);
+    } else {
+      await expect(provider.resolve('billing')).rejects.toThrow('lookup');
+      await expect(provider.isHealthy()).rejects.toThrow('lookup');
+    }
+  });
+  it('bounds aggregate depth, cycles and nested total member traversal', () => {
+    let error: Error = absent('ENOTFOUND');
+    for (let n = 0; n < 5; n++) error = new AggregateError([error]);
+    expect(isNameAbsent(error)).toBe(true);
+    expect(isNameAbsent(new AggregateError([error]))).toBe(false);
+    const cycle = new Error('cycle');
+    cycle.cause = cycle;
+    expect(isNameAbsent(cycle)).toBe(false);
+    const wide = new AggregateError(
+      Array.from(
+        { length: 8 },
+        () => new AggregateError(Array.from({ length: 8 }, () => absent('ENODATA'))),
+      ),
+    );
+    expect(isNameAbsent(wide)).toBe(false);
+  });
+});
+
 function srv(host: string, port: number, priority: number, weight: number): SrvRecord {
   return { host, port, priority, weight };
 }

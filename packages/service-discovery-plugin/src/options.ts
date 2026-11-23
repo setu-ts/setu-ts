@@ -122,6 +122,8 @@ export interface KubernetesDiscoveryOptions extends CommonDiscoveryOptions {
 interface DnsDiscoveryCommon extends CommonDiscoveryOptions {
   /** Discriminant. */
   readonly provider: 'dns';
+  /** IP literals with optional ports; requires runtime.createDnsResolver. @since 0.14.0 */
+  readonly servers?: readonly string[];
   /** `{service}` is replaced with the requested name. */
   readonly domainTemplate?: string;
   /** Whether resolved instances speak TLS. */
@@ -229,6 +231,54 @@ export interface ResolvedDiscoveryOptions {
 /** The largest `cacheTtlMs`: the largest delay a runtime timer accepts. */
 const MAX_CACHE_TTL_MS = 2147483647;
 
+/** Strict dotted IPv4, also used for the tail of an IPv4-mapped IPv6 literal. */
+function isIpv4(address: string): boolean {
+  const parts = address.split('.');
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255)
+  );
+}
+
+/** Web URL parsing validates IPv6 syntax without importing a runtime API. */
+function isIpv6(address: string): boolean {
+  if (!/^[\da-fA-F:.]+$/.test(address) || !address.includes(':')) return false;
+  if (address.includes('.') && !isIpv4(address.slice(address.lastIndexOf(':') + 1))) return false;
+  try {
+    new URL(`http://[${address}]/`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Matches the runtime's IP-literal grammar, including its refusal of IPv6 zones. */
+function validateDnsServers(servers: readonly string[]): void {
+  if (!Array.isArray(servers) || servers.length === 0) {
+    throw new RangeError('servers must be a non-empty array');
+  }
+  for (let index = 0; index < servers.length; index++) {
+    const entry = servers[index];
+    if (typeof entry === 'string') {
+      const bracketed = /^\[([^\]]+)\]:(\d+)$/.exec(entry);
+      const ipv4Port = /^([^:]+):(\d+)$/.exec(entry);
+      const parts = bracketed ?? ipv4Port;
+      const address = parts ? parts[1]! : entry;
+      const port = parts ? Number(parts[2]) : 53;
+      const validAddress = bracketed
+        ? isIpv6(address)
+        : ipv4Port
+          ? isIpv4(address)
+          : isIpv4(address) || isIpv6(address);
+      if (validAddress && port >= 1 && port <= 65535) continue;
+    }
+    const shown = typeof entry === 'string' ? `'${entry}'` : `(${typeof entry})`;
+    throw new RangeError(
+      `servers[${index}] ${shown} must be an IP literal with an optional decimal port (1..65535); a port needs brackets for IPv6`,
+    );
+  }
+}
+
 /**
  * Applies every documented default exactly once.
  *
@@ -242,6 +292,8 @@ const MAX_CACHE_TTL_MS = 2147483647;
  * @since 0.2.0
  */
 export function resolveOptions(options: ServiceDiscoveryPluginOptions): ResolvedDiscoveryOptions {
+  if (options.provider === 'dns' && options.servers !== undefined)
+    validateDnsServers(options.servers);
   const resolveTimeoutMs = options.resolveTimeoutMs ?? 2000;
   const emptyAnswerGraceMs = options.emptyAnswerGraceMs ?? 30_000;
   const cacheTtlMs = options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000;

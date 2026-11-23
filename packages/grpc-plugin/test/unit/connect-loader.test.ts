@@ -27,6 +27,21 @@ import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc
 import { fakeFile, fakeService } from '../fixtures/fake-connect-runtime.ts';
 import type { FileRegistryLike } from '../../src/interfaces/connect-runtime.ts';
 
+it('reads response metadata only from real Connect errors, for wire and non-wire answers', async () => {
+  const runtime = await loadConnectModule();
+  const headers = new Headers({ 'x-peer': 'draining' });
+  const fallback = new ConnectError('HTTP 503', Code.Unavailable, headers);
+  const wire = errorFromJson({}, headers, fallback);
+  expect(runtime.errorMetadata(fallback)).toBe(fallback.metadata);
+  expect(runtime.errorMetadata(wire)).toBe(wire.metadata);
+  expect(runtime.errorMetadata(wire)?.get('x-peer')).toBe('draining');
+  expect(
+    runtime.errorMetadata(new ConnectError('other code', Code.Internal, headers))?.get('x-peer'),
+  ).toBe('draining');
+  expect(runtime.errorMetadata(new Error('reset'))).toBeUndefined();
+  expect(runtime.errorMetadata({ metadata: headers })).toBeUndefined();
+});
+
 it('reads the real wire flag on trailer and JSON errors, never on HTTP-status or transport errors', async () => {
   const runtime = await loadConnectModule();
   const fallback = new ConnectError('HTTP 503', Code.Unavailable);

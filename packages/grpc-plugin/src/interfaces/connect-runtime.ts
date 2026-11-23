@@ -215,6 +215,8 @@ export interface ConnectRuntime {
 
   /** Whether an error is a Connect error with code `Unavailable`. */
   isUnavailable(error: unknown): boolean;
+  /** Response metadata on a Connect error, including non-wire HTTP status errors. */
+  errorMetadata(error: unknown): Headers | undefined;
   /** Whether Connect decoded the error from a server answer. */
   isWireError(error: unknown): boolean;
 }

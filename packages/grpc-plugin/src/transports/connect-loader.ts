@@ -66,7 +66,11 @@ export interface ConnectCoreModuleLike {
     metadata?: undefined,
     outgoingDetails?: undefined,
     cause?: unknown,
-  ) => Error & { readonly code: number; readonly isWireError?: boolean };
+  ) => Error & {
+    readonly code: number;
+    readonly isWireError?: boolean;
+    readonly metadata?: Headers;
+  };
   /** The `Code` enum; only `Unavailable` and `ResourceExhausted` are read. */
   Code: { readonly Unavailable: number; readonly ResourceExhausted: number };
 }
@@ -179,6 +183,9 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
     },
     isUnavailable(error: unknown): boolean {
       return error instanceof connect.ConnectError && error.code === connect.Code.Unavailable;
+    },
+    errorMetadata(error: unknown): Headers | undefined {
+      return error instanceof connect.ConnectError ? error.metadata : undefined;
     },
   };
 }

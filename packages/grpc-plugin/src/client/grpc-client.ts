@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { contextToTraceparent } from '@setu-ts/common';
+import { contextToTraceparent, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import type {
   GrpcClientOptions,
   GrpcServiceDefinition,
@@ -195,7 +195,7 @@ export function instanceOrigin(instance: ServiceInstance): string {
   return `${scheme}://${host}:${instance.port}`;
 }
 
-/** A refused stream, carrying the `Unavailable` error the caller will see. */
+/** An unprocessed call, carrying the `Unavailable` error the caller will see. */
 class RefusedStream {
   // A field, not a parameter property: the sources run through type stripping,
   // which accepts only erasable syntax.
@@ -410,8 +410,8 @@ export class GrpcClients {
   }
 
   /**
-   * Runs one call, retrying a unary call once when the server refused its
-   * stream (see {@linkcode isRefusedStream}).
+   * Runs one call, resending a unary call once when the peer guarantees it
+   * was not processed (a refused stream or marked shutdown Unavailable).
    */
   async #call(
     target: string,
@@ -440,12 +440,14 @@ export class GrpcClients {
       // A call with no deadline is retried with none.
       const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
       const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
-      if (!unary || (remaining !== undefined && remaining <= 0)) throw error.error;
+      if (!unary || signal?.aborted || (remaining !== undefined && remaining <= 0))
+        throw error.error;
       return this.#attempt(
         target,
         base,
         options,
-        (transport) => run(transport, remaining ?? timeoutMs),
+        (transport) =>
+          signal?.aborted ? Promise.reject(error.error) : run(transport, remaining ?? timeoutMs),
         signal,
       ).catch((again: unknown) => {
         throw again instanceof RefusedStream ? again.error : again;
@@ -496,7 +498,12 @@ export class GrpcClients {
         const calm = new GrpcExcessiveLoadError(error);
         throw runtime.resourceExhausted(calm.message, calm);
       }
-      if (!signal?.aborted && isRefusedStream(error)) {
+      if (
+        !signal?.aborted &&
+        (isRefusedStream(error) ||
+          (runtime.isUnavailable(error) &&
+            runtime.errorMetadata(error)?.get(UNPROCESSED_HEADER) === UNPROCESSED_SHUTDOWN))
+      ) {
         // The server never processed it: the instance's fault, and safe to send again.
         throw new RefusedStream(
           runtime.isUnavailable(error)

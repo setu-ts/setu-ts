@@ -127,7 +127,20 @@ export function createProvider(
     }
 
     case 'dns': {
-      if (runtime.dns === undefined) {
+      if (options.servers !== undefined && runtime.createDnsResolver === undefined) {
+        throw new DiscoveryUnavailableError(
+          'The dns servers option needs IRuntimeServices.createDnsResolver, which this runtime does not supply.',
+        );
+      }
+      const resolver =
+        options.servers === undefined
+          ? runtime.dns
+          : runtime.createDnsResolver!({
+              servers: options.servers,
+              // Core requires an integer; never shorten a configured fractional bound.
+              timeoutMs: Math.ceil(resolved.resolveTimeoutMs),
+            });
+      if (resolver === undefined) {
         throw new DiscoveryUnavailableError(
           "The 'dns' discovery provider needs IRuntimeServices.dns, which this " +
             'runtime does not supply (Cloudflare Workers has no resolver API). ' +
@@ -141,7 +154,7 @@ export function createProvider(
         resolveTimeoutMs: resolved.resolveTimeoutMs,
       };
       return new DnsProvider(
-        runtime.dns,
+        resolver,
         runtime,
         options.mode === 'a'
           ? { ...common, mode: 'a', port: options.port }

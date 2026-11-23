@@ -254,15 +254,22 @@ export function createFakeConnectRuntime(
     isUnavailable(error: unknown): boolean {
       return error instanceof FakeUnavailableError;
     },
+    errorMetadata(error: unknown): Headers | undefined {
+      return error instanceof FakeUnavailableError || error instanceof FakeResourceExhaustedError
+        ? error.metadata
+        : undefined;
+    },
   };
 }
 
 /** The fake runtime's `Unavailable` error. */
 export class FakeUnavailableError extends Error {
   readonly code = 14;
+  readonly metadata = new Headers();
 }
 
 /** The fake runtime's `ResourceExhausted` error. */
 export class FakeResourceExhaustedError extends Error {
   readonly code = 8;
+  readonly metadata = new Headers();
 }

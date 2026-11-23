@@ -180,11 +180,20 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
   call once more on another pick, within what is left of the call's deadline (its own, or the
   configured one). That spares most unary calls during a restart; a call whose retry is refused too
-  (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`.
-  Only the refusal itself is resent — Node's stream error, connect-node's own reading of the reset
-  code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one whose
-  message names `REFUSED_STREAM`: that server ran its handler. A drain 503 is **not resent**; it
-  reports failure under the outcome rule above. The server's own post-`close()` 503 is unmarked.
+  (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`. A
+  refused stream (Node's stream error, connect-node's own reading of the reset code, or Bun's stream
+  refused after `GOAWAY`; never an error a server sent, even one whose message names
+  `REFUSED_STREAM`: that server ran its handler) or an `Unavailable` carrying response metadata
+  `x-setu-unprocessed: shutdown` gets this one resend. The marker comparison is exact and does not
+  depend on the wire flag. The kernel's pre-pipeline drain 503 carries it even with a custom error
+  responder. Over HTTP/2 a draining Setu server on Node refuses a new stream instead (its drain
+  `GOAWAY`), so the marked 503 reaches a client over HTTP/1.1 (`httpVersion: '1.1'` on `connect` or
+  `grpc-web`) or through a proxy that forwards the kernel's answer. Unmarked `Unavailable`, other
+  marker values, other codes and streaming calls are not resent. A second marked failure surfaces to
+  the caller. Caller abort prevents resend. The instance still reports failure. The header is
+  reserved: an application setting it on its own `Unavailable` claims the request was not processed
+  and gets one resend of that unary call. The kernel does not strip it from application responses.
+  The server's own post-`close()` 503 is unmarked.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.

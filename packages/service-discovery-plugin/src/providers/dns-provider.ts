@@ -240,19 +240,31 @@ export class DnsProvider implements DiscoveryProvider {
 }
 
 /**
- * Whether DNS says the name or record type is absent, through at most five causes.
+ * Whether DNS says the name or record type is absent, through at most five
+ * cause/member edges and 64 nodes. Every aggregate member must say absent;
+ * truncation, an empty aggregate or any other failure is not absence.
  * @param error - DNS rejection, possibly wrapped by the runtime
  * @returns Whether the name is absent
  * @internal
  */
 export function isNameAbsent(error: unknown): boolean {
-  let current = error;
-  for (let depth = 0; depth <= 5; depth++) {
+  let remaining = 64;
+  const visit = (current: unknown, depth: number): boolean => {
+    if (depth > 5 || --remaining < 0) return false;
     if (current === null || typeof current !== 'object') return false;
+    if (current instanceof AggregateError) {
+      const members: unknown[] = current.errors;
+      return (
+        members.length > 0 &&
+        members.length <= remaining &&
+        members.every((member) => visit(member, depth + 1))
+      );
+    }
     const record = current as { code?: unknown; name?: unknown; cause?: unknown };
-    if (record.code === 'ENOTFOUND' || record.code === 'ENODATA' || record.name === 'NotFound')
-      return true;
-    current = record.cause;
-  }
-  return false;
+    // An explicit failure code must not be hidden by an absent nested cause.
+    if (record.code !== undefined) return record.code === 'ENOTFOUND' || record.code === 'ENODATA';
+    if (record.name === 'NotFound') return true;
+    return visit(record.cause, depth + 1);
+  };
+  return visit(error, 0);
 }

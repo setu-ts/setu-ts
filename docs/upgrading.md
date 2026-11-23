@@ -30,6 +30,12 @@ Missing DNS names now resolve `[]`, as static unknown names do, rather than caus
 retaining removed records indefinitely. Use a trusted host resolver. Other DNS errors remain
 failures, reflected in health, including hung lookups.
 
+No DNS configuration change is required. To select name servers, add the DNS arm's `servers` option
+with IP literals (optional ports; IPv6 ports need brackets). This requires a runtime with
+`createDnsResolver` (Node, Bun or Deno; not Workers). Fractional `resolveTimeoutMs` values round up
+for the runtime's integer whole-lookup bound. On Deno SERVFAIL reads as absence after the grace
+rule, and the underlying lookup may end about 2 s past the bound.
+
 Consul defaults the registration id to `<serviceName>-<address>-<port>` so restarts replace their
 own entry. Explicit ids still win. Once after upgrading, list `/v1/agent/services`, identify old
 uuid entries left by crashed processes, and deregister each via
@@ -51,11 +57,18 @@ concurrent streams, or keep fewer large replies in flight on one connection. A f
 faults raised before the request leaves (binary serialization, `writeMaxBytes`, a request header
 Node refuses) report nothing, and a header `Headers` rejects fails the call before any instance is
 picked. Caller abort reports nothing. Tight deadlines can therefore eject healthy instances; size
-deadlines for normal latency. Streaming still reports success at response headers only. A drain 503
-is not resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a
-single Service address pins a connection to one pod. Cancelling a response stream aborts the
-handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it to exit
-promptly.
+deadlines for normal latency. Streaming still reports success at response headers only. A unary
+`Unavailable` carrying exactly `x-setu-unprocessed: shutdown` now gets one resend on a new pick
+within the remaining deadline, regardless of wire status. This covers the kernel's pre-pipeline
+drain 503, including custom error responders, which reaches a client over HTTP/1.1 or through a
+proxy (over HTTP/2 a draining Node server refuses the stream, resent as before). The header is
+reserved: remove it from application errors unless the request was not processed and one resend is
+safe. Setting it on an application's own `Unavailable` makes that claim and gets the same resend;
+the kernel does not strip it. Streaming calls, other codes and unmarked errors are not resent. The
+instance still reports failure, a second marked failure surfaces, and caller abort prevents resend.
+Discover individual pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a single Service
+address pins a connection to one pod. Cancelling a response stream aborts the handler's `ctx.signal`
+before awaiting cleanup without a bound; handlers must observe it to exit promptly.
 
 Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
 the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause
@@ -159,8 +172,13 @@ may send that request again.
   code coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
   negative, infinite or over-range `resetTimeout`, or a missing one. A `timeout: Infinity` once
   meant "failures in a row": use a finite window, or the rate arm.
-- **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
-  rate policy throws a `RangeError` when `wrap()` builds the breaker.
+- **The resilience plugin.** `ResiliencePlugin` now takes both arms through the same shared window.
+  Existing valid count policies keep their behavior. Invalid `defaultCircuitBreaker` now throws
+  `RangeError` at plugin registration, and invalid explicit policies at `wrap()`. Use a positive
+  safe integer `threshold`/`minimumCalls`, finite 1–100 `failureRateThreshold`, finite `timeout`
+  greater than 0 (count) or at least 10 (rate), at most 2147483647, and finite `resetTimeout` from 0
+  to 2147483647. Choose one arm: combining count and rate fields is refused. Rate expiry uses ten
+  buckets; choose `minimumCalls` to avoid tripping on low-volume noise.
 
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 

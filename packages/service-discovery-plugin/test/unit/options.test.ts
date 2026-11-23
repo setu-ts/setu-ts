@@ -12,6 +12,62 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveOptions } from '../../src/options.ts';
 
+describe('DNS servers', () => {
+  it.each([
+    '127.0.0.1',
+    '127.0.0.1:7853',
+    '::1',
+    '[::1]:53',
+    '2001:db8::1',
+    '::ffff:192.0.2.1',
+    '::1:5353',
+  ])('accepts the IP literal %s', (entry) => {
+    expect(() =>
+      ServiceDiscoveryPlugin({ provider: 'dns', mode: 'srv', servers: [entry] }),
+    ).not.toThrow();
+  });
+  it.each([
+    'localhost',
+    '127.0.0.1:65536',
+    '127.0.0.1:0',
+    '',
+    '::1:78533',
+    '[::1]:0',
+    '[::1]:65536',
+    '[::1]',
+    '[127.0.0.1]:53',
+    'fe80::1%eth0',
+    '[fe80::1%eth0]:53',
+    ' 127.0.0.1',
+    '127.01.0.1',
+    '256.0.0.1',
+    '::ffff:192.00.2.1',
+    '1::2::3',
+    '[::1]:-1',
+    '[::1]:1.5',
+    '::g',
+  ])('refuses servers entry %s at construction', (entry) => {
+    expect(() =>
+      ServiceDiscoveryPlugin({ provider: 'dns', mode: 'srv', servers: [entry] }),
+    ).toThrow(RangeError);
+    expect(() =>
+      ServiceDiscoveryPlugin({ provider: 'dns', mode: 'srv', servers: [entry] }),
+    ).toThrow(`'${entry}'`);
+  });
+  it.each([[], new Array<string>(1), [null], '127.0.0.1'])(
+    'refuses an empty, sparse or non-string list: %j',
+    (servers) => {
+      expect(() =>
+        ServiceDiscoveryPlugin({
+          provider: 'dns',
+          mode: 'srv',
+          servers: servers as readonly string[],
+        }),
+      ).toThrow('servers');
+    },
+  );
+});
+
 describe('resolveOptions', () => {
   it('applies every documented default', () => {
     const resolved = resolveOptions({ provider: 'static', services: {} });
