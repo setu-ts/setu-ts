@@ -82,7 +82,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
   `circuitBreaker.threshold must be >= 1` text needs the new one. Values accepted before and refused
   now: a non-integer `threshold`; a `timeout` of 0 or less, `Infinity` or above 2147483647 (a
   `timeout: Infinity` once meant "failures in a row" — use a finite window, or the rate arm); a
-  negative, infinite or over-range `resetTimeout`.
+  negative, infinite or over-range `resetTimeout`; `NaN` or a numeric string for `timeout` or
+  `resetTimeout` (the old code coerced strings); a whole `threshold` above
+  `Number.MAX_SAFE_INTEGER`; a missing `timeout` or `resetTimeout`.
 - **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
   rate policy throws a `RangeError` when `wrap()` builds the breaker.
 

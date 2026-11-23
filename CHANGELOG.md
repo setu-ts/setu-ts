@@ -61,7 +61,8 @@ All notable changes to this project are documented here. The format follows
   (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
   `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
   non-integer `threshold`, a `timeout` of 0 or less, `Infinity` or above 2147483647, and a negative,
-  infinite or over-range `resetTimeout`.
+  infinite or over-range `resetTimeout`, `NaN` or numeric strings for either window, and a missing
+  `timeout` or `resetTimeout`.
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A

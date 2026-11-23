@@ -283,9 +283,9 @@ const client = createClient({
 });
 ```
 
-Per-origin circuit breaker, on the shared trip rule `createBreakerWindow` from `@setu-ts/common`. An
-open circuit throws `ClientCircuitOpenError` before consuming a rate-limit slot. The breaker counts
-one failure per exhausted transient sequence (not one per retry attempt). A success never clears
+Per-origin circuit breaker, on the trip rule `createBreakerWindow` from `@setu-ts/common`. An open
+circuit throws `ClientCircuitOpenError` before consuming a rate-limit slot. The breaker counts one
+failure per exhausted transient sequence (not one per retry attempt). A success never clears
 recorded failures: five failures within `timeout` trip the count arm above however many successes
 fall between them. An invalid policy, or one mixing both arms, throws a `RangeError` naming the
 field when the client is built.

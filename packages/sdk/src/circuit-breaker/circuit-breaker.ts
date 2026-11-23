@@ -6,8 +6,8 @@
  * classifier that decides how each rejection is recorded.
  *
  * Design notes:
- * - The trip rule is `createBreakerWindow`'s, from `@setu-ts/common`, with the
- *   count rule the resilience plugin's own breaker applies. A success never clears recorded failures: the count arm trips
+ * - The trip rule is `createBreakerWindow`'s, from `@setu-ts/common`; its count
+ *   arm is the rule the resilience plugin's own breaker applies. A success never clears recorded failures: the count arm trips
  *   on `threshold` failures within the rolling `timeout`, however many
  *   successes fall between them.
  * - The open→half-open cooldown is measured from `openedAt` — the moment the

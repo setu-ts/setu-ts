@@ -3,8 +3,7 @@ import * as nodeFs from 'node:fs/promises';
 /**
  * The SDK's `common` imports stay type-only (M98n §3.3, audit row O10), with
  * one allowed exception: value imports from `@setu-ts/common/breaker-window`,
- * the dependency-free module holding the circuit-breaker trip rule both
- * breakers share. The outbound HTTP collector is a deliberate local copy
+ * the dependency-free module holding the circuit-breaker trip rule. The outbound HTTP collector is a deliberate local copy
  * precisely so the browser-portable SDK carries no other `common` runtime
  * code. Both a source scan and the module graph are checked, so a value import
  * cannot slip in either way.
