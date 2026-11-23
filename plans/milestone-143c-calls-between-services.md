@@ -713,9 +713,10 @@ because the drain answer is written through the application's error responder wh
   session; the pick itself records nothing. Not covered: calls started before the session holds the
   peer's SETTINGS (the first on each new HTTP/2 session, and after a reconnect or GOAWAY)
   (connect-node's `gotoReady` waits only for the `connect` event, not the peer's SETTINGS, so the
-  limit still reads 4294967295; found in review), and a peer that advertises no limit. Node's own
-  server then refuses an oversized list (measured at 65620 octets) with `REFUSED_STREAM`; the F2
-  residual entry below covers that case. grpc-go's handling of an over-limit send is not verified.
+  limit still reads 4294967295; found in review), and a peer that advertises no limit. On Node an
+  oversized list is then refused with `REFUSED_STREAM` by the client's own HTTP/2 library, before
+  any frame is sent (second re-audit, L2); the F2 residual entry below covers that case. grpc-go's
+  handling of an over-limit send is not verified.
 - **F4, absent names do not grow the cache (coordinator decision A).** A cold empty answer is cached
   like any other, but at most 256 unwatched names that have only ever answered empty stay cached;
   past that the oldest is evicted (a failing one last, its retry spacing and reporter with it), and
@@ -754,8 +755,10 @@ because the drain answer is written through the application's error responder wh
     a `REFUSED_STREAM` on that call is the caller's fault: no outcome is reported, no resend, and
     the call fails with `GrpcHeaderListTooLargeError` (the F2 guard's error and `callOutcome`
     exemption). A `REFUSED_STREAM` on a call at or under 64 KiB stays a refused stream (`failure`
-    and a resend). The 64 KiB threshold is one named constant citing the measurement: Node's server
-    refused 65,620 octets without advertising a limit, and grpc-go's server advertises one only when
+    and a resend). The 64 KiB threshold is one named constant citing the measurement: on Node the
+    client's own HTTP/2 library refuses to send a list over 64 KiB (smallest refused 65,660 octets;
+    the first text here said Node's server refused it, corrected after the second re-audit, L2),
+    another peer may refuse a large list itself, and grpc-go's server advertises one only when
     configured (`internal/transport/http2_server.go:205`, read 2026-11-23) while enforcing its own
     default (`:173-178`), so the client does not rely on the peer advertising. A refusal from a peer
     that is shutting down (GOAWAY, so the client session is already closed) stays a refused stream
@@ -793,6 +796,42 @@ because the drain answer is written through the application's error responder wh
     replicas advertising 16384 still exempt 12 calls with a 17 KiB header (nothing ejected, no
     stream reaches a peer).
 
+- **Second re-audit of dcad54a7d..6d91f4750 (2026-11-23), fresh agent; record
+  `m143c-reaudit2-record.md`.** F3 option B, F2 residual (a) and F5 option A passed with negative
+  controls; F1, F2, F4, F6, F7 stay closed. Three new findings, all decided by the maintainer on
+  2026-11-23:
+  - **N1 (Medium, predated the range): DECIDED option (d).** 128 or more small caller headers (about
+    5 KB) exceeded Node's server `maxHeaderListPairs`; the server reset the stream with
+    `ENHANCE_YOUR_CALM`, which reported `failure`, so 12 calls ejected a healthy replica. Rule: a
+    stream reset with `ENHANCE_YOUR_CALM` never counts against the instance, whatever the call sent,
+    and is not resent; the call fails as `ResourceExhausted` with a new exported
+    `GrpcExcessiveLoadError` as its `cause`. No field-count threshold and no Node constant. Matched
+    only on errors that are not a server answer, by Node's stream error (`ERR_HTTP2_STREAM_ERROR`
+    naming `NGHTTP2_ENHANCE_YOUR_CALM`) or connect-node's exact reading of the reset code with no
+    response metadata (`isExcessiveLoadReset` in `call-outcome.ts`); the wrapping uses a new
+    internal `ConnectRuntime.resourceExhausted`. Evidence: RFC 9113 §7 defines the code as the peer
+    "exhibiting a behavior that might be generating excessive load" (a statement about the client);
+    Node's `node_http2.cc` sends it for more than 128 header pairs and for too many concurrent
+    streams; grpc-go maps it to `codes.ResourceExhausted` (`http_util.go` `http2ErrConvTab`); gRFC
+    A8 has the client double its own keepalive on a GOAWAY `ENHANCE_YOUR_CALM` `too_many_pings`;
+    only Envoy appears to count it for ejection, and a `router.cc` source comment says an upstream
+    reset "should be treated as external origin error". Accepted cost: a server that sends it
+    wrongly is never ejected; its calls still fail visibly. Scope is a stream reset; connect-node
+    already maps a GOAWAY `too_many_pings` to its own `ResourceExhausted`, which this rule does not
+    change. A reset for too many concurrent streams is not driven in a test: a compliant client
+    honours the peer's `SETTINGS_MAX_CONCURRENT_STREAMS`, so only the table rows cover the shape.
+  - **L1 (Low, from F3 option B): DECIDED document only.** On the default `connect` protocol any
+    non-200 JSON body parses as a server answer (`errorFromJson` sets `isWireError` for any JSON
+    object and falls back to the HTTP-derived code), so a wrong service or proxy answering JSON 500
+    or 400 counts as answered and is not ejected; an HTML error page still is. connect does not
+    expose whether the body carried a `code` field (checked in `protocol-connect/error-json.js`: the
+    fallback code is used silently and no flag is kept), so a code-less body cannot be told apart
+    cheaply. The README and PUBLIC_API state it beside the readiness remedy.
+  - **L2 (Low): DECIDED correct the wording.** On Node the refusal of a list over 64 KiB comes from
+    the client's own HTTP/2 library before anything is sent, not from the peer. The error message,
+    README, JSDoc and this plan now say "the client's HTTP/2 library refused to send it"; the rule
+    and the closing-session resend are unchanged.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none in this lane. `DiscoveryProvider.resolve` gains an optional
@@ -814,6 +853,9 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `ConnectRuntime.errorMetadata`                                          | internal port member         | The marked-503 resend rule in `GrpcClients.#call` (after the Core gate, §3.9). Not exported; added only with §3.9.                                                          |
 | Streaming-procedure local `AbortController`                             | internal (no symbol)         | `rpc-dispatcher.ts` creates it; `iterableStream` and `nativeGrpcReply` `cancel()` abort it (§3.11).                                                                         |
 | `callOutcome`                                                           | internal function            | `GrpcClients.#attempt` and `#call`. Not exported.                                                                                                                           |
+| `GrpcExcessiveLoadError`                                                | class, barrel export         | Built by `GrpcClients.#attempt` for an `ENHANCE_YOUR_CALM` reset; callers read it as the call error's `cause` (§3.12, N1).                                                  |
+| `ConnectRuntime.resourceExhausted`                                      | internal port member         | `GrpcClients.#attempt` wraps the N1 error in a `ResourceExhausted` `ConnectError`. Not exported.                                                                            |
+| `isExcessiveLoadReset`                                                  | internal function            | `callOutcome` and `GrpcClients.#attempt`. Not exported.                                                                                                                     |
 | `GrpcHeaderListTooLargeError`                                           | class, barrel export         | Thrown by the header-list guard; `callOutcome` exempts it; callers read it as the call error's `cause` (§3.12).                                                             |
 | `validateCircuitBreakerPolicy`                                          | internal function            | `ResiliencePlugin.register` and `ResilienceService.#resolveCircuitBreaker`. Not exported.                                                                                   |
 

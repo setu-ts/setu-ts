@@ -16,18 +16,21 @@ const NO_ADVERTISED_LIMIT = 4294967295;
 
 /**
  * Caller threshold when no header-list limit was known when the call started
- * and the peer refuses the stream while its session is still open.
- * Node 24's HTTP/2 server advertised no maxHeaderListSize and refused a
- * 65,620-octet list with REFUSED_STREAM. grpc-go also advertises only when
- * configured (internal/transport/http2_server.go:205), so we cannot rely on
- * the peer advertising. Larger lists that the peer accepts remain allowed.
+ * and the stream is refused while its session is still open. On Node 24 the
+ * client's own HTTP/2 library refuses to send a list over 64 KiB, resetting the
+ * stream with REFUSED_STREAM before any frame reaches the peer (measured; the
+ * smallest list refused was 65,660 octets); another peer may refuse a large list
+ * itself, and grpc-go's server advertises its limit only when configured
+ * (internal/transport/http2_server.go:205), so the client does not rely on the
+ * peer advertising. Larger lists that are sent and answered remain allowed.
  * @internal
  */
 export const UNADVERTISED_HEADER_LIST_LIMIT = 65536;
 
 /**
- * A peer refusing a list at or below this floor advertised less than any gRPC
- * default, so the instance fails and the call can be resent safely.
+ * When a list at or below this floor exceeds a peer's advertised limit, that peer
+ * advertised less than any gRPC default, so the instance fails and the call can be
+ * resent safely.
  * gRPC core's GRPC_ARG_MAX_METADATA_SIZE: "Defaults to maximum of 8 KB and"
  * 0.8 × the absolute limit (include/grpc/impl/channel_arg_names.h):
  * https://github.com/grpc/grpc/blob/master/include/grpc/impl/channel_arg_names.h

@@ -2,9 +2,17 @@ import { expect, it } from 'vitest';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
-import { callOutcome, GRPC_CODE, isRefusedStream } from '../../src/client/call-outcome.ts';
+import {
+  callOutcome,
+  GRPC_CODE,
+  isExcessiveLoadReset,
+  isRefusedStream,
+} from '../../src/client/call-outcome.ts';
 import { PeerHeaderListLimitError } from '../../src/client/header-list-guard.ts';
-import { GrpcHeaderListTooLargeError } from '../../src/errors/grpc-errors.ts';
+import {
+  GrpcExcessiveLoadError,
+  GrpcHeaderListTooLargeError,
+} from '../../src/errors/grpc-errors.ts';
 
 it('counts an undersized advertised limit as a refused instance fault, but exempts oversized caller headers', async () => {
   const runtime = await loadConnectModule();
@@ -262,3 +270,77 @@ it('does not attribute a request header Node refuses before sending to the insta
     expect(callOutcome(other, undefined, runtime.isWireError)).toBe('failure');
   }
 });
+
+const CALM_NODE = 'Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM';
+const CALM_CONNECT = 'http/2 stream closed with error code ENHANCE_YOUR_CALM (0xb)';
+const calmNode = (): Error =>
+  Object.assign(new Error(CALM_NODE), { code: 'ERR_HTTP2_STREAM_ERROR' });
+
+// [label, error, isWireError, the matcher's answer, callOutcome]
+for (const [label, build, wire, matches, expected] of [
+  ["Node's stream error", () => calmNode(), false, true, undefined],
+  [
+    "Node's stream error under connect's wrapper",
+    () =>
+      new ConnectError(`[internal] ${CALM_NODE}`, Code.Internal, undefined, undefined, calmNode()),
+    false,
+    true,
+    undefined,
+  ],
+  [
+    "connect-node's reading of the reset code",
+    () => new ConnectError(CALM_CONNECT, Code.ResourceExhausted),
+    false,
+    true,
+    undefined,
+  ],
+  ['the client error itself', () => new GrpcExcessiveLoadError(calmNode()), false, true, undefined],
+  [
+    'a ConnectError wrapping the client error',
+    () =>
+      new ConnectError(
+        'calm',
+        Code.ResourceExhausted,
+        undefined,
+        undefined,
+        new GrpcExcessiveLoadError(),
+      ),
+    false,
+    true,
+    undefined,
+  ],
+  [
+    "connect-node's text with response metadata (a server sent it)",
+    () =>
+      new ConnectError(CALM_CONNECT, Code.ResourceExhausted, {
+        'content-type': 'application/grpc',
+      }),
+    false,
+    false,
+    'failure',
+  ],
+  ['the text without the stream-error code', () => new Error(CALM_NODE), false, false, 'failure'],
+  [
+    'another stream error',
+    () => Object.assign(new Error('NGHTTP2_CANCEL'), { code: 'ERR_HTTP2_STREAM_ERROR' }),
+    false,
+    false,
+    'failure',
+  ],
+  // callOutcome consults the matcher only for errors that are not a server answer.
+  ['a wire error copying the text', () => calmNode(), true, true, 'failure'],
+  [
+    "a wire ResourceExhausted copying connect-node's text",
+    () => new ConnectError(CALM_CONNECT, Code.ResourceExhausted),
+    true,
+    true,
+    'success',
+  ],
+] as const) {
+  it(`classifies an ENHANCE_YOUR_CALM shape: ${label} → ${String(expected)}`, () => {
+    const error = build();
+    expect(isExcessiveLoadReset(error)).toBe(matches);
+    expect(callOutcome(error, undefined, () => wire)).toBe(expected);
+    expect(isRefusedStream(error)).toBe(false);
+  });
+}

@@ -108,6 +108,7 @@ export function callOutcome(
     typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   const wire = isWireError(error);
   if (!wire && isPreSendFault(error, code)) return undefined;
+  if (!wire && isExcessiveLoadReset(error)) return undefined;
   if (typeof code === 'number' && FAILURE_CODES.has(code)) return 'failure';
   if (code === GRPC_CODE.Canceled) return 'failure';
   if (typeof code === 'number' && wire && WIRE_SUCCESS_CODES.has(code)) return 'success';
@@ -160,6 +161,50 @@ function hasInvalidRequestHeaderCause(error: object): boolean {
   for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
     const { code, cause } = current as { code?: unknown; cause?: unknown };
     if (typeof code === 'string' && INVALID_REQUEST_HEADER_CODES.has(code)) return true;
+    current = cause;
+  }
+  return false;
+}
+
+/** connect-node's message for an `ENHANCE_YOUR_CALM` reset code (`connectErrorFromH2ResetCode`). */
+const CONNECT_NODE_CALM = 'http/2 stream closed with error code ENHANCE_YOUR_CALM (0xb)';
+
+/**
+ * Whether the server reset the call's stream with HTTP/2 `ENHANCE_YOUR_CALM`
+ * (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says
+ * for more than 128 header fields or too many concurrent streams). Matched in the
+ * cause chain (at most five objects) by Node's own stream error, by connect-node's
+ * exact reading of the reset code with no response metadata, or by the client's
+ * `GrpcExcessiveLoadError` (by name). The caller passes only errors that are not
+ * a server answer, so a server message copying the text never matches.
+ *
+ * @param error - The call's error
+ * @returns `true` when the reset was `ENHANCE_YOUR_CALM`
+ */
+export function isExcessiveLoadReset(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    const { name, message, code, cause, rawMessage, metadata } = current as {
+      name?: unknown;
+      message?: unknown;
+      code?: unknown;
+      cause?: unknown;
+      rawMessage?: unknown;
+      metadata?: unknown;
+    };
+    if (name === 'GrpcExcessiveLoadError') return true;
+    if (
+      code === 'ERR_HTTP2_STREAM_ERROR' &&
+      typeof message === 'string' &&
+      message.includes('NGHTTP2_ENHANCE_YOUR_CALM')
+    )
+      return true;
+    if (
+      rawMessage === CONNECT_NODE_CALM &&
+      metadata instanceof Headers &&
+      metadata.keys().next().done === true
+    )
+      return true;
     current = cause;
   }
   return false;

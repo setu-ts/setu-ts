@@ -41,6 +41,7 @@ export { grpcClient, grpcClientProvider } from './client/grpc-client-helper.ts';
 // Re-export errors
 export {
   GrpcDescriptorError,
+  GrpcExcessiveLoadError,
   GrpcHeaderListTooLargeError,
   GrpcRuntimeLoadError,
   GrpcUnavailableError,

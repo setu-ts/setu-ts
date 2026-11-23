@@ -41,14 +41,18 @@ own. Every other server answer reports success, including application codes and 
 `Unknown`, `DataLoss`. The same codes without a server answer fail. A request that makes a healthy
 handler throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a
 broken dependency, say) is not ejected by call outcomes. Take it out through readiness (health
-checks) instead. A few client-side faults raised before the request leaves (binary serialization,
-`writeMaxBytes`, a request header Node refuses) report nothing, and a header `Headers` rejects fails
-the call before any instance is picked. Caller abort reports nothing. Tight deadlines can therefore
-eject healthy instances; size deadlines for normal latency. Streaming still reports success at
-response headers only. A drain 503 is not resent. Discover individual pods (headless DNS mode `'a'`
-or Kubernetes) to spread calls; a single Service address pins a connection to one pod. Cancelling a
-response stream aborts the handler's `ctx.signal` before awaiting cleanup without a bound; handlers
-must observe it to exit promptly.
+checks) instead; the same holds for a wrong service or proxy answering JSON 500 or 400 on the
+default `connect` protocol. A stream the server resets with HTTP/2 `ENHANCE_YOUR_CALM` is never
+counted against the instance or resent; the call fails as `ResourceExhausted` with
+`GrpcExcessiveLoadError` as its `cause`; send fewer headers or fewer concurrent streams. A few
+client-side faults raised before the request leaves (binary serialization, `writeMaxBytes`, a
+request header Node refuses) report nothing, and a header `Headers` rejects fails the call before
+any instance is picked. Caller abort reports nothing. Tight deadlines can therefore eject healthy
+instances; size deadlines for normal latency. Streaming still reports success at response headers
+only. A drain 503 is not resent. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to
+spread calls; a single Service address pins a connection to one pod. Cancelling a response stream
+aborts the handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it
+to exit promptly.
 
 Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
 the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause
@@ -57,11 +61,11 @@ counts as `failure` against the instance; unary calls are resent once to another
 remaining deadline, like a refused stream: that peer advertised less than any gRPC default. If the
 resend meets the same fault, `Unavailable` names the header size and advertised limit. When no
 header-list limit was known when the call started, a sent list over 65536 octets becomes that same
-caller error only on `REFUSED_STREAM`; `size` is the RFC 7541 §4.1 list size and `limit` is the
-client's 65536 threshold. Neither case reports an outcome or resends. At or under 65536,
-refused-stream failure and resend remain; an accepted larger list is unaffected. Shrink the headers
-on this error. A refusal from a peer shutting down (its session closed or destroyed) stays a refused
-stream and is resent.
+caller error only on `REFUSED_STREAM` (on Node the client's HTTP/2 library refused to send it);
+`size` is the RFC 7541 §4.1 list size and `limit` is the client's 65536 threshold. Neither case
+reports an outcome or resends. At or under 65536, refused-stream failure and resend remain; an
+accepted larger list is unaffected. Shrink the headers on this error. A refusal from a peer shutting
+down (its session closed or destroyed) stays a refused stream and is resent.
 
 ### Module pages (`@setu-ts/cli`)
 

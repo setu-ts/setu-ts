@@ -244,6 +244,10 @@ export function createFakeConnectRuntime(
       return new FakeUnavailableError(message);
     },
 
+    resourceExhausted(message: string, cause?: unknown): Error {
+      return new FakeResourceExhaustedError(message, { cause });
+    },
+
     isWireError(error: unknown): boolean {
       return error instanceof Error && 'isWireError' in error && error.isWireError === true;
     },
@@ -256,4 +260,9 @@ export function createFakeConnectRuntime(
 /** The fake runtime's `Unavailable` error. */
 export class FakeUnavailableError extends Error {
   readonly code = 14;
+}
+
+/** The fake runtime's `ResourceExhausted` error. */
+export class FakeResourceExhaustedError extends Error {
+  readonly code = 8;
 }

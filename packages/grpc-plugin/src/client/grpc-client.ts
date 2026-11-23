@@ -22,7 +22,8 @@ import type {
 import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
-import { callOutcome, isRefusedStream } from './call-outcome.ts';
+import { callOutcome, isExcessiveLoadReset, isRefusedStream } from './call-outcome.ts';
+import { GrpcExcessiveLoadError } from '../errors/grpc-errors.ts';
 import { findPeerHeaderListLimitError, guardHeaderList } from './header-list-guard.ts';
 
 /** Every option, resolved. */
@@ -489,6 +490,12 @@ export class GrpcClients {
     } catch (error) {
       const outcome = callOutcome(error, signal, runtime.isWireError);
       if (outcome !== undefined) this.#report(discovery, instance, outcome);
+      if (!signal?.aborted && !runtime.isWireError(error) && isExcessiveLoadReset(error)) {
+        // The server judged this client's behaviour excessive: the caller's to
+        // change, so neither counted against the instance nor sent again.
+        const calm = new GrpcExcessiveLoadError(error);
+        throw runtime.resourceExhausted(calm.message, calm);
+      }
       if (!signal?.aborted && isRefusedStream(error)) {
         // The server never processed it: the instance's fault, and safe to send again.
         throw new RefusedStream(

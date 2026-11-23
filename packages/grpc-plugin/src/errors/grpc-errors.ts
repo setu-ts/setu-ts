@@ -62,14 +62,16 @@ export class GrpcUnavailableError extends Error {
 /**
  * A client call whose request header list exceeds both the peer's advertised
  * limit and 8 KiB, or the client's threshold when no header-list limit was known
- * when the call started and the peer refuses it. At or under 8 KiB, exceeding an
+ * when the call started and the stream is refused (on Node the client's HTTP/2
+ * library refuses to send a list over 64 KiB, before any frame reaches the peer). At or under 8 KiB, exceeding an
  * advertised limit instead counts against the instance; unary calls are resent
  * once within the remaining deadline: that peer advertised less than any gRPC default.
  * For an advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`, the call is stopped before
  * the peer processes it (a call started before the session holds the peer's
  * SETTINGS, such as the first on a new session, is not checked). If no header-list
  * limit was known when the call started, a list over the client's 64 KiB threshold
- * becomes this error only when the peer refuses the stream; a normal answer is unaffected.
+ * becomes this error only when the stream is refused (by the client's HTTP/2 library
+ * on Node, or by a peer); a call that is sent and answered is unaffected.
  * It is never reported against the instance, and it is not sent
  * to another one: the headers are the caller's to shrink. It reaches the caller
  * as the `cause` of the call's `ConnectError`.
@@ -95,12 +97,35 @@ export class GrpcHeaderListTooLargeError extends Error {
     super(
       reason === 'unadvertised-refusal'
         ? `The call's header list is ${size} octets, over the client's ${limit}-octet threshold; ` +
-            'no header-list limit was known when the call started and the peer refused the stream. Send fewer or smaller headers.'
+            "no header-list limit was known when the call started and the client's HTTP/2 library refused to send it. Send fewer or smaller headers."
         : `The call's header list is ${size} octets, over the ${limit} the peer accepts ` +
             '(HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE); send fewer or smaller headers.',
     );
     this.name = 'GrpcHeaderListTooLargeError';
     this.size = size;
     this.limit = limit;
+  }
+}
+
+/**
+ * A client call whose stream the server reset with HTTP/2 `ENHANCE_YOUR_CALM`
+ * (RFC 9113 §7: the peer judged this client's behaviour as generating excessive
+ * load, as Node's server does for more than 128 header fields or too many
+ * concurrent streams). The call is never reported against the instance, whatever
+ * it sent, and is not sent to another one. It reaches the caller as the `cause`
+ * of a `ConnectError` with code `ResourceExhausted` (grpc-go's mapping of the
+ * code); the original stream error is its own `cause`.
+ * @since 0.14.0
+ */
+export class GrpcExcessiveLoadError extends Error {
+  /** @param cause - The stream error the reset produced */
+  constructor(cause?: unknown) {
+    super(
+      "The server reset the call with HTTP/2 ENHANCE_YOUR_CALM: it judged this client's behaviour " +
+        'excessive (for example too many header fields or concurrent streams). The call was not ' +
+        'resent and is not counted against the instance.',
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'GrpcExcessiveLoadError';
   }
 }

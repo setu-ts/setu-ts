@@ -32,7 +32,10 @@ import {
   headerListSize,
   UNADVERTISED_HEADER_LIST_LIMIT,
 } from '../../src/client/header-list-guard.ts';
-import { GrpcHeaderListTooLargeError } from '../../src/errors/grpc-errors.ts';
+import {
+  GrpcExcessiveLoadError,
+  GrpcHeaderListTooLargeError,
+} from '../../src/errors/grpc-errors.ts';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
@@ -930,3 +933,53 @@ describeNode('grpcClient and a peer header-list limit', () => {
     }
   });
 });
+
+describeNode.each(['grpc', 'connect'] as const)(
+  'grpcClient and an ENHANCE_YOUR_CALM reset on %s',
+  (protocol) => {
+    it('neither reports nor resends calls with 130 small extra headers, and names the error', async () => {
+      const observed = [fresh(), fresh()];
+      const a = await startServer(observed[0]!);
+      const b = await startServer(observed[1]!);
+      // Each manager binds request when its guard is installed: observe the
+      // prototype before the caller builds its sessions.
+      const { Http2SessionManager } = await import('@connectrpc/connect-node');
+      const requests = vi.spyOn(Http2SessionManager.prototype, 'request');
+      const restore: Array<{ mockRestore(): void }> = [requests];
+      try {
+        const caller = await startCaller(
+          [
+            { id: 'a', port: a.port },
+            { id: 'b', port: b.port },
+          ],
+          { ejection: {}, clients: { billing: { basePath: '/grpc', protocol } } },
+        );
+        const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+        const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+        const picks = vi.spyOn(discovery, 'pick');
+        const reports = vi.spyOn(discovery, 'report');
+        restore.push(picks, reports);
+        // Node's server allows 128 header fields (maxHeaderListPairs); about 5 KB in all.
+        const headers = Object.fromEntries(
+          Array.from({ length: 130 }, (_, i) => [`x-h-${i}`, 'v']),
+        );
+        for (let n = 0; n < 12; n++) {
+          const error = await failure(billing.echo({ message: 'many' }, { headers }));
+          expect(Code[error.code]).toBe('ResourceExhausted');
+          expect(error.cause, error.message).toBeInstanceOf(GrpcExcessiveLoadError);
+        }
+        expect(requests).toHaveBeenCalledTimes(12); // one stream per call: nothing resent
+        expect(picks).toHaveBeenCalledTimes(12);
+        expect(reports).not.toHaveBeenCalled();
+        expect((discovery as unknown as { ejectedInstances: number }).ejectedInstances).toBe(0);
+        expect(observed.map((o) => o.traceparents.length)).toEqual([0, 0]);
+        for (let n = 0; n < 2; n++) {
+          expect((await billing.echo({ message: 'normal' })).response).toBe('echo: normal');
+        }
+        expect(observed.map((o) => o.traceparents.length)).toEqual([1, 1]);
+      } finally {
+        for (const spy of restore) spy.mockRestore();
+      }
+    });
+  },
+);

@@ -71,7 +71,7 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
       },
       createClient: (service, transport) => ({ service, transport }),
       ConnectError: FakeConnectError,
-      Code: { Unavailable: 14 },
+      Code: { Unavailable: 14, ResourceExhausted: 8 },
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -313,6 +313,9 @@ describe('adaptConnectModule — the client side (M139b §3.12)', () => {
     expect(runtime.isUnavailable(new Error('down'))).toBe(false);
     const cause = new Error('refused');
     expect((runtime.unavailable('again', cause) as Error & { cause?: unknown }).cause).toBe(cause);
+    const calm = runtime.resourceExhausted('calm', cause) as FakeConnectError & { cause?: unknown };
+    expect([calm.message, calm.code, calm.cause]).toEqual(['calm', 8, cause]);
+    expect(runtime.isUnavailable(calm)).toBe(false);
   });
 });
 

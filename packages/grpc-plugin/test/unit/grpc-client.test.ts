@@ -34,12 +34,13 @@ import {
   loadConnectNode,
 } from '../../src/client/connect-node-loader.ts';
 import type { ConnectNodeModuleLike } from '../../src/client/connect-node-loader.ts';
-import { GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
+import { GrpcExcessiveLoadError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 import type { ClientTransportLike } from '../../src/interfaces/connect-runtime.ts';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import {
   createFakeConnectRuntime,
+  FakeResourceExhaustedError,
   FakeUnavailableError,
 } from '../fixtures/fake-connect-runtime.ts';
 
@@ -966,6 +967,71 @@ describe('refused streams (REFUSED_STREAM)', () => {
       ['a', 'failure'],
       ['a', 'failure'],
     ]);
+  });
+
+  it('neither reports nor resends a call the server reset with ENHANCE_YOUR_CALM, and names it', async () => {
+    const calm = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+      },
+    );
+    for (const shape of [calm, new Error('[internal] reset', { cause: calm })]) {
+      const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+      let attempts = 0;
+      const node = fakeNode(() => {
+        attempts++;
+        return Promise.reject(shape);
+      });
+      const { clients: c } = clients({ discovery: () => discovery }, node);
+      const error = (await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)) as Error & {
+        cause?: unknown;
+      };
+      expect(attempts).toBe(1);
+      expect(discovery.reports).toEqual([]);
+      expect(error).toBeInstanceOf(FakeResourceExhaustedError);
+      expect(error.cause).toBeInstanceOf(GrpcExcessiveLoadError);
+      expect(error.message).toBe((error.cause as Error).message);
+      expect((error.cause as Error & { cause?: unknown }).cause).toBe(shape);
+      expect(isRefusedStream(error)).toBe(false);
+    }
+  });
+
+  it('a wire error copying the ENHANCE_YOUR_CALM text follows the normal outcome rule', async () => {
+    const discovery = fakeDiscovery([instance('a', 1)]);
+    const copied = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+        isWireError: true,
+      },
+    );
+    const node = fakeNode(() => Promise.reject(copied));
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    expect(await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)).toBe(copied);
+    expect(discovery.reports).toEqual([['a', 'failure']]);
+  });
+
+  it('a caller abort during an ENHANCE_YOUR_CALM reset rethrows the original error', async () => {
+    const discovery = fakeDiscovery([instance('a', 1)]);
+    const calm = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+      },
+    );
+    const abort = new AbortController();
+    const node = fakeNode(() => {
+      abort.abort();
+      return Promise.reject(calm);
+    });
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    const { transport } = c.client(BILLING, 'billing') as { transport: ClientTransportLike };
+    const error = await transport
+      .unary({}, abort.signal, undefined, undefined, {})
+      .catch((e: unknown) => e);
+    expect(error).toBe(calm);
+    expect(discovery.reports).toEqual([]);
   });
 
   it("keeps connect-node's own Unavailable reading as is, and fails the retry with a different error as that error", async () => {

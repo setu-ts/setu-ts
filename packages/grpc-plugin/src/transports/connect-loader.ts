@@ -67,8 +67,8 @@ export interface ConnectCoreModuleLike {
     outgoingDetails?: undefined,
     cause?: unknown,
   ) => Error & { readonly code: number; readonly isWireError?: boolean };
-  /** The `Code` enum; only `Unavailable` is read. */
-  Code: { readonly Unavailable: number };
+  /** The `Code` enum; only `Unavailable` and `ResourceExhausted` are read. */
+  Code: { readonly Unavailable: number; readonly ResourceExhausted: number };
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -160,6 +160,15 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       return new connect.ConnectError(
         message,
         connect.Code.Unavailable,
+        undefined,
+        undefined,
+        cause,
+      );
+    },
+    resourceExhausted(message: string, cause?: unknown): Error {
+      return new connect.ConnectError(
+        message,
+        connect.Code.ResourceExhausted,
         undefined,
         undefined,
         cause,
