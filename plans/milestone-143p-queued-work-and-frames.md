@@ -446,6 +446,17 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   reader of `SubscribeOptions` and `ISubscription` is found with `rg` before the change; an
   implementor that builds a literal of one of these types is unaffected (both members optional).
 
+- **Review amendments (2026-11-23):** three paths that pass options on must refuse `fanOut` with a
+  `RangeError`, because fan-out there is wrong or silently dropped: `RequestReplyCore.respond`
+  (`request-reply-core.ts:219-240`; every responder would answer each request) and
+  `onIntegrationEvent` with `inbox` (`integration/subscribe.ts:217`, `:285`; the inbox drops the
+  option). The declarative `SubscriptionDefinition.options` path (`messaging-plugin.ts:726`) warns
+  once when it asked for `fanOut` and the returned subscription lacks the marker (a custom arm that
+  ignores it). The traced, pipelined and custom facades return the inner subscription, so the marker
+  survives them; `PipelinedBroker`'s consumer identity (`pipelined-broker.ts:203-204`) is per
+  process under `fanOut`, which is correct and is stated in a comment. No `testing` fake implements
+  `IMessageBroker`. Test home: `fan-out-subscribe.test.ts` (both refusals, the declarative warning).
+
 ### 3.7 How each broker honours `fanOut`
 
 - **Decision:** one table, and the conformance test iterates it as data. A new internal module
@@ -474,6 +485,26 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   is the one new reaper, because nothing on the server expires a group.
 - **Test home:** `fan-out-conformance.test.ts` (the table as test data, §6);
   `redis-streams-fan-out-sweep.test.ts`.
+
+- **Review amendments (2026-11-23):**
+  - **Service Bus name.** A Service Bus subscription name is at most 50 characters (vendor
+    documentation), and `messaging-consumers-fanout-<uuid>` is 63. The Service Bus arm names its
+    fan-out subscription `fanout-<uuid>` (43 characters), as the reply inbox uses `rr-inbox-<uuid>`
+    (`service-bus-broker.ts:713`). `fan-out.ts` takes the per-arm prefix; the other arms keep
+    `<defaultQueue>-fanout-<uuid>` (Pub/Sub allows 255 characters, `pubsub-broker.ts:55`).
+  - **Redis Streams liveness is a heartbeat key, never `inactive`.** The existing sweep reads
+    `inactive` (`redis-streams-broker.ts:47-48`), the time since the last successful read on Redis
+    7.2+, so a quiet backplane stream looks idle while its replicas poll, and a group just created
+    has no consumers until its first `XREADGROUP`. Each fan-out subscriber writes
+    `<stream>:fanout-alive:<group>` with a 60 s TTL before `XGROUP CREATE` and refreshes it every 20
+    s while subscribed; `unsubscribe()` deletes the key and destroys the group. The sweep, in one
+    Lua script like `SWEEP_CONSUMERS`, destroys a `-fanout-` group only when its heartbeat key is
+    absent. A fan-out subscriber whose read returns `NOGROUP` re-creates its group at `$` and warns
+    once ("fan-out group was removed; frames published while it was absent were not received"). Test
+    home `redis-streams-fan-out-sweep.test.ts` adds: a quiet group with a live heartbeat kept; a
+    just-created group kept; `NOGROUP` re-created with one warning.
+  - **NATS.** An operator-provisioned work-queue stream refuses a second consumer on a subject, so a
+    fan-out subscribe fails there, loudly; the README says so.
 
 ### 3.8 The backplane asks for fan-out and refuses a broker that cannot give it
 
@@ -533,6 +564,19 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   pipelined facade); `outbox-unroutable-real.test.ts` (guarded: a row for an unbound topic stays
   pending, then is delivered once a queue binds).
 
+- **Review amendments (2026-11-23):**
+  - A routed publish needs a confirm channel with return listeners (`rabbitmq-broker.ts:798-800`).
+    On a connection without one (`#confirmed` false, `:1048-1057`), every row would fail its whole
+    budget. The relay's routed publish then falls back to a plain publish and the broker warns once
+    that unroutable rows cannot be detected on an unconfirmed channel; the README states it. (Data
+    is not lost silently by the fallback any more than today; refusing would stop a working relay.)
+  - `UnroutableMessageError` reaches the relay unwrapped: `publishConfirmed` rethrows it as is
+    rather than wrapping it in its generic `Error` (`:299-305`, `:320`). Test: the relay's failure
+    path receives an `instanceof UnroutableMessageError`.
+  - The routed path stamps `x-setu-disposition-id` on the message to match a return to its publish
+    (`rabbitmq-broker.ts:808-818`, `:317`), so it must stay on the wire. The consumer path removes
+    it from the headers a handler sees; a test asserts a relayed message's handler does not see it.
+
 ### 3.11 `consumerRetry` on Pub/Sub
 
 - **Decision:** the Pub/Sub arms accept `consumerRetry?: false | ConsumerRetryOptions` and a new
@@ -563,6 +607,27 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   `consumer-retry-conformance.test.ts`; `consumer-retry-options.test.ts` (shared validator, both old
   arms unchanged).
 
+- **Review amendments (2026-11-23):**
+  - **Dead-letter topic with no subscription loses messages** (Pub/Sub drops a publish to a topic
+    with no subscription). At `connect()` the broker checks that `deadLetterTopic` exists and has at
+    least one subscription: none → refuse with a named error (silent loss); the read fails (for
+    example no `pubsub.topics.getSubscriptions` right) → warn once and continue, as the SQS rule
+    does for an explicit target.
+  - The topic is normalised to `projects/{project}/topics/{topic}` through the SDK's
+    `pubsub.topic(name).name`, and backoffs are passed as `{ seconds, nanos }`.
+  - The not-retryable forward acks only after the publish resolves; a failed publish nacks.
+  - An existing subscription with no retry policy, or a different one, gets the warn-once naming it
+    and is not changed; the upgrade notes say subscriptions created before 0.14.0 keep their
+    policies until the operator updates them.
+  - Transport seams (listed in §4): `onMessage` gains `orderingKey?: string` and
+    `deliveryAttempt?: number`; `open` takes an options object
+    `{ onClosed?, create?: { retryPolicy?, deadLetterPolicy?, messageRetentionSeconds?, expirationTtlSeconds? } }`
+    used when `open` creates the subscription, and resolves with
+    `existing?: { retryPolicy?, deadLetterPolicy? }` read from the `getMetadata()` call the adapter
+    already makes (`pubsub-broker.ts:416`) when it attached to an existing one. A transport that
+    omits these behaves as today, and the broker warns once that the configured retry policy could
+    not be applied or checked.
+
 ### 3.12 `consumerRetry` on Service Bus
 
 - **Decision:** the Service Bus arms accept `consumerRetry?: false | ConsumerRetryOptions`, enabled
@@ -585,6 +650,27 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   classifier, the 240,000 ms refusal, the `maxDeliveryCount` clamp and warning, `false`);
   `consumer-retry-conformance.test.ts`.
 
+- **Review amendments (2026-11-23):**
+  - **Lock budget.** The receiver is opened with `maxAutoLockRenewalDurationInMs: 300000` set
+    explicitly, and each hold is capped at the renewal budget left (300,000 ms since receipt, less
+    30,000 ms margin); when the budget left is below the delay, the message is abandoned at once and
+    the broker warns once per subscription.
+  - **Close during a hold.** `unsubscribe()` and `disconnect()` cancel pending holds (timers from
+    `runtime.setTimeout`) and abandon those messages at once, best effort, before closing the
+    receiver.
+  - **`deliveryCount` base.** The JS SDK copies AMQP `delivery_count` unchanged
+    (`serviceBusMessage.js:294`); AMQP counts prior deliveries, so the first delivery is expected to
+    read 0 and the attempt number is `deliveryCount + 1`. Codex measures it on the emulator before
+    writing the rule, and a unit test pins the measured base; the `maxDeliveryCount` clamp uses the
+    same base.
+  - **Seams (listed in §4):** `IServiceBusTransport.getSubscription?(topic, sub)` returning
+    `{ maxDeliveryCount? }` for the clamp; `onMessage` `deliveryCount?` and `deadLetter?(reason)`.
+    When `deadLetter` or `deliveryCount` is absent the broker abandons as today and warns once.
+  - **Concurrency.** The receiver runs one call at a time (no `maxConcurrentCalls` passed,
+    `service-bus-broker.ts:539-552`), so a failing message holds its subscription for the sum of its
+    delays (about 156 s at the defaults). This is stated in D4 and the README; the concurrency
+    option stays with M143m (V13-262).
+
 ### 3.13 A Pub/Sub stream the SDK closed is re-opened, and reported while it is closed
 
 - **Decision:** `IPubSubTransport.open` gains an optional fourth parameter
@@ -603,6 +689,14 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   `pubsub-emulator.test.ts` (guarded: delete the subscription under a running consumer through the
   admin API, recreate the topic's subscription by re-open, publish, receive).
 
+- **Review amendments (2026-11-23):** the adapter flags its own `sub.close()` so a broker-initiated
+  close never calls `onClosed` (`subscription.js:236-239` re-emits `close` for both);
+  `unsubscribe()` during a pending re-open cancels it and closes a handle that resolves afterwards;
+  a successful re-open replaces the entry in the broker's subscription map and removes the old
+  Subscription object's listeners; a fan-out subscription is re-opened with its original creation
+  options (600 s retention, one-day ttl), so an expired one is re-created as a fan-out one. Each
+  case is in `pubsub-stream-recovery.test.ts`.
+
 ### 3.14 Ordered Pub/Sub delivery keeps order across a failure
 
 - **Decision:** on a broker built with `enableMessageOrdering`, a new internal module
@@ -617,6 +711,15 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
 - **Test home:** `pubsub-ordered-dispatch.test.ts` (serial per key, parallel across keys, the
   failure-then-redelivery sequence `0,1,2,3,4(fail),4,5,…`, no key unaffected);
   `pubsub-emulator.test.ts` re-runs X122-9's 15-message check.
+
+- **Review amendments (2026-11-23):** Pub/Sub counts every nack as a delivery attempt, including the
+  gate's nacks of later messages. So: the gate unblocks a key on the first redelivery of any message
+  it nacked for that key (not only the failed head, which may have been dead-lettered and never
+  return); buffered messages of a key are dropped without settling when the stream closes (§3.13;
+  they are redelivered). On a broker with both `enableMessageOrdering` and `deadLetterTopic`, the
+  broker warns once at `connect()` that the later messages of a failing key spend delivery attempts
+  too and may be dead-lettered with it (each with its attributes, so nothing is lost silently).
+  `pubsub-ordered-dispatch.test.ts` adds the head-dead-lettered sequence and the stream-close case.
 
 ### 3.15 One exhausted-job rule for every queue adapter
 
@@ -659,11 +762,11 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   returns `'discarded'` (§3.3a), the job processor and the service's dead-worker path report
   `settled('terminal-error', 'discarded')` instead of `'dead-lettered'`. SQS stays a non-confirming
   adapter (`DeleteMessage` with an old receipt can succeed without deleting), so the collector still
-  maps a completed SQS settle to `unknown`; `discarded` reaches the wire only for an adapter that
-  confirms, or as the input the collector maps. The JSDoc on `QueueSettlementState` is corrected:
-  since Part A a stale SQS settle and a failed SQS dead-letter send reject (`failed`), and only a
-  delete whose receipt has gone stale on the server is absorbed. `diagnostics-plugin`'s
-  `queue-protocol.ts` accepts the new member in its `SETTLEMENTS` set. Every other reader found by
+  maps its completed acknowledged, requeued and dead-lettered settles to `unknown` (see the
+  amendment below for `discarded`). The JSDoc on `QueueSettlementState` is corrected: since Part A a
+  stale SQS settle and a failed SQS dead-letter send reject (`failed`), and only a delete whose
+  receipt has gone stale on the server is absorbed. `diagnostics-plugin`'s `queue-protocol.ts`
+  accepts the new member in its `SETTLEMENTS` set. Every other reader found by
   `rg QueueSettlementState` (job processor, observation collector, service) is checked for an
   exhaustive switch or table.
 - **Why:** §3.3a's discard is not a dead letter; reporting it as one tells an operator the payload
@@ -672,6 +775,11 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice is a
   settlement passed to the observer, on both the final-failure and dead-worker paths);
   `diagnostics-plugin` `queue-protocol` test (the new member accepted, an unknown string still
   refused).
+
+- **Review amendment (2026-11-23):** the collector's non-confirming mapping
+  (`queue-observation-collector.ts:550`) passes `discarded` through as it passes `failed`: it is the
+  adapter's own decision to drop the job, not a claim that the backend applied a settle. The JSDoc
+  says exactly that. The `SETTLEMENTS` set is the only set reader; no exhaustive switch exists.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -690,28 +798,31 @@ unroutable RabbitMQ outbox row is retried and then failed instead of marked sent
 `messaging` transport refuses a broker without fan-out; frames older than 5 s are dropped by
 default.
 
-| Exported symbol                                                                                     | Kind               | Consumer / real code path that READS it                                                                                |
-| --------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `SubscribeOptions.fanOut` (common, out of lane)                                                     | interface member   | Read by `fan-out.ts` in every messaging-plugin broker; set by `MessagingBackplane.connect()`                           |
-| `ISubscription.fanOut` (common, out of lane)                                                        | interface member   | Set by every broker that honours `fanOut`; read by `MessagingBackplane.connect()`                                      |
-| `QueueSettlementState` member `'discarded'` (common, out of lane)                                   | type member        | Passed by `job-processor.ts` and `queue-service.ts` on a discard; accepted by `diagnostics-plugin` `queue-protocol.ts` |
-| `SqsDeadLetterTargetMissingError` (queue-plugin)                                                    | class              | Thrown by `SqsQueue.prepareConsumer` (D9); an application catches it from `app.start()` for a declared processor       |
-| `ISqsTransport.getQueueAttributes?`, `getQueueUrl?`                                                 | interface members  | Called by `sqs-redrive.ts` when a name is first consumed; `adaptSqsModule` implements both                             |
-| `ISqsTransport.send` 4th parameter `attributes?`                                                    | parameter          | Read by `adaptSqsModule`'s send; written by the dead-letter forward                                                    |
-| `SqsQueueOptions.deadLetterQueues` value type `string \| false`                                     | type widening      | Read by `sqs-redrive.ts` and `deadLetter` (§3.3a)                                                                      |
-| `SqsReceivedMessage.messageId?`                                                                     | interface member   | Filled by `adaptSqsModule`; read by the unreadable warning and the `setu-source-message-id` attribute                  |
-| `SqsSdkModule.GetQueueAttributesCommand`, `GetQueueUrlCommand`                                      | interface members  | Used by `adaptSqsModule`                                                                                               |
-| `SqsQueue` constructor 4th parameter `defaults?`                                                    | parameter          | Filled by `QueuePlugin` from `defaultMaxAttempts`; read by `reserve` for an envelope without `maxAttempts`             |
-| `SnsPublisher.publishJob`                                                                           | method             | Application code; the SNS to SQS pairing                                                                               |
-| `SnsPublisherOptions.telemetry`                                                                     | option             | Read by `publishJob` (§4.1)                                                                                            |
-| `SnsPublisherOptions.runtime`                                                                       | option             | Read by `publishJob` for the default `id` (§4.1)                                                                       |
-| `UnroutableMessageError` (messaging-plugin)                                                         | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications   |
-| `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                         | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                       |
-| `ServiceBusMessagingOptions*.consumerRetry`                                                         | option             | Read by `ServiceBusBroker` (§4.1)                                                                                      |
-| `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                           | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                         |
-| `IServiceBusTransport.createSubscription` 3rd parameter; `onMessage` `deliveryCount?`, `deadLetter` | parameter, members | Read by `adaptServiceBusModule`; written by the fan-out path and §3.12                                                 |
-| `BackplaneFanOutUnsupportedError` (backplane)                                                       | class              | Thrown by `MessagingBackplane.connect()`; surfaces from `app.start()`                                                  |
-| `MessagingBackplaneOptions.maxFrameAgeMs`, `RedisBackplaneOptions.maxFrameAgeMs`                    | options            | Read by the receive path of each transport (§4.1)                                                                      |
+| Exported symbol                                                                                     | Kind               | Consumer / real code path that READS it                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SubscribeOptions.fanOut` (common, out of lane)                                                     | interface member   | Read by `fan-out.ts` in every messaging-plugin broker; set by `MessagingBackplane.connect()`                                                                                                                                                            |
+| `ISubscription.fanOut` (common, out of lane)                                                        | interface member   | Set by every broker that honours `fanOut`; read by `MessagingBackplane.connect()`                                                                                                                                                                       |
+| `QueueSettlementState` member `'discarded'` (common, out of lane)                                   | type member        | Passed by `job-processor.ts` and `queue-service.ts` on a discard; accepted by `diagnostics-plugin` `queue-protocol.ts`                                                                                                                                  |
+| `SqsDeadLetterTargetMissingError` (queue-plugin)                                                    | class              | Thrown by `SqsQueue.prepareConsumer` (D9); an application catches it from `app.start()` for a declared processor                                                                                                                                        |
+| `ISqsTransport.getQueueAttributes?`, `getQueueUrl?`                                                 | interface members  | Called by `sqs-redrive.ts` when a name is first consumed; `adaptSqsModule` implements both                                                                                                                                                              |
+| `ISqsTransport.send` 4th parameter `attributes?`                                                    | parameter          | Read by `adaptSqsModule`'s send; written by the dead-letter forward                                                                                                                                                                                     |
+| `SqsQueueOptions.deadLetterQueues` value type `string \| false`                                     | type widening      | Read by `sqs-redrive.ts` and `deadLetter` (§3.3a)                                                                                                                                                                                                       |
+| `SqsReceivedMessage.messageId?`                                                                     | interface member   | Filled by `adaptSqsModule`; read by the unreadable warning and the `setu-source-message-id` attribute                                                                                                                                                   |
+| `SqsSdkModule.GetQueueAttributesCommand`, `GetQueueUrlCommand`                                      | interface members  | Used by `adaptSqsModule`                                                                                                                                                                                                                                |
+| `SqsQueue` constructor 4th parameter `defaults?`                                                    | parameter          | Filled by `QueuePlugin` from `defaultMaxAttempts`; read by `reserve` for an envelope without `maxAttempts`                                                                                                                                              |
+| `SnsPublisher.publishJob`                                                                           | method             | Application code; the SNS to SQS pairing                                                                                                                                                                                                                |
+| `SnsPublisherOptions.telemetry`                                                                     | option             | Read by `publishJob` (§4.1)                                                                                                                                                                                                                             |
+| `SnsPublisherOptions.runtime`                                                                       | option             | Read by `publishJob` for the default `id` (§4.1)                                                                                                                                                                                                        |
+| `UnroutableMessageError` (messaging-plugin)                                                         | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications                                                                                                                                    |
+| `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                         | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                                                                                                                                                        |
+| `ServiceBusMessagingOptions*.consumerRetry`                                                         | option             | Read by `ServiceBusBroker` (§4.1)                                                                                                                                                                                                                       |
+| `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                           | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                                                                                                                                                          |
+| `IPubSubSubscription.existing?`; Pub/Sub `onMessage` `orderingKey?`, `deliveryAttempt?`             | members            | Filled by `adaptPubSubModule`; read by the policy-differs warning (§3.11) and `pubsub-ordering.ts` (§3.14)                                                                                                                                              |
+| `IServiceBusTransport.getSubscription?`                                                             | member             | Implemented by `adaptServiceBusModule`; read by the `maxDeliveryCount` clamp (§3.12)                                                                                                                                                                    |
+| `IServiceBusTransport.createSubscription` 3rd parameter; `onMessage` `deliveryCount?`, `deadLetter` | parameter, members | Read by `adaptServiceBusModule`; written by the fan-out path and §3.12                                                                                                                                                                                  |
+| `BackplaneFanOutUnsupportedError` (backplane)                                                       | class              | Thrown by `MessagingBackplane.connect()`; surfaces from `app.start()`                                                                                                                                                                                   |
+| `MessagingBackplaneOptions.maxFrameAgeMs`, `RedisBackplaneOptions.maxFrameAgeMs`                    | options            | Read by the receive path of each transport (§4.1)                                                                                                                                                                                                       |
+| `MessagingBackplane` constructor and `createBackplane` clock `now?`                                 | parameter          | Both are exported and take no runtime today (`messaging-backplane.ts:92-97`, `backplane-factory.ts:57-61`); the stamp and age check read `now()`, which the plugin fills from `runtime.now`; absent, frame age is disabled and the transport warns once |
 
 Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.prepareConsumer`,
 `fan-out.ts`, `consumer-retry.ts`, `pubsub-ordering.ts`, `frame-age.ts`, `PUBLISH_REQUIRE_ROUTE`,
@@ -824,7 +935,7 @@ completeness assertion against the package's list of arms.
 | `realtime-backplane-plugin/test/unit/messaging-backplane.test.ts` (extended)                                                                                                                                                                                                                                          | `messaging-backplane.ts`, `errors.ts`                                | `fanOut` requested; refusal and unsubscribe; frame age applied                                                                                                                                                                                                                                              |
 | `realtime-backplane-plugin/test/unit/redis-backplane.test.ts` (extended)                                                                                                                                                                                                                                              | `redis-backplane.ts`                                                 | Stamp on publish, drop on receive, reworded warning                                                                                                                                                                                                                                                         |
 | `realtime-backplane-plugin/test/unit/backplane-factory.test.ts` (extended)                                                                                                                                                                                                                                            | `backplane-factory.ts`, `interfaces/index.ts`                        | `maxFrameAgeMs` passed and validated on both arms                                                                                                                                                                                                                                                           |
-| `realtime-backplane-plugin/test/integration/backplane-fan-out-real.test.ts` (new)                                                                                                                                                                                                                                     | `messaging-backplane.ts`                                             | The X122 check per arm (rabbitmq, kafka, nats, redis-streams, pubsub, service-bus): two replicas, 50 frames each way, all arrive; memory transport as the negative control; Workers-shaped fake broker refused at start                                                                                     |
+| `realtime-backplane-plugin/test/integration/backplane-fan-out-real.test.ts` (new)                                                                                                                                                                                                                                     | `messaging-backplane.ts`                                             | The X122 check per arm (rabbitmq, kafka, nats, redis-streams, pubsub, service-bus): two replicas, 50 frames each way, all arrive; the messaging transport without `fanOut` on a shared-group arm as the negative control (loses frames); Workers-shaped fake broker refused at start                        |
 | `realtime-backplane-plugin/test/integration/backplane-lateness-real.test.ts` (new)                                                                                                                                                                                                                                    | `redis-backplane.ts`, `messaging-backplane.ts`, `frame-age.ts`       | Stalling relay before Redis and RabbitMQ; no frame older than the bound is dispatched; frames after the stall arrive                                                                                                                                                                                        |
 
 ## 7. Verification gates
@@ -853,6 +964,11 @@ report, not assumed. The `common` and `diagnostics-plugin` changes run under the
   (not verified) → the fan-out conformance asserts creation and deletion on the emulators, and the
   crash-expiry column of §3.7 is stated from the vendor documentation only; the row's closure note
   says so.
+- **The emulators may not honour the retry and lifecycle settings at all** (Pub/Sub `retryPolicy`,
+  `deadLetterPolicy`, `messageRetentionDuration`; Service Bus `autoDeleteOnIdle` and the admin
+  `getSubscription`; unverified) → each real-arm assertion is guarded on a capability probe run
+  first (create a subscription with the setting, read it back); a cell the emulator does not honour
+  is recorded in the test output and in the row's closure note as documentation-only.
 - **Service Bus fan-out needs administration rights** (Manage) that a send-and-listen role lacks →
   the subscribe error names the right; the README says it; the backplane refusal message points to
   `redis`.
@@ -984,13 +1100,16 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   adds no option.
 - **D4, retries on by default for Pub/Sub and Service Bus.** (a) On by default, as RabbitMQ and
   Redis Streams are; (b) opt-in, as Google's default subscription has no retry policy.
-  **Recommendation: (a)**; Spring Cloud Stream also retries by default.
+  **Recommendation: (a)**; Spring Cloud Stream also retries by default. Cost of (a) on Service Bus:
+  the receiver runs one call at a time today, so one failing message holds its subscription for the
+  sum of its delays (about 156 s at the defaults, §3.12) until M143m's concurrency option (V13-262).
 - **D5, the `maxFrameAgeMs` default.** (a) 5,000 ms; (b) 2,000 ms (tighter, more sensitive to clock
   skew); (c) off by default. X3-3 measured frames up to 20 s late. **Recommendation: (a).**
 - **D6, unroutable outbox rows on RabbitMQ.** (a) Always routed for the relay (retry, then failed),
-  plain publish unchanged; (b) an opt-in outbox option; (c) documentation only. Spring AMQP makes
-  `mandatory` opt-in for publishes in general, but the outbox README promises at-least-once delivery
-  of every row. **Recommendation: (a).**
+  plain publish unchanged; (b) an opt-in `outbox.relay.requireRoute: boolean` (default `false`) on
+  the messaging plugin's outbox options, read by the relay; (c) documentation only. Spring AMQP
+  makes `mandatory` opt-in for publishes in general, but the outbox README promises at-least-once
+  delivery of every row. **Recommendation: (a).**
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
   once as its own PR, Part B after it on the same branch (§0.3).
 - **D8, the Pub/Sub ordering row.** (a) Fix in the framework (§3.14); (b) correct the README only.
