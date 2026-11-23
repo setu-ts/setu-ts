@@ -1,5 +1,11 @@
-import { CAPABILITIES, OptionalDependencyUnavailableError, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  CSRF_EXEMPT_STATE_KEY,
+  CSRF_TOKEN_ACCESS_STATE_KEY,
+  OptionalDependencyUnavailableError,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
+import type { ICsrfTokenAccess, IPlugin, IPluginContext, IRequestContext } from '@setu-ts/common';
 import {
   claimDeclaredOperationIds,
   DEFAULT_EXCLUDED_OWNERS,
@@ -108,6 +114,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
   } = options;
   const assets = resolveSwaggerAssets(swagger);
   const assetBase = endpoint.replace(/\/+$/, '');
+  const csrfTokenRoute = `${assetBase}/csrf-token`;
 
   // The documentation endpoints are not part of the API being documented, so
   // they are always excluded — a spec that lists `/openapi.json` and `/docs`
@@ -115,7 +122,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
   // into every generated client. Caller exclusions are added on top.
   const excludedPaths = [
     specEndpoint,
-    ...(swagger ? [endpoint] : []),
+    ...(swagger ? [endpoint, csrfTokenRoute] : []),
     // Asset routes exist only when self-hosting; in the external modes an
     // application route at the same path is the application's own.
     ...(swagger && assets === 'self'
@@ -198,6 +205,7 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
 
       // Register the spec endpoint
       ctx.router.get(specEndpoint, (ctx) => {
+        startsNoSession(ctx);
         const spec = openApiService.getSpec();
         return ctx.response.status(200).header('Content-Type', 'application/json').json(spec);
       });
@@ -225,13 +233,14 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
           }
           for (const asset of SWAGGER_ASSETS) {
             const bytes = await fs.readFile(`${directory}/${asset.file}`);
-            ctx.router.get(`${assetBase}/${asset.file}`, (ctx) =>
-              ctx.response
+            ctx.router.get(`${assetBase}/${asset.file}`, (ctx) => {
+              startsNoSession(ctx);
+              return ctx.response
                 .status(200)
                 .header('Content-Type', asset.contentType)
                 .header('Cache-Control', 'public, max-age=3600')
-                .send(bytes),
-            );
+                .send(bytes);
+            });
           }
         }
         const uiHtml = swaggerUiHtml({
@@ -239,13 +248,27 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
           title: `${title ?? 'API'} - Documentation`,
           assets,
           endpoint,
+          csrfTokenUrl: csrfTokenRoute,
         });
 
         ctx.router.get(endpoint, (ctx) => {
+          startsNoSession(ctx);
           const result = ctx.response.status(200).text(uiHtml);
           // Override content-type to HTML after text() sets it to text/plain
           ctx.response.header('Content-Type', 'text/html; charset=utf-8');
           return result;
+        });
+
+        // The form-CSRF token for Swagger UI's Try-it-out calls: the token of a
+        // session this request restored, or 204 (and no session) otherwise.
+        ctx.router.get(csrfTokenRoute, (ctx) => {
+          const access = ctx.state.get(CSRF_TOKEN_ACCESS_STATE_KEY) as ICsrfTokenAccess | undefined;
+          const token = access?.tokenForExistingSession();
+          if (access === undefined || token === undefined) {
+            startsNoSession(ctx);
+            return ctx.response.status(204).header('Cache-Control', 'no-store').send();
+          }
+          return ctx.response.status(200).json({ headerName: access.headerName, token });
         });
       }
 
@@ -258,4 +281,13 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
       });
     },
   };
+}
+
+/**
+ * Marks a documentation route as one that never commits a session. The docs page, the spec and the
+ * self-hosted assets are safe-method reads that need no session, so an anonymous visitor gets no
+ * session cookie from them (and a tenant-sealed first visit starts none).
+ */
+function startsNoSession(ctx: IRequestContext): void {
+  ctx.state.set(CSRF_EXEMPT_STATE_KEY, true);
 }

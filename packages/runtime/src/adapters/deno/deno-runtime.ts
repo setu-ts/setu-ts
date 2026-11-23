@@ -17,6 +17,8 @@ import type {
   RuntimeSignal,
 } from '@setu-ts/common';
 import { mergeRuntimeServices } from '../../services/cross-runtime.ts';
+import { createDenoFatalErrorObserver } from '../shared/fatal-error-observer.ts';
+import type { GlobalEventHost } from '../shared/fatal-error-observer.ts';
 import { createWebWorkerHost } from '../shared/web-worker-host.ts';
 import { createDenoDnsResolver } from './deno-dns-resolver.ts';
 import type { DenoSrvRecord } from './deno-dns-resolver.ts';
@@ -93,6 +95,7 @@ export interface DenoDirEntry {
  * @param host - Injected Deno host (defaults to real Deno global)
  * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @param dns - Injected DNS resolver (defaults to one over the host's `resolveDns`)
+ * @param globalEvents - Where uncaught errors are announced (defaults to the global scope; `null` for none)
  * @returns Complete runtime services for Deno
  */
 export function createDenoRuntimeServices(
@@ -105,6 +108,10 @@ export function createDenoRuntimeServices(
   // have detection it does not have. Do not pass an event name speculatively.
   workers: IWorkerHost = createWebWorkerHost(),
   dns: IDnsResolver = createDenoDnsResolver(host),
+  // Deno reports an uncaught error or rejection through the global `error`
+  // and `unhandledrejection` events, not through the `Deno` namespace.
+  // `null` (not `undefined`, which would take this default) means none.
+  globalEvents: GlobalEventHost | null = globalThis as unknown as GlobalEventHost,
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => host.readFile(path),
@@ -226,7 +233,13 @@ export function createDenoRuntimeServices(
           },
         };
 
+  const fatal =
+    globalEvents !== null && typeof globalEvents.addEventListener === 'function'
+      ? { onFatalError: createDenoFatalErrorObserver(globalEvents) }
+      : {};
+
   return mergeRuntimeServices({
+    ...fatal,
     platform: () => 'deno',
     reportError: (record) => {
       try {

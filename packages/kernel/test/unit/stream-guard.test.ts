@@ -104,4 +104,21 @@ describe('guardEmptyChunks', () => {
       'source failed',
     );
   });
+
+  it('keeps the source error when the reporting callback throws (CodeRabbit)', async () => {
+    const { runtime } = createFakeRuntime();
+    const failure = new Error('source failed');
+    const seen: unknown[] = [];
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(failure);
+      },
+    });
+    const guarded = guardEmptyChunks(body, runtime, (error) => {
+      seen.push(error);
+      throw new Error('reporter broke');
+    });
+    await expect(guarded.getReader().read()).rejects.toBe(failure);
+    expect(seen).toEqual([failure]);
+  });
 });

@@ -7,7 +7,8 @@ import { createArgs } from '../../../create/src/index.ts';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { EXAMPLES, EXCLUDED_EXAMPLES, exampleTemplate } from '../../src/examples/catalog.ts';
 import { EXAMPLE_MANIFEST } from '../../src/examples/manifest.ts';
-import { examplePaths, FETCH_TIMEOUT_MS } from '../../src/examples/new.ts';
+import { examplePaths, FETCH_TIMEOUT_MS, runExampleNew } from '../../src/examples/new.ts';
+import { parseArgs } from '../../src/args.ts';
 import {
   exampleTsconfig,
   rewriteExamplePackage,
@@ -185,7 +186,7 @@ describe('example scaffolding', () => {
       '--devtool',
       '--devtool-port=4500',
       '--logger=console',
-      '--env-file=.env',
+      '--dotenv=.env',
       '--transport=http',
       '--transport-url=x',
       '--port=3000',
@@ -207,10 +208,22 @@ describe('example scaffolding', () => {
       const h = harness();
       expect(
         await h.run(['new', 'demo', '--example', ...(value === undefined ? [] : [value])]),
-      ).toBe(1);
-      for (const offered of EXAMPLES) expect(h.err.text()).toContain(offered);
+      ).toBe(value === undefined ? 2 : 1);
+      if (value === undefined) expect(h.err.text()).toContain('Option --example needs a value');
+      else for (const offered of EXAMPLES) expect(h.err.text()).toContain(offered);
       expect(h.fs.writes).toEqual([]);
     }
+    const direct = harness();
+    expect(
+      await runExampleNew('demo', parseArgs(['--example']), {
+        fs: direct.fs,
+        cwd: '/work',
+        log: direct.out.sink,
+        error: direct.err.sink,
+        secret: () => 'a'.repeat(64),
+      }),
+    ).toBe(1);
+    for (const offered of EXAMPLES) expect(direct.err.text()).toContain(offered);
     for (const [name, reason] of Object.entries(EXCLUDED_EXAMPLES)) {
       const h = harness();
       expect(await h.run(['new', 'demo', '--example', name])).toBe(1);

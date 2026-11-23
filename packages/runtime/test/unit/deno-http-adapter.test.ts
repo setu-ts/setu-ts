@@ -10,8 +10,13 @@ import {
   DenoHttpAdapter,
   DenoHttpServerHandle,
   isDenoHttpServerHandle,
+  isMarkedSourceError,
+  markSourceErrors,
 } from '../../src/adapters/deno/deno-http-adapter.ts';
 import { describe, expect, it } from 'vitest';
+import { setUpgradeIntent } from '@setu-ts/common';
+import type { IRequest, IResponse, ResponseSnapshot, WebSocketEventSink } from '@setu-ts/common';
+import { DENO_WS_MAX_MESSAGE_BYTES } from '../../src/adapters/shared/websocket-ceiling.ts';
 import { createTestContext } from '@setu-ts/testing';
 
 describe('Deno socket peer', () => {
@@ -249,4 +254,146 @@ it('uses the native default host with an ephemeral port and startup callback', a
 });
 it('refuses foreign server handles on close', async () => {
   await expect(new DenoHttpAdapter().close({})).rejects.toThrow('Invalid server handle');
+});
+
+// ---------------------------------------------------------------------------
+// M143i: stream failure, WebSocket ceiling and the HTTP/2 drain statement
+// ---------------------------------------------------------------------------
+
+/** A sink with a configured message limit. */
+function m143iSink(maxMessageBytes?: number): WebSocketEventSink {
+  return {
+    ...(maxMessageBytes === undefined ? {} : { maxMessageBytes }),
+    onOpen: () => {},
+    onMessage: () => {},
+    onClose: () => {},
+    onError: () => {},
+  };
+}
+
+/** A stream that yields one chunk and then fails. */
+function failingStream(): ReadableStream<Uint8Array> {
+  let sent = false;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (!sent) {
+        sent = true;
+        controller.enqueue(new Uint8Array([97]));
+        return;
+      }
+      controller.error(new Error('source failed'));
+    },
+  });
+}
+
+/** A framework response double that only answers `snapshot()`. */
+function respond(snapshot: Partial<ResponseSnapshot> & { body?: unknown } = {}): IResponse {
+  const full = {
+    streaming: snapshot.body instanceof ReadableStream,
+    status: 200,
+    headers: new Headers(),
+    body: null,
+    ...snapshot,
+  } as ResponseSnapshot;
+  return { snapshot: () => full } as unknown as IResponse;
+}
+
+describe('Deno failed response stream (V13-256)', () => {
+  it('Deno: marks a body error so onError stays quiet, and wraps a primitive', async () => {
+    const reader = markSourceErrors(failingStream()).getReader();
+    await reader.read();
+    const error = await reader.read().catch((e: unknown) => e);
+    expect(isMarkedSourceError(error)).toBe(true);
+    expect(isMarkedSourceError(new Error('other'))).toBe(false);
+    expect(isMarkedSourceError('text')).toBe(false);
+
+    const primitive = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error('plain');
+      },
+    });
+    const wrappedError = await markSourceErrors(primitive)
+      .getReader()
+      .read()
+      .catch((e: unknown) => e);
+    expect(wrappedError).toBeInstanceOf(Error);
+    expect(isMarkedSourceError(wrappedError)).toBe(true);
+  });
+});
+
+describe('Deno adapter: M143i', () => {
+  /** A Deno host capturing serve options. */
+  function denoHost(): {
+    host: DenoServeHost;
+    options: () => Parameters<DenoServeHost['serve']>[0];
+  } {
+    let captured: Parameters<DenoServeHost['serve']>[0] | undefined;
+    return {
+      host: {
+        serve(options) {
+          captured = options;
+          return { shutdown: () => Promise.resolve() };
+        },
+        upgradeWebSocket: () => ({
+          socket: new EventTarget() as never,
+          response: new Response(null, { status: 200 }),
+        }),
+      },
+      options: () => captured!,
+    };
+  }
+
+  it('keeps a body error quiet in onError and reports any other error', async () => {
+    const deno = denoHost();
+    const records: Readonly<Record<string, unknown>>[] = [];
+    const adapter = new DenoHttpAdapter(deno.host, { reportError: (r) => records.push(r) });
+    adapter.setHandler(() => respond({ body: failingStream() }));
+    await adapter.listen(0);
+    const response = await deno.options().fetch(new Request('http://localhost/'));
+    const bodyError = await response.text().catch((e: unknown) => e);
+    const onError = deno.options().onError!;
+    expect((await onError(bodyError)).status).toBe(500);
+    expect(records).toEqual([]);
+    expect((await onError(new Error('handler threw'))).status).toBe(500);
+    expect(records).toEqual([
+      expect.objectContaining({ level: 'error', msg: 'Deno.serve handler failed' }),
+    ]);
+  });
+
+  it('states once at listen that a draining Deno server sends no GOAWAY, only with HTTP/2', async () => {
+    const records: Readonly<Record<string, unknown>>[] = [];
+    const plain = new DenoHttpAdapter(denoHost().host, { reportError: (r) => records.push(r) });
+    await plain.listen(0);
+    expect(records).toEqual([]);
+    const h2 = new DenoHttpAdapter(denoHost().host, {
+      http2: true,
+      reportError: (r) => records.push(r),
+    });
+    await h2.listen(0);
+    expect(records).toEqual([expect.objectContaining({ level: 'warn' })]);
+    expect(String(records[0]?.['msg'])).toContain('GOAWAY');
+    const throwing = new DenoHttpAdapter(denoHost().host, {
+      http2: true,
+      reportError: () => {
+        throw new Error('no channel');
+      },
+    });
+    await expect(throwing.listen(0)).resolves.toBeDefined();
+    expect('beginDrain' in throwing).toBe(false);
+  });
+
+  it('reports the ceiling at the first handshake that asks for more', async () => {
+    const deno = denoHost();
+    const records: Readonly<Record<string, unknown>>[] = [];
+    const adapter = new DenoHttpAdapter(deno.host, { reportError: (r) => records.push(r) });
+    adapter.setHandler((request: IRequest): IResponse => {
+      setUpgradeIntent(request, { sink: m143iSink(DENO_WS_MAX_MESSAGE_BYTES + 1) });
+      return respond();
+    });
+    await adapter.listen(0);
+    await deno.options().fetch(new Request('http://localhost/ws'));
+    expect(records).toEqual([
+      expect.objectContaining({ configured: DENO_WS_MAX_MESSAGE_BYTES + 1, platform: 'deno' }),
+    ]);
+  });
 });

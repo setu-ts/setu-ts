@@ -89,6 +89,10 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   nodemailer: '^10',
   pino: '10.x',
   'swagger-ui-dist': '^5',
+  // openapi-plugin's real-browser Swagger UI proof; the version apps/full-stack pins.
+  playwright: '1.63.0',
+  // The floor of openapi-plugin's `^5` peer range, for the same browser proof.
+  'swagger-ui-dist-floor': 'npm:swagger-ui-dist@5.0.0',
   'react-router': '^8',
   ws: '^8.18.0',
   zod: '^4.6.6',

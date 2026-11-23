@@ -12,7 +12,20 @@ All notable changes to this project are documented here. The format follows
   `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and `staleForMs`.
   Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range `resolveTimeoutMs`
   (0–2147483647) with `RangeError`.
-
+- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
+  from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
+  through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
+  observes the error without changing how the process ends (Node, Deno and Bun; absent on Workers).
+  `app.stop()` logs `Server stopping`, `Shutdown drain finished` (with `remaining` and `timedOut`)
+  and `Server stopped`. `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000).
+  `RuntimeSignal` adds `'SIGHUP'`. `IRuntimeServices.unrefTimer` (optional) lets the process exit
+  with a timer pending: the handle's `unref()` on Node, Bun and Deno 2, nothing on Workers.
+  `IHttpAdapter.beginDrain` lets the Node adapter (which also serves Bun's HTTP/2) send HTTP/2
+  `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
+  `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
+  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
+  `@setu-ts/worker-pool-plugin` does not read it yet (V13-131's worker-pool half, M143r). V13-11,
+  V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -102,7 +115,57 @@ All notable changes to this project are documented here. The format follows
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`).** Clarify per-pod discovery
   for connection balancing, the unchanged no-resend rule for drain 503s, grace-expiry watch
   delivery, the shared 5 s provider-health cache and instance-address requirements for registration.
-
+- **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
+  no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
+  `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A
+  client that leaves before the response is logged at once as `Request aborted before completion`
+  (for a request that called `ctx.defer`); a streamed body's `ctx.defer` cleanups run when the
+  request's signal aborts, so a client that leaves on workerd still runs them, while other cleanups
+  wait for the handler to settle and are never run under it (V13-200). On that abort the kernel
+  cancels the body and runs the cleanups once its `cancel()` settles, with no time limit, so a
+  `cancel()` that never settles keeps the request's resources. It cannot see a source's `pull` or a
+  pump it started: a source that does work of its own must make `cancel()` wait for it, and a source
+  with no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its
+  `pull`. With a logger registered, a wait still pending after 30 s logs one `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `{ requestId, method, path, waitedMs }`, and releases nothing. A failed response stream is
+  logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
+  gRPC-Web reply holds the shutdown drain until it ends (V13-23), as a streamed body whose request
+  registered `ctx.defer` cleanups already did. Every streamed body is cancelled when its client
+  leaves, with or without `ctx.defer` (new on Workers, where the body is not cancelled for you). A
+  `stop()` during `start()` cancels the start: its close hooks run, a close hook registered later
+  runs at once, no later startup step runs, and a `listen()` already pending is closed when it
+  resolves; a `stop()` after startup's last step waits for `start()` and stops normally (V13-43).
+- **`@setu-ts/runtime` (M143i, #611).** Node answers a refused WebSocket upgrade with the
+  framework's response (status, reason phrase, headers, body), as Bun and Deno do;
+  `rejectRawUpgrade` takes its reason phrases from a status table (V13-53). Bun keeps a quiet
+  response stream open past its 10 s idle timeout (V13-42). Bun and Deno report once, at the first
+  handshake whose limit is unlimited or above their ceiling (Bun 16 MiB, Deno 64 MiB), that the
+  runtime cannot honour it (V13-41). A failed response stream is cut off without the runtime
+  printing it on Node, Bun and Deno (an HTTP/2 stream on Node is reset with `INTERNAL_ERROR`, not
+  `NO_ERROR`, so the client sees a failure rather than a clean end), and Node no longer writes
+  `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2 states at listen
+  that it sends no `GOAWAY` when draining. A rejecting response-trailers promise on Node is reported
+  as `Response trailers failed`. Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain)
+  are logged at `warn`, faults at `error`. `onFatalError` does not report a throw an application
+  captures with `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
+- **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
+  accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
+  for a request whose client left before the response (the logger-plugin half of V13-110), so alerts
+  that count 5xx request lines no longer count those requests. In a Deno application that logs
+  requests, Deno now prints its one-time legacy-abort notice; `--unstable-no-legacy-abort` removes
+  it.
+- **BREAKING — `@setu-ts/cli` (M143b; V13-140, #610).** `setu new --env-file <path>` and
+  `setu generate app --env-file <path>` are renamed `--dotenv <path>`, with the same grammar. Node
+  reads `--env-file` anywhere on its command line, even after the script name, so under Node the old
+  flag never reached `setu`: Node tried to load the file and exited 9. `--env-file` is now refused
+  by name (exit 2) on Bun and Deno too.
+- **`@setu-ts/cli`, `@setu-ts/create` (M143b; V13-166, #610).** `setu` and `npm create @setu-ts`
+  refuse to start below Node 22.9.0 (exit 1, naming the supported range), the lowest version on
+  which the CLI and a generated project both work. Between that floor and the supported range they
+  warn and continue. The check is the new `@setu-ts/cli/node-version` subpath (`nodeFloorRefusal`,
+  `isNodeBelowFloor`, `isSupportedNode`, `HARD_FLOOR_NODE`, `SUPPORTED_NODE`), which both
+  executables load before anything else.
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery
@@ -117,6 +180,75 @@ All notable changes to this project are documented here. The format follows
   placeholder sign-in. The CLI rewrites `test/support/pages.ts` and `session.ts` only while they
   carry its `Regenerated by setu` first line, and refuses to overwrite a project's own file there.
   Existing modules are untouched.
+
+### Fixed
+
+- **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
+  a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with
+  an unhandled `'error'` event (in 0.13.0 a reset mid-pipeline ended any Node application with a
+  WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
+  has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
+  descriptor, and a status outside 200–599 is answered as 500.
+- **`@setu-ts/session-plugin` (M143a, #609; V13-135, V13-136, V13-137).** On the store strategy a
+  `destroy()` or `regenerate()` stays in force whatever request on the session was already in
+  flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every
+  commit to a restored session checks it after its write and deletes its own write when present,
+  sending no cookie. A regeneration whose source was signed out meanwhile is refused, and a sign-out
+  that lands after a regeneration's check also ends the regenerated session. A commit whose request
+  loaded the session `maxAge` or more ago is refused (markers expire one second after `maxAge`), a
+  regeneration or `clear()` sign-out refused that way still revokes the old id, and a commit that
+  reaches its marker check that late ends its session (deleting its row under a `revoked` marker,
+  which every commit and regeneration that checks its markers afterwards refuses (one that committed
+  during the stall keeps its new id), without following its successor links; a stalled regeneration
+  deletes only its new row). `restoreRevocationCheck: true` also checks the markers on every
+  store-held restore. Store commits write this request's changes onto the current row
+  (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload write), so a
+  concurrent request's keys survive. `SessionService.commit` takes an optional `SessionCommitPolicy`
+  and returns a `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
+- **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
+  V13-20).** A signed-in visitor's response, a response setting the session cookie and one carrying
+  a CSRF token answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as
+  each is known; an anonymous response that read the session varies on `Cookie`. An explicit
+  shared-cacheable directive set by the handler is kept, with one bounded warning per route, unless
+  the response sets the session cookie; one set by a middleware outside the session middleware
+  before it runs is replaced by `private, no-store` for a signed-in visitor; on a `public` response
+  a refresh-only commit and a new visitor's CSRF-token-only session are not committed, so a form on
+  a page marked `public` fails CSRF. A missing asset starts no session. The React Router bridge sets
+  a route's `Cache-Control` instead of appending it.
+- **`@setu-ts/cache-plugin` (M143a, #609; V13-111).** `cacheMiddleware` stores no response marked
+  `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
+  from a `public` entry that does not vary on `Cookie`/`Authorization`, storing only such a
+  response. A response varying on either is stored and served only for requests carrying no cookie
+  and no `Authorization`, and a `Vary: *` response is never stored. A request carrying any cookie or
+  `Authorization` never joins or leads a coalesced flight, and a response captured after the session
+  plugin set `PER_VISITOR_RESPONSE_STATE_KEY` (new in `@setu-ts/common`; set at a request's first
+  application write, a CSRF token read and a read of a restored session holding application data) is
+  never stored; one captured after it set `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` (new in
+  `@setu-ts/common`, set at the first application read) is stored only for a request carrying no
+  cookie and no `Authorization`, with `Cookie` added to the stored `Vary`, whatever the handler did
+  to its headers. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
+  arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
+  uses too; a value with an unclosed quote is never stored.
+- **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
+  CORS at 125, so the request-size 400 and 413 carry them.
+- **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out
+  sends the form-CSRF token on same-origin unsafe calls, from a new `GET <docs>/csrf-token` route
+  read through `ICsrfTokenAccess` (`CSRF_TOKEN_ACCESS_STATE_KEY`, new in `@setu-ts/common`). The
+  docs page, spec and assets commit no session.
+- **`@setu-ts/cli` (M143b; V13-36, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161,
+  V13-168, #610).** A built-in option given with no value (`--template` at the end, `--template=`)
+  is refused by name with exit 2, where it silently meant the default. `setu new` refuses a target
+  that is a file or a non-empty directory (a `.git` directory is allowed) before writing, and offers
+  to delete only a directory an interrupted run left. `setu add`, `setu generate` and `setu sync`
+  hold a project lock, `.setu-ts/write.lock`, so a second command in the same project or workspace
+  is refused rather than interleaving its writes; a lock left by a process that is gone is named
+  with how to clear it. `setu add telemetry` records the four OpenTelemetry peers on Workers too,
+  and the microservice template lists them, so a Workers project's tests pass and a Bigtable project
+  installs; `setu add database --type bigtable` restores any missing peer when telemetry-plugin is
+  present. `setu add view` builds the CSS before `test` and `test:e2e`. A Pub/Sub project's `.env`
+  sets `PUBSUB_EMULATOR_HOST`, `setu add` names it as the emulator's address, and the generated
+  `test` scripts load the dotenv the way `start` does. A new npm or Bun workspace's root `test`
+  passes while it has no members, through a generated `scripts/test.mjs`.
 
 ## [0.13.0] — 2026-11-17
 

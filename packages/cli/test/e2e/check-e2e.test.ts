@@ -157,7 +157,9 @@ for (const template of ['rest', 'class-based', 'microservice']) {
       JSON.stringify({ silence: ['setu.W001'] }),
     );
     expect((await run(['check', '--strict', '--dir', project])).code).toBe(0);
-  });
+    // Dozens of real check/sync/generate runs: the microservice case took 22 s of the
+    // default 30 s on a green CI runner and timed out on a slower one.
+  }, 120_000);
 }
 
 it('checks two workspace members and names the broken member', async () => {

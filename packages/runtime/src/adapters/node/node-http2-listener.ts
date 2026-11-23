@@ -104,9 +104,13 @@ export const HTTP2_IDLE_TIMEOUT_MS = 75_000;
  * Also closes, the same way, a session idle for
  * {@linkcode HTTP2_IDLE_TIMEOUT_MS} with no stream open.
  *
+ * Once the returned function has run, a session that opens later is closed as
+ * soon as it opens: a client reconnecting to a server that is draining is told
+ * to go elsewhere too, and a stream it opens there is refused unprocessed.
+ *
  * @param server - Any `node:http2` server
  * @param idleTimeoutMs - Overrides {@linkcode HTTP2_IDLE_TIMEOUT_MS}; tests only
- * @returns Closes the sessions open at the time of the call
+ * @returns Closes the sessions open at the time of the call, and every later one
  */
 export function trackHttp2Sessions(
   server: {
@@ -115,7 +119,12 @@ export function trackHttp2Sessions(
   idleTimeoutMs: number = HTTP2_IDLE_TIMEOUT_MS,
 ): () => void {
   const sessions = new Set<Http2Session>();
+  let closing = false;
   server.on('session', (session) => {
+    if (closing) {
+      session.close();
+      return;
+    }
     sessions.add(session);
     session.once('close', () => sessions.delete(session));
     let open = 0;
@@ -135,6 +144,7 @@ export function trackHttp2Sessions(
     });
   });
   return () => {
+    closing = true;
     for (const session of sessions) session.close();
   };
 }
@@ -216,6 +226,16 @@ export class CleartextHttp2Server {
   on(event: 'upgrade', listener: (...args: never[]) => void): this {
     this.#http1.on(event, listener as (...args: unknown[]) => void);
     return this;
+  }
+
+  /**
+   * Starts the drain while still accepting connections: sends GOAWAY to every
+   * HTTP/2 session (and to any that opens later) and closes idle HTTP/1.1
+   * keep-alive connections. Requests in flight continue.
+   */
+  drain(): void {
+    this.#closeSessions();
+    this.#http1.closeIdleConnections();
   }
 
   /**

@@ -21,6 +21,8 @@ describe('resolveSessionConfig', () => {
       rolling: false,
       maxCookieBytes: 4096,
       tenantBinding: true,
+      storeCommit: 'changes',
+      restoreRevocationCheck: false,
     });
   });
 
@@ -109,5 +111,42 @@ describe('resolveCsrfConfig', () => {
 
   it('accepts an empty ignore list, making every method verified', () => {
     expect(resolveCsrfConfig({ ignoreMethods: [] }).ignoreMethods.size).toBe(0);
+  });
+});
+
+describe('store-strategy options', () => {
+  it("defaults storeCommit to 'changes' and restoreRevocationCheck to false with a store", () => {
+    const config = resolveSessionConfig({ store: 'memory' });
+    expect(config.storeCommit).toBe('changes');
+    expect(config.restoreRevocationCheck).toBe(false);
+  });
+
+  it('carries both through with a store', () => {
+    const config = resolveSessionConfig({
+      store: 'memory',
+      storeCommit: 'snapshot',
+      restoreRevocationCheck: true,
+    });
+    expect(config.storeCommit).toBe('snapshot');
+    expect(config.restoreRevocationCheck).toBe(true);
+  });
+
+  it.each([
+    [{ storeCommit: 'changes' as const }, 'storeCommit'],
+    [{ restoreRevocationCheck: false }, 'restoreRevocationCheck'],
+  ])('throws a TypeError naming %s when set without a store', (options, name) => {
+    expect(() => resolveSessionConfig(options)).toThrow(TypeError);
+    expect(() => resolveSessionConfig(options)).toThrow(
+      `SessionPlugin option '${name}' applies only to the store strategy; set 'store' as well.`,
+    );
+  });
+
+  it('refuses values of the wrong shape from an untyped config', () => {
+    expect(() => resolveSessionConfig({ store: 'memory', storeCommit: 'merge' as never })).toThrow(
+      "SessionPlugin option 'storeCommit' must be 'changes' or 'snapshot'.",
+    );
+    expect(() =>
+      resolveSessionConfig({ store: 'memory', restoreRevocationCheck: 'true' as never }),
+    ).toThrow("SessionPlugin option 'restoreRevocationCheck' must be a boolean.");
   });
 });

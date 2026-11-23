@@ -20,17 +20,43 @@ deno add npm:@setu-ts/kernel
 
 ## What's Inside
 
-| Area              | Exports                                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `app.diagnostics` reader (opt-in) |
-| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                         |
-| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                          |
-| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                           |
-| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                       |
-| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                            |
+| Area              | Exports                                                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `StartCancelledError`, `app.diagnostics` reader (opt-in) |
+| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                                                |
+| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                                                 |
+| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                                                  |
+| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                                              |
+| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                                                   |
 
-Only the seven public exports listed above are part of the public API; all concrete classes are
+Only the eight public exports listed above are part of the public API; all concrete classes are
 internal.
+
+## Stopping, crashes and HEAD (since 0.14.0)
+
+- `app.start({ port, drainTimeoutMs })` sets how long `stop()` waits for in-flight requests (default
+  10 000 ms). A streamed gRPC, Connect or gRPC-Web reply, and a streamed body whose request
+  registered `ctx.defer` cleanups, hold the drain until they end; other streams (SSE) do not.
+- With a logger registered, `stop()` logs `Server stopping`, `Shutdown drain finished` (with
+  `remaining` and `timedOut`) and `Server stopped`; an uncaught exception or unhandled rejection
+  while the application runs logs one `fatal` line, `Process failed`, and the process still ends as
+  it would have.
+- `stop()` during `start()` cancels the start: `ctx.signal` aborts, `start()` rejects with
+  `StartCancelledError`, the close hooks run and no later startup step runs (a `listen()` already
+  pending is closed when it resolves); once startup has passed its last step, a `stop()` waits for
+  `start()` to resolve and stops normally.
+- Every `GET` route answers `HEAD`, with an explicit `HEAD` route preferred at equal rank;
+  `inject()`, `dispatch()` and `app.fetch()` hand back a `HEAD` answer with no body.
+- A request that called `ctx.defer` and whose signal aborts before its response is logged as
+  `Request aborted before completion` at once; its `ctx.defer` cleanups wait for the handler to
+  settle (a streamed body's run when the signal aborts, once the body's `cancel()` settles, with no
+  time limit — a `cancel()` that never settles keeps the request's resources; a source that does
+  work of its own, in `pull` or a pump it started, must make `cancel()` wait for it; a source with
+  no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its `pull`;
+  with a logger registered, a wait still pending after 30 s logs one `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`), so
+  a handler that never settles keeps what it holds; a failed response stream is logged once as
+  `Response stream failed`.
 
 <!-- version:history -->
 
@@ -143,6 +169,7 @@ package fits the plugin architecture.
 | Export                          | Kind      |
 | ------------------------------- | --------- |
 | `createApplication`             | function  |
+| `StartCancelledError`           | class     |
 | `ApplicationOptions`            | interface |
 | `IKernelApplication`            | interface |
 | `InjectRequest`                 | interface |

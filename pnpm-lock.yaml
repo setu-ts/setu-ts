@@ -1508,6 +1508,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/session-plugin':
+        specifier: workspace:^
+        version: link:../session-plugin
       '@types/node':
         specifier: ^24
         version: 24.19.2
@@ -2681,6 +2684,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      '@setu-ts/session-plugin':
+        specifier: workspace:^
+        version: link:../session-plugin
       '@setu-ts/validation-plugin':
         specifier: workspace:^
         version: link:../validation-plugin
@@ -2690,9 +2696,15 @@ importers:
       '@types/swagger-ui-dist':
         specifier: ^3.30.6
         version: 3.30.6
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
       swagger-ui-dist:
         specifier: ^5
         version: 5.33.3
+      swagger-ui-dist-floor:
+        specifier: npm:swagger-ui-dist@5.0.0
+        version: swagger-ui-dist@5.0.0
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -2878,6 +2890,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      esbuild:
+        specifier: ~0.28.0
+        version: 0.28.2
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -8128,6 +8143,9 @@ packages:
 
   stubs@3.0.0:
     resolution: {integrity: sha512-PdHt7hHUJKxvTCgbKX9C1V/ftOcjJQgz8BZwNfV5c4B6dcGqlpelTbJ999jBGZ2jYiPAwcX5dP6oBwVlBlUbxw==}
+
+  swagger-ui-dist@5.0.0:
+    resolution: {integrity: sha512-bwl6og9I9CAHKGSnYLKydjhBuH7d3oU6RX6uKN8oDCkLusTHXOW3sZMyBWjRtjGFnCMmN085oZoaR/4Wm9nIaQ==}
 
   swagger-ui-dist@5.33.3:
     resolution: {integrity: sha512-7xJKxAjf+/ajlW/V/dMfbiY+NC5BWtbvzzdI/AsX5UzMtOMudmFz/tjuKN0jN7QVe5drKKnx01CdYEJvTFvQlw==}
@@ -13411,6 +13429,8 @@ snapshots:
       anynum: 1.0.1
 
   stubs@3.0.0: {}
+
+  swagger-ui-dist@5.0.0: {}
 
   swagger-ui-dist@5.33.3:
     dependencies:

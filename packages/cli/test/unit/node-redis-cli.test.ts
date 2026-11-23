@@ -415,8 +415,11 @@ describe('node-redis CLI', () => {
         const rest = contents
           .trimEnd()
           .split('\n')
-          .filter((line) => !['node_modules/', 'coverage/', '.env'].includes(line));
-        contents = `node_modules/\ncoverage/\n.env\n.env.*\n!.env.example\n${rest.length === 0 ? '' : `${rest.join('\n')}\n`}`;
+          .filter(
+            (line) =>
+              !['node_modules/', 'coverage/', '.setu-ts/write.lock/', '.env'].includes(line),
+          );
+        contents = `node_modules/\ncoverage/\n.setu-ts/write.lock/\n.env\n.env.*\n!.env.example\n${rest.length === 0 ? '' : `${rest.join('\n')}\n`}`;
       }
       if (runtime === 'deno' && file.endsWith('deno.json')) {
         const manifest = JSON.parse(contents);
@@ -568,7 +571,7 @@ describe('node-redis CLI', () => {
   it.each([
     [['new', 'svc', '--redis-client', 'node-redis'], 'requires a Redis arm'],
     [['new', 'svc', '--redis-client', 'unknown'], 'Unknown --redis-client'],
-    [['new', 'svc', '--redis-client'], 'Unknown --redis-client'],
+    [['new', 'svc', '--redis-client'], 'Option --redis-client needs a value'],
     [
       [
         'new',
@@ -586,7 +589,7 @@ describe('node-redis CLI', () => {
     const h = harness();
     expect(await h.run(args)).toBe(2);
     expect(h.errors.join('\n')).toContain(message);
-    expect(h.fs.writes).toHaveLength(0);
+    expect(h.fs.projectWrites).toHaveLength(0);
   });
 
   it.each([

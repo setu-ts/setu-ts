@@ -249,3 +249,46 @@ describe('SessionService.fromHeaders', () => {
     });
   });
 });
+
+describe('SessionService.fromHeaders with restoreRevocationCheck', () => {
+  async function signedIn(store: RecordingStore, restoreRevocationCheck: boolean) {
+    const { service } = await makeService({ store, restoreRevocationCheck }, store);
+    const { cookie, id } = await committedCookie(service, { userId: 'u1' });
+    store.calls.length = 0;
+    return { service, cookie, id };
+  }
+
+  it('reads no marker without the option', async () => {
+    const store = new RecordingStore();
+    const { service, cookie, id } = await signedIn(store, false);
+    expect(await service.fromHeaders(new Headers({ cookie }))).not.toBeNull();
+    expect(store.calls).toEqual([`read:${id}`]);
+  });
+
+  it('treats a present marker as no session', async () => {
+    for (const kind of ['revoked', 'superseded'] as const) {
+      const store = new RecordingStore();
+      const { service, cookie, id } = await signedIn(store, true);
+      store.entries.set(`${kind}:${id}`, { __setu_marker: kind });
+      expect(await service.fromHeaders(new Headers({ cookie }))).toBeNull();
+      expect(store.calls).toContain(`read:revoked:${id}`);
+      expect(store.calls).toContain(`read:superseded:${id}`);
+    }
+  });
+
+  it('does not count a marker id row without its payload', async () => {
+    const store = new RecordingStore();
+    const { service, cookie, id } = await signedIn(store, true);
+    store.entries.set(`revoked:${id}`, {});
+    expect(await service.fromHeaders(new Headers({ cookie }))).not.toBeNull();
+  });
+
+  it('rejects when a marker read throws', async () => {
+    const store = new RecordingStore();
+    const { service, cookie } = await signedIn(store, true);
+    const read = store.read.bind(store);
+    store.read = (key: string) =>
+      key.includes(':') ? Promise.reject(new Error('store down')) : read(key);
+    await expect(service.fromHeaders(new Headers({ cookie }))).rejects.toThrow('store down');
+  });
+});

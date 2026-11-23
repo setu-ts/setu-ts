@@ -42,18 +42,18 @@ export function registerCartFormRoutes(router: IRouterApi): void {
 - Cookies encrypt by default; `mode: 'sign'` exposes payloads. `maxAge`: 7200 seconds; optional
   `idleTimeoutMs`: milliseconds. Defaults: secure, httpOnly, sameSite lax; local HTTP needs
   `cookie: { secure: false }`.
-- Missing keys return `undefined`. Nested mutations need another `set`.
-- `csrf: {}` checks unsafe methods: `_csrf` field or `x-csrf-token` header. The helper follows
-  config.
+- Missing keys return `undefined`; nested mutations need another `set`.
+- `csrf: {}` checks unsafe methods: `_csrf` field or `x-csrf-token` header.
 - `csrf.exemptBearer` defaults true: authenticated header credentials with a new session skip CSRF
   and commit no cookie, even on excluded paths. Restored sessions/non-Bearer Authorization prevent
   exemption. Bearer/API-key-to-cookie exchanges need false; see README.
-- Secrets: option → secrets manager → config → environment; ≥32 characters. Arrays rotate keys, with
-  index 0 sealing new cookies.
+- Secrets: option → secrets manager → config → env; ≥32 characters. Arrays rotate (index 0 seals).
 
 ## Other options
 
 - `store: 'memory'`, `'cache'` or an `ISessionStore` enables server-side payload storage.
 - `regenerate` rotates the session id and clears the form-CSRF token; fetch a fresh token after
-  sign-in or MFA promotion. Other data, including the tenant binding, stays. `destroy` logs out.
-- `rolling` renews expiry; `tenantBinding` defaults to true and refuses a tenant mismatch with 403.
+  sign-in or MFA promotion. Other data, tenant binding included, stays. `destroy` logs out.
+- `rolling` renews expiry; `tenantBinding` defaults to true and refuses tenant mismatches (403).
+- Per-visitor responses get private, no-store and Vary: Cookie; how a handler's own Cache-Control
+  combines with that depends on order (README, Caching). New visitors' public-page forms fail CSRF.

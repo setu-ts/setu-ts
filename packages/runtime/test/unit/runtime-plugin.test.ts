@@ -542,6 +542,20 @@ describe('runtime-plugin | reportError', () => {
     expect(errors[0]?.metadata).not.toHaveProperty('msg');
   });
 
+  it('forwards a warning record to logger.warn, not logger.error (CodeRabbit)', () => {
+    const errors: Array<{ message: string; metadata?: unknown }> = [];
+    const warnings: Array<{ message: string; metadata?: unknown }> = [];
+    const { captured, ctx } = createReportingHarness(createFakeRuntimeServices('node'));
+    const logger = recordingLogger(errors);
+    logger.warn = (message, metadata) => void warnings.push({ message, metadata });
+    ctx.services.register(CAPABILITIES.LOGGER, logger);
+    captured.reportError!({ level: 'warn', msg: 'WebSocket limit above ceiling', limit: 0 });
+    expect(warnings).toEqual([
+      { message: 'WebSocket limit above ceiling', metadata: { limit: 0 } },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
   it('falls back to services.reportError when no logger is registered', () => {
     const reported: Readonly<Record<string, unknown>>[] = [];
     const services = {

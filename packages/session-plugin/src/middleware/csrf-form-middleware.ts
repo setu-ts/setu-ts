@@ -11,16 +11,18 @@
  */
 import type {
   HandlerResult,
+  ICsrfTokenAccess,
   IRequestContext,
   MiddlewareFunction,
   NextFunction,
 } from '@setu-ts/common';
-import { respondWithError } from '@setu-ts/common';
+import { CSRF_TOKEN_ACCESS_STATE_KEY, respondWithError } from '@setu-ts/common';
 
 import { CsrfTokenMismatchError } from '../errors.ts';
 import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
-import { CSRF_CONFIG_STATE_KEY } from '../csrf/token.ts';
+import { CSRF_CONFIG_STATE_KEY, getCsrfToken } from '../csrf/token.ts';
+import { getSession } from '../services/get-session.ts';
 import type { PublishedCsrfConfig } from '../csrf/token.ts';
 import { applyCsrfExemption } from '../csrf/exclude.ts';
 import { verifyWithConfig } from '../csrf/verify.ts';
@@ -74,6 +76,15 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
     // string, so there is nothing left to mutate.
     const published: PublishedCsrfConfig = Object.freeze({ fieldName: config.fieldName });
     ctx.state.set(CSRF_CONFIG_STATE_KEY, published);
+    // The token accessor for components that cannot import this package (the
+    // Swagger UI token route). It hands out the token of a session this request
+    // restored, and never starts a session.
+    const access: ICsrfTokenAccess = Object.freeze({
+      headerName: config.headerName,
+      tokenForExistingSession: (): string | undefined =>
+        getSession(ctx).isNew ? undefined : getCsrfToken(ctx),
+    });
+    ctx.state.set(CSRF_TOKEN_ACCESS_STATE_KEY, access);
 
     if (
       config.ignoreMethods.has(ctx.request.method.toUpperCase()) ||
