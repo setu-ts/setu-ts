@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel`.** Optional
+  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
+  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
+  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
+  independent of status. An application setting the marker claims no processing and a Setu gRPC
+  client may send that unary call once more.
+
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -40,6 +47,10 @@ All notable changes to this project are documented here. The format follows
   through pages.
 
 ### Changed
+
+- **`@setu-ts/runtime`.** `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause
+  containing both address-family failures in A-then-AAAA order; migrate readers of
+  `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit

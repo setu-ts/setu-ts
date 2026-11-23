@@ -12,6 +12,22 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### DNS errors and the reserved drain marker
+
+`IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.
+Code reading `error.cause.code` must inspect `error.cause.errors` instead, in A-then-AAAA order;
+only classify a name as absent when every member indicates absence. One successful family continues
+to return addresses. Runtime error codes otherwise remain unchanged; Deno 2.9.6 also reports
+SERVFAIL as `NotFound`.
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a Setu gRPC client may send that
+unary call once more.
+
 ### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
 
 - **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s

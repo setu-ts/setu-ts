@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { startDnsServer } from '../fixtures/udp-dns-server.ts';
 import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -192,4 +193,59 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
     },
     20_000,
   );
+});
+
+describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
+  it('answers from loopback and bounds a silent server', async () => {
+    const server = await startDnsServer();
+    const childFile = resolve(root, '.tmp/runtime-edge-server/bun-dns-child.mjs');
+    await mkdir(resolve(root, '.tmp/runtime-edge-server'), { recursive: true });
+    await build({
+      entryPoints: [resolve(root, 'packages/runtime/test/fixtures/bun-dns-child.ts')],
+      outfile: childFile,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      logLevel: 'silent',
+    });
+    try {
+      const output = await new Promise<string>((resolveOutput, reject) => {
+        const child = spawn('bun', [childFile, server.server], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        const timeout = setTimeout(() => {
+          child.kill();
+          reject(new Error('Bun DNS child exceeded 5 s'));
+        }, 5000);
+        child.stdout!.on('data', (chunk: Buffer) => {
+          stdout += chunk.toString();
+        });
+        child.stderr!.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString();
+        });
+        child.on('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        child.on('exit', (code) => {
+          clearTimeout(timeout);
+          if (code === 0) resolveOutput(stdout);
+          else reject(new Error(stderr));
+        });
+      });
+      const records = output
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(records).toHaveLength(2);
+      expect(records[0]).toEqual({ addresses: ['10.0.0.1'] });
+      expect(records[1]!['code']).toBe('ETIMEOUT');
+      expect(records[1]!['elapsedMs']).toBeLessThan(400);
+      expect(server.queries).toBeGreaterThan(0);
+    } finally {
+      await server.stop();
+    }
+  });
 });

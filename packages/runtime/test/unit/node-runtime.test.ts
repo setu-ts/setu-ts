@@ -537,3 +537,26 @@ describe('node-runtime | onSignal', () => {
     expect(seen).toEqual(['SIGINT']);
   });
 });
+
+it('exposes createDnsResolver and forwards options to the injected creator', () => {
+  const options = { servers: ['127.0.0.1:5353'], timeoutMs: 100 };
+  const resolver = {
+    resolveHost: () => Promise.resolve(['10.0.0.1']),
+    resolveSrv: () => Promise.resolve([]),
+  };
+  const seen: unknown[] = [];
+  const runtime = createNodeRuntimeServices(createFakeNodeHost(), undefined, undefined, (value) => {
+    seen.push(value);
+    return resolver;
+  });
+  expect(typeof runtime.createDnsResolver).toBe('function');
+  expect(runtime.createDnsResolver!(options)).toBe(resolver);
+  expect(seen).toEqual([options]);
+});
+
+it('validates chosen DNS options at creation and returns independent resolvers', () => {
+  const runtime = createNodeRuntimeServices(createFakeNodeHost());
+  expect(() => runtime.createDnsResolver!({ servers: [], timeoutMs: 0 })).toThrow(RangeError);
+  const options = { servers: ['::1'], timeoutMs: 1 };
+  expect(runtime.createDnsResolver!(options)).not.toBe(runtime.createDnsResolver!(options));
+});

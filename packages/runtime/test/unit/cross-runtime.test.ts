@@ -10,6 +10,7 @@ import {
   crossSetTimeout,
   crossSubtle,
   crossUuid,
+  mergeRuntimeServices,
 } from '../../src/services/cross-runtime.ts';
 
 describe('cross-runtime services', () => {
@@ -130,4 +131,24 @@ describe('cross-runtime services', () => {
       expect(count).toBe(countAfterClear);
     });
   });
+});
+
+it('preserves the createDnsResolver capability when merging', () => {
+  const resolver = {
+    resolveHost: () => Promise.resolve([]),
+    resolveSrv: () => Promise.resolve([]),
+  };
+  const createDnsResolver = () => resolver;
+  const runtime = mergeRuntimeServices({
+    platform: () => 'node',
+    version: () => 'test',
+    hostname: () => 'test',
+    env: {},
+    exit: () => {
+      throw new Error('exit');
+    },
+    createDnsResolver,
+  });
+  expect(runtime.createDnsResolver).toBe(createDnsResolver);
+  expect(runtime.createDnsResolver!({ servers: ['::1'], timeoutMs: 0 })).toBe(resolver);
 });

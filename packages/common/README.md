@@ -47,6 +47,21 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                                                  |
 | Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                                                  |
 
+## DNS and unprocessed responses (since 0.14.0)
+
+`DnsResolverOptions` configures the optional `IRuntimeServices.createDnsResolver` with readonly
+IP-literal `servers` and a whole-lookup `timeoutMs`. Node, Bun and Deno implement it; Workers omits
+it. `IDnsResolver.resolveHost` rejects with an `AggregateError` cause holding both family errors in
+A-then-AAAA order when both fail. One successful family is still returned.
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a Setu gRPC client may send that
+unary call once more.
+
 ## Usage
 
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
@@ -231,7 +246,6 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
-| `FatalErrorOrigin`                    | type      |
 | `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
@@ -420,6 +434,8 @@ package fits the plugin architecture.
 | `TELEMETRY_CONTEXT_OPAQUE`            | const     |
 | `TRACEPARENT_HEADER`                  | const     |
 | `TRACESTATE_HEADER`                   | const     |
+| `UNPROCESSED_HEADER`                  | const     |
+| `UNPROCESSED_SHUTDOWN`                | const     |
 | `UPGRADE_INTENT`                      | const     |
 | `VALIDATION_METADATA`                 | const     |
 | `AddJobOptions`                       | interface |
@@ -459,6 +475,7 @@ package fits the plugin architecture.
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
 | `DispatchOptions`                     | interface |
+| `DnsResolverOptions`                  | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |
@@ -802,6 +819,7 @@ package fits the plugin architecture.
 | `EventDiagnosticsState`               | type      |
 | `EventHandler`                        | type      |
 | `EventObservationOperation`           | type      |
+| `FatalErrorOrigin`                    | type      |
 | `FilterComparison`                    | type      |
 | `FilterExpression`                    | type      |
 | `FilterOperator`                      | type      |

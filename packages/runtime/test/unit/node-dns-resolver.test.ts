@@ -95,7 +95,7 @@ describe('createNodeDnsResolver — resolveHost', () => {
     expect(await resolver.resolveHost('svc')).toEqual(['2001:db8::1']);
   });
 
-  it('rejects only when both families fail, carrying the first as cause', async () => {
+  it('rejects only when both families fail, carrying both failures as an aggregate cause', async () => {
     const first = new Error('ENOTFOUND v4');
     const resolver = createNodeDnsResolver(
       fakeDns({
@@ -108,7 +108,9 @@ describe('createNodeDnsResolver — resolveHost', () => {
     try {
       await resolver.resolveHost('missing');
     } catch (error) {
-      expect((error as Error).cause).toBe(first);
+      expect((error as Error).cause).toBeInstanceOf(AggregateError);
+      expect(((error as Error).cause as AggregateError).errors[0]).toBe(first);
+      expect(((error as Error).cause as AggregateError).errors[1]).toBeInstanceOf(Error);
     }
   });
 

@@ -258,6 +258,10 @@ interface StartOptions {
 The drain bound is `StartOptions.drainTimeoutMs`; there is no other shutdown option.
 
 **The two drain numbers, in one place.** The bound must fit inside the orchestrator's grace period
+
+The kernel's pre-pipeline drain answer sets `UNPROCESSED_HEADER: UNPROCESSED_SHUTDOWN`
+(`x-setu-unprocessed: shutdown`), after the error responder, independent of its status.
+
 (the time between `SIGTERM` and `SIGKILL`) minus the pre-stop delay and the time the shutdown and
 close hooks need. The library default is **10 000 ms**, which fits a 30 s grace with room to spare.
 For a project deployed with the manifests `setu new` generates, **20 000 ms** fits: they give 30 s
@@ -879,6 +883,17 @@ app.router.get('/info', (ctx) => {
 
 ### Available Runtime Services
 
+`UNPROCESSED_HEADER = 'x-setu-unprocessed'` and `UNPROCESSED_SHUTDOWN = 'shutdown'` are Common
+constants (since 0.14.0).
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a Setu gRPC client may send that
+unary call once more.
+
 ```typescript
 interface IRuntimeServices {
   platform(): 'node' | 'deno' | 'bun' | 'cloudflare-workers';
@@ -903,6 +918,7 @@ interface IRuntimeServices {
   fs?: IFileSystem;
   workers?: IWorkerHost;
   dns?: IDnsResolver;
+  createDnsResolver?(options: DnsResolverOptions): IDnsResolver; // since 0.14.0
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
 }
@@ -957,13 +973,14 @@ that resolves names internally and exposes no lookup surface. Callers must degra
 it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
 `DiscoveryUnavailableError` during `register()`, naming the alternatives.
 
-| Member         | Node | Deno           | Bun | Workers |
-| -------------- | ---- | -------------- | --- | ------- |
-| `fs`           | ✅   | ✅             | ✅  | ❌      |
-| `workers`      | ✅   | ✅             | ✅  | ❌      |
-| `dns`          | ✅   | ✅             | ✅  | ❌      |
-| `onSignal`     | ✅   | ✅ (not Win32) | ✅  | ❌      |
-| `onFatalError` | ✅   | ✅             | ✅  | ❌      |
+| Member              | Node | Deno           | Bun | Workers |
+| ------------------- | ---- | -------------- | --- | ------- |
+| `fs`                | ✅   | ✅             | ✅  | ❌      |
+| `workers`           | ✅   | ✅             | ✅  | ❌      |
+| `dns`               | ✅   | ✅             | ✅  | ❌      |
+| `createDnsResolver` | ✅   | ✅             | ✅  | ❌      |
+| `onSignal`          | ✅   | ✅ (not Win32) | ✅  | ❌      |
+| `onFatalError`      | ✅   | ✅             | ✅  | ❌      |
 
 `onSignal` registers a process-termination handler so an application can run `app.stop()` — its
 shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
@@ -992,6 +1009,11 @@ Bun survives a rejection, it reports the first one as fatal and observes no late
 process listener per mechanism exists while any handler is subscribed.
 
 ```typescript
+interface DnsResolverOptions { // since 0.14.0
+  readonly servers: readonly string[];
+  readonly timeoutMs: number;
+}
+
 interface IDnsResolver {
   resolveSrv(hostname: string): Promise<readonly SrvRecord[]>;
   resolveHost(hostname: string): Promise<readonly string[]>;
@@ -1005,13 +1027,57 @@ interface SrvRecord {
 }
 ```
 
+#### Chosen DNS servers (since 0.14.0)
+
+`IRuntimeServices.createDnsResolver(options)` returns a new `IDnsResolver` on Node, Bun and Deno;
+Workers omits the member. `DnsResolverOptions` has readonly `servers: readonly string[]` and
+`timeoutMs: number` fields. Invalid options throw `RangeError` at creation.
+
+```typescript
+const resolver = runtime.createDnsResolver?.({
+  servers: ['127.0.0.1:5353', '[::1]:5353'],
+  timeoutMs: 3000,
+});
+const addresses = await resolver?.resolveHost('billing.internal');
+```
+
+Servers must be a nonempty list of IPv4 literals, IPv4 with a port, bare IPv6 literals, or bracketed
+IPv6 with a port. Ports are plain decimal digits from 1 to 65535, defaulting to 53. Hostnames,
+whitespace, empty strings and IPv6 zone indices (`%eth0`) are refused; duplicates are accepted. An
+unbracketed `::1:5353` is itself an IPv6 address on port 53, not a port suffix.
+
+`timeoutMs` is an integer from 0 to 2_147_483_647. A positive value bounds a whole `resolveSrv` call
+or a whole `resolveHost` call covering both A and AAAA, using an independent timer and cancellation
+per call. Each server attempt gets `max(1, ceil(timeoutMs / servers.length))` ms. An event loop
+stalled by application work can delay timers. A timeout from the resolver has `code: 'ETIMEOUT'`;
+already answered address families are still returned. The default `runtime.dns` continues using the
+host resolver without this added bound.
+
+Node and Bun use a separate `node:dns/promises` Resolver per call with `tries: 1`. The attempt share
+is a target: the first lookup in a Node process takes about twice that share. Bun rounds attempt
+timing more coarsely (300 or 500 ms can take about 1 s); a short whole bound may end before a later
+server is tried. The resolver's own timer still enforces the whole bound. With zero, no own timer is
+installed: Node/Bun use the runtime's default attempt timeout (Node about 2 s per server, about 3 s
+for the first lookup in a process).
+
+Deno takes one name server per call, so it tries servers in order, rotating on any error except
+`NotFound`. Each attempt is aborted at its share when the bound is positive. Deno 2.9.6 itself ends
+a signalled attempt at about 2 s even if the share is longer; that earlier timeout is `TimedOut`. It
+reports NXDOMAIN, no records and SERVFAIL alike as `NotFound`, so SERVFAIL does not rotate. With
+zero, no signal is passed and Deno's own timeout is about 15 s per server.
+
+On all four resolver implementations (default and chosen-server), `resolveHost` concatenates A then
+AAAA. When both fail, the outer error has an `AggregateError` cause with `errors` in A-then-AAAA
+order. A single successful family still wins, even if it returns an empty list.
+
 `SrvRecord.host` is deliberately named that rather than reusing a runtime's own spelling: Deno calls
 the field `target` and Node calls it `name`, and passing either through unchanged would type-check
 on both runtimes while producing `undefined` hostnames on one. `resolveHost` concatenates `A` and
 `AAAA` results and rejects only when **both** families fail, because an IPv4-only host has no `AAAA`
-record at all. The runtime package exports both resolver factories: `createNodeDnsResolver(dns?)`
-(shared by the Node and Bun adapters, over `node:dns/promises`) and `createDenoDnsResolver(host)`
-(over `Deno.resolveDns`).
+record at all. Since 0.14.0 the outer error's cause is an `AggregateError` whose `errors` are in
+A-then-AAAA order, retaining both runtime failures. One successful family wins. The runtime package
+exports both resolver factories: `createNodeDnsResolver(dns?)` (shared by the Node and Bun adapters,
+over `node:dns/promises`) and `createDenoDnsResolver(host)` (over `Deno.resolveDns`).
 
 The runtime package also exports the worker host factories `createWebWorkerHost(globals?)`
 (Deno/Bun, over the web `Worker` API) and `createNodeWorkerHost(mods?)` (Node, over
@@ -14029,6 +14095,28 @@ reaches `redactors[<string>]`):
 | `DATA_CLASSIFICATIONS.PHI`    | `'phi'`    |
 | `DATA_CLASSIFICATIONS.PCI`    | `'pci'`    |
 | `DATA_CLASSIFICATIONS.SECRET` | `'secret'` |
+
+The injected factory signatures (since 0.14.0 for the creator parameter) are:
+
+```typescript
+createNodeRuntimeServices(host?: NodeHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createBunRuntimeServices(host?: BunHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+createDenoRuntimeServices(host?: DenoHost, workers?: IWorkerHost, dns?: IDnsResolver,
+  globalEvents?: GlobalEventHost | null,
+  createDnsResolver?: (options: DnsResolverOptions) => IDnsResolver): IRuntimeServices;
+```
+
+Both exported `DenoDnsHost` and `DenoHost` accept an optional trailing options parameter on both
+`resolveDns` overloads (since 0.14.0). Hosts with only two parameters remain assignable:
+
+```typescript
+resolveDns(query: string, recordType: 'SRV',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<DenoSrvRecord[]>;
+resolveDns(query: string, recordType: 'A' | 'AAAA',
+  options?: { nameServer?: { ipAddr: string; port: number }; signal?: AbortSignal }): Promise<string[]>;
+```
 
 ### Values (runtime exports)
 

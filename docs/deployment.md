@@ -474,6 +474,17 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 With the handler in place the same container exits **0** rather than 143. Every example the
 deployment gate builds carries it.
 
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a Setu gRPC client may send that
+unary call once more.
+
+A client can use the exact marker as the server's claim that a unary request can be sent again
+within its deadline. An ordinary application 503 has no such guarantee.
+
 ### How the pieces line up
 
 1. The pod is removed from the Service's endpoints, and `preStop` starts.

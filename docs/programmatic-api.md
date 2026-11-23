@@ -313,7 +313,10 @@ ctx.lifecycle.onError((error, ctx) => {
 Shutdown lifecycle hooks. The kernel owns the guard, drain, and socket close. The actual shutdown
 order is: **stopping hooks while requests are still accepted → refuse new requests → drain in-flight
 requests → close the server socket → shutdown hooks → close hooks**. A rejecting stopping hook is
-reported only after the remaining shutdown phases finish.
+reported only after the remaining shutdown phases finish. Refused requests carry the reserved
+`x-setu-unprocessed: shutdown` marker, independent of the error responder's status, before any
+request lifecycle hook, middleware or handler ran. An application setting that header makes the same
+not-processed claim and a Setu gRPC client may send that unary call once more.
 
 ```typescript
 ctx.lifecycle.onStopping(() => {

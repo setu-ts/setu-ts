@@ -92,7 +92,7 @@ describe('createDenoDnsResolver — resolveHost', () => {
     expect(await resolver.resolveHost('svc')).toEqual(['2001:db8::1']);
   });
 
-  it('rejects only when both families fail, carrying the first as cause', async () => {
+  it('rejects only when both families fail, carrying both failures as an aggregate cause', async () => {
     const first = new Error('NXDOMAIN v4');
     const resolver = createDenoDnsResolver(
       fakeHost({
@@ -105,7 +105,9 @@ describe('createDenoDnsResolver — resolveHost', () => {
     try {
       await resolver.resolveHost('missing');
     } catch (error) {
-      expect((error as Error).cause).toBe(first);
+      expect((error as Error).cause).toBeInstanceOf(AggregateError);
+      expect(((error as Error).cause as AggregateError).errors[0]).toBe(first);
+      expect(((error as Error).cause as AggregateError).errors[1]).toBeInstanceOf(Error);
     }
   });
 

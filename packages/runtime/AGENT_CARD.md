@@ -36,6 +36,8 @@ export const runtimePlugin = RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
 
 ## Behaviour the types do not show
 
+- `createDnsResolver({ servers, timeoutMs })` on Node/Bun/Deno bounds a whole lookup; absent on
+  Workers; `resolveHost` failures carry an AggregateError cause.
 - `RuntimePlugin` detects the platform unless `platform` is supplied.
 - `maxBodyBytes` counts bytes actually read, including chunked bodies. Omitted means unbounded; zero
   refuses bodies. Negative, fractional or unsafe-integer limits throw at construction.
