@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, serializeError, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -29,6 +29,7 @@ import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
 import { bindDenoSocketToSink } from './deno-ws-upgrader.ts';
+import { DENO_WS_MAX_MESSAGE_BYTES, WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
 
 // ---------------------------------------------------------------------------
 // Host seam
@@ -67,6 +68,12 @@ export interface DenoServeHost {
     cert?: string;
     /** The private key matching {@linkcode cert}. @since 0.13.0 */
     key?: string;
+    /**
+     * `Deno.serve`'s error hook. Also receives a response body stream's
+     * error, which Deno otherwise prints to the console.
+     * @since 0.14.0
+     */
+    onError?: (error: unknown) => Response | Promise<Response>;
   }): DenoServer;
   /**
    * Performs an RFC 6455 handshake on an inbound request.
@@ -112,6 +119,7 @@ export const defaultDenoServeHost: DenoServeHost = {
         ...(options.cert !== undefined && options.key !== undefined
           ? { cert: options.cert, key: options.key }
           : {}),
+        ...(options.onError !== undefined ? { onError: options.onError } : {}),
       },
       options.fetch,
     );
@@ -130,6 +138,55 @@ export const defaultDenoServeHost: DenoServeHost = {
 // Handle
 // ---------------------------------------------------------------------------
 
+/** Errors a response body stream raised, which the kernel has already logged. */
+const sourceErrors = new WeakSet<object>();
+
+/**
+ * Whether `Deno.serve`'s `onError` received a body stream's error.
+ *
+ * @param error - What `onError` received
+ * @returns True for an error {@linkcode markSourceErrors} passed through
+ * @internal - Not exported from package index
+ */
+export function isMarkedSourceError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && sourceErrors.has(error);
+}
+
+/**
+ * Wraps a streamed body so its source error is recognised in `onError` and
+ * not printed a second time. A primitive reason is wrapped once in an
+ * `Error` so it can be recorded.
+ *
+ * @param body - The response body
+ * @returns The wrapping stream
+ * @internal - Not exported from package index
+ */
+export function markSourceErrors(body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        let next: ReadableStreamReadResult<Uint8Array>;
+        try {
+          next = await reader.read();
+        } catch (error) {
+          const marked =
+            typeof error === 'object' && error !== null ? error : new Error(String(error));
+          sourceErrors.add(marked);
+          controller.error(marked);
+          return;
+        }
+        if (next.done) controller.close();
+        else controller.enqueue(next.value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+}
+
 /**
  * Internal handle for a Deno HTTP server.
  *
@@ -144,10 +201,18 @@ export class DenoHttpServerHandle {
   /** The listener's scheme: `https` only when this adapter terminates TLS. */
   readonly #scheme: 'http' | 'https';
 
-  constructor(host: DenoServeHost, maxBodyBytes?: number, scheme: 'http' | 'https' = 'http') {
+  readonly #ceiling: WebSocketCeilingReport;
+
+  constructor(
+    host: DenoServeHost,
+    maxBodyBytes?: number,
+    scheme: 'http' | 'https' = 'http',
+    reportError?: (record: Readonly<Record<string, unknown>>) => void,
+  ) {
     this.#host = host;
     this.#maxBodyBytes = maxBodyBytes;
     this.#scheme = scheme;
+    this.#ceiling = new WebSocketCeilingReport(DENO_WS_MAX_MESSAGE_BYTES, 'deno', reportError);
   }
 
   /**
@@ -229,7 +294,10 @@ export class DenoHttpServerHandle {
         if (intent !== undefined) {
           return this.#performUpgrade(request, intent);
         }
-        return mapSnapshotToWebResponse(frameworkResponse.snapshot());
+        const snapshot = frameworkResponse.snapshot();
+        return snapshot.streaming
+          ? mapSnapshotToWebResponse(snapshot, markSourceErrors(snapshot.body))
+          : mapSnapshotToWebResponse(snapshot);
       };
 
       // Run the framework handler FIRST — this executes the full middleware
@@ -256,6 +324,7 @@ export class DenoHttpServerHandle {
       return new Response(null, { status: 501 });
     }
 
+    this.#ceiling.check(intent.sink);
     try {
       const { socket, response } = upgradeWebSocket.call(
         this.#host,
@@ -299,10 +368,14 @@ export class DenoHttpAdapter implements IHttpAdapter {
   #handle: DenoHttpServerHandle;
 
   readonly #tls: Http2TlsOptions | undefined;
+  readonly #http2: boolean;
+  readonly #reportError: ((record: Readonly<Record<string, unknown>>) => void) | undefined;
 
   constructor(host?: DenoServeHost, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultDenoServeHost;
     const http2 = options?.http2;
+    this.#http2 = http2 !== undefined;
+    this.#reportError = options?.reportError;
     // `http2: true` changes nothing here: `Deno.serve` already answers h2c
     // and HTTP/1.1 on one port. TLS material is what it can use.
     this.#tls = http2 !== undefined && http2 !== true ? http2 : undefined;
@@ -310,6 +383,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
       this.#host,
       options?.maxBodyBytes,
       this.#tls === undefined ? 'http' : 'https',
+      options?.reportError,
     );
   }
 
@@ -337,8 +411,38 @@ export class DenoHttpAdapter implements IHttpAdapter {
       ...(hostname !== undefined && { hostname }),
       ...(this.#tls !== undefined && { cert: this.#tls.cert, key: this.#tls.key }),
       fetch: fetchHandler,
+      // A body stream's error reaches here once headers are sent; Deno would
+      // otherwise print it outside the logger. The kernel has already logged
+      // it, and the 500 is discarded because the response has started. Any
+      // other error still goes to the adapter's error channel.
+      onError: (error) => {
+        if (!isMarkedSourceError(error)) {
+          try {
+            this.#reportError?.({
+              level: 'error',
+              msg: 'Deno.serve handler failed',
+              ...serializeError(error),
+            });
+          } catch {
+            // Reporting must never replace the 500.
+          }
+        }
+        return new Response(null, { status: 500 });
+      },
     });
     this.#handle.server = server;
+    if (this.#http2) {
+      // `Deno.serve` gives no session control, so a draining Deno member
+      // cannot send GOAWAY: the difference from Node is stated here, once.
+      try {
+        this.#reportError?.({
+          level: 'warn',
+          msg: 'HTTP/2 clients are not sent GOAWAY when this Deno server drains; calls during the drain get 503',
+        });
+      } catch {
+        // Reporting must never fail the listen.
+      }
+    }
     return this.#handle;
   }
 

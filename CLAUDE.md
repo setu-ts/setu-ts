@@ -861,6 +861,11 @@ here.
   a loader, an action and a CSRF form with no `/api` controller, `--page --api` adds the controller,
   and the service's trimming `parse` is the one input rule; widened 2026-11-20 to refusals in pages,
   the template, `apps/full-stack`, `setu.W007` and `docs/pages.md`) — complete (PR #604).
+- **Milestone 143i** (`kernel` + `runtime` + `common` + `logger-plugin` — what the process says, and
+  what differs between runtimes: fatal-error, stop and drain log lines, `drainTimeoutMs`, `SIGHUP`,
+  GOAWAY at drain start, `StartCancelledError`, implicit `HEAD`, abort-time `defer`, refused-upgrade
+  and stream-failure parity; 13 V13 rows and the V13-110 logger half; ships in `0.14.0`) — complete
+  (PR #611).
 - **Milestone 143a** (`session-plugin` + `cache-plugin` + `http-security-plugin` + `openapi-plugin`
   - `react-router-plugin` + `common` — sessions and shared caches: revocation markers and a commit
     fence, `storeCommit`, per-visitor `Cache-Control`, `cacheMiddleware` credentialed rule, security

@@ -175,6 +175,13 @@
       },
       {
         "kind": "method",
+        "name": "onFatalError",
+        "optional": true,
+        "readonly": false,
+        "signature": "onFatalError?(handler:(error:unknown,origin:FatalErrorOrigin)=>void):()=>void"
+      },
+      {
+        "kind": "method",
         "name": "onSignal",
         "readonly": false,
         "optional": true,
@@ -221,6 +228,13 @@
         "readonly": true,
         "optional": false,
         "signature": "readonly subtle:SubtleCrypto"
+      },
+      {
+        "kind": "method",
+        "name": "unrefTimer",
+        "readonly": false,
+        "optional": true,
+        "signature": "unrefTimer?(handle:TimerHandle):void"
       },
       {
         "kind": "method",

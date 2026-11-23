@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
+  from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
+  through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
+  observes the error without changing how the process ends (Node, Deno and Bun; absent on Workers).
+  `app.stop()` logs `Server stopping`, `Shutdown drain finished` (with `remaining` and `timedOut`)
+  and `Server stopped`. `StartOptions.drainTimeoutMs` sets the drain bound (default 10 000).
+  `RuntimeSignal` adds `'SIGHUP'`. `IRuntimeServices.unrefTimer` (optional) lets the process exit
+  with a timer pending: the handle's `unref()` on Node, Bun and Deno 2, nothing on Workers.
+  `IHttpAdapter.beginDrain` lets the Node adapter (which also serves Bun's HTTP/2) send HTTP/2
+  `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
+  `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
+  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
+  `@setu-ts/worker-pool-plugin` does not read it yet (V13-131's worker-pool half, M143r). V13-11,
+  V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -27,6 +41,46 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
+  no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
+  `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A
+  client that leaves before the response is logged at once as `Request aborted before completion`
+  (for a request that called `ctx.defer`); a streamed body's `ctx.defer` cleanups run when the
+  request's signal aborts, so a client that leaves on workerd still runs them, while other cleanups
+  wait for the handler to settle and are never run under it (V13-200). On that abort the kernel
+  cancels the body and runs the cleanups once its `cancel()` settles, with no time limit, so a
+  `cancel()` that never settles keeps the request's resources. It cannot see a source's `pull` or a
+  pump it started: a source that does work of its own must make `cancel()` wait for it, and a source
+  with no `cancel()` gets no wait, so a limit released through `defer` does not cover work in its
+  `pull`. With a logger registered, a wait still pending after 30 s logs one `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `{ requestId, method, path, waitedMs }`, and releases nothing. A failed response stream is
+  logged once, `Response stream failed`, with the request id (V13-256). A streamed gRPC, Connect or
+  gRPC-Web reply holds the shutdown drain until it ends (V13-23), as a streamed body whose request
+  registered `ctx.defer` cleanups already did. Every streamed body is cancelled when its client
+  leaves, with or without `ctx.defer` (new on Workers, where the body is not cancelled for you). A
+  `stop()` during `start()` cancels the start: its close hooks run, a close hook registered later
+  runs at once, no later startup step runs, and a `listen()` already pending is closed when it
+  resolves; a `stop()` after startup's last step waits for `start()` and stops normally (V13-43).
+- **`@setu-ts/runtime` (M143i, #611).** Node answers a refused WebSocket upgrade with the
+  framework's response (status, reason phrase, headers, body), as Bun and Deno do;
+  `rejectRawUpgrade` takes its reason phrases from a status table (V13-53). Bun keeps a quiet
+  response stream open past its 10 s idle timeout (V13-42). Bun and Deno report once, at the first
+  handshake whose limit is unlimited or above their ceiling (Bun 16 MiB, Deno 64 MiB), that the
+  runtime cannot honour it (V13-41). A failed response stream is cut off without the runtime
+  printing it on Node, Bun and Deno (an HTTP/2 stream on Node is reset with `INTERNAL_ERROR`, not
+  `NO_ERROR`, so the client sees a failure rather than a clean end), and Node no longer writes
+  `Error: <message>` into the body (V13-256). A Deno server configured for HTTP/2 states at listen
+  that it sends no `GOAWAY` when draining. A rejecting response-trailers promise on Node is reported
+  as `Response trailers failed`. Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain)
+  are logged at `warn`, faults at `error`. `onFatalError` does not report a throw an application
+  captures with `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
+- **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
+  accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
+  for a request whose client left before the response (the logger-plugin half of V13-110), so alerts
+  that count 5xx request lines no longer count those requests. In a Deno application that logs
+  requests, Deno now prints its one-time legacy-abort notice; `--unstable-no-legacy-abort` removes
+  it.
 - **BREAKING — `@setu-ts/cli` (M143b; V13-140, #610).** `setu new --env-file <path>` and
   `setu generate app --env-file <path>` are renamed `--dotenv <path>`, with the same grammar. Node
   reads `--env-file` anywhere on its command line, even after the script name, so under Node the old
@@ -55,6 +109,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
+  a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with
+  an unhandled `'error'` event (in 0.13.0 a reset mid-pipeline ended any Node application with a
+  WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
+  has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
+  descriptor, and a status outside 200–599 is answered as 500.
 - **`@setu-ts/session-plugin` (M143a, #609; V13-135, V13-136, V13-137).** On the store strategy a
   `destroy()` or `regenerate()` stays in force whatever request on the session was already in
   flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every

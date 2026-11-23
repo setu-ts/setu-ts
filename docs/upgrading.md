@@ -12,6 +12,57 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
+
+- **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
+  bound. Keep it below the orchestrator's grace period minus any pre-stop delay and the time the
+  shutdown hooks need; `PUBLIC_API.md` ("The two drain numbers, in one place") gives the default and
+  the value that fits the generated deployment manifests, with the arithmetic.
+- **SIGHUP.** `RuntimeSignal` now includes `'SIGHUP'`. Add it to an entry's signal loop so a closed
+  terminal stops the application cleanly. An exhaustive `switch` over `RuntimeSignal` needs a new
+  arm.
+- **A stop during start.** `start()` rejects with `StartCancelledError` when `stop()` is called
+  before it finishes, and `stop()` resolves without running `onStopping` or `onShutdown` (the start
+  never finished); close hooks still run. An entry that logs every start failure should treat
+  `StartCancelledError` as a clean stop. A plugin that waits at startup can pass `ctx.signal` to the
+  wait. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
+  for it and stops normally.
+- **gRPC streams hold the drain.** A streamed RPC reply in flight at `stop()` now finishes before
+  the server closes, up to the drain bound, as a streamed body whose request registered `ctx.defer`
+  cleanups already did. Other streams (SSE) are released as before, but every streamed body is now
+  cancelled when its client leaves, and a Deno application that streams responses prints Deno's
+  legacy-abort notice (`--unstable-no-legacy-abort` removes it).
+- **New log lines.** `Server stopping`, `Shutdown drain finished`, `Server stopped`,
+  `Process failed` (fatal), `Response stream failed`, `Response trailers failed` (Node),
+  `Request aborted before completion` and `Startup cancelled` come through the registered logger.
+  The request log records `101` (was `200`) for an accepted upgrade, and `499` with `aborted: true`
+  (was the handler's status) for a request whose client left before the response. Alerts that count
+  5xx request lines no longer count those requests; the kernel's error line still records a server
+  fault. In a Deno application that logs requests, request logging now reads `request.signal`, so
+  Deno prints its legacy-abort notice once per process; run Deno with `--unstable-no-legacy-abort`
+  to remove it.
+- **HEAD.** Every `GET` route answers `HEAD`. Remove a hand-written `HEAD` route that only repeated
+  its `GET`.
+- **Node refused upgrades.** A refused WebSocket upgrade on Node carries the response the pipeline
+  produced (for example a Problem Details 401) instead of a bare status line, and `rejectRawUpgrade`
+  writes `401 Unauthorized` (not `401 Bad Request`), with an empty reason phrase for a status it
+  does not name.
+- **Stream sources and `ctx.defer`.** When the request's signal aborts before a streamed response
+  ends (on Workers, where the body is not cancelled for you), the kernel now cancels the body and
+  runs the request's `ctx.defer` cleanups once its `cancel()` settles, with no time limit; on Node,
+  Bun and Deno the consumer's cancel already waited for `cancel()` the same way. On every runtime,
+  then, a custom `ReadableStream` source whose `cancel()` never settles keeps its request's
+  resources (a request scope, a concurrency slot) until it does: make `cancel()` settle, and make it
+  wait for any work the source still has running in `pull` or a pump it started. A source with no
+  `cancel()` gets no wait, so that work is not covered by a limit released through `defer`. New in
+  0.14.0: with a logger registered, a cleanup still waiting 30 s after the client left logs one
+  `warn` line,
+  `Request cleanup still waiting for the response stream to stop; its resources are still held`,
+  with `requestId`, `method`, `path` and `waitedMs`, which names the route that stops admitting.
+- **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
+  signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
+  compatibility date is before 2026-11-17.
+
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 
 Replace `setu new … --env-file <path>` and `setu generate app … --env-file <path>` with
@@ -1220,13 +1271,14 @@ application without `DiPlugin` is unaffected.
 - **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
   disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
   `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
-  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
-  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
-  settle after the kernel's own 5 s bound.
+  hold `app.stop()` for about k × 5 s — longer than the drain bound (10 s unless `drainTimeoutMs`
+  sets it) once k exceeds 2. A request scope's disposal failures are logged at `warn` as
+  `Request scope disposal failed`, even when they settle after the kernel's own 5 s bound.
 - **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
   means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
-  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
+  in-flight until its body finishes, so `stop()` waits for it, up to the drain bound (10 s unless
+  `drainTimeoutMs` sets it).
 
 <!-- version:history -->
 

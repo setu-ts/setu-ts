@@ -235,8 +235,6 @@ interface ApplicationOptions {
   onError?: (error: Error, ctx: RequestContext) => void;
   onRequest?: (ctx: RequestContext) => void | Promise<void>;
   onResponse?: (ctx: RequestContext) => void | Promise<void>;
-  gracefulShutdown?: boolean;
-  shutdownTimeout?: number;
 }
 
 interface Application {
@@ -252,8 +250,21 @@ interface Application {
 interface StartOptions {
   port?: number;
   hostname?: string;
+  /** Longest wait for in-flight requests in stop(); 0–2147483647 ms, default 10000. @since 0.14.0 */
+  drainTimeoutMs?: number;
 }
 ```
+
+The drain bound is `StartOptions.drainTimeoutMs`; there is no other shutdown option.
+
+**The two drain numbers, in one place.** The bound must fit inside the orchestrator's grace period
+(the time between `SIGTERM` and `SIGKILL`) minus the pre-stop delay and the time the shutdown and
+close hooks need. The library default is **10 000 ms**, which fits a 30 s grace with room to spare.
+For a project deployed with the manifests `setu new` generates, **20 000 ms** fits: they give 30 s
+of grace and a 5 s pre-stop sleep, leaving 25 s, of which 20 s drain and 5 s close the server and
+run the hooks. The generated entry does not pass it yet, so such a project drains for the default.
+Change any one of the grace period, the pre-stop sleep or `drainTimeoutMs`, and recheck the other
+two.
 
 ### Usage
 
@@ -296,6 +307,59 @@ when one is registered: `Server listening` with the `port`, and `hostname` only 
 supplied. A `port: 0` start logs `Server listening on an ephemeral port` with no port field. With no
 logger, nothing is logged; a logger that throws never fails `start()`. Deno also keeps its own
 native listening banner, so a Deno start shows both lines.
+
+### Shutdown, crashes and a stop during start (0.14.0)
+
+With a logger registered, `stop()` logs `Server stopping` (`{ inFlight }`) as it begins,
+`Shutdown drain finished` (`{ durationMs, remaining, timedOut }`, at `warn` when `timedOut`) and
+`Server stopped` (`{ durationMs }`, at `warn` with `{ error }` when a hook failed). After the
+`onStopping` hooks the kernel calls `IHttpAdapter.beginDrain` once (Node: HTTP/2 `GOAWAY`, idle
+HTTP/1.1 connections closed), then waits up to `drainTimeoutMs` for in-flight requests. A streamed
+RPC reply (gRPC, Connect, gRPC-Web) holds the drain until it ends, and so does a streamed body whose
+request registered `ctx.defer` cleanups; other streamed bodies do not.
+
+While it runs, the kernel subscribes `IRuntimeServices.onFatalError`, so an uncaught exception or an
+unhandled rejection logs one `fatal` line, `Process failed` (`{ origin, error }`); the process still
+ends as it would have.
+
+`stop()` called before `start()` finishes cancels the start: `ctx.signal` aborts, every awaited
+startup step is abandoned, `start()` rejects with `StartCancelledError`, the close hooks run (not
+`onStopping` or `onShutdown`), a close hook registered after that runs at once, and no later startup
+step runs: a `listen()` already pending when `stop()` is called may still bind, and the kernel
+closes that handle as soon as it resolves. `stop()` resolves; the kernel logs `Startup cancelled` at
+`warn`. Once startup has passed its last step, a `stop()` that lands before `start()` resolves waits
+for it and stops normally.
+
+### HEAD, client aborts and failed streams (0.14.0)
+
+`router.match('HEAD', path)` ranks the `GET` routes with the `HEAD` routes, so every `GET` route
+answers `HEAD`; at equal rank an explicit `HEAD` route wins. Over a server the adapter sends no
+body; `inject()`, `dispatch()` and `app.fetch()` drop the body themselves and keep the headers,
+cancelling a streamed body. When the request's own signal aborts before the response is handed back,
+the kernel logs `Request aborted before completion` at once (for a request that called `ctx.defer`);
+its cleanups still wait for the handler to settle, so a request scope or a concurrency slot is never
+released under a running handler, and a handler that never settles keeps what it holds. Every
+streamed body is cancelled when the request's signal aborts, with or without cleanups, so a client
+that leaves reaches the source's `cancel()` even on a runtime that never cancels the body. A request
+with `ctx.defer` cleanups leaves the drain only after that cancel has settled and its cleanups have
+run (for an early middleware response, after its handler has settled too); one whose source's
+`cancel()` never settles stays in flight, and at the drain bound `stop()` stops waiting for it
+without releasing it. A streamed body's cleanups run once on that abort: the kernel cancels the body
+first and runs them once its `cancel()` settles, with no time limit, so a `cancel()` that never
+settles keeps the request's resources. It waits for the source's `cancel()`, not for its `pull` or
+any pump it started, which no reader can see; a source that does work of its own (in `pull`, or a
+pump it started) must make its `cancel()` wait for that work, and a source with no `cancel()` gets
+no wait, so a limit released through `defer` does not cover work in its `pull`. `stop()` is not held
+by such a request beyond the drain bound; its cleanups run if and when the `cancel()` settles. When
+a logger is registered, a cleanup still waiting after 30 s logs one `warn` line,
+`Request cleanup still waiting for the response stream to stop; its resources are still held`, with
+`{ requestId, method, path, waitedMs }`; it releases nothing. Its timer comes from the runtime,
+fires at most once, and is cleared when `cancel()` settles or at `stop()`; with no logger, no timer
+is set. The kernel tries to unref it through `IRuntimeServices.unrefTimer` (a no-op on Workers;
+without that hook, whether the timer stays referenced depends on the runtime), and a timer that
+stays referenced can delay process exit until it fires or is cleared. A streamed body whose source
+fails is logged once as `Response stream failed` (`{ requestId, method, path, status, error }`), and
+the error still aborts the response.
 
 ### Route Introspection
 
@@ -829,6 +893,7 @@ interface IRuntimeServices {
   hrtime(): number;
   setTimeout(fn: () => void, ms: number): TimerHandle;
   clearTimeout(handle: TimerHandle): void;
+  unrefTimer?(handle: TimerHandle): void; // since 0.14.0; the handle's unref() on Node, Bun and Deno 2, no-op on Workers
   setInterval(fn: () => void, ms: number): TimerHandle;
   clearInterval(handle: TimerHandle): void;
 
@@ -839,9 +904,11 @@ interface IRuntimeServices {
   workers?: IWorkerHost;
   dns?: IDnsResolver;
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
+  onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
 }
 
-type RuntimeSignal = 'SIGTERM' | 'SIGINT';
+type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP'; // 'SIGHUP' since 0.14.0
+type FatalErrorOrigin = 'uncaughtException' | 'unhandledRejection'; // since 0.14.0
 ```
 
 `IFileSystem` provides `readFile`/`writeFile`/`stat`/`readdir`/`mkdir`/`rm`, plus an **optional**
@@ -890,12 +957,13 @@ that resolves names internally and exposes no lookup surface. Callers must degra
 it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
 `DiscoveryUnavailableError` during `register()`, naming the alternatives.
 
-| Member     | Node | Deno           | Bun | Workers |
-| ---------- | ---- | -------------- | --- | ------- |
-| `fs`       | ✅   | ✅             | ✅  | ❌      |
-| `workers`  | ✅   | ✅             | ✅  | ❌      |
-| `dns`      | ✅   | ✅             | ✅  | ❌      |
-| `onSignal` | ✅   | ✅ (not Win32) | ✅  | ❌      |
+| Member         | Node | Deno           | Bun | Workers |
+| -------------- | ---- | -------------- | --- | ------- |
+| `fs`           | ✅   | ✅             | ✅  | ❌      |
+| `workers`      | ✅   | ✅             | ✅  | ❌      |
+| `dns`          | ✅   | ✅             | ✅  | ❌      |
+| `onSignal`     | ✅   | ✅ (not Win32) | ✅  | ❌      |
+| `onFatalError` | ✅   | ✅             | ✅  | ❌      |
 
 `onSignal` registers a process-termination handler so an application can run `app.stop()` — its
 shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
@@ -907,6 +975,21 @@ signalled, so there is nothing to register for. The **Deno** adapter omits it on
 registering for `SIGTERM` throws rather than no-opping — so the presence of the key means "this
 runtime can register a handler", never "this platform raises signals". A no-op was rejected
 deliberately: it would let a caller conclude its shutdown handler runs when it never would.
+
+`onFatalError` (0.14.0) observes an error about to end the process and returns a function that
+removes the handler. It never keeps the process alive: the exit code and the runtime's own report on
+stderr are unchanged. Node uses `uncaughtExceptionMonitor`; Deno the global `error` and
+`unhandledrejection` events; Bun `uncaughtExceptionMonitor` for throws and, because a Bun
+`unhandledRejection` listener would suppress the crash, a listener that removes itself and raises
+the reason again, so Bun ends the process itself, unless the application has its own. Each handler
+is called once per crash. On Node and Bun an error the application handles itself is not reported:
+Node's `uncaughtException` listener handles a throw or a rejection, Bun's only a throw (Bun never
+hands it a rejection, which still ends the process and is reported), a capture callback
+(`process.setUncaughtExceptionCaptureCallback`) handles a throw on both and a rejection on Node, and
+an `unhandledRejection` listener handles a rejection on both. Deno cannot tell and reports it. On
+Bun the observer assumes the default `--unhandled-rejections` mode: under `warn` or `none`, where
+Bun survives a rejection, it reports the first one as fatal and observes no later rejection. One
+process listener per mechanism exists while any handler is subscribed.
 
 ```typescript
 interface IDnsResolver {
@@ -1119,7 +1202,11 @@ The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child l
   lets the logger filter.
 - One `request completed` at `info` (method, path, status, duration in ms), including a request that
   threw: the status is the one `errorHandler`'s responder predicts through `statusFor` (`500`
-  without it), so a custom `respond` hook that chooses another status is not reflected
+  without it), so a custom `respond` hook that chooses another status is not reflected. Since 0.14.0
+  an accepted upgrade is logged `101`, and a request whose client left before the response (its
+  signal aborted when the line is written) `499` with `aborted: true`, whatever the handler
+  produced; a stream cut off after the line keeps its status. On Deno the read prints Deno's
+  legacy-abort notice once per process (`--unstable-no-legacy-abort` removes it)
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
 It does not log the error itself; `errorHandler` logs it once (V9-80). The database-plugin scrub
@@ -13741,15 +13828,16 @@ const app = await createTestApp({
 ### Graceful Shutdown
 
 ```typescript
-const app = createApplication({
-  gracefulShutdown: true,
-  shutdownTimeout: 10000,
-});
+await app.start({ port: 3000, drainTimeoutMs: 20_000 });
 
-// Framework handles SIGTERM and SIGINT automatically
-// Calls onShutdown hooks for all plugins
-// Waits for in-flight requests to complete
-// Closes database connections, message brokers, etc.
+// The framework installs no signal handler; the entry registers one.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void app.stop().then(() => runtime.exit(0));
+  });
+}
+// stop() runs onStopping hooks, sends HTTP/2 GOAWAY (Node), waits up to drainTimeoutMs
+// for in-flight requests, closes the server, then runs onShutdown and onClose hooks.
 ```
 
 ### Composition Over Configuration
@@ -14054,7 +14142,7 @@ reaches `redactors[<string>]`):
 | Plugin context APIs    | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Service registry       | `IServiceRegistry` (token-checked reads and writes since 0.13.0), `CapabilityServices`, `KeysServing<T>`, `KeysAccepting<T>`, `TokenEntry<Tok>`, `UnboundCapability`, `UnboundToken`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | HTTP                   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteMiddlewareGroups`, `routeMiddlewareOf`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`, `withIdempotencyMetadata`, `idempotencyMetadataOf`, `RATE_LIMIT_METADATA`, `RouteRateLimitMetadata`, `withRateLimitMetadata`, `rateLimitMetadataOf`, `RouteResponseDocumentation`, `RouteResponseHeader`, `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata`, `mcpToolMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `StreamOptions`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`, `fallbackErrorStatus`, `fallbackErrorHint` |
-| Runtime                | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Runtime                | `IRuntimeServices`, `FatalErrorOrigin`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions<T>`, `InjectionToken<T>`, `ContainerToken<T>` — `string \| InjectionToken<T> \| Constructor<T>`, the token any `IContainer` method accepts — and `InjectEntry`, one `inject` element: a `ContainerToken` or `{ token, optional: true }`; `ModuleFactoryProvider<T>` (`0.13.0`) is a `FactoryProvider<T>` that names its own token (`provide`: a string or an `InjectionToken<T>`) and an optional `scope`, the factory entry `@Module({ providers })` takes. See "DI container contract (M125)" below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Logging                | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Config                 | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -14138,7 +14226,14 @@ contract changed in 0.11.0:
 **`IRequestContext.defer?(cleanup)`** (M125) — registers per-request cleanup. The kernel runs
 cleanups in reverse registration order only after the handler settles: normally before a buffered
 response is handed back (awaiting any that return a promise), and when a streaming body ends, errors
-or is cancelled. An early middleware response returns immediately, but its cleanup and
+or is cancelled. Since 0.14.0 a streamed body's cleanups also run, once, when the request's own
+signal aborts first, after the body's `cancel()` settles, with no time limit (the kernel cannot see
+a source's `pull`, so a source that does work of its own must make `cancel()` wait for it; a
+`cancel()` that never settles keeps the request's resources, reported by one `warn` line after 30 s
+when a logger is registered; a source with no `cancel()` gets no wait, so a limit released through
+`defer` does not cover work in its `pull`) (on Workers the signal needs the `enable_request_signal`
+compatibility flag before the 2026-11-17 compatibility date); an abort never runs cleanups under a
+running handler. An early middleware response returns immediately, but its cleanup and
 shutdown-drain accounting wait for the running handler; late handler cleanup registrations join that
 same cleanup list. A handler still running when `stop()`'s drain bound expires keeps its cleanup
 until it settles, which is then after `stop()` returned and the close hooks ran. On failure, cleanup
@@ -14180,6 +14275,18 @@ Contract notes:
 
 - `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
   so every plugin may rely on it (ARCHITECTURE.md §7).
+- `IPluginContext.signal?: AbortSignal` (0.14.0) aborts when `stop()` is called before `start()`
+  finishes; the kernel always sets it. A plugin that waits at startup passes it to that wait.
+- `StartOptions.drainTimeoutMs?: number` (0.14.0) is the shutdown drain bound: a whole number from 0
+  to 2 147 483 647, default 10 000; `start()` refuses any other value with a `TypeError` before a
+  plugin registers.
+- `IHttpAdapter.beginDrain?(handle)` (0.14.0) starts the drain while in-flight requests continue:
+  the Node adapter sends HTTP/2 `GOAWAY` to every session (and to any that opens later) and closes
+  idle HTTP/1.1 connections. Deno omits it (`Deno.serve` has no session control) and says so once at
+  `listen` when HTTP/2 is configured; Bun serves HTTP/2 through the Node adapter.
+- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; `@setu-ts/worker-pool-plugin` does not read it
+  yet, V13-131, M143r) is to cancel a worker-pool call: an aborted signal rejects with
+  `signal.reason`, a queued call is withdrawn, a running call's worker is terminated.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop
@@ -14770,9 +14877,10 @@ slash-prefixed spelling.
 
 ### Values (runtime exports)
 
-| Export              | Kind     | Purpose                                                           |
-| ------------------- | -------- | ----------------------------------------------------------------- |
-| `createApplication` | function | Creates a kernel application with optional pre-registered plugins |
+| Export                | Kind     | Purpose                                                                                                  |
+| --------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `createApplication`   | function | Creates a kernel application with optional pre-registered plugins                                        |
+| `StartCancelledError` | class    | Rejection of a `start()` that `stop()` cancelled (`message: 'start() was cancelled by stop()'`) — 0.14.0 |
 
 ### Types
 
@@ -14927,70 +15035,70 @@ WebSocket upgrade support (Milestone 46) — shared primitives:
 
 Per-runtime upgrade seams:
 
-| Export                                 | Kind     | Purpose                                                                           |
-| -------------------------------------- | -------- | --------------------------------------------------------------------------------- |
-| `bindDenoSocketToSink`                 | function | Binds a `Deno.upgradeWebSocket` socket's `on*` handlers to a `WebSocketEventSink` |
-| `createBunWebSocketHandlers`           | function | Builds the serve-time handler object for `Bun.serve`'s `websocket` option         |
-| `bindCloudflareSocketToSink`           | function | Accepts a Workers `WebSocketPair` server half and binds it to a sink              |
-| `createDefaultCloudflareWebSocketHost` | function | Builds the Workers host from the real `WebSocketPair` global                      |
-| `buildUpgradeResponseInit`             | function | Builds the Workers 101 `ResponseInit` carrying the client socket                  |
-| `NodeUpgradeCoordinator`               | class    | Owns the `ws` server for one Node adapter and performs the raw handshake          |
-| `adaptWsModule`                        | function | Narrows an imported `ws` module to `WsModuleLike`                                 |
-| `loadWsModule`                         | function | Lazily imports `ws`; throws with the install command if absent                    |
-| `bindWsSocketToSink`                   | function | Binds a `ws` socket's events to a `WebSocketEventSink`                            |
-| `createWsTransport`                    | function | Wraps a `ws` socket as an `IWebSocketTransport`                                   |
-| `toWsReadyState`                       | function | Maps a `ws` numeric ready state to `WebSocketReadyState`                          |
-| `createUpgradeRequest`                 | function | Rebuilds a web `Request` from Node's `upgrade` event arguments                    |
-| `asUpgradeEmitter`                     | function | Probes a Node server handle for the raw `upgrade` event                           |
-| `rejectRawUpgrade`                     | function | Writes an HTTP status line to a raw socket and destroys it                        |
+| Export                                 | Kind     | Purpose                                                                                                            |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------ |
+| `bindDenoSocketToSink`                 | function | Binds a `Deno.upgradeWebSocket` socket's `on*` handlers to a `WebSocketEventSink`                                  |
+| `createBunWebSocketHandlers`           | function | Builds the serve-time handler object for `Bun.serve`'s `websocket` option                                          |
+| `bindCloudflareSocketToSink`           | function | Accepts a Workers `WebSocketPair` server half and binds it to a sink                                               |
+| `createDefaultCloudflareWebSocketHost` | function | Builds the Workers host from the real `WebSocketPair` global                                                       |
+| `buildUpgradeResponseInit`             | function | Builds the Workers 101 `ResponseInit` carrying the client socket                                                   |
+| `NodeUpgradeCoordinator`               | class    | Owns the `ws` server for one Node adapter and performs the raw handshake                                           |
+| `adaptWsModule`                        | function | Narrows an imported `ws` module to `WsModuleLike`                                                                  |
+| `loadWsModule`                         | function | Lazily imports `ws`; throws with the install command if absent                                                     |
+| `bindWsSocketToSink`                   | function | Binds a `ws` socket's events to a `WebSocketEventSink`                                                             |
+| `createWsTransport`                    | function | Wraps a `ws` socket as an `IWebSocketTransport`                                                                    |
+| `toWsReadyState`                       | function | Maps a `ws` numeric ready state to `WebSocketReadyState`                                                           |
+| `createUpgradeRequest`                 | function | Rebuilds a web `Request` from Node's `upgrade` event arguments                                                     |
+| `asUpgradeEmitter`                     | function | Probes a Node server handle for the raw `upgrade` event                                                            |
+| `rejectRawUpgrade`                     | function | Writes an HTTP status line (reason phrase from a status table, empty when unknown) to a raw socket and destroys it |
 
 ### Types
 
-| Export                              | Kind | Purpose                                                                        |
-| ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`, `maxBodyBytes`, `http2`)       |
-| `Http2TlsOptions`                   | type | PEM `key` and `cert` for `RuntimePlugin({ http2: { key, cert } })` (0.13.0)    |
-| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)            |
-| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
-| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
-| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
-| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
-| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)           |
-| `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
-| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
-| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
-| `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
-| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
-| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                         |
-| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
-| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
-| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |
-| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter                        |
-| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point)                |
-| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point)                |
-| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)                 |
-| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                                      |
-| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                                 |
-| `WebWorkerGlobals`                  | type | Injectable seam for `createWebWorkerHost` (`Worker` + concurrency)             |
-| `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                   |
-| `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`) |
-| `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                        |
-| `WebSocketLike`                     | type | Minimal web `WebSocket` shape the adapters drive                               |
-| `DenoWebSocketLike`                 | type | A web socket exposing the `on*` handler properties (Deno)                      |
-| `DenoWebSocketUpgrade`              | type | Result shape of `Deno.upgradeWebSocket` (`{ socket, response }`)               |
-| `BunServerWebSocket`                | type | Minimal Bun `ServerWebSocket` shape, carrying `data`                           |
-| `BunSocketData`                     | type | Per-socket data Bun carries from `upgrade()` to its handlers (`{ sink }`)      |
-| `BunWebSocketHandlers`              | type | The serve-time handler object for `Bun.serve`'s `websocket` option             |
-| `CloudflareServerSocket`            | type | Workers server-half socket (`accept()` + `addEventListener`)                   |
-| `CloudflareWebSocketPair`           | type | A created Workers pair (`{ client, server }`)                                  |
-| `CloudflareWebSocketHost`           | type | Injectable seam for the Workers upgrader (extension point)                     |
-| `CloudflareUpgradeResponseInit`     | type | The Workers 101 response init, including the `webSocket` member                |
-| `WsModuleLike`                      | type | Structural facade over the `ws` module (`{ WebSocketServer }`)                 |
-| `WsServerLike`                      | type | Structural facade over a `noServer` `ws` `WebSocketServer`                     |
-| `WsSocketLike`                      | type | Structural facade over a `ws` socket                                           |
-| `NodeIncomingMessage`               | type | Minimal `node:http.IncomingMessage` shape for building an upgrade `Request`    |
-| `RawUpgradeSocket`                  | type | Minimal raw duplex socket shape a refusal writes to                            |
-| `UpgradeEmitter`                    | type | A server handle that emits the raw `upgrade` event                             |
+| Export                              | Kind | Purpose                                                                                                                                                                                         |
+| ----------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`, `maxBodyBytes`, `http2`)                                                                                                                        |
+| `Http2TlsOptions`                   | type | PEM `key` and `cert` for `RuntimePlugin({ http2: { key, cert } })` (0.13.0)                                                                                                                     |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)                                                                                                                             |
+| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                                                                                                                                          |
+| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                                                                                                                                               |
+| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                                                                                                                                           |
+| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                                                                                                                                         |
+| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)                                                                                                                            |
+| `NodeHost`                          | type | Host interface for the Node adapter (extension point)                                                                                                                                           |
+| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                                                                                                                                         |
+| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                                                                                                                                    |
+| `BunHost`                           | type | Host interface for the Bun adapter (extension point)                                                                                                                                            |
+| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                                                                                                                                          |
+| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                                                                                                                                          |
+| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                                                                                                                                      |
+| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                                                                                                                                      |
+| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                                                                                                                                       |
+| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter                                                                                                                                         |
+| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point)                                                                                                                                 |
+| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point)                                                                                                                                 |
+| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)                                                                                                                                  |
+| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                                                                                                                                                       |
+| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                                                                                                                                                  |
+| `WebWorkerGlobals`                  | type | Injectable seam for `createWebWorkerHost` (`Worker` + concurrency)                                                                                                                              |
+| `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                                                                                                                                    |
+| `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`)                                                                                                                  |
+| `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                                                                                                                                         |
+| `WebSocketLike`                     | type | Minimal web `WebSocket` shape the adapters drive                                                                                                                                                |
+| `DenoWebSocketLike`                 | type | A web socket exposing the `on*` handler properties (Deno)                                                                                                                                       |
+| `DenoWebSocketUpgrade`              | type | Result shape of `Deno.upgradeWebSocket` (`{ socket, response }`)                                                                                                                                |
+| `BunServerWebSocket`                | type | Minimal Bun `ServerWebSocket` shape, carrying `data`                                                                                                                                            |
+| `BunSocketData`                     | type | Per-socket data Bun carries from `upgrade()` to its handlers (`{ sink }`)                                                                                                                       |
+| `BunWebSocketHandlers`              | type | The serve-time handler object for `Bun.serve`'s `websocket` option                                                                                                                              |
+| `CloudflareServerSocket`            | type | Workers server-half socket (`accept()` + `addEventListener`)                                                                                                                                    |
+| `CloudflareWebSocketPair`           | type | A created Workers pair (`{ client, server }`)                                                                                                                                                   |
+| `CloudflareWebSocketHost`           | type | Injectable seam for the Workers upgrader (extension point)                                                                                                                                      |
+| `CloudflareUpgradeResponseInit`     | type | The Workers 101 response init, including the `webSocket` member                                                                                                                                 |
+| `WsModuleLike`                      | type | Structural facade over the `ws` module (`{ WebSocketServer }`)                                                                                                                                  |
+| `WsServerLike`                      | type | Structural facade over a `noServer` `ws` `WebSocketServer`                                                                                                                                      |
+| `WsSocketLike`                      | type | Structural facade over a `ws` socket                                                                                                                                                            |
+| `NodeIncomingMessage`               | type | Minimal `node:http.IncomingMessage` shape for building an upgrade `Request`                                                                                                                     |
+| `RawUpgradeSocket`                  | type | Minimal raw duplex socket shape a refusal writes to (`write(string \| Uint8Array)`, `destroy()`; optional `end()`, `once('finish')`, `on('error')` and `setTimeout(ms, listener)` since 0.14.0) |
+| `UpgradeEmitter`                    | type | A server handle that emits the raw `upgrade` event                                                                                                                                              |
 
 Contract notes:
 

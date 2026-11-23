@@ -18,7 +18,7 @@ import * as barrel from '../../src/index.ts';
 
 describe('@setu-ts/kernel barrel', () => {
   it('exports exactly the documented runtime surface', () => {
-    expect(Object.keys(barrel).sort()).toEqual(['createApplication']);
+    expect(Object.keys(barrel).sort()).toEqual(['StartCancelledError', 'createApplication']);
   });
 
   it('does not leak the router internals the tie-break is built from', async () => {

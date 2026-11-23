@@ -18,3 +18,4 @@ export type {
 } from './application/application.ts';
 
 export { createApplication } from './application/application.ts';
+export { StartCancelledError } from './application/start-cancelled-error.ts';

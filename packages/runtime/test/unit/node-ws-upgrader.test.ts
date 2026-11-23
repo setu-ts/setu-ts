@@ -393,11 +393,14 @@ describe('rejectRawUpgrade', () => {
       [503, 'Service Unavailable'],
       [501, 'Not Implemented'],
       [500, 'Internal Server Error'],
-      [418, 'Bad Request'],
+      [401, 'Unauthorized'],
+      // A status with no known reason phrase gets an empty one (RFC 9112 §4),
+      // never a wrong one such as the `Bad Request` every status once got.
+      [418, ''],
     ] as const) {
       const socket = fakeRawSocket();
       rejectRawUpgrade(socket, status);
-      expect(socket.writes[0]).toContain(`${status} ${reason}`);
+      expect(socket.writes[0]).toContain(`${status} ${reason}\r\n`);
     }
   });
 });
