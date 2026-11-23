@@ -271,9 +271,14 @@ describe('session e2e (real kernel app)', () => {
     });
 
     it('surfaces the handler error when the revocation warning itself throws', async () => {
+      // A restorable session (only a store-held source is revoked), whose delete fails.
+      const rows = new Map<string, unknown>();
       const store = {
-        read: () => Promise.resolve(null),
-        write: () => Promise.resolve(),
+        read: (id: string) => Promise.resolve((rows.get(id) as never) ?? null),
+        write: (id: string, data: unknown) => {
+          rows.set(id, data);
+          return Promise.resolve();
+        },
         destroy: () => Promise.reject(new Error('store down')),
       };
       const { app } = buildApp({ store: store as never });

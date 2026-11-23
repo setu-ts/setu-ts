@@ -82,10 +82,16 @@ async function writeRRResponseToContext(
 
   // Copy all headers. Set-Cookie uses appendHeader for multi-value;
   // other headers also use appendHeader so repeated header values survive.
+  // Cache-Control is the exception: it is SET, so a route's `headers` export
+  // replaces the value the session plugin wrote before the route ran instead
+  // of merging two directives into one header.
   for (const [key, value] of response.headers.entries()) {
-    if (key.toLowerCase() === 'set-cookie') {
+    const lower = key.toLowerCase();
+    if (lower === 'set-cookie') {
       // Multiple Set-Cookie values are already combined with `, ` by Headers.entries().
       // Use getSetCookie() for individual cookies below.
+    } else if (lower === 'cache-control') {
+      ctx.response.header(key, value);
     } else {
       ctx.response.appendHeader(key, value);
     }

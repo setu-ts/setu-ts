@@ -76,6 +76,73 @@ header. An `openapi.exclude: ['/auth/logout']` entry is no longer needed.
 action and the read to its loader, or silence `setu.W007` in `.setu-ts/check.json` for a page that
 calls an API it also publishes on purpose. `setu check --strict` fails on it.
 
+### Security headers at 10 and CORS at 125 (`@setu-ts/http-security-plugin`)
+
+Security headers moved from priority 250 to 10, and CORS from 200 to 125, so the request-size 400
+and 413 (and any refusal after priority 10) carry the security headers, and an allowed origin's CORS
+headers, like every other response. An application middleware registered between the new and the old
+numbers now runs after them: it sees their headers already set, and a CORS preflight is answered
+before it. Move such a middleware below 10 (or 125) if it must run first.
+
+### Sessions: revocation markers and `storeCommit` (`@setu-ts/session-plugin`)
+
+On the store strategy a sign-out or regeneration now writes a marker entry, `revoked:<id>` or
+`superseded:<id>`, beside the session rows, and a regeneration that stays in the store also writes a
+link, `successor:<id>`, naming the new id; all expire one second after `maxAge`, and an
+`ISessionStore` of your own sees those ids. A commit that finds its session revoked while it ran is
+refused and sends no cookie, and so is a commit whose request loaded the session `maxAge` or more
+ago (a regeneration or a `clear()` sign-out refused that way still revokes the old id); one that
+reaches its marker check that late ends its session (deleting its row under a `revoked` marker,
+which every commit and regeneration that checks its markers afterwards refuses (one that committed
+during the stall keeps its new id), without following its successor links; a stalled regeneration
+deletes only its new row). Use Redis with `noeviction` (or a dedicated instance) for sessions;
+cache-plugin's memory cache evicts at `maxSize` and is for development only.
+
+Store commits now default to `storeCommit: 'changes'`: a commit writes this request's changes onto
+the current row, and a commit whose row is gone is refused. Set `storeCommit: 'snapshot'` to keep
+writing the whole payload. `SessionService.commit` returns `'written' | 'refused' | 'skipped'`
+instead of `void` and takes an optional policy; a caller that awaited it is unaffected.
+
+### Session responses carry `Cache-Control` (`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin`)
+
+A response for a signed-in visitor, a response that sets the session cookie, and one that read a
+CSRF token now carry `Cache-Control: private, no-store` and `Vary: Cookie`; an anonymous response
+that read the session carries `Vary: Cookie`. A page that a CDN cached by accident stops being
+cached, which is the intent. To cache a page on purpose, set `Cache-Control` in the handler; the
+plugin keeps it unless the response sets the session cookie (a directive set by a middleware outside
+the session middleware before it runs is replaced by `private, no-store` for a signed-in visitor),
+and logs one warning per route when it is per-visitor. On such a `public` response the plugin
+withholds the session cookie for a commit that would only refresh the expiry (`rolling`,
+`idleTimeoutMs`) or only store a new visitor's CSRF token or tenant binding: a form on a page you
+mark `public` now fails CSRF on submit, so remove `public` from pages carrying a form. See the
+session plugin's Caching section. A React Router route's `headers` export now replaces
+`Cache-Control` rather than appending a second value. A new session holding only the CSRF token or
+tenant binding is no longer committed on a `404` that is not a page navigation.
+
+### `cacheMiddleware` stores no per-visitor response (`@setu-ts/cache-plugin`)
+
+`cacheMiddleware` no longer stores a response marked `private` or `no-store` (or with a malformed
+`Cache-Control`), nor one for a request whose session was written (an application key set, deleted
+or cleared, or a `regenerate()` or `destroy()`), that read a CSRF token, or that read a restored
+session holding application data, even when the handler marks it `public`, and a request carrying
+`Authorization` or any cookie is served only an entry stored with `Cache-Control: public` that does
+not vary on `Cookie` or `Authorization`. A response varying on either is stored and served only for
+requests carrying no cookie and no `Authorization`, and so is a page that read the session even when
+its handler replaced `Vary` and set `public`; a `Vary: *` response is never stored. An application
+whose visitors all carry an unrelated cookie (analytics, consent) gets nothing cached until it marks
+responses `public` or names its session cookie:
+`cacheMiddleware({ credentialCookies: ['setu_session'] })`. A request carrying any cookie or
+`Authorization` no longer shares a handler run with concurrent misses for the same key. One
+exception stays the application's: a signed-in visitor's response that never touches the session API
+and that the handler marks `public` is stored and replayed, so never mark a personalised response
+`public`.
+
+### Docs routes start no session (`@setu-ts/openapi-plugin`)
+
+The Swagger UI page, the spec and the self-hosted assets no longer commit a session, so a `rolling`
+session is not refreshed by them. The plugin adds `GET <docs endpoint>/csrf-token`, which Swagger
+UI's Try-it-out calls read; an application route at that path now conflicts with it.
+
 ## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)

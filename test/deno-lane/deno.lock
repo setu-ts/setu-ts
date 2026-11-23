@@ -3777,7 +3777,9 @@
       },
       "jsr:@setu-ts/openapi-plugin@0.13.0": {
         "dependencies": [
+          "npm:playwright@1.63.0",
           "npm:swagger-ui-dist@5",
+          "npm:swagger-ui-dist@5.0.0",
           "npm:vitest@5.0.3",
           "npm:zod@^4.6.6"
         ]

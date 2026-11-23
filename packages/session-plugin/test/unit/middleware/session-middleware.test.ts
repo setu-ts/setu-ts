@@ -278,3 +278,122 @@ it('M139a still commits a session when the marker is anything but boolean true',
   });
   expect(response.headers.has('set-cookie')).toBe(true);
 });
+
+describe('sessionMiddleware cache marking', () => {
+  async function signedInCookie(
+    middleware: Awaited<ReturnType<typeof makeMiddleware>>['middleware'],
+  ): Promise<string> {
+    const { ctx, response } = makeContext();
+    await middleware(ctx, () => {
+      (ctx.state.get(SESSION_STATE_KEY) as ISession).set('userId', 'u1');
+      return Promise.resolve();
+    });
+    return response.setCookies()[0]!.split(';')[0]!;
+  }
+
+  it('S1 is visible to a middleware inside it, before the handler', async () => {
+    const { middleware } = await makeMiddleware();
+    const cookie = await signedInCookie(middleware);
+    const { ctx } = makeContext({ headers: { cookie } });
+    let seen: string | null = 'unset';
+    await middleware(ctx, () => {
+      seen = ctx.response.snapshot().headers.get('cache-control');
+      return Promise.resolve();
+    });
+    expect(seen).toBe('private, no-store');
+  });
+
+  it('the first application read adds Vary: Cookie at once, before an inner cache captures', async () => {
+    const { middleware } = await makeMiddleware();
+    const { ctx } = makeContext();
+    const seen: Array<string | null> = [];
+    await middleware(ctx, () => {
+      const session = ctx.state.get(SESSION_STATE_KEY) as ISession;
+      session.get('__csrf');
+      seen.push(ctx.response.snapshot().headers.get('vary'));
+      session.get('userId');
+      seen.push(ctx.response.snapshot().headers.get('vary'));
+      return Promise.resolve();
+    });
+    expect(seen).toEqual([null, 'Cookie']);
+  });
+
+  it('the first application write is visible to an inner middleware at once', async () => {
+    const { middleware } = await makeMiddleware();
+    const { ctx } = makeContext();
+    const seen: Array<string | null> = [];
+    await middleware(ctx, () => {
+      const session = ctx.state.get(SESSION_STATE_KEY) as ISession;
+      session.set('__csrf', 'reserved');
+      seen.push(ctx.response.snapshot().headers.get('cache-control'));
+      session.set('cart', 1);
+      seen.push(ctx.response.snapshot().headers.get('cache-control'));
+      return Promise.resolve();
+    });
+    expect(seen).toEqual([null, 'private, no-store']);
+  });
+
+  it('marks a signed-in response on the exempt and no-commit paths', async () => {
+    const { middleware } = await makeMiddleware({ rolling: true });
+    const cookie = await signedInCookie(middleware);
+    for (const key of ['session-plugin:csrf-exempt', 'session-plugin:no-commit']) {
+      const { ctx, response } = makeContext({ headers: { cookie } });
+      await middleware(ctx, () => {
+        ctx.state.set(key, true);
+        (ctx.state.get(SESSION_STATE_KEY) as ISession).get('userId');
+        return Promise.resolve();
+      });
+      expect(response.setCookies()).toEqual([]);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('vary')).toBe('Cookie');
+    }
+  });
+
+  it('keeps the marking when the handler throws', async () => {
+    const { middleware } = await makeMiddleware();
+    const cookie = await signedInCookie(middleware);
+    const { ctx, response } = makeContext({ headers: { cookie } });
+    await expect(
+      middleware(ctx, () => Promise.reject(new Error('handler failed'))),
+    ).rejects.toThrow('handler failed');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('passes the commit policy: a public response gets no refresh cookie', async () => {
+    const { middleware } = await makeMiddleware({ rolling: true });
+    const cookie = await signedInCookie(middleware);
+    const { ctx, response } = makeContext({ headers: { cookie } });
+    await middleware(ctx, () => {
+      ctx.response.header('cache-control', 'public, max-age=60');
+      return Promise.resolve();
+    });
+    expect(response.setCookies()).toEqual([]);
+    expect(response.headers.get('cache-control')).toBe('public, max-age=60');
+  });
+
+  it('answers the tenant-mismatch 403 private, no-store', async () => {
+    const { middleware } = await makeMiddleware();
+    const first = makeContext();
+    first.ctx.request.tenant = { id: 'acme' } satisfies ITenant;
+    await middleware(first.ctx, () => Promise.resolve());
+    const cookie = first.response.setCookies()[0]!.split(';')[0]!;
+    const replay = makeContext({ headers: { cookie } });
+    replay.ctx.request.tenant = { id: 'globex' } satisfies ITenant;
+    await middleware(replay.ctx, () => Promise.resolve());
+    expect(replay.response.statusCode).toBe(403);
+    expect(replay.response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('a public asset on a first tenant visit starts no session', async () => {
+    const { middleware } = await makeMiddleware();
+    const { ctx, response } = makeContext();
+    ctx.request.tenant = { id: 'acme' } satisfies ITenant;
+    await middleware(ctx, () => {
+      ctx.response.header('cache-control', 'public, max-age=31536000, immutable');
+      return Promise.resolve();
+    });
+    expect(response.setCookies()).toEqual([]);
+    expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(response.headers.get('vary')).toBeNull();
+  });
+});

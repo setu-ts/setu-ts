@@ -4,12 +4,21 @@ import { describe, expect, it } from 'vitest';
 import type {
   HandlerResult,
   ICacheStore,
+  IPluginContext,
   IRequestContext,
   IServiceRegistry,
   ITenant,
 } from '@setu-ts/common';
+import {
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
+import type { CacheMiddlewareOptions } from '../../src/interfaces/index.ts';
 import { cacheMiddleware } from '../../src/middleware/cache-middleware.ts';
+import { CachePlugin } from '../../src/plugin/cache-plugin.ts';
 
 describe('cacheMiddleware', () => {
   function createFakeStore(): {
@@ -697,5 +706,437 @@ describe('cacheMiddleware', () => {
       const setCalls = calls.filter((c) => c.method === 'set');
       expect(setCalls.length).toBe(0);
     });
+  });
+});
+
+describe('cacheMiddleware — per-visitor responses', () => {
+  type Handler = (ctx: IRequestContext) => HandlerResult | Promise<HandlerResult>;
+
+  async function appWith(
+    handler: Handler,
+    options: CacheMiddlewareOptions = {},
+  ): Promise<{ app: Awaited<ReturnType<typeof start>>; calls: () => number }> {
+    let count = 0;
+    const app = await start(async (ctx) => {
+      count += 1;
+      return await handler(ctx);
+    }, options);
+    return { app, calls: () => count };
+  }
+
+  async function start(handler: Handler, options: CacheMiddlewareOptions) {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CachePlugin({ store: 'memory' }),
+        {
+          name: 'per-visitor-route',
+          version: '1.0.0',
+          register(ctx: IPluginContext): void {
+            ctx.middleware.add(cacheMiddleware({ ttlSeconds: 60, ...options }));
+            ctx.router.get('/page', handler);
+          },
+        },
+      ],
+    });
+    await app.start();
+    return app;
+  }
+
+  async function bothInOrigin(calls: () => number): Promise<void> {
+    for (let i = 0; i < 1_000 && calls() < 2; i++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    expect(calls()).toBe(2);
+  }
+
+  const get = (headers: Record<string, string> = {}) =>
+    ({ method: 'GET', url: 'http://localhost/page', headers }) as const;
+
+  const plain: Handler = (ctx) => ctx.response.text('page');
+  const withCacheControl =
+    (value: string): Handler =>
+    (ctx) =>
+      ctx.response.header('cache-control', value).text('page');
+
+  it.each([
+    ['private', withCacheControl('private, max-age=60')],
+    ['no-store', withCacheControl('no-store')],
+    ['private with a field list', withCacheControl('private="set-cookie", max-age=60')],
+    ['with a malformed (unclosed-quote) value', withCacheControl('public, max-age=60, x="a')],
+  ] as const)('never stores a response marked %s', async (_name, handler) => {
+    const { app, calls } = await appWith(handler);
+    try {
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // A response that varies on a credential is the cookie-less variant only when a cookie-less request
+  // produced it, and only a cookie-less request may be served it. Each handler says `public`, so the
+  // `public` rule alone would let a credentialed request through: only the Vary check refuses it.
+  it.each([
+    ['Vary: Cookie', 'Accept, Cookie', { cookie: 'theme=dark' }],
+    ['Vary: Authorization', 'authorization', { authorization: 'Bearer t' }],
+  ] as const)(
+    'stores a %s response from a cookie-less request and never serves it to a credentialed one',
+    async (_name, vary, credential) => {
+      const { app, calls } = await appWith((ctx) =>
+        ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary }).text('page'),
+      );
+      try {
+        await app.inject(get());
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+        expect(calls()).toBe(1);
+        const credentialed = await app.inject(get(credential));
+        expect(credentialed.headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(2);
+        // The credentialed response varies on a credential too, so it replaced nothing.
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+        expect(calls()).toBe(2);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it('never stores a response captured after the per-visitor flag was set', async () => {
+    const { app, calls } = await appWith((ctx) => {
+      ctx.state.set(PER_VISITOR_RESPONSE_STATE_KEY, true);
+      return ctx.response.header('cache-control', 'public, max-age=60').text('page');
+    });
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // A comma inside a quoted argument does not split directives (RFC 9111 §5.2).
+  it.each([
+    ['a quoted argument holding "public"', 'max-age=60, example="one,public,two"', 'MISS'],
+    ['an escaped quote before "public"', 'example="a\\",public", max-age=60', 'MISS'],
+    ['a real public directive', 'max-age=60, example="one,two", public', 'HIT'],
+    ['an unclosed quote', 'public, max-age=60, x="a', 'MISS'],
+  ] as const)(
+    'reads Cache-Control directives outside quotes: %s',
+    async (_name, cacheControl, second) => {
+      const { app } = await appWith((ctx) =>
+        ctx.response.header('cache-control', cacheControl).text('page'),
+      );
+      try {
+        await app.inject(get({ authorization: 'Bearer a' }));
+        const next = await app.inject(get({ authorization: 'Bearer b' }));
+        expect(next.headers.get('x-cache')).toBe(second);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  // A response flagged as depending on cookies is stored as varying on Cookie, whatever its headers.
+  const cookieDependent: Handler = (ctx) => {
+    ctx.state.set(COOKIE_DEPENDENT_RESPONSE_STATE_KEY, true);
+    return ctx.response
+      .setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Accept' })
+      .text(ctx.request.headers.get('cookie') ?? 'no cookie');
+  };
+
+  it('stores a cookie-dependent response with Vary: Cookie, never for a request with a cookie', async () => {
+    const { app, calls } = await appWith(cookieDependent);
+    try {
+      const first = await app.inject(get());
+      expect(first.headers.get('vary')).toBe('Accept');
+      const hit = await app.inject(get());
+      expect([hit.headers.get('x-cache'), hit.headers.get('vary')]).toEqual([
+        'HIT',
+        'Accept, Cookie',
+      ]);
+      const withCookie = await app.inject(get({ cookie: 'setu_session=a' }));
+      expect([withCookie.body, withCookie.headers.get('x-cache')]).toEqual([
+        'setu_session=a',
+        'MISS',
+      ]);
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a cookie-dependent response is not stored for a cookie credentialCookies does not name', async () => {
+    const { app, calls } = await appWith(cookieDependent, { credentialCookies: ['setu_session'] });
+    try {
+      await app.inject(get({ cookie: 'theme=dark' }));
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('coalesced joiners replay the cookie-dependent payload with its Vary: Cookie', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return cookieDependent(ctx);
+    });
+    try {
+      const leader = app.inject(get());
+      const joiner = app.inject(get());
+      for (let i = 0; i < 1_000 && calls() < 1; i++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      release();
+      const [, j] = await Promise.all([leader, joiner]);
+      expect([j.headers.get('x-cache'), j.headers.get('vary')]).toEqual([
+        'COALESCED',
+        'Accept, Cookie',
+      ]);
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // RFC 9111 §4.1: a stored `Vary: *` response can never be reused.
+  it('never stores a Vary: * response', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: '*' }).text('page'),
+    );
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // With `credentialCookies` narrowed, a cookie it does not name makes no credential, but a page
+  // varying on Cookie may still depend on it: such a request neither stores nor is served that page.
+  it('with credentialCookies a Vary: Cookie entry is stored and served only without any cookie', async () => {
+    const { app, calls } = await appWith(
+      (ctx) =>
+        ctx.response
+          .header('vary', 'Cookie')
+          .text(ctx.request.headers.get('cookie') ?? 'no cookie'),
+      { credentialCookies: ['setu_session'] },
+    );
+    try {
+      expect((await app.inject(get({ cookie: 'theme=dark' }))).body).toBe('theme=dark');
+      const anonymous = await app.inject(get());
+      expect([anonymous.body, anonymous.headers.get('x-cache')]).toEqual(['no cookie', 'MISS']);
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      const light = await app.inject(get({ cookie: 'theme=light' }));
+      expect([light.body, light.headers.get('x-cache')]).toEqual(['theme=light', 'MISS']);
+      expect(calls()).toBe(3);
+      // A nameless pair is still a cookie an application may read raw.
+      const nameless = await app.inject(get({ cookie: 'abc' }));
+      expect([nameless.body, nameless.headers.get('x-cache')]).toEqual(['abc', 'MISS']);
+      expect(calls()).toBe(4);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('stores a non-public Vary: Cookie response for cookie-less requests only', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.header('vary', 'Cookie').text('page'),
+    );
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      expect((await app.inject(get({ cookie: 'a=1' }))).headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('still stores and replays an anonymous page', async () => {
+    const { app, calls } = await appWith(plain);
+    try {
+      await app.inject(get());
+      expect((await app.inject(get())).headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it.each([
+    ['an Authorization header', { authorization: 'Bearer t' }],
+    ['any cookie', { cookie: 'theme=dark' }],
+    ['a nameless cookie pair', { cookie: 'abc' }],
+  ] as const)(
+    'a request carrying %s is neither stored nor served a non-public entry',
+    async (_n, headers) => {
+      const { app, calls } = await appWith(plain);
+      try {
+        await app.inject(get(headers));
+        expect(calls()).toBe(1);
+        // Nothing was stored for the credentialed request...
+        expect((await app.inject(get())).headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(2);
+        // ...and the anonymous entry now stored is not replayed to it.
+        const again = await app.inject(get(headers));
+        expect(again.headers.get('x-cache')).toBe('MISS');
+        expect(calls()).toBe(3);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it('a credentialed request is replayed a HIT from a public entry', async () => {
+    const { app, calls } = await appWith(withCacheControl('public, max-age=60'));
+    try {
+      await app.inject(get());
+      const hit = await app.inject(get({ cookie: 'setu_session=abc' }));
+      expect(hit.headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('stores a credentialed public response without Vary: Cookie (a bearer API)', async () => {
+    const { app, calls } = await appWith(withCacheControl('public, max-age=60'));
+    try {
+      await app.inject(get({ authorization: 'Bearer t' }));
+      expect((await app.inject(get({ authorization: 'Bearer u' }))).headers.get('x-cache')).toBe(
+        'HIT',
+      );
+      expect(calls()).toBe(1);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('does not store a credentialed public response that varies on Cookie', async () => {
+    const { app, calls } = await appWith((ctx) =>
+      ctx.response.setHeaders({ 'cache-control': 'public, max-age=60', vary: 'Cookie' }).text('p'),
+    );
+    try {
+      await app.inject(get({ cookie: 'a=1' }));
+      await app.inject(get({ cookie: 'a=1' }));
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('with credentialCookies only the named cookies make a request credentialed', async () => {
+    const { app, calls } = await appWith(plain, { credentialCookies: ['setu_session'] });
+    try {
+      await app.inject(get({ cookie: 'theme=dark' }));
+      expect((await app.inject(get({ cookie: 'consent=yes' }))).headers.get('x-cache')).toBe('HIT');
+      expect(calls()).toBe(1);
+      const named = await app.inject(get({ cookie: 'theme=dark; setu_session=abc' }));
+      expect(named.headers.get('x-cache')).toBe('MISS');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('with credentialCookies: [] only Authorization counts', async () => {
+    const { app, calls } = await appWith(plain, { credentialCookies: [] });
+    try {
+      await app.inject(get({ cookie: 'setu_session=abc' }));
+      expect((await app.inject(get({ cookie: 'setu_session=xyz' }))).headers.get('x-cache')).toBe(
+        'HIT',
+      );
+      expect((await app.inject(get({ authorization: 'Bearer t' }))).headers.get('x-cache')).toBe(
+        'MISS',
+      );
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a credentialed request never joins an anonymous flight, and never leads one', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+    });
+    try {
+      // Anonymous leader, credentialed concurrent request: the credentialed one runs its own origin.
+      const leader = app.inject(get());
+      const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
+      // Release only once BOTH requests are inside the origin: a coalesced joiner never gets there,
+      // so this wait would time out (and the test fail) if one joined the other's flight.
+      await bothInOrigin(calls);
+      release();
+      const [a, c] = await Promise.all([leader, credentialed]);
+      expect(a.body).toBe('anonymous');
+      expect(c.body).toBe('setu_session=abc');
+      expect(c.headers.get('x-cache')).toBe('MISS');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('an anonymous request does not join a credentialed request in flight', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(async (ctx) => {
+      await gate;
+      return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+    });
+    try {
+      const credentialed = app.inject(get({ cookie: 'setu_session=abc' }));
+      const anonymous = app.inject(get());
+      // Release only once BOTH requests are inside the origin: a coalesced joiner never gets there,
+      // so this wait would time out (and the test fail) if one joined the other's flight.
+      await bothInOrigin(calls);
+      release();
+      const [c, a] = await Promise.all([credentialed, anonymous]);
+      expect(c.body).toBe('setu_session=abc');
+      expect(a.body).toBe('anonymous');
+      expect(calls()).toBe(2);
+    } finally {
+      await app.stop();
+    }
+  });
+  it('a request with a cookie credentialCookies does not name never joins an anonymous flight', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { app, calls } = await appWith(
+      async (ctx) => {
+        await gate;
+        return ctx.response.text(ctx.request.headers.get('cookie') ?? 'anonymous');
+      },
+      { credentialCookies: ['setu_session'] },
+    );
+    try {
+      const leader = app.inject(get());
+      const themed = app.inject(get({ cookie: 'theme=dark' }));
+      // A coalesced joiner never reaches the origin, so this wait would fail if it joined.
+      await bothInOrigin(calls);
+      release();
+      const [a, t] = await Promise.all([leader, themed]);
+      expect([a.body, t.body]).toEqual(['anonymous', 'theme=dark']);
+      expect(t.headers.get('x-cache')).toBe('MISS');
+    } finally {
+      await app.stop();
+    }
   });
 });

@@ -53,6 +53,7 @@
     "@setu-ts/logger-plugin": "workspace:^",
     "@setu-ts/multi-tenancy-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
     "@types/node": "^24",
     "ioredis": "5.x",
     "redis": "6.x",

@@ -4,6 +4,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import { createCsrfRequestInterceptor } from '../../src/ui/swagger-interceptor.ts';
 import { swaggerUiHtml } from '../../src/ui/swagger-ui.ts';
 
 describe('swaggerUiHtml', () => {
@@ -235,5 +236,28 @@ describe('swaggerUiHtml', () => {
     // $' is preserved literally; ' is not escaped by htmlEscape
     expect(html).toContain('/api/v1/$&apos;/spec.json');
     expect(html).not.toContain('__SPEC_URL__');
+  });
+});
+
+describe('swaggerUiHtml CSRF interceptor', () => {
+  it('embeds the interceptor and the token URL when a token route is given', () => {
+    const html = swaggerUiHtml({ specUrl: '/openapi.json', csrfTokenUrl: '/docs/csrf-token' });
+    expect(html).toContain('requestInterceptor: (');
+    expect(html).toContain(createCsrfRequestInterceptor.toString());
+    expect(html).toContain('("/docs/csrf-token", window)');
+  });
+
+  it('escapes < in the token URL so it cannot close the script element', () => {
+    const html = swaggerUiHtml({
+      specUrl: '/openapi.json',
+      csrfTokenUrl: '/d</script>/csrf-token',
+    });
+    expect(html).not.toContain('/d</script>');
+    expect(html).toContain('\\u003c/script>');
+  });
+
+  it('embeds no interceptor without a token route', () => {
+    expect(swaggerUiHtml({ specUrl: '/openapi.json' })).not.toContain('requestInterceptor');
+    expect(swaggerUiHtml('/openapi.json')).not.toContain('requestInterceptor');
   });
 });

@@ -44,6 +44,7 @@ export interface FrameworkMiddlewareBand {
  */
 export const FRAMEWORK_MIDDLEWARE_BANDS: readonly FrameworkMiddlewareBand[] = [
   { from: 0, to: 0, owner: 'error handler' },
+  { from: 10, to: 10, owner: 'security headers' },
   { from: 20, to: 20, owner: 'metrics' },
   { from: 30, to: 30, owner: 'telemetry' },
   { from: 40, to: 40, owner: 'tenant resolution' },

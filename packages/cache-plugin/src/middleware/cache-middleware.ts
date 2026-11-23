@@ -5,10 +5,37 @@
  * response on HIT (short-circuiting the handler chain), or captures the
  * handler's response on MISS and stores it when the status is cacheable.
  *
+ * It never stores a per-visitor response. A response whose `Cache-Control`
+ * says `private` or `no-store` is not stored, nor one captured after a
+ * component set {@linkcode PER_VISITOR_RESPONSE_STATE_KEY} (the session plugin
+ * does at a request's first application write, a CSRF token read and a read of a restored session holding application data). A request carrying
+ * `Authorization` or a credential cookie (any cookie by default, see
+ * {@linkcode CacheMiddlewareOptions.credentialCookies}) is credentialed: it is
+ * served a HIT only from a `public` entry whose `Vary` names neither `Cookie`
+ * nor `Authorization`, never shares an origin run with another request, and
+ * its own response is stored only when it says `public` and its `Vary` names
+ * neither. A response whose `Vary` names `Cookie` or `Authorization` is stored
+ * only from a request carrying no cookie and no `Authorization` at all, even
+ * one `credentialCookies` does not name, so it is only ever the cookie-less
+ * variant, and it is served only to such a request. A request carrying any
+ * cookie or `Authorization` never shares an origin run with another request. A `Vary: *` response is never
+ * stored. A response captured after a component set
+ * {@linkcode COOKIE_DEPENDENT_RESPONSE_STATE_KEY} (the session plugin does at
+ * the first application read) is treated as varying on `Cookie` whatever its
+ * own `Vary` says: never stored from a request carrying a cookie or
+ * `Authorization`, and stored from a cookie-less one with `Cookie` added to
+ * the stored `Vary`.
+ *
  * @module
  */
 import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import {
+  cacheControlDirectives,
+  CAPABILITIES,
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
+  parseCookie,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
 import { cacheCoalescer } from '../services/coalescer.ts';
 import { composeCacheKey } from '../utils/cache-key.ts';
@@ -56,6 +83,7 @@ export function cacheMiddleware(options?: CacheMiddlewareOptions): MiddlewareFun
   const bypassFn = options?.bypass;
   const storeToken = options?.store ?? CAPABILITIES.CACHE;
   const cacheableStatuses = options?.cacheableStatuses ?? [200];
+  const credentialCookies = options?.credentialCookies;
 
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     // Bypass: skip cache entirely.
@@ -72,6 +100,24 @@ export function cacheMiddleware(options?: CacheMiddlewareOptions): MiddlewareFun
 
     // Resolve store at request time (not middleware-creation time).
     const store = ctx.services.get<ICacheStore>(storeToken);
+
+    // A credentialed request may see a per-visitor response: it is served
+    // only a `public` entry that does not vary on a credential, runs its own
+    // origin outside the coalescer, and stores its response only when that
+    // response says `public` and does not vary on a credential.
+    // A request that is not credentialed but carries a cookie (one `credentialCookies` does not
+    // name) gets the same exclusion from entries that vary on a cookie, without the `public` rule.
+    const credentialed = isCredentialed(ctx.request.headers, credentialCookies);
+    if (credentialed || carriesCookie(ctx.request.headers)) {
+      const entry = await store.get<CachedResponsePayload>(key);
+      if (entry !== null && servableWithCookies(entry, credentialed)) {
+        replayCachedResponse(ctx, entry, 'HIT');
+        return;
+      }
+      await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses, credentialed, true);
+      ctx.response.header('X-Cache', 'MISS');
+      return;
+    }
 
     // Try to read a cached HIT.
     const cached = await store.get<CachedResponsePayload>(key);
@@ -122,18 +168,30 @@ async function captureOrigin(
   key: string,
   ttlSeconds: number | undefined,
   cacheableStatuses: readonly number[],
+  credentialed = false,
+  withCookies = false,
 ): Promise<CacheOriginOutcome> {
   await next();
   const snapshot = ctx.response.snapshot();
+  // A response a component flagged as depending on cookies is judged and stored as varying on
+  // `Cookie`, whatever its own `Vary` says; the live response is not changed.
+  const headers =
+    ctx.state.get(COOKIE_DEPENDENT_RESPONSE_STATE_KEY) === true
+      ? withVaryCookie(snapshot.headers)
+      : snapshot.headers;
   if (
     snapshot.streaming ||
     !cacheableStatuses.includes(snapshot.status) ||
-    hasSetCookie(snapshot.headers)
+    hasSetCookie(headers) ||
+    ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY) === true ||
+    isPrivate(headers.get('cache-control')) ||
+    varyFields(headers.get('vary')).includes('*') ||
+    (withCookies && !servableWithCookies(headers, credentialed))
   ) {
     return { replayable: false };
   }
 
-  const payload = encodePayload(snapshot);
+  const payload = encodePayload({ ...snapshot, headers });
   await store.set<CachedResponsePayload>(key, payload, ttlSeconds);
   return { replayable: true, payload };
 }
@@ -176,4 +234,89 @@ function replayCachedResponse(
  */
 function hasSetCookie(headers: Headers): boolean {
   return headers.has('set-cookie');
+}
+
+/**
+ * Whether a request carries a credential: `Authorization`, or a cookie that
+ * counts — any cookie when `credentialCookies` is omitted, only the named ones
+ * otherwise (`[]` leaves `Authorization` alone).
+ */
+function isCredentialed(
+  headers: Headers,
+  credentialCookies: readonly string[] | undefined,
+): boolean {
+  if (headers.has('authorization')) {
+    return true;
+  }
+  if (credentialCookies === undefined) {
+    return carriesCookie(headers);
+  }
+  const cookies = parseCookie(headers.get('cookie'));
+  return credentialCookies.some((name) => Object.hasOwn(cookies, name));
+}
+
+/** Whether a `Cache-Control` value holds `private` or `no-store`. */
+function isPrivate(cacheControl: string | null): boolean {
+  if (cacheControl !== null && cacheControlDirectives(cacheControl) === undefined) {
+    return true;
+  }
+  return hasDirective(cacheControl, 'private') || hasDirective(cacheControl, 'no-store');
+}
+
+/**
+ * Whether a request carries any cookie, whether or not it counts as a credential. Any non-blank
+ * `Cookie` header counts, a nameless pair included, since an application may read it raw.
+ */
+function carriesCookie(headers: Headers): boolean {
+  return (headers.get('cookie') ?? '').trim() !== '';
+}
+
+/** A copy of `headers` whose `Vary` names `Cookie`, added once. */
+function withVaryCookie(headers: Headers): Headers {
+  const copy = new Headers(headers);
+  if (!varyFields(copy.get('vary')).includes('cookie')) {
+    copy.append('vary', 'Cookie');
+  }
+  return copy;
+}
+
+/** The lowercased field names of a `Vary` value. */
+function varyFields(vary: string | null): string[] {
+  return vary === null ? [] : vary.split(',').map((field) => field.trim().toLowerCase());
+}
+
+/**
+ * Whether a response, live or stored, may be served to (or stored from) a request carrying a
+ * cookie or `Authorization`: its `Vary` names neither `Cookie` nor `Authorization`, and, for a
+ * credentialed request, it says `public`.
+ */
+function servableWithCookies(
+  source: Headers | CachedResponsePayload,
+  credentialed: boolean,
+): boolean {
+  const read = (name: string): string | null => {
+    if (source instanceof Headers) {
+      return source.get(name);
+    }
+    const entry = source.headers.find(([header]) => header.toLowerCase() === name);
+    return entry === undefined ? null : entry[1];
+  };
+  if (varyFields(read('vary')).some((field) => field === 'cookie' || field === 'authorization')) {
+    return false;
+  }
+  const cacheControl = read('cache-control');
+  return !credentialed || (hasDirective(cacheControl, 'public') && !isPrivate(cacheControl));
+}
+
+/**
+ * Whether a `Cache-Control` value holds a directive, by name and case
+ * insensitively (`private="set-cookie"` holds `private`).
+ */
+function hasDirective(cacheControl: string | null, directive: string): boolean {
+  if (cacheControl === null) {
+    return false;
+  }
+  // A malformed value (an unclosed quote) holds no directive this middleware relies on; `isPrivate`
+  // reads it as private, so it is never stored.
+  return cacheControlDirectives(cacheControl)?.includes(directive) ?? false;
 }
