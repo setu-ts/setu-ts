@@ -99,9 +99,8 @@ for (const type of ['dynamodb', 'cosmos', 'bigtable'])
       const disabled = fixture(type, 0);
       await disabled.adapter.connect();
       try {
-        // The Bigtable connect warm-up keeps its own 2 s bound when requestTimeoutMs is 0.
-        disabled.calls.length = 0;
         await disabled.adapter.createDataSource('Row').findById('a');
+        expect(disabled.calls.length).toBeGreaterThan(0);
         for (const call of disabled.calls) {
           expect(call.options.abortSignal).toBeUndefined();
           expect(call.options.timeoutMs).toBeUndefined();

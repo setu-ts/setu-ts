@@ -938,15 +938,20 @@ export class CosmosTransaction implements IAdapterTransaction {
       const operationStatuses = (response.result ?? []).map((entry) => entry.statusCode);
       // A 207 batch lists the actual refusal beside the dependent 424s. Keep
       // that root status rather than losing it to the aggregate response.
-      const failureCode =
-        operationStatuses.find((status) => status >= 300 && status !== 424) ?? code;
+      const failureIndex = operationStatuses.findIndex((status) => status >= 300 && status !== 424);
+      const failureCode = operationStatuses[failureIndex] ?? code;
       const statuses = operationStatuses.join(', ');
       const error = new CosmosTransactionBatchError(
         failureCode,
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
           `(per-operation: ${statuses}). The batch is atomic, so no operation was applied.`,
       );
-      if (failureCode === 412)
+      // A conditional operation loses its precondition two ways. Measured on
+      // the emulator, the service checks existence before the ETag: a stale
+      // `ifMatch` on a row still present answers 412, and on a row deleted
+      // since the call answers 404. Both are the same lost race.
+      const conditional = operations[failureIndex]?.ifMatch !== undefined;
+      if (failureCode === 412 || (failureCode === 404 && conditional))
         throw new SerializationConflictError(
           'Cosmos transaction lost a write precondition; all writes were rolled back.',
           { cause: error },

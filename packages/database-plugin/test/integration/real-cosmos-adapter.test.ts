@@ -28,7 +28,7 @@ import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
 import { DatabaseService } from '../../src/services/database-service.ts';
 import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
-import { DatabaseTimeoutError } from '../../src/errors.ts';
+import { DatabaseTimeoutError, SerializationConflictError } from '../../src/errors.ts';
 import {
   readinessAcrossFreeze,
   relayTarget,
@@ -678,6 +678,42 @@ describe('CosmosAdapter against a real emulator — duplicate key', () => {
       }
     },
   );
+});
+
+describe('CosmosAdapter against a real emulator — a unit of work whose row was deleted', () => {
+  for (const kind of ['updateWhere', 'deleteWhere'] as const) {
+    it(
+      `commits a buffered ${kind} as a serialization conflict when the row was deleted (service 404)`,
+      { skip: skipReal },
+      async () => {
+        const container = await provision(`deleted_${kind}_${suffix}`, '/id');
+        const adapter = new CosmosAdapter({
+          endpoint: endpoint as string,
+          key,
+          database: databaseId,
+          containers: { Row: { container, partitionKey: 'id' } },
+        });
+        await adapter.connect();
+        try {
+          const root = adapter.createDataSource('Row');
+          await root.create({ id: 'a', version: 1 });
+          const tx = await adapter.beginTransaction();
+          const source = tx.createDataSource('Row');
+          if (kind === 'updateWhere')
+            await source.updateWhere!('a', { version: 1 }, { version: 2 });
+          else await source.deleteWhere!('a', { version: 1 });
+          await root.delete('a');
+          const error: unknown = await tx.commit().catch((caught: unknown) => caught);
+          expect(error).toBeInstanceOf(SerializationConflictError);
+          // The service checks existence before the ETag: 404, not 412.
+          expect(((error as Error).cause as { code?: unknown }).code).toBe(404);
+          expect(await root.findById('a')).toBeNull();
+        } finally {
+          await adapter.disconnect();
+        }
+      },
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

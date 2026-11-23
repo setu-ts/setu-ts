@@ -2210,10 +2210,11 @@ probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Dri
 for instances without `execute()`), memory (its own connection state — the process is the backend),
 and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read of the absent
 key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped entity; with
-none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by the smaller of
-`requestTimeoutMs` and 2000 ms and rejects on expiry (`'unknown'`, `degraded`); a refusal (missing
-table, denied access, unreachable service) is `false`. The concrete `DatabaseService` exposes the
-seam the indicator reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
+none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by 2000 ms, or by
+`requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's bound), and
+rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access, unreachable
+service) is `false`. The concrete `DatabaseService` exposes the seam the indicator reads:
+`hasReachabilityProbe` (a synchronous presence read) and `reachability()`
 (`Promise<boolean | undefined>` — the bounded probe, `undefined` when no answer was produced), the
 database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
 adapter whose own probe does not re-derive `isReady()` cannot report `up` for a connection it has
@@ -3069,9 +3070,8 @@ whether `disconnect()` closes the client it produced.
 garbage-collection policies and split points belong to the application's provisioning, and a missing
 table or instance is already reported by the service as `5 NOT_FOUND` quoting the full resource path
 — while `instance.getTables()` is a table-ADMIN call a data-plane service account commonly cannot
-make, so probing at connect time would refuse a working configuration. Since 0.14.0 `connect()`
-sends one data-plane warm-up read (below) and ignores its result. Configuration mistakes are refused
-at construction instead, by name.
+make, so probing at connect time would refuse a working configuration. `connect()` sends no request.
+Configuration mistakes are refused at construction instead, by name.
 
 **The row key is composed from logical fields.** `BigtableRowKeyMapping` is
 `{ fields, separator?, prefix? }`, defaulting to `{ fields: ['id'], separator: '#' }`. A
@@ -3162,7 +3162,7 @@ injection seam, so an application implementing its own facade can name every sig
 | ------------------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `requestTimeoutMs` | DynamoDB, Cosmos, Bigtable | Whole-call bound, retries included; default `15000`, `0` disables. DynamoDB: `abortSignal` on every `send`; Cosmos: `abortSignal` in the `CosmosRequestOptions` of every call; Bigtable: `gaxOptions.timeout` on every read and conditional write plus a whole-read deadline. Expiry is `DatabaseTimeoutError` (`504`) with the driver error as `cause`. Refused at construction by `deadlineRangeError` (non-finite, negative, above 2147483647); a fraction is accepted. |
 | `clientOptions`    | DynamoDB, Cosmos, Bigtable | Spread first into the SDK constructor the lazy arm builds; the arm's own `region`/`endpoint`/`credentials`, `endpoint`/`key`, or `projectId`/`apiEndpoint` win when set. Unread with an injected `client`. On Bigtable, with an endpoint set (`apiEndpoint`, `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST` read by the plugin through `ctx.runtime.env`), `metricsEnabled: false` is passed unless `clientOptions` sets it.                                     |
-| `readinessEntity`  | DynamoDB, Bigtable         | The entity whose table the readiness probe reads (default: the first entry of `entities` / `tables`); with none, no probe and one `warn` at `connect()`. On Bigtable it also names the table of `connect()`'s warm-up read, bounded by the smaller of `requestTimeoutMs` and 2000 ms (else the first mapped table, else a table named `'__setu_readiness__'`).                                                                                                             |
+| `readinessEntity`  | DynamoDB, Bigtable         | The entity whose table the readiness probe reads (default: the first entry of `entities` / `tables`); with none, no probe and one `warn` at `connect()`.                                                                                                                                                                                                                                                                                                                   |
 
 Each adapter assigns `isHealthy` (see Health status above). The injection facades widen to carry the
 bound:

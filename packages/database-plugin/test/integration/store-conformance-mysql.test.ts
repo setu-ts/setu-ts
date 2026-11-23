@@ -1,7 +1,7 @@
 /** MYSQL_URL, like POSTGRES_URL, selects a shared backend: these proofs run in isolation. */
 import { describe, expect, it } from 'vitest';
 import type { AgentRunRow } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { AgentRunLeaseLostError, CAPABILITIES } from '@setu-ts/common';
 import { MockServiceRegistry } from '@setu-ts/testing';
 import { createDatabaseAgentRunStore, createDatabaseGrantSource } from '../../src/index.ts';
 import { DatabaseOutboxStore } from '../../src/outbox/database-outbox-store.ts';
@@ -40,7 +40,7 @@ for (const type of ['prisma', 'drizzle'] as const) {
     skipMysql,
   );
   describe(`real MySQL ${type} stores`, { skip: skipMysql }, () => {
-    it('commits counters, fences stale holders and purges children through Drizzle', async () => {
+    it('commits counters, fences stale holders and purges children', async () => {
       const h = await mysqlHarness(type);
       try {
         const services = new MockServiceRegistry();
@@ -94,7 +94,7 @@ for (const type of ['prisma', 'drizzle'] as const) {
             leaseVersion: 1,
             chunks: [],
           }),
-        ).rejects.toThrow();
+        ).rejects.toBeInstanceOf(AgentRunLeaseLostError);
         expect(await store.purge((await store.get('run'))!)).toBe(true);
       } finally {
         await h.dispose();

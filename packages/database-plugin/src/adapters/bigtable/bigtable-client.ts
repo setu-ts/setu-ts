@@ -29,11 +29,11 @@ import type {
  * @since 0.2.0
  */
 export interface BigtableClientConfiguration {
-  /** SDK constructor options, overridden by the adapter's explicit keys. */
+  /**
+   * Further `Bigtable` constructor options, passed through to the SDK.
+   * `projectId` and `apiEndpoint` given beside it win over the same keys here.
+   */
   readonly clientOptions?: Readonly<Record<string, unknown>>;
-  /** Plugin-owned runtime environment detection; not an application option. */
-  readonly emulatorFromEnvironment?: boolean;
-  readonly [key: string]: unknown;
   /** The GCP project the instance lives in. */
   readonly projectId: string;
   /**
@@ -45,6 +45,24 @@ export interface BigtableClientConfiguration {
    */
   readonly apiEndpoint?: string;
 }
+
+/**
+ * What the plugin read from the runtime environment for the lazy arm.
+ *
+ * Not on the exported configuration: an adapter built directly decides from
+ * its options alone, and only the plugin reads the environment.
+ *
+ * @internal
+ */
+export interface BigtableEnvironmentFacts {
+  /** `BIGTABLE_EMULATOR_HOST` is set. */
+  readonly emulatorFromEnvironment?: boolean;
+  /** `GOOGLE_CLOUD_UNIVERSE_DOMAIN` is set. */
+  readonly universeFromEnvironment?: boolean;
+}
+
+/** The options handed to the native `Bigtable` constructor. */
+type BigtableSdkClientOptions = Readonly<Record<string, unknown>> & { readonly projectId: string };
 
 /** The native SDK's per-row write surface, as this adapter uses it. */
 interface BigtableSdkRow {
@@ -106,7 +124,7 @@ interface BigtableSdkClientInstance {
  */
 export interface BigtableSdkModule {
   /** The Bigtable client constructor. */
-  Bigtable: new (configuration: BigtableClientConfiguration) => BigtableSdkClientInstance;
+  Bigtable: new (options: BigtableSdkClientOptions) => BigtableSdkClientInstance;
 }
 
 /** The deferred client-resolution seam the adapter lifecycle drives. */
@@ -146,6 +164,21 @@ export function createInjectedBigtableLoader(client: IBigtableClient): BigtableC
 export function createLazyBigtableLoader(
   configuration: BigtableClientConfiguration,
 ): BigtableClientLoader {
+  return createBigtableSdkLoader(configuration, {});
+}
+
+/**
+ * The lazy SDK loader with the plugin's environment facts.
+ *
+ * @param configuration - Settings passed to the native `Bigtable` constructor
+ * @param environment - What the plugin read from the runtime environment
+ * @returns A loader that imports and adapts the SDK when used, marked owned
+ * @internal
+ */
+export function createBigtableSdkLoader(
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): BigtableClientLoader {
   return {
     owned: true,
     load: async (): Promise<IBigtableClient> => {
@@ -158,7 +191,7 @@ export function createLazyBigtableLoader(
           cause: error,
         });
       }
-      return adaptBigtableSdkModule(module, configuration);
+      return adaptBigtableSdk(module, configuration, environment);
     },
   };
 }
@@ -278,15 +311,66 @@ export function adaptBigtableSdkModule(
   module: BigtableSdkModule,
   configuration: BigtableClientConfiguration,
 ): IBigtableClient {
-  const { clientOptions, emulatorFromEnvironment, ...top } = configuration;
+  return adaptBigtableSdk(module, configuration, {});
+}
+
+/**
+ * The options the native constructor receives.
+ *
+ * `clientOptions` spread first, so the explicit `projectId`/`apiEndpoint`
+ * win. Against an emulator — named by the environment, or an endpoint with
+ * no `sslCreds`, which is plaintext — two SDK defaults that need Google's
+ * production services are turned off unless the caller set them: client-side
+ * metrics export, and the universe-domain lookup that otherwise stalls the
+ * first call while it resolves Google credentials. The universe default also
+ * steps aside whenever a universe is configured, through `clientOptions` or
+ * `GOOGLE_CLOUD_UNIVERSE_DOMAIN`, because the SDK lets an option override
+ * that variable and gax refuses a call whose universe does not match.
+ *
+ * @param configuration - The adapter's client configuration
+ * @param environment - What the plugin read from the runtime environment
+ * @returns The constructor options
+ * @internal
+ */
+function bigtableSdkOptions(
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): BigtableSdkClientOptions {
+  const { clientOptions, ...top } = configuration;
   const effective = { ...clientOptions, ...top };
-  const emulator = effective.apiEndpoint !== undefined || emulatorFromEnvironment === true;
-  const client = new module.Bigtable({
+  const endpoint = effective['apiEndpoint'] !== undefined;
+  const emulator = endpoint || environment.emulatorFromEnvironment === true;
+  const plaintextEmulator =
+    environment.emulatorFromEnvironment === true ||
+    (endpoint && clientOptions?.['sslCreds'] === undefined);
+  const universeConfigured =
+    clientOptions?.['universeDomain'] !== undefined ||
+    clientOptions?.['universe_domain'] !== undefined ||
+    environment.universeFromEnvironment === true;
+  return {
     ...effective,
     ...(emulator && clientOptions?.['metricsEnabled'] === undefined
       ? { metricsEnabled: false }
       : {}),
-  });
+    ...(plaintextEmulator && !universeConfigured ? { universeDomain: 'googleapis.com' } : {}),
+  };
+}
+
+/**
+ * Adapts the native SDK with the plugin's environment facts.
+ *
+ * @param module - The native SDK module, or a structural test double
+ * @param configuration - Settings supplied to the native client constructor
+ * @param environment - What the plugin read from the runtime environment
+ * @returns The facade the adapter drives
+ * @internal
+ */
+export function adaptBigtableSdk(
+  module: BigtableSdkModule,
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): IBigtableClient {
+  const client = new module.Bigtable(bigtableSdkOptions(configuration, environment));
   return {
     instance: (id: string): IBigtableInstance => {
       const instance = client.instance(id);

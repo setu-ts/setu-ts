@@ -141,17 +141,16 @@ All notable changes to this project are documented here. The format follows
   adapter logs one `warn` and has no probe. Each uncached health check adds one read billed by the
   provider (the probe is cached 5 s). An injected `IBigtableClient` must accept the new
   `{ column: { cellLimit } }` filter variant and the optional `{ timeoutMs }` argument; every read
-  asks for the latest cell only. Bigtable `connect()` waits up to 2 s for a warm-up read. Prisma
-  conditional and versioned writes on a connector other than PostgreSQL run
-  `updateMany`/`deleteMany` and a `findUnique` read-back in a short transaction holding a pool
-  connection (`maxWait` 2 s, so pool exhaustion answers 503, `P2028`: size the pool for it); a lost
-  race on MySQL answers 409/404 instead of success; a `keyColumns` that matches several rows throws
-  and rolls back; a client extension or middleware for `update`/`delete` no longer sees them: hook
-  `updateMany`/`deleteMany` too. Drizzle with MySQL writes through the repository (it was a masked
-  500); its `contains` escapes with `!`; on mysql-proxy a write's read-back runs outside a
-  transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key or a write conflict
-  through `query()` answers 409 where it was 500; mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed
-  mysql2 connection answers 503.
+  asks for the latest cell only. Prisma conditional and versioned writes on a connector other than
+  PostgreSQL run `updateMany`/`deleteMany` and a `findUnique` read-back in a short transaction
+  holding a pool connection (`maxWait` 2 s, so pool exhaustion answers 503, `P2028`: size the pool
+  for it); a lost race on MySQL answers 409/404 instead of success; a `keyColumns` that matches
+  several rows throws and rolls back; a client extension or middleware for `update`/`delete` no
+  longer sees them: hook `updateMany`/`deleteMany` too. Drizzle with MySQL writes through the
+  repository (it was a masked 500); its `contains` escapes with `!`; on mysql-proxy a write's
+  read-back runs outside a transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key
+  or a write conflict through `query()` answers 409 where it was 500; mysql2 `ER_LOCK_DEADLOCK`
+  answers 409; a closed mysql2 connection answers 503.
 
 ### Fixed
 
@@ -160,12 +159,14 @@ All notable changes to this project are documented here. The format follows
   lost its race reports the miss (409 or 404) instead of returning the stale row: connectors other
   than PostgreSQL decide from `updateMany`/`deleteMany`'s affected-row count (V13-230). Drizzle on
   MySQL writes through the repository by the affected-row count and a read-back, its `contains`
-  parses under any `sql_mode`, and an `offset` with no `limit` pages to the end (V13-243, V13-242).
-  A MySQL deadlock or duplicate key through `query()` answers 409 on both MySQL cells, and a closed
-  mysql2 connection 503 (V13-244, V13-251). A Bigtable project runs on a host without Google
-  credentials (client-side metrics off on an emulator, V13-231), its reads stay flat as a row is
-  updated (latest cell only, V13-239), and `connect()` pays the SDK's first-use cost instead of the
-  first request (V13-240). The agent-run store's `verify()` on DynamoDB or Bigtable carries a cause
+  matches a value holding `!`, `%`, `_` or a backslash literally under the default `sql_mode`
+  (Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES` for bound values), and an `offset` with
+  no `limit` pages to the end (V13-243, V13-242). A MySQL deadlock or duplicate key through
+  `query()` answers 409 on both MySQL cells, and a closed mysql2 connection 503 (V13-244, V13-251).
+  A Bigtable project runs on a host without Google credentials (client-side metrics off on an
+  emulator, V13-231), its reads stay flat as a row is updated (latest cell only, V13-239), and its
+  first call on an emulator skips the SDK's credentials lookup (`universeDomain` defaulted when none
+  is configured, V13-240). The agent-run store's `verify()` on DynamoDB or Bigtable carries a cause
   naming why it refuses and which backends serve it (V13-249).
 - **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
   a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with

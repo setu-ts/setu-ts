@@ -773,19 +773,29 @@ grows with its update count (2.8 ms new, 97 ms after about 8,400 updates).
   endpoint the data client uses insecure credentials and needs no ADC, so the metadata-server
   detection may belong to `GCPMetricsHandler`, which §3.11 turns off. M-3 measures the first
   `findById` after `connect()` on the emulator with `metricsEnabled: false`.
-- **Decision (V13-240).** If M-3 is under 500 ms, no warm-up is built: §3.11 closes the row and the
-  guarded cell asserts the first call's latency. Otherwise `connect()` runs one warm-up read and
-  awaits it, bounded by `min(requestTimeoutMs, 2000)` (2000 when it is `0`), so boot waits at most 2
-  s on a frozen store; its result is ignored (an outage at boot is reported by `/ready`, not by a
-  failed start). The warm-up is independent of `readinessEntity`: it reads a sentinel row of the
-  readiness entity's table when one exists, else of the first mapped table, else of a fixed table
-  name, since a `NOT_FOUND` still establishes the channel. The README names the SDK's
-  `METADATA_SERVER_DETECTION=none` switch. The admin-plane probe the README rejected stays rejected:
-  this is a data-plane read of the application's own table.
+- **Decision (V13-240), DECIDED by the maintainer 2026-11-24 (option (a), narrowed).** M-3 measured
+  the first call after `connect()` at 3.1 s with metrics off, and a 2 s warm-up left it at about
+  1.06 s (fresh process, three runs). The cost is gax resolving the universe domain on first use:
+  `google-auth-library` awaits `getUniverseDomain()` even with `sslCreds` (`googleauth.js:218-227`),
+  whose metadata-server probe waits 3000 ms (`gcp-metadata` `index.js:460-462`); an explicit
+  `universeDomain` skips it (measured: connect 420 ms, first read 3.0 ms). So the lazy arm passes
+  `universeDomain: 'googleapis.com'` only when both hold: (1) `BIGTABLE_EMULATOR_HOST` is set (read
+  by the plugin through `ctx.runtime.env`), or `apiEndpoint` / `clientOptions.apiEndpoint` is set
+  and `clientOptions` carries no `sslCreds`; and (2) no universe domain is configured: neither
+  `clientOptions.universeDomain` nor `GOOGLE_CLOUD_UNIVERSE_DOMAIN` (read the same way; the SDK lets
+  options override that variable, `index.js:67-70`, so the default must step aside). Forcing it on a
+  sovereign-cloud project would make gax refuse every call ("configured universe domain does not
+  match", `google-gax` `grpc.js:398-406`), hence the narrowing. The `connect()` warm-up is dropped:
+  `connect()` issues no RPC. Compared: Go dials an insecure connection with no auth, Python uses
+  `AnonymousCredentials`, Java's `newBuilderForEmulator` installs `NoCredentialsProvider`; none
+  forces a universe domain, they avoid the lookup by never touching auth, which the Node client
+  cannot be told to do. Upgrade note: emulator boot gets faster; no change on real or
+  sovereign-cloud projects.
 - **Test home.** `test/unit/bigtable-page.test.ts` and `bigtable-data-source.test.ts` (every read
   carries the latest-cell filter first); `bigtable-client-seam.test.ts` (the new variant maps to the
-  SDK's `column.cellLimit`); `bigtable-adapter.test.ts` (connect warms once, ignores the result,
-  respects the bound); guarded real cells: after 2,000 updates of one row a read takes under 3× the
+  SDK's `column.cellLimit`; a table over every `universeDomain` trigger and skip case);
+  `plugin-nosql-options.test.ts` (both environment reads); `bigtable-adapter.test.ts` (`connect()`
+  issues no RPC); guarded real cells: after 2,000 updates of one row a read takes under 3× the
   new-row time; the first `findById` after `connect()` takes under 500 ms.
 
 ### 3.13 The frozen relay (Part 2, test infrastructure)
@@ -809,7 +819,7 @@ missing sort key.
 - **Decision.** In this package only: `verify()` reads the cause chain (as the outbox's
   `unavailableReason` does, `database-outbox-store.ts:199-215`) and, when the refusal is an
   `UnsupportedQueryFeatureError` from `dynamodb` or `bigtable`, wraps it in one more
-  `UnsupportedQueryFeatureError('agent-runs', <adapter>, 'The agent-run store needs ordered multi-field queries, which the <adapter> adapter cannot serve. Use PostgreSQL, SQLite or MongoDB for agent runs.', { cause })`
+  `UnsupportedQueryFeatureError('agent-runs', <adapter>, 'The agent-run store needs ordered multi-field queries, which the <adapter> adapter cannot serve. Use PostgreSQL, MySQL, SQLite or MongoDB for agent runs.', { cause })`
   before `AgentRunStoreUnavailableError('query-unsupported', { cause })`. The test asserts the chain
   itself (`error.cause.message` names the reason); whether the startup log prints causes is the
   kernel's (`agent-runs-plugin.ts:122` lets `verify()` reject), so no claim about the log is made.
@@ -861,12 +871,12 @@ the `scope` parameters and the frozen relay are internal.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                                      | Consumer                                                                                                                                         | Behavior (per implementation)                                                                                                                                                                                                                                                                                                   |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `requestTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit, the probe and the warm-up of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0` disables the bound; refused at construction exactly as `deadlineRangeError` refuses (non-finite, negative, above 2 147 483 647); non-integers accepted        |
-| `readinessEntity` (DynamoDB, Bigtable arms)                                 | carried by `buildAdapterOptions`; `isHealthy`, the Bigtable warm-up                                                                              | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn`                                                                                                                                                                                                                               |
-| `clientOptions` (the DynamoDB, Cosmos and Bigtable lazy arms; D-7)          | carried by `buildAdapterOptions`; each lazy loader → its SDK constructor (§3.11, §3.15)                                                          | spread first; the arm's own top-level options (Bigtable `projectId`/`apiEndpoint`; DynamoDB `region`/`endpoint`/`credentials`; Cosmos `endpoint`/`key`) win when set; Bigtable's derived `metricsEnabled: false` applies only when `clientOptions` does not set `metricsEnabled`; unread when `client` is injected (documented) |
-| `dialect: 'mysql'` (existing, wider consumer)                               | Drizzle `contains`, offset-only `findAll`                                                                                                        | `escape '!'` with the `!`-escaped pattern; `limit 18446744073709551615` as an `sql.raw` chunk                                                                                                                                                                                                                                   |
+| Option                                                                      | Consumer                                                                                                                            | Behavior (per implementation)                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestTimeoutMs` (DynamoDB, Cosmos, Bigtable arms; name D-3, default D-4) | carried by `buildAdapterOptions` (`database-plugin.ts:396-440`); every data-source call, every commit and the probe of that adapter | DynamoDB: `abortSignal` on `send`; Cosmos: `abortSignal` in request and feed options; Bigtable: `gaxOptions.timeout`; expiry is `DatabaseTimeoutError` (504); `0` disables the bound; refused at construction exactly as `deadlineRangeError` refuses (non-finite, negative, above 2 147 483 647); non-integers accepted        |
+| `readinessEntity` (DynamoDB, Bigtable arms)                                 | carried by `buildAdapterOptions`; `isHealthy`                                                                                       | names the table the probe reads; default the first mapped entity; none → no probe plus one `warn`                                                                                                                                                                                                                               |
+| `clientOptions` (the DynamoDB, Cosmos and Bigtable lazy arms; D-7)          | carried by `buildAdapterOptions`; each lazy loader → its SDK constructor (§3.11, §3.15)                                             | spread first; the arm's own top-level options (Bigtable `projectId`/`apiEndpoint`; DynamoDB `region`/`endpoint`/`credentials`; Cosmos `endpoint`/`key`) win when set; Bigtable's derived `metricsEnabled: false` applies only when `clientOptions` does not set `metricsEnabled`; unread when `client` is injected (documented) |
+| `dialect: 'mysql'` (existing, wider consumer)                               | Drizzle `contains`, offset-only `findAll`                                                                                           | `escape '!'` with the `!`-escaped pattern; `limit 18446744073709551615` as an `sql.raw` chunk                                                                                                                                                                                                                                   |
 
 ## 5. Implementation files
 
@@ -1026,8 +1036,8 @@ controls.
 | To                         | Row                       | File                                                                               | Sentence to apply                                                                                                                                                                                                                                                                                                                                                                                         |
 | -------------------------- | ------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | M143j (CLI, template half) | V13-231                   | `packages/cli/src/commands/add.ts:2059` and the Bigtable lines the templates write | "Since M143q the plugin also turns Bigtable metrics off when `BIGTABLE_EMULATOR_HOST` is set. The Bigtable registration guidance reads `apiEndpoint` from `BIGTABLE_EMULATOR_HOST` when it is set (`{ projectId, instance, apiEndpoint, tables: {} }`), so a project pointed at `cbtemulator` turns the SDK's client-side metrics off and does not exit after 60 s on a host without Google credentials." |
-| M143j or M143e (CLI)       | V13-236, V13-240          | same guidance line                                                                 | "The DynamoDB and Bigtable guidance names `readinessEntity` (or writes the first generated entity into `entities` / `tables`), so `/ready` has a probe and the Bigtable client is warmed at boot." (D-5: mapped-entity read.)                                                                                                                                                                             |
-| M143l (Web, `auth-plugin`) | V13-240                   | `packages/auth-plugin/src/scoped/options.ts:365`                                   | "With the Bigtable warm-up (M143q §3.12) the first grant check no longer pays the SDK's first-use cost; M143l decides whether a `source-timeout` on a grant source should answer 503 rather than deny with 403."                                                                                                                                                                                          |
+| M143j or M143e (CLI)       | V13-236, V13-240          | same guidance line                                                                 | "The DynamoDB and Bigtable guidance names `readinessEntity` (or writes the first generated entity into `entities` / `tables`), so `/ready` has a probe." (D-5: mapped-entity read.)                                                                                                                                                                                                                       |
+| M143l (Web, `auth-plugin`) | V13-240                   | `packages/auth-plugin/src/scoped/options.ts:365`                                   | "With the emulator `universeDomain` default (M143q §3.12) the first grant check no longer pays the SDK's first-use cost; M143l decides whether a `source-timeout` on a grant source should answer 503 rather than deny with 403."                                                                                                                                                                         |
 | M143e (CLI)                | V13-254                   | `packages/cli/src/commands/add.ts` Prisma arm                                      | "The `--dialect mysql` refusal for `--type drizzle` no longer applies: Drizzle with MySQL writes through the repository since 0.14.0." (The Prisma half of V13-254 is unchanged.)                                                                                                                                                                                                                         |
 | M143h (Data, next letter)  | V13-218, V13-252, V13-132 | `src/errors/classify.ts`                                                           | "M143q added a read of the Prisma driver-adapter `kind` (`UniqueConstraintViolation`, `TransactionWriteConflict`); map `ForeignKeyConstraintViolation`, `NullConstraintViolation`, `LengthMismatch` and `ValueOutOfRange` on the same read."                                                                                                                                                              |
 | M143h (Data)               | V13-237                   | `src/errors/classify.ts:586`                                                       | "The NoSQL call bound of M143q throws `DatabaseTimeoutError` itself, including Bigtable `DEADLINE_EXCEEDED` on a call the adapter bounded; the classifier's `TimeoutError` name rule and a Bigtable code-4 rule remain yours, for SDK-internal timeouts and injected facades."                                                                                                                            |
@@ -1159,7 +1169,9 @@ existing precedent; confirmed as listed):
   - DynamoDB `TransactionCanceledException` with a `TransactionConflict` reason now answers 409
     (`SerializationConflictError`, rolled back, safe to retry) where it was a masked 500, the same
     rule as a PostgreSQL serialization failure here;
-  - if M-3 selects the warm-up (§3.12), Bigtable `connect()` waits up to 2 s for it;
+  - Bigtable on an emulator endpoint with no universe domain configured gets
+    `universeDomain: 'googleapis.com'` (§3.12), so its first call is fast: no change on real or
+    sovereign-cloud projects;
   - the readiness probe adds one read per uncached health check (a DynamoDB or Bigtable point read,
     a Cosmos `database.read()`), billed by the provider: lengthen the indicator's cache interval, or
     point `readinessEntity` at a small table;

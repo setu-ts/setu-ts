@@ -246,14 +246,15 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
             'id' in operation ? operation.id : String((body as Record<string, unknown>).id);
           const key = documentKey(container, partitionKey, id);
           const found = pending.get(key);
+          // Measured on the emulator: existence is checked before the ETag,
+          // so an `ifMatch` write to a row deleted since answers 404, not 412.
           const status =
-            operation.ifMatch !== undefined && operation.ifMatch !== found?.['_etag']
-              ? 412
-              : operation.operationType === 'Create' && found !== undefined
-                ? 409
-                : ['Replace', 'Patch', 'Delete'].includes(operation.operationType) &&
-                    found === undefined
-                  ? 404
+            ['Replace', 'Patch', 'Delete'].includes(operation.operationType) && found === undefined
+              ? 404
+              : operation.ifMatch !== undefined && operation.ifMatch !== found?.['_etag']
+                ? 412
+                : operation.operationType === 'Create' && found !== undefined
+                  ? 409
                   : 200;
           if (status !== 200)
             return Promise.resolve({

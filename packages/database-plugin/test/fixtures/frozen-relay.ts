@@ -74,8 +74,8 @@ export async function startFrozenRelay(target: {
     track(upstream);
     client.on('data', (chunk: Buffer) => forward(upstream, chunk));
     upstream.on('data', (chunk: Buffer) => forward(client, chunk));
-    // A side that ends or fails takes its partner with it, exactly as a direct
-    // connection would; while frozen the partner simply never hears of it.
+    // A side that ends or fails takes its partner with it at once, exactly as a
+    // direct connection would, frozen or not: freezing holds data, not closes.
     const pair = (from: Socket, to: Socket): void => {
       from.on('error', () => to.destroy());
       from.on('close', () => to.destroy());

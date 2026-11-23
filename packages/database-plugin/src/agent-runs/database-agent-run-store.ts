@@ -160,7 +160,7 @@ export class DatabaseAgentRunStore implements IAgentRunStore {
           ? new UnsupportedQueryFeatureError(
               'agent-runs',
               refusal.adapter,
-              `The agent-run store needs ordered multi-field queries, which the ${refusal.adapter} adapter cannot serve. Use PostgreSQL, SQLite or MongoDB for agent runs.`,
+              `The agent-run store needs ordered multi-field queries, which the ${refusal.adapter} adapter cannot serve. Use PostgreSQL, MySQL, SQLite or MongoDB for agent runs.`,
               { cause },
             )
           : cause;

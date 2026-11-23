@@ -41,8 +41,6 @@ export type BigtableCellBag = Readonly<Record<string, Readonly<Record<string, st
  * @internal
  */
 export interface IBigtableWriteBuffer {
-  /** Carries a conditional first write's predicate to CheckAndMutateRow at commit. */
-  condition(test: readonly BigtableFilter[]): void;
   /**
    * Claims the transaction's single (table, row key) pair.
    *
@@ -53,17 +51,33 @@ export interface IBigtableWriteBuffer {
    */
   claim(table: string, rowKey: string, operation: string): void;
   /**
+   * Ends one successful `claim`, whether or not its operation buffered a write.
+   * A row whose claims have all ended with nothing buffered is free again.
+   */
+  release(): void;
+  /**
    * Buffers a cell write, merging it over anything already buffered.
    *
    * @param cells - The cells to write
    * @param creating - `true` for a `create`, whose commit must refuse an
    *   existing row
+   * @param condition - A conditional write's predicate, carried to
+   *   CheckAndMutateRow at commit. Given in the same synchronous call as the
+   *   write, so no other write in the unit of work can land between the
+   *   predicate and the cells it guards.
    * @throws {BigtableTransactionScopeError} When a `create` follows an
-   *   operation that already required the row to be present
+   *   operation that already required the row to be present, or when the
+   *   write would share its row's buffer with a conditional write
    */
-  insert(cells: BigtableCellBag, creating: boolean): void;
-  /** Buffers a whole-row delete, discarding any cells buffered before it. */
-  remove(): void;
+  insert(cells: BigtableCellBag, creating: boolean, condition?: readonly BigtableFilter[]): void;
+  /**
+   * Buffers a whole-row delete, discarding any cells buffered before it.
+   *
+   * @param condition - A conditional delete's predicate, as for `insert`
+   * @throws {BigtableTransactionScopeError} When the delete would share its
+   *   row's buffer with a conditional write
+   */
+  remove(condition?: readonly BigtableFilter[]): void;
 }
 
 /**
@@ -98,6 +112,22 @@ interface BufferState {
   expects: RowPrecondition;
   /** Whether any operation has been buffered at all. */
   touched: boolean;
+  /** Claims whose operation has not yet finished: each holds the row. */
+  pending: number;
+}
+
+/** The operations whose write carries a predicate. */
+const CONDITIONAL: ReadonlySet<string> = new Set(['updateWhere', 'deleteWhere']);
+
+/**
+ * The refusal for a conditional write that would share its row's buffer.
+ *
+ * @returns The error
+ */
+function conditionalOnlyError(): BigtableTransactionScopeError {
+  return new BigtableTransactionScopeError(
+    'A Bigtable conditional write must be the only write in its unit of work. Write the row once per unit of work.',
+  );
 }
 
 /**
@@ -156,7 +186,9 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
       );
     }
     const state = this.#state;
-    if (state === null || !state.touched) {
+    // An untouched row with no operation still in flight held nothing: every
+    // claim on it ended in a miss. The next write may target any row.
+    if (state === null || (!state.touched && state.pending === 0)) {
       this.#state = {
         table,
         rowKey,
@@ -165,15 +197,22 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
         expects: 'any',
         touched: false,
         condition: null,
+        pending: 1,
       };
       return;
     }
-    if (state.condition !== null || operation === 'updateWhere' || operation === 'deleteWhere') {
-      throw new BigtableTransactionScopeError(
-        'A Bigtable conditional write must be the only write in its unit of work. Write the row once per unit of work.',
-      );
+    // A claim still awaiting its pre-read holds the row exactly as a buffered
+    // write does: re-targeting it would move that pending write onto whichever
+    // row claimed last. The conditional-only rule is checked again where the
+    // write is buffered, in the same synchronous step, because two claims on
+    // one row can both pass here before either has written.
+    if (state.touched && (state.condition !== null || CONDITIONAL.has(operation))) {
+      throw conditionalOnlyError();
     }
-    if (state.table === table && state.rowKey === rowKey) return;
+    if (state.table === table && state.rowKey === rowKey) {
+      state.pending += 1;
+      return;
+    }
     throw new BigtableTransactionScopeError(
       `Bigtable transactions are atomic on ONE row: this transaction already targets ` +
         `'${state.table}'/'${state.rowKey}', and ${operation} targets '${table}'/'${rowKey}'. ` +
@@ -183,13 +222,15 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
   }
 
   /** @inheritdoc */
-  condition(test: readonly BigtableFilter[]): void {
-    this.#requireState().condition = test;
+  release(): void {
+    const state = this.#state;
+    if (state !== null && state.pending > 0) state.pending -= 1;
   }
 
   /** @inheritdoc */
-  insert(cells: BigtableCellBag, creating: boolean): void {
+  insert(cells: BigtableCellBag, creating: boolean, condition?: readonly BigtableFilter[]): void {
     const state = this.#requireState();
+    this.#guardConditional(state, condition);
     // A `create` buffered after an `update` is contradictory: one requires the
     // row absent and the other requires it present. Refused by name rather
     // than resolved, because carrying only the FIRST operation's condition
@@ -210,8 +251,9 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
   }
 
   /** @inheritdoc */
-  remove(): void {
+  remove(condition?: readonly BigtableFilter[]): void {
     const state = this.#requireState();
+    this.#guardConditional(state, condition);
     // A delete reported its own boolean from committed state, so it imposes no
     // precondition on the commit — and it CLEARS one an earlier write set,
     // because after a whole-row delete the row's prior state no longer decides
@@ -297,6 +339,24 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     this.#settled = true;
     this.#state = null;
     return Promise.resolve();
+  }
+
+  /**
+   * Enforces "a conditional write is the only write to its row" at buffer time.
+   *
+   * Runs before anything is buffered, so a refused write leaves the buffer as
+   * it was. A conditional write needs an untouched buffer; any write after a
+   * conditional one is refused.
+   *
+   * @param state - The claimed state
+   * @param condition - The write's own predicate, if it is conditional
+   * @throws {BigtableTransactionScopeError} When either rule is broken
+   */
+  #guardConditional(state: BufferState, condition: readonly BigtableFilter[] | undefined): void {
+    if (state.condition !== null || (condition !== undefined && state.touched)) {
+      throw conditionalOnlyError();
+    }
+    if (condition !== undefined) state.condition = condition;
   }
 
   /**

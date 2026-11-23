@@ -26,7 +26,7 @@ import {
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
 
-describe('M143q MySQL driver signals', () => {
+describe('MySQL driver signals', () => {
   for (const [kind, originalCode, expected] of [
     ['UniqueConstraintViolation', '1062', 'duplicate'],
     ['UniqueConstraintViolation', '23505', 'duplicate'],

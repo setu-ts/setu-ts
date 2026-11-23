@@ -285,7 +285,11 @@ export function createBigtableDataSource(
       const persisted = { ...data } as Record<string, unknown>;
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'create');
-        buffer.insert(cells, true);
+        try {
+          buffer.insert(cells, true);
+        } finally {
+          buffer.release();
+        }
         return persisted;
       }
       const existed = await table.row(rowKey).conditionalMutate([{ all: true }], {
@@ -313,21 +317,25 @@ export function createBigtableDataSource(
 
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'update');
-        // A deferred write still has to REPORT the updated row, and the write
-        // lands at commit, so the committed row is read and merged here.
-        const committed = await readOne(rowKey);
-        if (committed === null) {
-          throw new Error(
-            `Bigtable entity '${target.entity}' has no row keyed '${rowKey}' to update.`,
-          );
+        try {
+          // A deferred write still has to REPORT the updated row, and the write
+          // lands at commit, so the committed row is read and merged here.
+          const committed = await readOne(rowKey);
+          if (committed === null) {
+            throw new Error(
+              `Bigtable entity '${target.entity}' has no row keyed '${rowKey}' to update.`,
+            );
+          }
+          if (hasCells) buffer.insert(cells, false);
+          // Only the fields that produced a CELL are merged. An `undefined`
+          // payload field writes nothing, so spreading `data` wholesale made the
+          // buffered path answer `undefined` where the direct path — which
+          // re-reads the row — answers the stored value: two entry points
+          // disagreeing about one call.
+          return { ...committed, ...writtenFields(data) } as Record<string, unknown>;
+        } finally {
+          buffer.release();
         }
-        if (hasCells) buffer.insert(cells, false);
-        // Only the fields that produced a CELL are merged. An `undefined`
-        // payload field writes nothing, so spreading `data` wholesale made the
-        // buffered path answer `undefined` where the direct path — which
-        // re-reads the row — answers the stored value: two entry points
-        // disagreeing about one call.
-        return { ...committed, ...writtenFields(data) } as Record<string, unknown>;
       }
 
       if (!hasCells) {
@@ -358,9 +366,13 @@ export function createBigtableDataSource(
       const rowKey = composeRowKey(target, id, 'delete');
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'delete');
-        const committed = await readOne(rowKey);
-        buffer.remove();
-        return committed !== null;
+        try {
+          const committed = await readOne(rowKey);
+          buffer.remove();
+          return committed !== null;
+        } finally {
+          buffer.release();
+        }
       }
       return await table.row(rowKey).conditionalMutate([{ all: true }], {
         onMatch: [{ method: 'delete' }],
@@ -377,20 +389,23 @@ export function createBigtableDataSource(
       assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
       const rowKey = composeRowKey(target, id, 'updateWhere');
       buffer?.claim(target.table, rowKey, 'updateWhere');
-      const test = preconditionTest(target, where);
-      if (test === null) return null;
-      const cells = buildCells(target, index, data, 'update');
-      if (buffer !== undefined) {
-        const committed = await readOne(rowKey);
-        if (committed === null || !matchesWhere(committed, where)) return null;
-        buffer.condition(test);
-        buffer.insert(cells, false);
-        return { ...committed, ...writtenFields(data) };
+      try {
+        const test = preconditionTest(target, where);
+        if (test === null) return null;
+        const cells = buildCells(target, index, data, 'update');
+        if (buffer !== undefined) {
+          const committed = await readOne(rowKey);
+          if (committed === null || !matchesWhere(committed, where)) return null;
+          buffer.insert(cells, false, test);
+          return { ...committed, ...writtenFields(data) };
+        }
+        const matched = await table.row(rowKey).conditionalMutate(test, {
+          onMatch: [{ method: 'insert', data: cells }],
+        });
+        return matched ? await readOne(rowKey) : null;
+      } finally {
+        buffer?.release();
       }
-      const matched = await table.row(rowKey).conditionalMutate(test, {
-        onMatch: [{ method: 'insert', data: cells }],
-      });
-      return matched ? await readOne(rowKey) : null;
     },
     async deleteWhere(id, where) {
       const checked = checkWritePrecondition(where);
@@ -400,16 +415,21 @@ export function createBigtableDataSource(
       where = checked.where;
       const rowKey = composeRowKey(target, id, 'deleteWhere');
       buffer?.claim(target.table, rowKey, 'deleteWhere');
-      const test = preconditionTest(target, where);
-      if (test === null) return false;
-      if (buffer !== undefined) {
-        const committed = await readOne(rowKey);
-        if (committed === null || !matchesWhere(committed, where)) return false;
-        buffer.condition(test);
-        buffer.remove();
-        return true;
+      try {
+        const test = preconditionTest(target, where);
+        if (test === null) return false;
+        if (buffer !== undefined) {
+          const committed = await readOne(rowKey);
+          if (committed === null || !matchesWhere(committed, where)) return false;
+          buffer.remove(test);
+          return true;
+        }
+        return await table.row(rowKey).conditionalMutate(test, {
+          onMatch: [{ method: 'delete' }],
+        });
+      } finally {
+        buffer?.release();
       }
-      return await table.row(rowKey).conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
     },
 
     async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {

@@ -14,7 +14,7 @@ import { mysqlTables } from './mysql-tables.ts';
 /** Each harness owns an explicitly-created database; no existing table is adopted or dropped. */
 export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110) {
   const endpoint = new URL(process.env['MYSQL_URL']!);
-  const name = `m143q_${crypto.randomUUID().replaceAll('-', '')}`;
+  const name = `setu_mysql_${crypto.randomUUID().replaceAll('-', '')}`;
   const options = {
     host: endpoint.hostname,
     port: Number(endpoint.port || 3306),

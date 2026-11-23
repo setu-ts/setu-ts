@@ -6,7 +6,8 @@
  * the SDK import served by a recording module, so a value is proven to reach
  * the adapter by what the SDK then sees — `buildAdapterOptions` dropping a key
  * leaves the adapter on its default, and the recording shows it. The
- * Bigtable rows also cover the plugin's `BIGTABLE_EMULATOR_HOST` read through
+ * Bigtable rows also cover the plugin's `BIGTABLE_EMULATOR_HOST` and
+ * `GOOGLE_CLOUD_UNIVERSE_DOMAIN` reads through
  * `ctx.runtime.env`.
  *
  * @module
@@ -334,7 +335,7 @@ describe("DatabasePlugin 'bigtable' arm options", () => {
     expect(record.configurations).toEqual([{ projectId: 'p', universeDomain: 'example.test' }]);
   });
 
-  it('carries requestTimeoutMs and readinessEntity to the warm-up and the probe', async () => {
+  it('carries requestTimeoutMs and readinessEntity to the probe, and connect sends nothing', async () => {
     const record = mockBigtableSdk();
     const app = await register({
       type: 'bigtable',
@@ -347,16 +348,14 @@ describe("DatabasePlugin 'bigtable' arm options", () => {
       },
     });
     try {
+      expect(record.reads).toEqual([]);
       expect(await app.indicator()).toMatchObject({ data: { reachable: true } });
-      // The warm-up at connect, then the readiness probe: both on the readiness
-      // entity's table, both bounded by min(requestTimeoutMs, 2000).
-      expect(record.reads.map((read) => read.table)).toEqual(['audit', 'audit']);
-      expect(record.reads.map((read) => read.options['gaxOptions'])).toEqual([
-        { timeout: 750 },
-        { timeout: 750 },
-      ]);
+      // The readiness probe only: on the readiness entity's table, bounded by
+      // requestTimeoutMs because it is non-zero and below 2000.
+      expect(record.reads.map((read) => read.table)).toEqual(['audit']);
+      expect(record.reads.map((read) => read.options['gaxOptions'])).toEqual([{ timeout: 750 }]);
       await app.service.getRepository('Order').findById('a');
-      expect(record.reads[2]).toMatchObject({
+      expect(record.reads[1]).toMatchObject({
         table: 'orders',
         options: { gaxOptions: { timeout: 750 } },
       });
@@ -381,24 +380,47 @@ describe("DatabasePlugin 'bigtable' arm options", () => {
     }
   });
 
-  const metrics: readonly {
+  const environments: readonly {
     readonly name: string;
     readonly env: Record<string, string>;
     readonly metricsEnabled: false | undefined;
+    readonly universeDomain: string | undefined;
   }[] = [
     {
       name: 'BIGTABLE_EMULATOR_HOST set',
       env: { BIGTABLE_EMULATOR_HOST: '127.0.0.1:8086' },
       metricsEnabled: false,
+      universeDomain: 'googleapis.com',
     },
     {
       name: 'BIGTABLE_EMULATOR_HOST empty',
       env: { BIGTABLE_EMULATOR_HOST: '' },
       metricsEnabled: undefined,
+      universeDomain: undefined,
     },
-    { name: 'no emulator variable', env: {}, metricsEnabled: undefined },
+    {
+      name: 'BIGTABLE_EMULATOR_HOST and GOOGLE_CLOUD_UNIVERSE_DOMAIN set',
+      env: {
+        BIGTABLE_EMULATOR_HOST: '127.0.0.1:8086',
+        GOOGLE_CLOUD_UNIVERSE_DOMAIN: 'example.test',
+      },
+      metricsEnabled: false,
+      universeDomain: undefined,
+    },
+    {
+      name: 'GOOGLE_CLOUD_UNIVERSE_DOMAIN empty',
+      env: { BIGTABLE_EMULATOR_HOST: '127.0.0.1:8086', GOOGLE_CLOUD_UNIVERSE_DOMAIN: '' },
+      metricsEnabled: false,
+      universeDomain: 'googleapis.com',
+    },
+    {
+      name: 'no emulator variable',
+      env: {},
+      metricsEnabled: undefined,
+      universeDomain: undefined,
+    },
   ];
-  for (const row of metrics) {
+  for (const row of environments) {
     it(`reads the environment through ctx.runtime.env: ${row.name}`, async () => {
       const record = mockBigtableSdk();
       const app = await register(
@@ -407,10 +429,26 @@ describe("DatabasePlugin 'bigtable' arm options", () => {
       );
       await app.close();
       expect(record.configurations).toHaveLength(1);
-      expect(record.configurations[0]?.['metricsEnabled']).toBe(row.metricsEnabled);
-      expect('emulatorFromEnvironment' in record.configurations[0]!).toBe(false);
+      const configuration = record.configurations[0]!;
+      expect(configuration['metricsEnabled']).toBe(row.metricsEnabled);
+      expect(configuration['universeDomain']).toBe(row.universeDomain);
+      expect('emulatorFromEnvironment' in configuration).toBe(false);
+      expect('universeFromEnvironment' in configuration).toBe(false);
     });
   }
+
+  it('reads GOOGLE_CLOUD_UNIVERSE_DOMAIN against an apiEndpoint too', async () => {
+    const record = mockBigtableSdk();
+    const app = await register(
+      {
+        type: 'bigtable',
+        options: { projectId: 'p', instance: 'i', apiEndpoint: '127.0.0.1:8086' },
+      },
+      { GOOGLE_CLOUD_UNIVERSE_DOMAIN: 'example.test' },
+    );
+    await app.close();
+    expect('universeDomain' in record.configurations[0]!).toBe(false);
+  });
 
   it('lets clientOptions.metricsEnabled win over the emulator default', async () => {
     const record = mockBigtableSdk();

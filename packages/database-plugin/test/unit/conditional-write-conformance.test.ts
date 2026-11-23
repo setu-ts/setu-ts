@@ -12,6 +12,8 @@ import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bi
 import { dynamoFixture } from '../fixtures/conditional-dynamo.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
 import {
+  BigtableTransactionScopeError,
+  CosmosTransactionScopeError,
   EntityNotFoundError,
   UnsupportedQueryFeatureError,
   VersionConflictError,
@@ -261,22 +263,53 @@ describe('updateVersioned / deleteVersioned at every public data source (M128)',
 
 /**
  * Inside a transaction, the versioned write applies exactly where the
- * transaction-scoped source has conditional writes. The two sets are data:
- * a source moving between them fails here, not in prose.
+ * transaction-scoped source has conditional writes. The two sets are written
+ * out, not derived from `sources`: a source moving between them, or a source
+ * added to `sources` and to neither set, fails here, not in prose.
  */
 const TRANSACTION_OUTCOMES: Readonly<Record<'applies' | 'refuses', readonly string[]>> = {
-  applies: sources
-    .filter((source) => source.transactionalConditional === true)
-    .map((source) => source.name),
-  refuses: sources
-    .filter((source) => source.transactionalConditional === 'refused')
-    .map((source) => source.name),
+  applies: [
+    'drizzle',
+    'drizzle-mysql',
+    'prisma',
+    'prisma-mysql',
+    'prisma-undetermined',
+    'mongodb',
+    'dynamodb',
+    'cosmos',
+    'bigtable',
+  ],
+  refuses: ['memory', 'd1'],
+};
+
+/**
+ * What a second stale-version write to the same row in the same transaction gives. The SQL and
+ * MongoDB sources read their own write and report the stale version; DynamoDB, Cosmos and
+ * Bigtable refuse a second conditional write to a row they already write in the unit of work.
+ */
+const STALE_IN_TRANSACTION: Readonly<Record<string, abstract new (...args: never[]) => Error>> = {
+  drizzle: VersionConflictError,
+  'drizzle-mysql': VersionConflictError,
+  prisma: VersionConflictError,
+  'prisma-mysql': VersionConflictError,
+  'prisma-undetermined': VersionConflictError,
+  mongodb: VersionConflictError,
+  dynamodb: UnsupportedQueryFeatureError,
+  cosmos: CosmosTransactionScopeError,
+  bigtable: BigtableTransactionScopeError,
 };
 
 describe('updateVersioned inside a transaction (M128)', () => {
   it('the two sets cover every adapter exactly once', () => {
-    expect([...TRANSACTION_OUTCOMES.applies, ...TRANSACTION_OUTCOMES.refuses].sort()).toEqual(
-      sources.map((source) => source.name).sort(),
+    const listed = [...TRANSACTION_OUTCOMES.applies, ...TRANSACTION_OUTCOMES.refuses];
+    expect(new Set(listed).size).toBe(listed.length);
+    expect([...listed].sort()).toEqual(sources.map((source) => source.name).sort());
+    for (const source of sources)
+      expect(source.transactionalConditional, source.name).toBe(
+        TRANSACTION_OUTCOMES.applies.includes(source.name) ? true : 'refused',
+      );
+    expect(Object.keys(STALE_IN_TRANSACTION).sort()).toEqual(
+      [...TRANSACTION_OUTCOMES.applies].sort(),
     );
   });
 
@@ -291,6 +324,13 @@ describe('updateVersioned inside a transaction (M128)', () => {
         await expect(updateVersioned(repo, 'a', 1, { name: 'new' }), name).resolves.toMatchObject({
           version: 2,
         });
+        await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toBeInstanceOf(
+          STALE_IN_TRANSACTION[name]!,
+        );
+        if (name === 'dynamodb')
+          await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toMatchObject({
+            feature: 'transaction',
+          });
       } finally {
         await done();
       }

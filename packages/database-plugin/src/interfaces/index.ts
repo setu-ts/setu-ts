@@ -980,9 +980,11 @@ export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
    * retries included, unlike the SDK's own per-HTTP-request
    * `requestTimeout`. It is passed to `send` as an `abortSignal`, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
    * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
    *
-   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
    * negative value, or one above 2147483647, is refused at construction with
    * a `RangeError`; a fraction is accepted.
    *
@@ -1189,9 +1191,11 @@ export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
    * retries included, unlike the SDK's own per-HTTP-request
    * `requestTimeout`. It is passed as an `abortSignal` in the request options of every call, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
    * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
    *
-   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
    * negative value, or one above 2147483647, is refused at construction with
    * a `RangeError`; a fraction is accepted.
    *
@@ -1335,12 +1339,14 @@ export interface BigtableDatabaseOptions extends DatabaseConnectionOptions {
 export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
    * A bound on every call this adapter makes to Bigtable: the whole call,
-   * retries included, unlike the SDK's own per-HTTP-request
-   * `requestTimeout`. It is mapped to `gaxOptions.timeout` on each read and conditional write, and a read is also ended at the deadline as a whole, since the SDK retries a streaming read with a fresh deadline per attempt; an injected facade receives it as `{ timeoutMs }`. A call that exceeds it rejects with
+   * retries included, where the SDK's own gax `timeout` bounds one attempt.
+   * It is mapped to `gaxOptions.timeout` on each read and conditional write, and a read is also ended at the deadline as a whole, since the SDK retries a streaming read with a fresh deadline per attempt; an injected facade receives it as `{ timeoutMs }`. A call that exceeds it rejects with
    * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe uses the smaller of this and 2000 ms.
+   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
    *
-   * `0` disables the bound, leaving the SDK's own defaults. A non-finite or
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
    * negative value, or one above 2147483647, is refused at construction with
    * a `RangeError`; a fraction is accepted.
    *
@@ -1351,13 +1357,17 @@ export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions,
   /**
    * Options spread first into the SDK client constructor the lazy arm builds;
    * `projectId` and `apiEndpoint` win over the same keys here when set. Use it for the SDK's own
-   * settings, a per-request handler or connection policy among them; those
-   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * settings, credentials, `sslCreds` or gax settings among them; a gax
+   * `timeout` bounds each attempt, `requestTimeoutMs` still bounds the whole call.
    * When an endpoint is set (`apiEndpoint`, `clientOptions.apiEndpoint`, or
    * `BIGTABLE_EMULATOR_HOST` read by the plugin) and this does not set
    * `metricsEnabled`, the arm passes `metricsEnabled: false`, because the
    * SDK's client-side metrics exporter needs Google credentials; set
-   * `metricsEnabled: true` here to keep them.
+   * `metricsEnabled: true` here to keep them. Against an emulator —
+   * `BIGTABLE_EMULATOR_HOST`, or an endpoint with no `sslCreds` here — the arm
+   * also passes `universeDomain: 'googleapis.com'`, unless a universe is
+   * configured here (`universeDomain`) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`
+   * read by the plugin; a caller's `universeDomain` is passed unchanged.
    * Unread when `client` is injected.
    *
    * @since 0.14.0
@@ -1369,9 +1379,8 @@ export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions,
    * service answers, `false` on gRPC `NOT_FOUND`, `PERMISSION_DENIED`,
    * `UNAVAILABLE` or `UNAUTHENTICATED`. Defaults to the first entry of
    * `tables`; with neither, the adapter has no probe and logs one `warn` at
-   * `connect()` naming this option. `connect()` also reads that row once as
-   * a warm-up, bounded by the smaller of `requestTimeoutMs` and 2000 ms, and
-   * ignores its result.
+   * `connect()` naming this option. The probe is bounded by 2000 ms, or by
+   * `requestTimeoutMs` when that is non-zero and smaller.
    *
    * @since 0.14.0
    */

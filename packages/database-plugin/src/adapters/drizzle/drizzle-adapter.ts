@@ -1495,8 +1495,11 @@ function containsExpression(
 ): unknown {
   const pattern = `%${escapeLikePattern(value, dialect === 'mysql' ? '!' : '\\')}%`;
   if (dialect !== 'mysql') return sql`${column} like ${pattern} escape '\\'`;
-  // mysql2.query interpolates bound strings with backslashes even under
-  // NO_BACKSLASH_ESCAPES. Keep those bytes out of bound literals altogether.
+  // mysql2.query interpolates bound strings into the query text with
+  // backslash escapes, so a backslash in the value is sent as char(92),
+  // outside any literal. That does not make NO_BACKSLASH_ESCAPES supported:
+  // mysql2 escapes a quote as \', which does not parse under that mode, so
+  // Drizzle on mysql2 does not support it for any bound value.
   const segments = pattern.split('\\');
   let expression: unknown = segments[0];
   for (const segment of segments.slice(1))

@@ -135,9 +135,19 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const logger = resolveLogger(ctx);
+      // The Bigtable SDK reads both variables itself; the lazy arm needs to
+      // know of them to keep its emulator defaults from overriding them.
       const runtimeOptions =
-        adapterType === 'bigtable' && ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
-          ? { ...adapterOptions, emulatorFromEnvironment: true }
+        adapterType === 'bigtable'
+          ? {
+              ...adapterOptions,
+              ...(ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
+                ? { emulatorFromEnvironment: true }
+                : {}),
+              ...(ctx.runtime.env['GOOGLE_CLOUD_UNIVERSE_DOMAIN']
+                ? { universeFromEnvironment: true }
+                : {}),
+            }
           : adapterOptions;
       const adapter = await createAdapter(options, adapterType, runtimeOptions, (message) =>
         logger?.warn(message),

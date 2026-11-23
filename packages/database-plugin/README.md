@@ -950,12 +950,12 @@ pool's flags, so keep the default.
 
 **`dialect: 'mysql'`** also selects two MySQL forms. A `contains` filter is `LIKE … ESCAPE '!'` with
 `!`, `%` and `_` in the value escaped by `!`, and a backslash in the value sent as `char(92)` rather
-than inside a string: a backslash escape does not parse under MySQL's default `sql_mode`, and `!`
-needs no escaping in an SQL string under any `sql_mode`, `NO_BACKSLASH_ESCAPES` included. A
-`findAll` with an `offset` and no `limit` carries `LIMIT 18446744073709551615`, MySQL's documented
-"to the end" value, because MySQL has no `OFFSET` outside `LIMIT`. The adapter detects MySQL from
-the instance's class name; pass `dialect` when that cannot name it, or a `contains` keeps the
-backslash form.
+than inside a string. Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES` for bound values:
+mysql2 writes each bound string into the query text with backslash escapes, so a value holding `'`
+does not parse under that mode. Keep MySQL's default `sql_mode`. A `findAll` with an `offset` and no
+`limit` carries `LIMIT 18446744073709551615`, MySQL's documented "to the end" value, because MySQL
+has no `OFFSET` outside `LIMIT`. The adapter detects MySQL from the instance's class name; pass
+`dialect` when that cannot name it, or a `contains` keeps the backslash form.
 
 **mysql-proxy.** Drizzle's `drizzle-orm/mysql-proxy` driver refuses `transaction()`, so on it the
 write and its read-back run unwrapped. The outcome is still decided by the write's count, but the
@@ -1297,18 +1297,18 @@ app.register(
 );
 ```
 
-| `options` field    | Type                                    | Default           | Read by                                                                                                                             |
-| ------------------ | --------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `projectId`        | `string`                                | —                 | The lazy client path. Required unless `client` is supplied.                                                                         |
-| `instance`         | `string`                                | —                 | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.         |
-| `apiEndpoint`      | `string`                                | —                 | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                            |
-| `client`           | `IBigtableClient`                       | —                 | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                   |
-| `tables`           | `Record<string, BigtableEntityMapping>` | `{}`              | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`. |
-| `maxPageFetches`   | `number`                                | `10`              | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                        |
-| `requestTimeoutMs` | `number` (ms)                           | `15000`           | Every read and conditional write, the readiness probe and the warm-up; `0` disables. See [Bounding a call](#bounding-a-call).       |
-| `clientOptions`    | `Record<string, unknown>`               | —                 | The lazy client path: spread into `new Bigtable(…)` first; `projectId` and `apiEndpoint` win. Unread with `client`.                 |
-| `readinessEntity`  | `string`                                | first of `tables` | The table the readiness probe and the warm-up read. See [Health reporting](#health-reporting).                                      |
-| `logQueries`       | `boolean`                               | `false`           | The database service, exactly as for every other arm.                                                                               |
+| `options` field    | Type                                    | Default           | Read by                                                                                                                              |
+| ------------------ | --------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `projectId`        | `string`                                | —                 | The lazy client path. Required unless `client` is supplied.                                                                          |
+| `instance`         | `string`                                | —                 | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.          |
+| `apiEndpoint`      | `string`                                | —                 | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                             |
+| `client`           | `IBigtableClient`                       | —                 | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                    |
+| `tables`           | `Record<string, BigtableEntityMapping>` | `{}`              | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`.  |
+| `maxPageFetches`   | `number`                                | `10`              | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                         |
+| `requestTimeoutMs` | `number` (ms)                           | `15000`           | Every read and conditional write, and the readiness probe; `0` disables the bound on calls. See [Bounding a call](#bounding-a-call). |
+| `clientOptions`    | `Record<string, unknown>`               | —                 | The lazy client path: spread into `new Bigtable(…)` first; `projectId` and `apiEndpoint` win. Unread with `client`.                  |
+| `readinessEntity`  | `string`                                | first of `tables` | The table the readiness probe reads. See [Health reporting](#health-reporting).                                                      |
+| `logQueries`       | `boolean`                               | `false`           | The database service, exactly as for every other arm.                                                                                |
 
 **Tables must already exist.** The adapter creates no instance and no table: column families,
 garbage-collection policies and split points belong to the application's provisioning. A missing
@@ -1317,14 +1317,13 @@ no admin call — an `instance.getTables()` probe is a table-ADMIN call a data-p
 commonly cannot make, so probing would refuse a working configuration. Configuration mistakes are
 caught at construction instead, by name.
 
-**`connect()` warms the client (since 0.14.0).** The SDK's first-use setup, including detecting a
-metadata server on a host that is not Google's, otherwise lands on the first request, where it can
-cost seconds and exceed a caller's own bound. So `connect()` sends one data-plane read of the absent
-row `'__setu_readiness__'` — on the `readinessEntity`'s table, else the first mapped table, else a
-table of that name — and waits for it at most the smaller of `requestTimeoutMs` and 2000 ms. Its
-result is ignored: a store that is down at boot is reported by `/ready`, not by a failed start. Set
-`METADATA_SERVER_DETECTION=none` in the environment to skip the SDK's metadata-server detection on a
-host outside Google Cloud.
+**The emulator's first call does not wait on a credentials lookup (since 0.14.0).** Without a
+universe domain the SDK looks one up from Google credentials on its first call, which on a host
+outside Google Cloud cost about a second. Against an emulator — `BIGTABLE_EMULATOR_HOST` set, or an
+endpoint with no `sslCreds` in `clientOptions` — the lazy arm passes
+`universeDomain: 'googleapis.com'`, unless a universe is configured in `clientOptions`
+(`universeDomain`, passed unchanged) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`. `connect()` sends no
+request: a store that is down at boot is reported by `/ready`, not by a failed start.
 
 **Client-side metrics are off on an emulator (since 0.14.0).** `@google-cloud/bigtable` 6 exports
 client-side metrics unless `metricsEnabled: false`, and its exporter needs Google credentials: on a
@@ -1792,9 +1791,9 @@ backend.
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
 `execute()`), memory (its own connection state — the process is the backend), and since 0.14.0
-Cosmos DB, DynamoDB and Bigtable. Each of the three is bounded by the smaller of `requestTimeoutMs`
-and 2000 ms, so it settles before the service stops waiting; a probe that expires rejects, which the
-indicator reports as `degraded`:
+Cosmos DB, DynamoDB and Bigtable. Each of the three is bounded by 2000 ms, or by `requestTimeoutMs`
+when that is non-zero and smaller (`0` does not lift the 2000 ms probe bound), so it settles before
+the service stops waiting; a probe that expires rejects, which the indicator reports as `degraded`:
 
 | Adapter   | Probe                                                                               | `false` (`down`) on                                                                                            |
 | --------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |

@@ -113,7 +113,7 @@ for (const type of ['dynamodb', 'cosmos', 'bigtable'])
       }
     });
   });
-it('M-5: a numeric-key ValidationException is reachable; no mapped target warns once', async () => {
+it('a numeric-key ValidationException is reachable; no mapped target warns once', async () => {
   const native = frozenFacade(dynamoFixture().client);
   const adapter = new DynamoAdapter({ client: native.client, readinessEntity: 'Explicit' });
   await adapter.connect();

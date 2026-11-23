@@ -264,6 +264,7 @@ describe('local CI plan', () => {
       KAFKA_BROKERS: '127.0.0.1:9092',
       OUTBOX_POSTGRES_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
       AGENT_RUNS_PG_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
+      MYSQL_URL: 'mysql://root:setu@127.0.0.1:3307/setu_test',
       PGVECTOR_URL: 'postgres://postgres:postgres@127.0.0.1:5433/postgres',
       QDRANT_URL: 'http://127.0.0.1:6333',
       MONGODB_RS_URI: 'mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true',
@@ -303,6 +304,10 @@ describe('local CI plan', () => {
       { run: 'pnpm test:coverage --no-tooling messaging-plugin', env: {} },
     ]);
     expect(shardCommands(workflow, 'packages')).toEqual([
+      {
+        run: 'cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm dlx prisma@7.10.1 generate --config prisma.config.ts',
+        env: {},
+      },
       { run: 'pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin', env: {} },
     ]);
     expect(shardCommands(workflow, 'tooling')).toEqual([
@@ -336,7 +341,7 @@ describe('local CI plan', () => {
     expect(ci.jobs.node.steps.filter((step) => step.run?.includes('docker run '))).toHaveLength(
       full.length - Object.keys(ci.jobs.node.services).length,
     );
-    expect(full).toHaveLength(14);
+    expect(full).toHaveLength(15);
     expect(backendSpecs('cli-1')).toEqual(full);
     expect(backendSpecs('messaging')).toEqual(full);
     for (const [name, service] of Object.entries(ci.jobs.node.services))
@@ -352,6 +357,11 @@ describe('local CI plan', () => {
       '--http-management-port=9100',
     );
     expect(full.find((spec) => spec.name === 'postgres')!.args).toEqual(['-c', 'port=5433']);
+    // MYSQL_URL names port 3307, so the local listener must be on 3307 too.
+    const mysql = full.find((spec) => spec.name === 'mysql')!;
+    expect(new URL(ciEnvironment(workflow).MYSQL_URL!).port).toBe('3307');
+    expect(mysql.ports).toEqual([3307]);
+    expect(mysql.args).toEqual(['--port=3307']);
     expect(() => assertUniquePorts([full[0]!, { ...full[1]!, ports: [5433] }])).toThrow(
       'Port 5433 claimed by postgres and mongo',
     );

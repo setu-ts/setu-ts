@@ -16,8 +16,10 @@ import type {
   IBigtableClient,
 } from '../../src/adapters/bigtable/bigtable-client-types.ts';
 import {
+  adaptBigtableSdk,
   adaptBigtableSdkModule,
   type BigtableClientConfiguration,
+  type BigtableEnvironmentFacts,
   type BigtableSdkModule,
   createInjectedBigtableLoader,
   createLazyBigtableLoader,
@@ -25,7 +27,7 @@ import {
 
 /** Everything the fake SDK module saw. */
 interface SdkLog {
-  configuration?: BigtableClientConfiguration;
+  configuration?: Readonly<Record<string, unknown>>;
   instances: string[];
   tables: string[];
   reads: unknown[];
@@ -38,7 +40,7 @@ interface SdkLog {
 function fakeModule(log: SdkLog, rows: { id: string; data?: unknown }[] = []): BigtableSdkModule {
   return {
     Bigtable: class {
-      constructor(configuration: BigtableClientConfiguration) {
+      constructor(configuration: Readonly<Record<string, unknown>> & { projectId: string }) {
         log.configuration = configuration;
       }
       instance(id: string) {
@@ -102,23 +104,156 @@ describe('loaders', () => {
   });
 });
 
+/**
+ * When the lazy arm defaults `universeDomain`: against an emulator (the
+ * environment's, or an endpoint with no `sslCreds`), and only when no universe
+ * is configured in `clientOptions` or the environment.
+ */
+const universeCases: readonly {
+  readonly name: string;
+  readonly environment: BigtableEnvironmentFacts;
+  readonly configuration: BigtableClientConfiguration;
+  readonly universeDomain: string | undefined;
+  readonly metricsEnabled: false | undefined;
+}[] = [
+  {
+    name: 'no endpoint and no emulator variable',
+    environment: {},
+    configuration: { projectId: 'p' },
+    universeDomain: undefined,
+    metricsEnabled: undefined,
+  },
+  {
+    name: 'the emulator variable set',
+    environment: { emulatorFromEnvironment: true },
+    configuration: { projectId: 'p' },
+    universeDomain: 'googleapis.com',
+    metricsEnabled: false,
+  },
+  {
+    name: 'the emulator variable set, sslCreds given',
+    environment: { emulatorFromEnvironment: true },
+    configuration: { projectId: 'p', clientOptions: { sslCreds: 'tls' } },
+    universeDomain: 'googleapis.com',
+    metricsEnabled: false,
+  },
+  {
+    name: 'apiEndpoint without sslCreds',
+    environment: {},
+    configuration: { projectId: 'p', apiEndpoint: '127.0.0.1:8086' },
+    universeDomain: 'googleapis.com',
+    metricsEnabled: false,
+  },
+  {
+    name: 'apiEndpoint with sslCreds',
+    environment: {},
+    configuration: {
+      projectId: 'p',
+      apiEndpoint: 'bigtable.example.test',
+      clientOptions: { sslCreds: 'tls' },
+    },
+    universeDomain: undefined,
+    metricsEnabled: false,
+  },
+  {
+    name: 'clientOptions.apiEndpoint without sslCreds',
+    environment: {},
+    configuration: { projectId: 'p', clientOptions: { apiEndpoint: '127.0.0.1:8086' } },
+    universeDomain: 'googleapis.com',
+    metricsEnabled: false,
+  },
+  {
+    name: 'clientOptions.apiEndpoint with sslCreds',
+    environment: {},
+    configuration: {
+      projectId: 'p',
+      clientOptions: { apiEndpoint: 'bigtable.example.test', sslCreds: 'tls' },
+    },
+    universeDomain: undefined,
+    metricsEnabled: false,
+  },
+  {
+    name: 'clientOptions.universeDomain set, passed unchanged',
+    environment: { emulatorFromEnvironment: true },
+    configuration: {
+      projectId: 'p',
+      apiEndpoint: '127.0.0.1:8086',
+      clientOptions: { universeDomain: 'example.test' },
+    },
+    universeDomain: 'example.test',
+    metricsEnabled: false,
+  },
+  {
+    name: 'clientOptions.universe_domain set',
+    environment: {},
+    configuration: {
+      projectId: 'p',
+      apiEndpoint: '127.0.0.1:8086',
+      clientOptions: { universe_domain: 'example.test' },
+    },
+    universeDomain: undefined,
+    metricsEnabled: false,
+  },
+  {
+    name: 'the universe variable set, with the emulator variable',
+    environment: { emulatorFromEnvironment: true, universeFromEnvironment: true },
+    configuration: { projectId: 'p' },
+    universeDomain: undefined,
+    metricsEnabled: false,
+  },
+  {
+    name: 'the universe variable set, with apiEndpoint',
+    environment: { universeFromEnvironment: true },
+    configuration: { projectId: 'p', apiEndpoint: '127.0.0.1:8086' },
+    universeDomain: undefined,
+    metricsEnabled: false,
+  },
+];
+
+describe('the emulator universe default', () => {
+  for (const row of universeCases) {
+    it(`${row.universeDomain === undefined ? 'omits' : 'passes'} universeDomain: ${row.name}`, () => {
+      const log = newLog();
+      adaptBigtableSdk(fakeModule(log), row.configuration, row.environment);
+      expect(log.configuration?.['universeDomain']).toBe(row.universeDomain);
+      expect('universeDomain' in log.configuration!).toBe(row.universeDomain !== undefined);
+      expect(log.configuration?.['metricsEnabled']).toBe(row.metricsEnabled);
+      expect('emulatorFromEnvironment' in log.configuration!).toBe(false);
+      expect('universeFromEnvironment' in log.configuration!).toBe(false);
+    });
+  }
+
+  it('decides from options alone through the exported adapter', () => {
+    const log = newLog();
+    adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
+    expect(log.configuration).toEqual({ projectId: 'p' });
+  });
+});
+
 describe('adaptBigtableSdkModule', () => {
   for (const [configuration, expected] of [
     [{ projectId: 'p' }, { projectId: 'p' }],
-    [
-      { projectId: 'p', emulatorFromEnvironment: true },
-      { projectId: 'p', metricsEnabled: false },
-    ],
     [
       {
         projectId: 'p',
         clientOptions: { apiEndpoint: 'localhost:8086', projectId: 'ignored', custom: 'kept' },
       },
-      { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: false, custom: 'kept' },
+      {
+        projectId: 'p',
+        apiEndpoint: 'localhost:8086',
+        metricsEnabled: false,
+        universeDomain: 'googleapis.com',
+        custom: 'kept',
+      },
     ],
     [
       { projectId: 'p', apiEndpoint: 'localhost:8086', clientOptions: { metricsEnabled: true } },
-      { projectId: 'p', apiEndpoint: 'localhost:8086', metricsEnabled: true },
+      {
+        projectId: 'p',
+        apiEndpoint: 'localhost:8086',
+        metricsEnabled: true,
+        universeDomain: 'googleapis.com',
+      },
     ],
     [
       { projectId: 'p', clientOptions: { metricsEnabled: false } },
@@ -199,6 +334,7 @@ describe('adaptBigtableSdkModule', () => {
       projectId: 'p',
       apiEndpoint: '127.0.0.1:8086',
       metricsEnabled: false,
+      universeDomain: 'googleapis.com',
     });
   });
 

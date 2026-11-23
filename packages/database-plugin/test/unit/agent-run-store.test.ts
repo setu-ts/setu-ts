@@ -86,7 +86,7 @@ describe('database agent run store', () => {
           'needs ordered multi-field queries',
         );
         expect(((error as Error).cause as Error).message).toContain(
-          'Use PostgreSQL, SQLite or MongoDB',
+          'Use PostgreSQL, MySQL, SQLite or MongoDB for agent runs.',
         );
       } finally {
         read.mockRestore();

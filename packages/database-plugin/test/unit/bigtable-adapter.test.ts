@@ -9,7 +9,6 @@ import type {
   BigtableReadOptions,
   IBigtableClient,
 } from '../../src/adapters/bigtable/bigtable-client-types.ts';
-import type { BigtableAdapterOptions } from '../../src/interfaces/index.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
@@ -75,16 +74,11 @@ describe('construction guards', () => {
 });
 
 describe('lifecycle', () => {
-  it('connects with exactly one warm-up read and nothing else', async () => {
+  it('connects without issuing any RPC', async () => {
     const { store, adapter } = setup();
     await adapter.connect();
     expect(adapter.isReady()).toBe(true);
-    expect(store.reads).toEqual([
-      {
-        table: '__setu_readiness__',
-        options: { keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } },
-      },
-    ]);
+    expect(store.reads).toHaveLength(0);
   });
 
   it('is idempotent and shares one in-flight attempt', async () => {
@@ -238,17 +232,17 @@ it('refuses an absent instance from untyped input and accepts an explicit transa
   await adapter.disconnect();
 });
 
-/** One warm-up read as the client saw it. */
-interface WarmRead {
+/** One read as the client saw it. */
+interface SeenRead {
   readonly table: string;
   readonly options: BigtableReadOptions;
   readonly timeoutMs: number | undefined;
 }
 
-/** Wraps the fake client so every read records its table and call options; `fail` makes reads reject. */
-function warmClient(fail?: Error): { client: IBigtableClient; reads: WarmRead[] } {
+/** Wraps the fake client so every read records its table and call options. */
+function recordingClient(): { client: IBigtableClient; reads: SeenRead[] } {
   const inner = createFakeBigtableClient(new FakeBigtableStore());
-  const reads: WarmRead[] = [];
+  const reads: SeenRead[] = [];
   const client: IBigtableClient = {
     instance: (id) => {
       const instance = inner.instance(id);
@@ -259,9 +253,7 @@ function warmClient(fail?: Error): { client: IBigtableClient; reads: WarmRead[] 
             row: (key) => handle.row(key),
             readRows: (options, callOptions) => {
               reads.push({ table, options, timeoutMs: callOptions?.timeoutMs });
-              return fail === undefined
-                ? handle.readRows(options, callOptions)
-                : Promise.reject(fail);
+              return handle.readRows(options, callOptions);
             },
           };
         },
@@ -272,7 +264,16 @@ function warmClient(fail?: Error): { client: IBigtableClient; reads: WarmRead[] 
   return { client, reads };
 }
 
-describe('connect warm-up', () => {
+describe('connect and the readiness probe', () => {
+  it('sends no request across repeated and concurrent connects', async () => {
+    const { client, reads } = recordingClient();
+    const adapter = new BigtableAdapter({ client, instance: 'app', tables: { User: {} } });
+    await Promise.all([adapter.connect(), adapter.connect()]);
+    await adapter.connect();
+    expect(reads).toEqual([]);
+    await adapter.disconnect();
+  });
+
   const timeouts: readonly { readonly requestTimeoutMs?: number; readonly bound: number }[] = [
     { bound: 2000 },
     { requestTimeoutMs: 500, bound: 500 },
@@ -281,75 +282,29 @@ describe('connect warm-up', () => {
     { requestTimeoutMs: 0, bound: 2000 },
   ];
   for (const row of timeouts) {
-    it(`is bounded by ${row.bound} ms when requestTimeoutMs is ${String(row.requestTimeoutMs)}`, async () => {
-      const { client, reads } = warmClient();
+    it(`bounds the probe by ${row.bound} ms when requestTimeoutMs is ${String(row.requestTimeoutMs)}`, async () => {
+      const { client, reads } = recordingClient();
       const adapter = new BigtableAdapter({
         client,
         instance: 'app',
+        tables: { User: { table: 'users' } },
         ...(row.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: row.requestTimeoutMs }),
       });
       await adapter.connect();
-      expect(reads.map((read) => read.timeoutMs)).toEqual([row.bound]);
-      await adapter.disconnect();
-    });
-  }
-
-  const targets: readonly {
-    readonly name: string;
-    readonly options: Partial<BigtableAdapterOptions>;
-    readonly table: string;
-  }[] = [
-    { name: 'a fixed table with no mapping', options: {}, table: '__setu_readiness__' },
-    {
-      name: 'the first mapped table',
-      options: { tables: { Order: { table: 'orders' }, User: { table: 'users' } } },
-      table: 'orders',
-    },
-    {
-      name: "the readiness entity's table",
-      options: {
-        tables: { Order: { table: 'orders' }, User: { table: 'users' } },
-        readinessEntity: 'User',
-      },
-      table: 'users',
-    },
-  ];
-  for (const target of targets) {
-    it(`reads a sentinel row of ${target.name}`, async () => {
-      const { client, reads } = warmClient();
-      const adapter = new BigtableAdapter({ client, instance: 'app', ...target.options });
-      await adapter.connect();
+      expect(await adapter.isHealthy!()).toBe(true);
       expect(reads).toEqual([
         {
-          table: target.table,
+          table: 'users',
           options: { keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } },
-          timeoutMs: 2000,
+          timeoutMs: row.bound,
         },
       ]);
       await adapter.disconnect();
     });
   }
 
-  it('warms once across repeated and concurrent connects', async () => {
-    const { client, reads } = warmClient();
-    const adapter = new BigtableAdapter({ client, instance: 'app' });
-    await Promise.all([adapter.connect(), adapter.connect()]);
-    await adapter.connect();
-    expect(reads).toHaveLength(1);
-    await adapter.disconnect();
-  });
-
-  it('ignores a failed warm-up: connect resolves and the adapter is ready', async () => {
-    const { client, reads } = warmClient(Object.assign(new Error('table not found'), { code: 5 }));
-    const adapter = new BigtableAdapter({ client, instance: 'app' });
-    await adapter.connect();
-    expect(reads).toHaveLength(1);
-    expect(adapter.isReady()).toBe(true);
-    await adapter.disconnect();
-  });
-
-  it('ignores a warm-up target the mapping cannot resolve, leaving the error to the call that uses it', async () => {
-    const { client, reads } = warmClient();
+  it('leaves a mapping error to the call that uses it, not to connect', async () => {
+    const { client, reads } = recordingClient();
     const adapter = new BigtableAdapter({
       client,
       instance: 'app',
@@ -360,41 +315,5 @@ describe('connect warm-up', () => {
     expect(reads).toEqual([]);
     expect(() => adapter.createDataSource('Bad')).toThrow(/empty 'rowKey.fields'/);
     await adapter.disconnect();
-  });
-
-  it('drops an attempt whose disconnect landed during the warm-up', async () => {
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const store = new FakeBigtableStore();
-    const inner = createFakeBigtableClient(store);
-    let warming = false;
-    const client: IBigtableClient = {
-      instance: (id) => ({
-        table: (table) => ({
-          row: (key) => inner.instance(id).table(table).row(key),
-          readRows: async (options, callOptions) => {
-            warming = true;
-            await gate;
-            return await inner.instance(id).table(table).readRows(options, callOptions);
-          },
-        }),
-      }),
-      close: () => inner.close(),
-    };
-    const adapter = new BigtableAdapter(
-      { projectId: 'p', instance: 'i' },
-      { owned: true, load: () => Promise.resolve(client) },
-    );
-    const connecting = adapter.connect();
-    for (let tick = 0; tick < 50 && !warming; tick += 1) await Promise.resolve();
-    // The disconnect lands while the warm-up itself is in flight.
-    expect(warming).toBe(true);
-    await adapter.disconnect();
-    (release as () => void)();
-    await connecting;
-    expect(adapter.isReady()).toBe(false);
-    expect(store.closes).toBe(1);
   });
 });

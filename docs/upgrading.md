@@ -242,8 +242,11 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   take an optional `{ timeoutMs }` (which a facade may ignore, leaving the call unbounded). Every
   read now asks for the latest cell only: handle the variant in a facade that switches over the
   union.
-- **Bigtable `connect()` waits up to 2 s for a warm-up read**, whose result it ignores. To shorten
-  it, lower `requestTimeoutMs` (the wait is the smaller of it and 2 s).
+- **Bigtable on an emulator gets `universeDomain: 'googleapis.com'`.** When `BIGTABLE_EMULATOR_HOST`
+  is set, or `apiEndpoint` is set without your own `sslCreds`, and no universe domain is configured
+  (`clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN`), the lazy arm passes it so the
+  first call skips the SDK's credentials lookup. Emulator boot gets faster; real and sovereign-cloud
+  projects see no change. To opt out, set `clientOptions.universeDomain` yourself.
 - **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
   connector except `postgresql` / `postgres` (and when the connector cannot be determined),
   `updateWhere`, `deleteWhere`, `updateVersioned` and `deleteVersioned` run `updateMany` /
