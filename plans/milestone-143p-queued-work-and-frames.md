@@ -120,6 +120,15 @@ where the documentation is silent, its source on GitHub.
 | 20  | Dropping backplane frames by age (D5)             | None of the Socket.IO Redis and Redis Streams adapters, Phoenix.PubSub or ActionCable drops a frame by age; Dapr's message TTL is opt-in per message                                                                                                                                                                                                                                                                                                                        | coordinator lookup, 2026-11-23 (maintainer decision D5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 21  | `mandatory` on an outbox dispatch (D6)            | NServiceBus sets `mandatory` on sends and its outbox retries a failed dispatch; Spring AMQP and MassTransit leave `mandatory` off for ordinary publishes                                                                                                                                                                                                                                                                                                                    | coordinator lookup, 2026-11-23 (maintainer decision D6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 22  | Ordered Pub/Sub dispatch with async handlers (D8) | Google's ordering page puts per-key ordering of asynchronous work on the subscriber; the Java client serialises per key; the Node client (read from source, not run) does not, which a probe against the emulator confirms before the fix relies on it                                                                                                                                                                                                                      | coordinator lookup, 2026-11-23 (maintainer decision D8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 23  | A missing or unsubscribed dead-letter topic       | Spring Cloud GCP throws "Non-existing topic" when auto-create is off; neither Spring Cloud GCP nor Dapr checks that a dead-letter topic has a subscription; Google says dead letters published to a topic with no subscription are lost                                                                                                                                                                                                                                     | coordinator lookup from primary sources, 2026-11-23 (maintainer decision on review item 1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 24  | Publisher confirms for an outbox dispatch         | NServiceBus always uses publisher confirms on RabbitMQ ("there no longer is a way to disable publisher confirms")                                                                                                                                                                                                                                                                                                                                                           | coordinator lookup from primary sources, 2026-11-23 (item 2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 25  | Fan-out of a request responder                    | MassTransit and Moleculer load-balance requests across responders; NServiceBus takes the first reply; none fans a responder out                                                                                                                                                                                                                                                                                                                                             | coordinator lookup from primary sources, 2026-11-23 (item 3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 26  | Fan-out on Redis Streams                          | Socket.IO's redis-streams adapter and Watermill's fan-out mode read with `XREAD` per subscriber and no consumer group; no surveyed framework creates per-instance groups and sweeps them; Spring Cloud Stream's anonymous consumers have no DLQ                                                                                                                                                                                                                             | coordinator lookup from primary sources, 2026-11-23 (item 4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 27  | A delayed retry on a Service Bus subscription     | MassTransit and NServiceBus reschedule, because their topic subscriptions forward to queues                                                                                                                                                                                                                                                                                                                                                                                 | coordinator lookup from primary sources, 2026-11-23 (item 5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 28  | Long Service Bus entity names                     | MassTransit keeps the entity name and shortens a long one to 43 characters plus a 6-character hash                                                                                                                                                                                                                                                                                                                                                                          | coordinator lookup from primary sources, 2026-11-23 (item 6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 29  | An existing subscription with different settings  | Spring Cloud GCP and Dapr leave it unchanged and silent; MassTransit on Service Bus rewrites it                                                                                                                                                                                                                                                                                                                                                                             | coordinator lookup from primary sources, 2026-11-23 (item 7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 30  | An injectable clock on a transport                | Rebus injects `IRebusTime`                                                                                                                                                                                                                                                                                                                                                                                                                                                  | coordinator lookup from primary sources, 2026-11-23 (item 8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 31  | Redelivery on an ordered Pub/Sub key              | Google: "Redeliveries of a message trigger redelivery of all subsequent messages for that key"                                                                                                                                                                                                                                                                                                                                                                              | coordinator lookup from primary sources, 2026-11-23 (item 9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 What rows 10 to 14 settle for Part A: the unreadable rule follows NServiceBus and the RabbitMQ
 sibling (§3.5), but leaves the message for its visibility timeout when the forward fails rather than
@@ -134,7 +143,7 @@ Sidekiq on purpose (§10). Trace context travels in the envelope body (the AWS .
 is the precedent for refusing to start because of a queue attribute.
 
 Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went to the maintainer
-(§12); rows 19 to 22 record the comparisons behind the decisions of 2026-11-23.
+(§12); rows 19 to 31 record the comparisons behind the decisions of 2026-11-23.
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -440,10 +449,10 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
 
 - **Review amendments (2026-11-23):** `RequestReplyCore.respond` (`request-reply-core.ts:219-240`)
   ignores `fanOut` and warns once (every responder answering each request means duplicate replies,
-  not silent loss, so by the maintainer rule it adjusts rather than refuses; proposed, pending the
-  maintainer). `onIntegrationEvent` with `inbox` (`integration/subscribe.ts:217`, `:285`) refuses
+  not silent loss, so by the maintainer rule it adjusts rather than refuses; (maintainer decision,
+  2026-11-23)). `onIntegrationEvent` with `inbox` (`integration/subscribe.ts:217`, `:285`) refuses
   `fanOut` with a `RangeError`: the inbox drops the option, so the consumer would silently receive
-  only its share (proposed, pending the maintainer). The declarative
+  only its share (maintainer decision, 2026-11-23; Compared with, row 25). The declarative
   `SubscriptionDefinition.options` path (`messaging-plugin.ts:726`) warns once when it asked for
   `fanOut` and the returned subscription lacks the marker (a custom arm that ignores it). The
   traced, pipelined and custom facades return the inner subscription, so the marker survives them;
@@ -455,18 +464,19 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
 
 - **Decision:** one table, and the conformance test iterates it as data. A new internal module
   `fan-out.ts` holds the shared refusal (`fanOut` with `queue`), the per-instance name
-  (`<defaultQueue>-fanout-<uuid>`, `fanout-<uuid>` on Service Bus), and the marker helper.
+  (`<defaultQueue>-fanout-<uuid>`; on Service Bus the shortened form of the amendment below), and
+  the marker helper.
 
-  | Arm           | Consumer created                                                                                                           | Removed on `unsubscribe()`       | Left behind by a crash, and who removes it                                                                                        |
-  | ------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-  | memory        | the queue-less path (every subscriber invoked)                                                                             | yes                              | nothing                                                                                                                           |
-  | RabbitMQ      | the queue-less exclusive auto-delete queue (`rabbitmq-broker.ts:896-897`)                                                  | yes                              | nothing (exclusive)                                                                                                               |
-  | NATS          | the transient ephemeral consumer the reply inbox uses (`nats-broker.ts:700-716`), `deliver_policy: 'new'`                  | deleted                          | the server, after `inactive_threshold` (5 min)                                                                                    |
-  | Kafka         | a consumer group `<defaultQueue>-fanout-<uuid>`, joining at the end of each partition through the existing first-join rule | consumer stops; group left empty | Kafka, after `offsets.retention.minutes` (the reply-inbox precedent, `kafka-broker.ts:500-503`)                                   |
-  | Redis Streams | a group `<defaultQueue>-fanout-<uuid>` created at `$` on the shared stream                                                 | `XGROUP DESTROY`                 | any live fan-out subscriber on the same stream destroys a `-fanout-` group whose heartbeat key has expired, in the existing sweep |
-  | Pub/Sub       | a subscription `<defaultQueue>-fanout-<uuid>` with `messageRetentionDuration` 600 s and `expirationPolicy.ttl` 86,400 s    | deleted                          | Pub/Sub, after one idle day (the minimum ttl; it must exceed the retention, Compared with, row 9)                                 |
-  | Service Bus   | a subscription `fanout-<uuid>` created through the admin client with `autoDeleteOnIdle` 5 minutes                          | deleted                          | Service Bus, after 5 idle minutes (the minimum, row 9)                                                                            |
-  | custom        | the instance's own subscribe, options passed through                                                                       | the instance's                   | the instance's; the marker is the instance's to set                                                                               |
+  | Arm           | Consumer created                                                                                                                                     | Removed on `unsubscribe()`       | Left behind by a crash, and who removes it                                                        |
+  | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------- |
+  | memory        | the queue-less path (every subscriber invoked)                                                                                                       | yes                              | nothing                                                                                           |
+  | RabbitMQ      | the queue-less exclusive auto-delete queue (`rabbitmq-broker.ts:896-897`)                                                                            | yes                              | nothing (exclusive)                                                                               |
+  | NATS          | the transient ephemeral consumer the reply inbox uses (`nats-broker.ts:700-716`), `deliver_policy: 'new'`                                            | deleted                          | the server, after `inactive_threshold` (5 min)                                                    |
+  | Kafka         | a consumer group `<defaultQueue>-fanout-<uuid>`, joining at the end of each partition through the existing first-join rule                           | consumer stops; group left empty | Kafka, after `offsets.retention.minutes` (the reply-inbox precedent, `kafka-broker.ts:500-503`)   |
+  | Redis Streams | a plain `XREAD` reader from `$` on the shared stream, with no consumer group                                                                         | the reader stops                 | nothing (no server-side state)                                                                    |
+  | Pub/Sub       | a subscription `<defaultQueue>-fanout-<uuid>` with `messageRetentionDuration` 600 s and `expirationPolicy.ttl` 86,400 s                              | deleted                          | Pub/Sub, after one idle day (the minimum ttl; it must exceed the retention, Compared with, row 9) |
+  | Service Bus   | a subscription `<defaultQueue cut to 30>-fanout-<12 hex>` (at most 50 characters) created through the admin client with `autoDeleteOnIdle` 5 minutes | deleted                          | Service Bus, after 5 idle minutes (the minimum, row 9)                                            |
+  | custom        | the instance's own subscribe, options passed through                                                                                                 | the instance's                   | the instance's; the marker is the instance's to set                                               |
 
   The transport ports gain what the table needs:
   `IPubSubTransport.createSubscription(topic, sub, options?)` and
@@ -475,35 +485,33 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   reuses the Service Bus one for the reply inbox (V13-263, §11).
 
 - **Why:** each arm already has a per-instance consumer for its reply inbox, so fan-out reuses a
-  mechanism that is built, tested and reaped, rather than inventing seven. The Redis Streams sweep
-  is the one new reaper, because nothing on the server expires a group.
-- **Test home:** `fan-out-conformance.test.ts` (the table as test data, §6);
-  `redis-streams-fan-out-sweep.test.ts`.
+  mechanism that is built, tested and reaped, rather than inventing seven. Redis Streams is the
+  exception: a plain `XREAD` per subscriber leaves nothing on the server to reap (Compared with, row
+  26).
+- **Test home:** `fan-out-conformance.test.ts` (the table as test data, §6).
 
 - **Review amendments (2026-11-23):**
-  - **Service Bus name.** A Service Bus subscription name is at most 50 characters (vendor
-    documentation, not verified against the SDK or the emulator; the emulator run confirms it), and
-    `messaging-consumers-fanout-<uuid>` is 63. The Service Bus arm names its fan-out subscription
-    `fanout-<uuid>` (43 characters), as the reply inbox uses `rr-inbox-<uuid>`
-    (`service-bus-broker.ts:713`). `fan-out.ts` takes the per-arm prefix; the other arms keep
-    `<defaultQueue>-fanout-<uuid>` (Pub/Sub allows 255 characters, `pubsub-broker.ts:55`).
-  - **Redis Streams liveness is a heartbeat key, never `inactive`.** The existing sweep reads
-    `inactive` (`redis-streams-broker.ts:47-48`), the time since the last successful read on Redis
-    7.2+, so a quiet backplane stream looks idle while its replicas poll, and a group just created
-    has no consumers until its first `XREADGROUP`. Each fan-out subscriber writes
-    `{<stream>}:fanout-alive:<group>` with a 60 s TTL before `XGROUP CREATE` and refreshes it every
-    20 s while subscribed; `unsubscribe()` deletes the key and destroys the group. The sweep, in one
-    Lua script like `SWEEP_CONSUMERS`, destroys a `-fanout-` group only when its heartbeat key is
-    absent. Key passing: the sweep lists the stream's groups (`XINFO GROUPS`), then calls the script
-    with `KEYS = [stream, one heartbeat key per -fanout- group]` and the group names as `ARGV`. On
-    Redis Cluster every key must share the stream's slot: the heartbeat key is
-    `{<stream>}:fanout-alive:<group>`, whose hash tag is the whole stream name and so hashes to the
-    stream key's slot; when the stream name already contains a hash tag, the heartbeat key reuses
-    that tag instead (`<tag-prefix>{<tag>}…:fanout-alive:<group>`). A unit test asserts the slot of
-    both shapes. A fan-out subscriber whose read returns `NOGROUP` re-creates its group at `$` and
-    warns once ("fan-out group was removed; frames published while it was absent were not
-    received"). Test home `redis-streams-fan-out-sweep.test.ts` adds: a quiet group with a live
-    heartbeat kept; a just-created group kept; `NOGROUP` re-created with one warning.
+  - **Service Bus name (maintainer decision, 2026-11-23).** A Service Bus subscription name is at
+    most 50 characters (vendor documentation, not verified against the SDK or the emulator; the
+    emulator run confirms it), and `messaging-consumers-fanout-<uuid>` is 63. The Service Bus arm
+    keeps the owner visible with a shortened prefix: `defaultQueue` cut to its first 30 characters
+    with trailing `-`, `.` and `_` removed, then `-fanout-`, then 12 lowercase hex characters taken
+    from `runtime.uuid()` (48 random bits), at most 30 + 8 + 12 = 50 characters. When the create
+    reports that the name exists, the broker draws a new id once and retries, then fails the
+    subscribe. Compared with, row 28 (MassTransit keeps the entity name and hashes long names). The
+    other arms keep `<defaultQueue>-fanout-<uuid>` (Pub/Sub allows 255 characters,
+    `pubsub-broker.ts:55`).
+  - **Redis Streams fan-out is a plain `XREAD` (maintainer decision, 2026-11-23).** A fan-out
+    subscriber reads the shared stream with `XREAD BLOCK` from `$`, with no consumer group, so no
+    heartbeat key, no group and no sweep exist (Compared with, row 26: Socket.IO's redis-streams
+    adapter and Watermill's fan-out mode). The loop keeps the last id it read and continues from it
+    after a transient read error, so frames are skipped only when the connection is replaced and the
+    reader restarts at `$`, or when the stream was trimmed past that id; the README states this.
+    Cost, documented: no pending list, so a handler failure is logged once per failure and the frame
+    is not redelivered, and `consumerRetry` does not apply to a fan-out subscription (as Spring
+    Cloud Stream's anonymous consumers have no DLQ, and as Pub/Sub fan-out has no dead-letter
+    policy, §3.13). `unsubscribe()` stops the reader. Test home: `fan-out-subscribe.test.ts` (the
+    `XREAD` call shape, no `XGROUP`, continue from the last id, a failing handler not redelivered).
   - **NATS.** An operator-provisioned work-queue stream refuses a second consumer on a subject, so a
     fan-out subscribe fails there, loudly; the README says so.
 
@@ -561,25 +569,32 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   existing failure path then backs the row off and, after `relay.maxAttempts` (default 10,
   `outbox/options.ts:179`), marks it failed, which the outbox metrics already count. Every other
   broker ignores the symbol. A routed publish needs confirms and on/off return listeners
-  (`rabbitmq-broker.ts:798-800`); without them the relay falls back as the amendment below says.
-  `#createChannel` gives a real amqplib connection a confirm channel every time (`:1044-1051`), so
-  the fallback affects only an injected connection without `createConfirmChannel`. The guard's error
-  text is generalized from "consumer recovery" to name the routed publish. Plain `publish` is
-  unchanged (maintainer decision D6 (a), 2026-11-23).
+  (`rabbitmq-broker.ts:798-800`); without them the outbox refuses to start, as the amendment below
+  says. `#createChannel` gives a real amqplib connection a confirm channel every time
+  (`:1044-1051`), so the refusal affects only an injected connection without `createConfirmChannel`.
+  The guard's error text is generalized from "consumer recovery" to name the routed publish. Plain
+  `publish` is unchanged (maintainer decision D6 (a), 2026-11-23).
 - **Why:** the README promises at-least-once delivery of every committed row; on RabbitMQ that holds
   only when a queue is bound. Compared with, row 6: Spring AMQP and RabbitMQ's own guide use
   `mandatory` with a return handler; the broker already has that path for its own copies.
 - **Test home:** `rabbitmq-unroutable-publish.test.ts` (fake channel: `mandatory` on the wire for
   the relay and only for it, return → `UnroutableMessageError`, the symbol survives the traced and
-  pipelined facade); `outbox-unroutable-real.test.ts` (guarded: a row for an unbound topic stays
-  pending, then is delivered once a queue binds).
+  pipelined facade; a connection without `createConfirmChannel` makes `start()` fail with
+  `OutboxPublisherConfirmsRequiredError`, through the facades too); `outbox-unroutable-real.test.ts`
+  (guarded: a row for an unbound topic stays pending, then is delivered once a queue binds).
 
 - **Review amendments (2026-11-23):**
-  - A routed publish needs a confirm channel with return listeners (`rabbitmq-broker.ts:798-800`).
-    On a connection without one (`#confirmed` false, `:1048-1057`), every row would fail its whole
-    budget. The relay's routed publish then falls back to a plain publish and the broker warns once
-    that unroutable rows cannot be detected on an unconfirmed channel; the README states it. (Data
-    is not lost silently by the fallback any more than today; refusing would stop a working relay.)
+  - **The outbox needs publisher confirms (maintainer decision, 2026-11-23).** A routed publish
+    needs a confirm channel with return listeners (`rabbitmq-broker.ts:798-800`). On a connection
+    without one (`#confirmed` false, `:1048-1057`), the relay refuses to start: where the plugin
+    activates the outbox (the step that runs each store's `verify()` and fails `start()`,
+    `messaging-plugin.ts` around `:755-810`), it reads an internal symbol `ROUTED_PUBLISH_AVAILABLE`
+    (in `publish-options.ts`, never exported, the `REPLY_INBOX_TRANSIENT` pattern) from the broker;
+    `RabbitMqBroker` answers `false` without a confirm channel, other brokers leave it undefined (no
+    check), and the traced and pipelined facades forward it. `false` throws the new exported
+    `OutboxPublisherConfirmsRequiredError`, whose message says the outbox needs publisher confirms
+    and names `createConfirmChannel`. A plain publish with a warning is rejected because it would
+    still mark unroutable rows sent (Compared with, row 24: NServiceBus always uses confirms).
   - `UnroutableMessageError` reaches the relay unwrapped: `publishConfirmed` rethrows it as is
     rather than wrapping it in its generic `Error` (`:299-305`, `:320`). Test: the relay's failure
     path receives an `instanceof UnroutableMessageError`.
@@ -618,19 +633,27 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   arms unchanged).
 
 - **Review amendments (2026-11-23):**
-  - **Dead-letter topic with no subscription loses messages** (Pub/Sub drops a publish to a topic
-    with no subscription; vendor documentation, not verified against the emulator). At the broker's
-    first `subscribe` (not `connect()`, so a send-only service never refuses, the D9 precedent) the
-    broker checks that `deadLetterTopic` exists and has at least one subscription: a missing topic
-    or none → refuse that subscribe with a named error (silent loss; proposed, pending the
-    maintainer); the read fails (for example no `pubsub.topics.getSubscriptions` right) → warn once
-    and continue, as the SQS rule does for an explicit target.
+  - **Dead-letter topic checks (maintainer decision, 2026-11-23).** At the broker's first
+    `subscribe` (not `connect()`, so a send-only service never refuses, the D9 precedent) the broker
+    reads `deadLetterTopic`:
+    - the topic does not exist → refuse that subscribe with the new exported
+      `PubSubDeadLetterTopicMissingError` naming the topic (Compared with, row 23: Spring Cloud GCP
+      throws on a non-existing topic with auto-create off);
+    - the topic exists with no subscription → warn once and continue: Google says such dead letters
+      are lost, but neither Spring Cloud GCP nor Dapr checks, and a subscription can be added after
+      deploy (row 23). The warning names the topic and says dead letters are dropped until it has a
+      subscription;
+    - the read fails (for example no `pubsub.topics.get` or `pubsub.topics.getSubscriptions` right)
+      → warn once and continue. The transport gains
+      `inspectTopic?(topic): Promise<{ exists: boolean; subscriptions?: number }>` (listed in §4); a
+      transport without it skips the check with one warning.
   - The topic is normalised to `projects/{project}/topics/{topic}` through the SDK's
     `pubsub.topic(name).name`, and backoffs are passed as `{ seconds, nanos }`.
   - The not-retryable forward acks only after the publish resolves; a failed publish nacks.
   - An existing subscription with no retry policy, or a different one, gets the warn-once naming it
-    and is not changed; the upgrade notes say subscriptions created before 0.14.0 keep their
-    policies until the operator updates them.
+    and is not changed (maintainer decision, 2026-11-23; Compared with, row 29: Spring Cloud GCP and
+    Dapr leave it silently, MassTransit on Service Bus rewrites it); the upgrade notes say
+    subscriptions created before 0.14.0 keep their policies until the operator updates them.
   - Transport seams (listed in §4): `onMessage` gains `orderingKey?: string` and
     `deliveryAttempt?: number`; `open` takes an options object
     `{ onClosed?, create?: { retryPolicy?, deadLetterPolicy?, messageRetentionSeconds?, expirationTtlSeconds? } }`
@@ -663,10 +686,13 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   `consumer-retry-conformance.test.ts`.
 
 - **Review amendments (2026-11-23):**
-  - **Lock budget.** The receiver is opened with `maxAutoLockRenewalDurationInMs: 300000` set
-    explicitly, and each hold is capped at the renewal budget left (300,000 ms since receipt, less
-    60,000 ms margin, the margin behind the 240,000 ms refusal); when the budget left is below the
-    delay, the message is abandoned at once and the broker warns once per subscription.
+  - **Lock budget (maintainer decision, 2026-11-23).** MassTransit and NServiceBus reschedule a
+    delayed retry instead, because their subscriptions forward to queues (Compared with, row 27);
+    Setu reads subscriptions directly, so it holds. The receiver is opened with
+    `maxAutoLockRenewalDurationInMs: 300000` set explicitly, and each hold is capped at the renewal
+    budget left (300,000 ms since receipt, less 60,000 ms margin, the margin behind the 240,000 ms
+    refusal); when the budget left is below the delay, the message is abandoned at once and the
+    broker warns once per subscription.
   - **Close during a hold.** `unsubscribe()` and `disconnect()` cancel pending holds (timers from
     `runtime.setTimeout`) and abandon those messages at once, best effort, before closing the
     receiver.
@@ -711,7 +737,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   `create: { messageRetentionSeconds: 600, expirationTtlSeconds: 86400, retryPolicy }` (the
   configured backoff, so a failing handler is not redelivered in a hot loop) and no
   `deadLetterPolicy` (a per-instance, non-durable subscription does not feed the shared dead-letter
-  topic; proposed, pending the maintainer). `createSubscription`'s third parameter remains for the
+  topic; (maintainer decision, 2026-11-23)). `createSubscription`'s third parameter remains for the
   reply inbox. Each case is in `pubsub-stream-recovery.test.ts`.
 
 ### 3.14 Ordered Pub/Sub delivery keeps order across a failure
@@ -740,8 +766,9 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   return); buffered messages of a key are dropped without settling when the stream closes (§3.13;
   they are redelivered). On a broker with both `enableMessageOrdering` and `deadLetterTopic`, the
   broker warns once at `connect()` that the later messages of a failing key spend delivery attempts
-  too and may be dead-lettered with it (each with its attributes, so nothing is lost silently).
-  `pubsub-ordered-dispatch.test.ts` adds the head-dead-lettered sequence and the stream-close case.
+  too and may be dead-lettered with it (maintainer decision, 2026-11-23; Compared with, row 31; each
+  with its attributes, so nothing is lost silently). `pubsub-ordered-dispatch.test.ts` adds the
+  head-dead-lettered sequence and the stream-close case.
 
 ### 3.15 One exhausted-job rule for every queue adapter
 
@@ -818,9 +845,11 @@ the source queue; a forwarded copy carries three `setu-` attributes and not the 
 `visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a stale SQS settle now reports a
 settlement failure; `queue_jobs_total` counts an outcome only after its settle succeeds, on every
 adapter. Part B: Pub/Sub and Service Bus failing handlers are now delayed and limited by default; an
-unroutable RabbitMQ outbox row is retried and then failed instead of marked sent; the backplane
-`messaging` transport refuses a broker without fan-out. Frames are not dropped by age unless
-`maxFrameAgeMs` is set (D5), so the backplane's delivery is unchanged by default.
+unroutable RabbitMQ outbox row is retried and then failed instead of marked sent, and an outbox on a
+RabbitMQ connection without publisher confirms refuses to start; a Pub/Sub consumer whose
+`deadLetterTopic` does not exist is refused at its first subscribe; the backplane `messaging`
+transport refuses a broker without fan-out. Frames are not dropped by age unless `maxFrameAgeMs` is
+set (D5), so the backplane's delivery is unchanged by default.
 
 | Exported symbol                                                                                      | Kind               | Consumer / real code path that READS it                                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -838,6 +867,9 @@ unroutable RabbitMQ outbox row is retried and then failed instead of marked sent
 | `SnsPublisherOptions.telemetry`                                                                      | option             | Read by `publishJob` (§4.1)                                                                                                                                                                                                                                                                                 |
 | `SnsPublisherOptions.runtime`                                                                        | option             | Read by `publishJob` for the default `id` (§4.1)                                                                                                                                                                                                                                                            |
 | `UnroutableMessageError` (messaging-plugin)                                                          | class              | Thrown by `RabbitMqBroker` on a returned routed publish; read by the outbox relay's failure path and by applications                                                                                                                                                                                        |
+| `OutboxPublisherConfirmsRequiredError` (messaging-plugin)                                            | class              | Thrown where the plugin activates the outbox when the broker reports no confirm channel (§3.10); surfaces from `app.start()`                                                                                                                                                                                |
+| `PubSubDeadLetterTopicMissingError` (messaging-plugin)                                               | class              | Thrown by `GcpPubSubBroker`'s first `subscribe` when `deadLetterTopic` does not exist (§3.11)                                                                                                                                                                                                               |
+| `IPubSubTransport.inspectTopic?`                                                                     | member             | Implemented by `adaptPubSubModule`; read by the dead-letter topic check (§3.11)                                                                                                                                                                                                                             |
 | `PubSubMessagingOptions*.consumerRetry`, `.deadLetterTopic`                                          | options            | Read by `GcpPubSubBroker` (§4.1)                                                                                                                                                                                                                                                                            |
 | `ServiceBusMessagingOptions*.consumerRetry`                                                          | option             | Read by `ServiceBusBroker` (§4.1)                                                                                                                                                                                                                                                                           |
 | `IPubSubTransport.createSubscription` 3rd parameter, `open` 4th parameter                            | parameters         | Read by `adaptPubSubModule`; written by the fan-out path and the recovery path                                                                                                                                                                                                                              |
@@ -850,7 +882,7 @@ unroutable RabbitMQ outbox row is retried and then failed instead of marked sent
 
 Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.prepareConsumer`,
 `fan-out.ts`, `consumer-retry.ts`, `pubsub-ordering.ts`, `frame-age.ts`, `PUBLISH_REQUIRE_ROUTE`,
-`StaleClaimError`.
+`ROUTED_PUBLISH_AVAILABLE`, `StaleClaimError`.
 
 ### 4.1 Options — every option names its consumer
 
@@ -884,8 +916,8 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 | `packages/queue-plugin/src/adapters/sqs-envelope.ts` (new, internal)             | Encode and decode the v1 envelope; SNS notification unwrap                                                                                                                                                                                                                                                                           |
 | `packages/queue-plugin/src/sns/sns-publisher.ts`                                 | `publishJob`, `telemetry` option, attributes                                                                                                                                                                                                                                                                                         |
 | `packages/queue-plugin/README.md`, `packages/queue-plugin/AGENT_CARD.md`         | §3.17                                                                                                                                                                                                                                                                                                                                |
-| `packages/messaging-plugin/src/index.ts`                                         | Export `UnroutableMessageError`                                                                                                                                                                                                                                                                                                      |
-| `packages/messaging-plugin/src/errors.ts`                                        | `UnroutableMessageError`                                                                                                                                                                                                                                                                                                             |
+| `packages/messaging-plugin/src/index.ts`                                         | Export `UnroutableMessageError`, `OutboxPublisherConfirmsRequiredError`, `PubSubDeadLetterTopicMissingError`                                                                                                                                                                                                                         |
+| `packages/messaging-plugin/src/errors.ts`                                        | `UnroutableMessageError`, `OutboxPublisherConfirmsRequiredError`, `PubSubDeadLetterTopicMissingError`                                                                                                                                                                                                                                |
 | `packages/messaging-plugin/src/brokers/fan-out.ts` (new, internal)               | Shared fan-out refusal, naming, marker                                                                                                                                                                                                                                                                                               |
 | `packages/messaging-plugin/src/brokers/consumer-retry.ts` (new, internal)        | Shared `ConsumerRetryOptions` validation with per-arm ranges                                                                                                                                                                                                                                                                         |
 | `packages/messaging-plugin/src/brokers/pubsub-ordering.ts` (new, internal)       | Per-key serial dispatch and the nack-until-redelivered rule                                                                                                                                                                                                                                                                          |
@@ -893,10 +925,10 @@ Internal and not exported: `sqs-redrive.ts`, `sqs-envelope.ts`, `QueueAdapter.pr
 | `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`                       | Fan-out marker; routed publish for `PUBLISH_REQUIRE_ROUTE`; validation through `consumer-retry.ts`                                                                                                                                                                                                                                   |
 | `packages/messaging-plugin/src/brokers/nats-broker.ts`                           | Fan-out through the transient consumer path                                                                                                                                                                                                                                                                                          |
 | `packages/messaging-plugin/src/brokers/kafka-broker.ts`                          | Fan-out group                                                                                                                                                                                                                                                                                                                        |
-| `packages/messaging-plugin/src/brokers/redis-streams-broker.ts`                  | Fan-out group, destroy on close, idle `-fanout-` group sweep; validation through `consumer-retry.ts`                                                                                                                                                                                                                                 |
+| `packages/messaging-plugin/src/brokers/redis-streams-broker.ts`                  | Fan-out `XREAD` reader from `$`, no group; validation through `consumer-retry.ts`                                                                                                                                                                                                                                                    |
 | `packages/messaging-plugin/src/brokers/pubsub-broker.ts`                         | Fan-out subscription, retry and dead-letter policies, not-retryable forward, stream recovery, ordered dispatch                                                                                                                                                                                                                       |
 | `packages/messaging-plugin/src/brokers/service-bus-broker.ts`                    | Fan-out subscription with idle deletion, hold-then-abandon retry, `deadLetterMessage`, `maxDeliveryCount` read                                                                                                                                                                                                                       |
-| `packages/messaging-plugin/src/brokers/publish-options.ts`                       | `PUBLISH_REQUIRE_ROUTE` symbol                                                                                                                                                                                                                                                                                                       |
+| `packages/messaging-plugin/src/brokers/publish-options.ts`                       | `PUBLISH_REQUIRE_ROUTE` and `ROUTED_PUBLISH_AVAILABLE` symbols                                                                                                                                                                                                                                                                       |
 | `packages/messaging-plugin/src/outbox/relay.ts`                                  | Sets `PUBLISH_REQUIRE_ROUTE`                                                                                                                                                                                                                                                                                                         |
 | `packages/messaging-plugin/src/brokers/request-reply-core.ts`                    | `respond` ignores `fanOut` with one warning (§3.6)                                                                                                                                                                                                                                                                                   |
 | `packages/messaging-plugin/src/integration/subscribe.ts`                         | `inbox` with `fanOut` refused (§3.6)                                                                                                                                                                                                                                                                                                 |
@@ -945,9 +977,8 @@ completeness assertion against the package's list of arms.
 | `queue-plugin/test/e2e/sns-sqs-localstack.test.ts` (new)                                                                                                                                                                                                                                                              | `sns-publisher.ts`, `sqs-envelope.ts`                                                                       | `publishJob` read by `SqsQueue` on a raw and a wrapped subscription; `traceparent` survives                                                                                                                                                                                                                                                                                            |
 | `messaging-plugin/test/unit/fan-out-subscribe.test.ts`                                                                                                                                                                                                                                                                | `fan-out.ts`, every broker file, `request-reply-core.ts`, `integration/subscribe.ts`, `messaging-plugin.ts` | `subscribe(topic, h, { fanOut: true })` sets `fanOut` on the returned `ISubscription`; `queue` with `fanOut` refused; per-arm consumer shape on fakes as in §3.7; `respond` with `fanOut` warns once and keeps the competing queue; `onIntegrationEvent` with `inbox` and `fanOut` refused; the declarative path warns once when the marker is absent                                  |
 | `messaging-plugin/test/integration/fan-out-conformance.test.ts`                                                                                                                                                                                                                                                       | every broker file                                                                                           | Table §3.7 as data: two broker instances, N publishes from each, each instance receives all 2N; `unsubscribe()` removes the per-instance resource (recorded on fakes, listed through the admin API on real arms); negative control: the same table without `fanOut` loses messages on the shared-group arms                                                                            |
-| `messaging-plugin/test/unit/redis-streams-fan-out-sweep.test.ts`                                                                                                                                                                                                                                                      | `redis-streams-broker.ts`                                                                                   | Idle `-fanout-` groups destroyed; a group with a live consumer, and a non-fan-out group, kept                                                                                                                                                                                                                                                                                          |
 | `messaging-plugin/test/unit/consumer-retry-options.test.ts`                                                                                                                                                                                                                                                           | `consumer-retry.ts`, `rabbitmq-broker.ts`, `redis-streams-broker.ts`                                        | Shared validator; the two old arms' refusal texts unchanged (both entry points, non-default config)                                                                                                                                                                                                                                                                                    |
-| `messaging-plugin/test/unit/pubsub-consumer-retry.test.ts`                                                                                                                                                                                                                                                            | `pubsub-broker.ts`, `messaging-plugin.ts`                                                                   | §3.11 against a recording fake transport                                                                                                                                                                                                                                                                                                                                               |
+| `messaging-plugin/test/unit/pubsub-consumer-retry.test.ts`                                                                                                                                                                                                                                                            | `pubsub-broker.ts`, `messaging-plugin.ts`                                                                   | §3.11 against a recording fake transport, including the dead-letter topic checks at first subscribe (missing → `PubSubDeadLetterTopicMissingError`; no subscription → one warning; read failure → one warning; send-only service → no check)                                                                                                                                           |
 | `messaging-plugin/test/unit/service-bus-consumer-retry.test.ts`                                                                                                                                                                                                                                                       | `service-bus-broker.ts`, `messaging-plugin.ts`                                                              | §3.12 against a fake receiver and clock, plus the amendments: the explicit `maxAutoLockRenewalDurationInMs`; an early abandon with one warning when the lock budget left is below the delay; holds cancelled and abandoned on `unsubscribe()` and `disconnect()`; the measured `deliveryCount` base pinned; absent `deadLetter`/`deliveryCount` falls back to abandon with one warning |
 | `messaging-plugin/test/integration/consumer-retry-conformance.test.ts`                                                                                                                                                                                                                                                | the four retrying brokers                                                                                   | One table over rabbitmq, redis-streams, pubsub, service-bus: a handler that always fails is delivered exactly `maxAttempts` times (Pub/Sub: within the platform's documented approximation), spaced by at least the configured minimum delay, then dead-lettered with its payload; real arms guarded                                                                                   |
 | `messaging-plugin/test/unit/pubsub-ordered-dispatch.test.ts`                                                                                                                                                                                                                                                          | `pubsub-ordering.ts`, `pubsub-broker.ts`                                                                    | §3.14 sequences                                                                                                                                                                                                                                                                                                                                                                        |
@@ -1050,10 +1081,9 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   value can only make a frame pass the age check, which is today's behaviour. Relevant only when
   `maxFrameAgeMs > 0`; a forged old value only drops the forger's own frame.
 - **New resources and rights:** per-instance subscriptions and groups are named
-  `<defaultQueue>-fanout-<uuid>` (`fanout-<uuid>` on Service Bus) and never take caller input into
-  the name beyond the configured `defaultQueue`; Redis Streams fan-out writes
-  `{<stream>}:fanout-alive:<group>` keys with a 60 s TTL, and the sweep destroys only `-fanout-`
-  groups whose heartbeat key has expired.
+  `<defaultQueue>-fanout-<uuid>` (on Service Bus the 50-character shortened form, §3.7) and never
+  take caller input into the name beyond the configured `defaultQueue`; Redis Streams fan-out
+  creates nothing on the server (a plain `XREAD`).
 - **Required audit record:** the PR carries the audit's findings table and its negative controls.
 
 ## 11. Hand-overs
@@ -1145,6 +1175,16 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   plugin's outbox options, read by the relay; (c) documentation only. Spring AMQP makes `mandatory`
   opt-in for publishes in general, but the outbox README promises at-least-once delivery of every
   row. **Recommendation: (a).**
+- **Review items 1 to 10 (raised by the plan review of 2026-11-23).** **DECIDED by the maintainer,
+  2026-11-23:** (1) a missing Pub/Sub dead-letter topic refuses the first subscribe, one with no
+  subscription or an unreadable one warns once; (2) the outbox refuses to start on a RabbitMQ
+  connection without publisher confirms; (3) `fanOut` ignored with a warning on `respond`, refused
+  on an inbox subscription, warned when a declarative subscription lacks the marker; (4) Redis
+  Streams fan-out is a plain `XREAD`, no groups, no sweep; (5) the Service Bus lock budget and close
+  behaviour as §3.12; (6) Service Bus fan-out names keep a shortened `defaultQueue` prefix within 50
+  characters; (7) existing Pub/Sub subscriptions keep their settings with a warning; (8) the `now?`
+  clock parameter; (9) ordering plus a dead-letter topic accepted with a warning; (10) Pub/Sub
+  fan-out subscriptions get retry backoff and no dead-letter policy. Compared with, rows 23 to 31.
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
   once as its own PR, Part B after it on the same branch (§0.3).
 - **D8, the Pub/Sub ordering row.** **DECIDED by the maintainer, 2026-11-23: (a)** (Compared with,
