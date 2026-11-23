@@ -196,11 +196,14 @@ describe.runIf(runtimes.length > 0).each(runtimes)('M143i on $name', (runtime) =
 });
 
 describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
-  it('answers from loopback and bounds a silent server', async () => {
+  it('answers from loopback, bounds a silent server, and moves past a silent first server', async () => {
     const server = await startDnsServer();
+    let silent: Awaited<ReturnType<typeof startDnsServer>> | undefined;
     const childFile = resolve(root, '.tmp/runtime-edge-server/bun-dns-child.mjs');
     // The server is stopped even when the bundle step fails.
     try {
+      silent = await startDnsServer({ silent: true });
+      const silentServer = silent.server;
       await mkdir(resolve(root, '.tmp/runtime-edge-server'), { recursive: true });
       await build({
         entryPoints: [resolve(root, 'packages/runtime/test/fixtures/bun-dns-child.ts')],
@@ -211,7 +214,7 @@ describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
         logLevel: 'silent',
       });
       const output = await new Promise<string>((resolveOutput, reject) => {
-        const child = spawn('bun', [childFile, server.server], {
+        const child = spawn('bun', [childFile, server.server, silentServer], {
           stdio: ['ignore', 'pipe', 'pipe'],
         });
         let stdout = '';
@@ -241,13 +244,17 @@ describe.runIf(installed('bun'))('Bun chosen DNS servers', () => {
         .trim()
         .split('\n')
         .map((line) => JSON.parse(line) as Record<string, unknown>);
-      expect(records).toHaveLength(2);
+      expect(records).toHaveLength(3);
       expect(records[0]).toEqual({ addresses: ['10.0.0.1'] });
       expect(records[1]!['code']).toBe('ETIMEOUT');
       expect(records[1]!['elapsedMs']).toBeLessThan(400);
+      expect(records[2]!['fallback']).toEqual(['10.0.0.1']);
+      expect(records[2]!['elapsedMs']).toBeLessThan(550);
       expect(server.queries).toBeGreaterThan(0);
+      expect(silent.queries).toBeGreaterThan(0);
     } finally {
       await server.stop();
+      await silent?.stop();
     }
   });
 });

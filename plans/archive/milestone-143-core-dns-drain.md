@@ -20,7 +20,7 @@ the precedent. This branch ships the runtime half of the first and the server ha
 
 - **In scope:**
   - An optional `IRuntimeServices.createDnsResolver(options)` in `common`.
-    - Node and Bun serve it with a `node:dns/promises` `Resolver` per lookup.
+    - Node and Bun serve it with a `node:dns/promises` `Resolver` per server attempt (§3.3).
     - Deno serves it with `resolveDns` and `nameServer`.
     - Workers leave it absent.
   - Option validation shared by every runtime.
@@ -157,7 +157,7 @@ decided on 2026-11-23 that the kernel removes none (§3.7).
   `' 10.0.0.53'`, an IPv6 zone, `'::1:5353'` (accepted as an address on port 53), a duplicate entry
   (accepted), and `timeoutMs` of `0`, `2_147_483_647`, `2_147_483_648`, `1.5`, `-1` and `NaN`.
 
-### 3.3 Node and Bun: a `Resolver` per lookup, under a whole-lookup bound
+### 3.3 Node and Bun: a `Resolver` per server attempt, under a whole-lookup bound
 
 - **Decision (OD1 recommendation A):** `timeoutMs` bounds **each lookup call as a whole**. That is
   one `resolveSrv` call, or one `resolveHost` call covering both families. It holds whatever the
@@ -236,8 +236,11 @@ decided on 2026-11-23 that the kernel removes none (§3.7).
   single-`Resolver` design above timed out before reaching the second server. Node and Bun now
   mirror §3.4: each record-type query tries the servers in order, one attempt per server through its
   own `Resolver` (`tries: 1`, one server), ended at its share by the resolver's own timer, moving on
-  after any error except `ENOTFOUND`/`ENODATA`. The whole-lookup timer and its settling rules are
-  unchanged.
+  after any error except `ENOTFOUND`/`ENODATA`. The whole-lookup timer keeps its settling rules
+  (pending families count as failed with its `ETIMEOUT`), but it now stops every attempt still in
+  flight, in both families, instead of cancelling one shared `Resolver`. The single-`Resolver`
+  bullets above are kept as the record of the first design; the unit tests now assert one instance
+  per attempt holding one server, in order.
 
 ### 3.4 Deno: `resolveDns` with `nameServer`, servers tried in order
 
@@ -428,10 +431,10 @@ the factories' default creators. The injected creator's type is
 
 ### 4.1 Options — every option names its consumer
 
-| Option                         | Consumer                                                             | Behavior (per implementation)                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DnsResolverOptions.servers`   | `parseDnsResolverOptions` → Node/Bun `setServers`; Deno `nameServer` | Node/Bun: one `Resolver` per lookup with all servers, c-ares order. Deno: tried in order, next on a non-`NotFound` error. Workers: member absent                                                                                                                                                                                                                                                                                                                                                       |
-| `DnsResolverOptions.timeoutMs` | the resolver's own whole-lookup timer; the per-server attempt share  | `> 0`: the whole lookup settles by the bound on every runtime. That is `ETIMEOUT` from the resolver's own timer, or the runtime's own error if that ends sooner (Deno `TimedOut` at about 2 s). Each server's attempt targets `ceil(timeoutMs / servers.length)`; Bun's timing is coarser and a process's first Node lookup takes about twice that. `0`: no own timer; the runtime's default applies (about 2 to 3 s per server on Node and Bun, 15 s per server on Deno, all measured, none promised) |
+| Option                         | Consumer                                                             | Behavior (per implementation)                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DnsResolverOptions.servers`   | `parseDnsResolverOptions` → Node/Bun `setServers`; Deno `nameServer` | Node/Bun and Deno: tried in order, one attempt per server; Node/Bun use one `Resolver` per attempt. Deno: next on a non-`NotFound` error. Workers: member absent                                                                                                                                                                                                                                                                                                      |
+| `DnsResolverOptions.timeoutMs` | the resolver's own whole-lookup timer; the per-server attempt share  | `> 0`: the whole lookup settles by the bound on every runtime. That is `ETIMEOUT` from the resolver's own timer, or the runtime's own error if that ends sooner (Deno `TimedOut` at about 2 s). Each server's attempt is ended at `ceil(timeoutMs / servers.length)` by the resolver's own timer on every runtime. `0`: no own timer; the runtime's default applies (about 2 to 3 s per server on Node and Bun, 15 s per server on Deno, all measured, none promised) |
 
 ## 5. Implementation files
 
