@@ -1096,7 +1096,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
           () =>
             this.#warnOnce(
               'ordering-evicted:' + queue,
-              `Pub/Sub subscription ${JSON.stringify(queue)} holds more than ${MAX_ORDERING_KEYS} failing ordering keys; the oldest was forgotten while its failed message may still be redelivered, so later messages of that key can run out of order`,
+              `Pub/Sub subscription ${JSON.stringify(queue)} holds ${MAX_ORDERING_KEYS} ordering keys; the least recently used was forgotten while its failed message may still be redelivered, so later messages of that key can run out of order`,
             ),
         )
       : undefined;

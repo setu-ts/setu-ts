@@ -259,12 +259,14 @@ describe('Pub/Sub ordered async handler dispatch', () => {
   });
 
   it.each([
-    { evictAtMs: 1_000, warned: true },
-    { evictAtMs: 660_000, warned: false },
+    { failAtMs: 0, evictAtMs: 1_000, warned: true },
+    { failAtMs: 0, evictAtMs: 660_000, warned: false },
+    { failAtMs: 700_000, evictAtMs: 701_000, warned: true },
+    { failAtMs: 700_000, evictAtMs: 1_400_000, warned: false },
   ])(
-    'reports an eviction whose failed message may still return (evicted at $evictAtMs ms)',
-    async ({ evictAtMs, warned }) => {
-      let now = 0;
+    'reports an eviction whose failed message may still return (failed $failAtMs, evicted $evictAtMs)',
+    async ({ failAtMs, evictAtMs, warned }) => {
+      let now = failAtMs;
       const onRecentEviction = vi.fn();
       const gate = new PubSubOrdering(() => now, onRecentEviction, 1);
       await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () =>
@@ -305,17 +307,45 @@ describe('Pub/Sub ordered async handler dispatch', () => {
       throw new Error('failed');
     });
     await h.start();
-    // One failing message on each of 10,001 keys: the first key is forgotten
-    // while its failed message may still be redelivered.
-    for (let n = 0; n <= 10_000; n++) {
+    // One failing message on each of 10,002 keys: two keys are forgotten
+    // while their failed messages may still be redelivered, and one warning results.
+    for (let n = 0; n <= 10_001; n++) {
       h.deliver(n, 'k' + n);
       if (n % 500 === 0) await flushCloud();
     }
     await flushCloud();
     const evicted = h.warn.mock.calls.filter(([message]) =>
-      String(message).includes('failing ordering keys'),
+      String(message).includes('ordering keys; the least recently used was forgotten'),
     );
     expect(evicted).toHaveLength(1);
     await h.broker.disconnect();
+  });
+
+  it('evicts an idle key that never failed without a warning, and survives a throwing clock', async () => {
+    const onRecentEviction = vi.fn();
+    let broken = false;
+    const gate = new PubSubOrdering(
+      () => {
+        if (broken) throw new Error('clock');
+        return 0;
+      },
+      onRecentEviction,
+      1,
+    );
+    await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () =>
+      Promise.resolve(true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
+      Promise.resolve(false),
+    );
+    expect(onRecentEviction).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    broken = true;
+    const dispatch = vi.fn(() => Promise.resolve(true));
+    await gate.run({ orderingKey: 'c', messageId: 'c1', nack: vi.fn() }, dispatch);
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(onRecentEviction).not.toHaveBeenCalled();
+    gate.clear();
   });
 });

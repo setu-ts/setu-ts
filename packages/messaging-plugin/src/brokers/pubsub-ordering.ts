@@ -25,7 +25,11 @@ export interface IOrderedDelivery {
  */
 export const MAX_ORDERING_KEYS = 10_000;
 
-/** Longest Pub/Sub retry backoff (600 s) plus a margin: a failure older than this has been redelivered or dead-lettered. */
+/**
+ * Longest Pub/Sub retry backoff (600 s) plus a margin. A failure older than this
+ * has most likely been redelivered or dead-lettered; Pub/Sub applies its retry
+ * policy best effort, so this is a heuristic for the warning, not a guarantee.
+ */
 const REDELIVERY_WINDOW_MS = 660_000;
 
 type KeyState = {
@@ -120,12 +124,11 @@ export class PubSubOrdering {
       if (this.#keys.size < this.#maxKeys) return;
       if (state.pending !== 0) continue;
       this.#keys.delete(key);
-      if (state.nacked.size > 0 && this.#now() - state.failedAt < REDELIVERY_WINDOW_MS) {
-        try {
-          this.#onRecentEviction();
-        } catch {
-          /* Diagnostics cannot change dispatch. */
-        }
+      if (state.nacked.size === 0) continue;
+      try {
+        if (this.#now() - state.failedAt < REDELIVERY_WINDOW_MS) this.#onRecentEviction();
+      } catch {
+        /* A broken clock or sink only loses the warning; it cannot change dispatch. */
       }
     }
   }
