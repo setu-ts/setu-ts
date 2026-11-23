@@ -410,6 +410,9 @@ export class TaskPool {
     try {
       slot.handle.postMessage(request);
     } catch (error) {
+      // An input getter can abort the call during the copy and then fail it:
+      // the abort already settled the task (and dropped this slot).
+      if (task.settled) return;
       slot.task = null;
       this.rejectTask(task, error instanceof Error ? error : new Error(String(error)), 'clone');
     }

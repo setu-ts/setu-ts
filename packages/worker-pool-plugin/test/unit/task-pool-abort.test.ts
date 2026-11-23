@@ -279,6 +279,29 @@ describe('TaskPool cancellation', () => {
     await pool.shutdown();
   });
 
+  it('an abort during the input copy that then fails counts as aborted, never failed', async () => {
+    const controller = new AbortController();
+    // Stands in for structured clone running an aborting getter, then refusing a function.
+    const host = new FakeHost(
+      2,
+      (request) => {
+        if (request.input === 'A') {
+          controller.abort('reentrant');
+          throw new Error('DataCloneError');
+        }
+      },
+      true,
+    );
+    const { pool, metrics } = setup(10, new WorkerBudget(1), host);
+    const a = pool.run('A', 0, controller.signal);
+    const aborted = expect(a).rejects.toBe('reentrant');
+    host.handles[0].emitReady();
+    await aborted;
+    expect(pool.stats()).toMatchObject({ failed: 0, completed: 0 });
+    expectAborted(metrics);
+    await pool.shutdown();
+  });
+
   it('one signal shared by several calls starts no replacement worker for them', async () => {
     const host = new FakeHost(4, undefined, true);
     const timers = new FakeTimers();
@@ -350,6 +373,25 @@ describe('WorkerPoolService cancellation', () => {
       await service.shutdown();
     },
   );
+
+  it('a throwing options getter rejects the call instead of throwing', async () => {
+    const service = new WorkerPoolService(
+      {},
+      createFakeRuntime(new FakeTimers(), new FakeHost(1, undefined, true)),
+    );
+    const options = {
+      get signal(): AbortSignal {
+        throw new Error('getter');
+      },
+    };
+    let pending: Promise<unknown> | undefined;
+    expect(() => {
+      pending = service.run(SPEC, 1, options);
+    }).not.toThrow();
+    await expect(pending).rejects.toThrow('getter');
+    expect(service.stats()).toEqual([]);
+    await service.shutdown();
+  });
 
   it('keeps timeout validation, closed service, and unavailable host ahead of cancellation', async () => {
     const timers = new FakeTimers();

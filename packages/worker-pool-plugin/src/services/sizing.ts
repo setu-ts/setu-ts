@@ -157,7 +157,7 @@ export function assertTaskTimeout(value: unknown, name: string): void {
  * listener to it, and a value without one would fail inside a timer callback.
  *
  * @param value - The per-call `signal`; `undefined` is allowed
- * @throws {TypeError} Unless `value` is `undefined` or has `aborted`,
+ * @throws {TypeError} Unless `value` is `undefined` or has a boolean `aborted`,
  * `addEventListener` and `removeEventListener`
  */
 export function assertAbortSignal(value: unknown): void {

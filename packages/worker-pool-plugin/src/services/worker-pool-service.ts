@@ -187,10 +187,13 @@ export class WorkerPoolService implements IWorkerPool {
     input: TInput,
     options?: WorkerRunOptions,
   ): Promise<TOutput> {
-    // Read once: the value checked is the value the pool uses.
-    const timeoutMs: unknown = options?.timeoutMs;
-    const signal: unknown = options?.signal;
+    // Read once: the value checked is the value the pool uses. Read inside the
+    // try, so a throwing getter is a rejection, not a synchronous throw.
+    let timeoutMs: unknown;
+    let signal: unknown;
     try {
+      timeoutMs = options?.timeoutMs;
+      signal = options?.signal;
       assertTaskTimeout(timeoutMs, 'timeoutMs');
       assertAbortSignal(signal);
     } catch (error) {
