@@ -2389,3 +2389,37 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     expect(clients.map((client) => client.disconnectCount)).toEqual([1, 1]);
   });
 });
+
+describe('Redis frame age and publication uncertainty', () => {
+  it.each([0, 100])(
+    'stamps frames and applies receiver maxFrameAgeMs=%s',
+    async (maxFrameAgeMs) => {
+      const client = new FakeRedisClient();
+      const subscriber = new FakeRedisClient();
+      let now = 1;
+      const warn = vi.fn();
+      const backplane = new RedisBackplane(
+        { transport: 'redis', client, subscriber, maxFrameAgeMs },
+        'node-a',
+        'frames',
+        { failed: vi.fn(), succeeded: vi.fn(), warn },
+        () => now,
+      );
+      await backplane.connect();
+      await backplane.publish(FRAME);
+      expect(JSON.parse(client.published[0]!.message)).toEqual({ ...FRAME, sentAtMs: 1 });
+      const handler = vi.fn();
+      await backplane.subscribe(handler);
+      now = 1000;
+      subscriber.emit('frames', JSON.stringify({ ...FRAME, sentAtMs: 1 }));
+      expect(handler).toHaveBeenCalledTimes(maxFrameAgeMs === 0 ? 1 : 0);
+      subscriber.emit('frames', JSON.stringify({ ...FRAME, sentAtMs: now }));
+      expect(handler).toHaveBeenLastCalledWith(FRAME);
+      vi.spyOn(client, 'publish').mockRejectedValueOnce(new Error('secret'));
+      await expect(backplane.publish(FRAME)).rejects.toThrow('secret');
+      expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
+      expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(maxFrameAgeMs > 0);
+      await backplane.close();
+    },
+  );
+});

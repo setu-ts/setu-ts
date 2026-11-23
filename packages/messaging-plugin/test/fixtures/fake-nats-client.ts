@@ -171,6 +171,11 @@ export class FakeNatsMessage {
  * Fake NATS JetStream consumer.
  */
 export class FakeNatsConsumer {
+  #callback: ((message: FakeNatsMessage) => void) | undefined;
+  /** Delivers a new frame to this running consumer, as the server would. */
+  push(message: FakeNatsMessage): void {
+    if (!this.#stopped) this.#callback?.(message);
+  }
   #messages: FakeNatsMessage[];
   #filterSubject: string | undefined;
   #stopped = false;
@@ -198,6 +203,7 @@ export class FakeNatsConsumer {
   consume(options: {
     callback: (msg: FakeNatsMessage) => void;
   }): Promise<{ stop(): void; status(): Promise<AsyncIterable<{ type: string }>> }> {
+    this.#callback = options.callback;
     // Deliver messages using the callback from options, filtered by subject if filterSubject is set
     for (const msg of this.#messages) {
       if (!this.#stopped) {

@@ -29,9 +29,153 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { run as runProcess } from '../../../../test/node-helpers.ts';
+import { PubSubDeadLetterTopicMissingError } from '../../src/index.ts';
+import { untilReal } from '../fixtures/real-fan-out.ts';
 
 const emulatorHost = process.env['PUBSUB_EMULATOR_HOST'];
 const projectId = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
+
+describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
+  it(
+    'creates native retry and dead-letter policy and refuses a missing target with its cause',
+    { timeout: 45000 },
+    async () => {
+      const { PubSub } = await import('@google-cloud/pubsub');
+      const admin = new PubSub({ projectId });
+      const prefix = 'm143p-' + crypto.randomUUID();
+      const topic = prefix + '-orders';
+      const target = prefix + '-dead';
+      const queue = prefix + '-consumer';
+      const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+        projectId,
+        deadLetterTopic: target,
+        consumerRetry: { maxAttempts: 5, delaysMs: [1000, 2000] },
+      });
+      const absent = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+        projectId,
+        deadLetterTopic: prefix + '-absent',
+      });
+      try {
+        await admin.createTopic(topic);
+        await admin.createTopic(target);
+        await admin.topic(target).createSubscription(prefix + '-sink');
+        await broker.connect();
+        await broker.subscribe(topic, () => {}, { queue });
+        const [metadata] = await admin.subscription(queue).getMetadata();
+        expect(metadata.retryPolicy).toMatchObject({
+          minimumBackoff: { seconds: '1' },
+          maximumBackoff: { seconds: '2' },
+        });
+        expect(metadata.deadLetterPolicy).toMatchObject({
+          deadLetterTopic: admin.topic(target).name,
+          maxDeliveryAttempts: 5,
+        });
+        await absent.connect();
+        const refusal = await absent
+          .subscribe(topic, () => {}, { queue: prefix + '-missing' })
+          .catch((error: unknown) => error);
+        expect(refusal).toBeInstanceOf(PubSubDeadLetterTopicMissingError);
+        expect((refusal as Error).cause).toMatchObject({ code: 5 });
+      } finally {
+        await broker.disconnect();
+        await absent.disconnect();
+        for (const name of [topic, target]) {
+          for (const sub of (await admin.topic(name).getSubscriptions())[0]) await sub.delete();
+          await admin.topic(name).delete();
+        }
+        await admin.close();
+      }
+    },
+  );
+  it(
+    'recreates a deleted subscription and recovers delivery and reachability',
+    { timeout: 60000 },
+    async () => {
+      const { PubSub } = await import('@google-cloud/pubsub');
+      const admin = new PubSub({ projectId });
+      const topic = 'm143p-' + crypto.randomUUID();
+      const queue = topic + '-consumer';
+      const received: unknown[] = [];
+      const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+        projectId,
+        consumerRetry: false,
+      });
+      try {
+        await admin.createTopic(topic);
+        await broker.connect();
+        await broker.subscribe(
+          topic,
+          (message) => {
+            received.push(message);
+          },
+          { queue },
+        );
+        await admin.subscription(queue).delete();
+        await untilReal(async () => (await broker.reachability()) === false);
+        await untilReal(async () => (await admin.subscription(queue).exists())[0]);
+        await broker.publish(topic, { recovered: true });
+        await untilReal(() => received.length === 1);
+        expect(received).toEqual([{ recovered: true }]);
+        expect(await broker.reachability()).toBe(true);
+      } finally {
+        await broker.disconnect();
+        for (const sub of (await admin.topic(topic).getSubscriptions())[0]) await sub.delete();
+        await admin.topic(topic).delete();
+        await admin.close();
+      }
+    },
+  );
+  it(
+    'serializes one key through an async handler failure and later redelivery',
+    { timeout: 60000 },
+    async () => {
+      const { PubSub } = await import('@google-cloud/pubsub');
+      const admin = new PubSub({ projectId });
+      const topic = 'm143p-' + crypto.randomUUID();
+      const queue = topic + '-ordered';
+      const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+        projectId,
+        enableMessageOrdering: true,
+        consumerRetry: { delaysMs: [0, 0] },
+      });
+      const starts: number[] = [];
+      const seen = new Set<number>();
+      let active = 0;
+      let maxActive = 0;
+      let fail = true;
+      try {
+        await admin.createTopic(topic);
+        await broker.connect();
+        await broker.subscribe<number>(
+          topic,
+          async (n) => {
+            starts.push(n);
+            active++;
+            maxActive = Math.max(maxActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            active--;
+            if (n === 4 && fail) {
+              fail = false;
+              throw new Error('fail once');
+            }
+            seen.add(n);
+          },
+          { queue },
+        );
+        for (let n = 0; n < 15; n++) await broker.publish(topic, n, { orderingKey: 'one-key' });
+        await untilReal(() => seen.size === 15 && active === 0);
+        expect(maxActive).toBe(1);
+        expect(starts.slice(0, 5)).toEqual([0, 1, 2, 3, 4]);
+        expect(starts.filter((n) => n === 4)).toHaveLength(2);
+      } finally {
+        await broker.disconnect();
+        for (const sub of (await admin.topic(topic).getSubscriptions())[0]) await sub.delete();
+        await admin.topic(topic).delete();
+        await admin.close();
+      }
+    },
+  );
+});
 
 describe('M113a REAL Pub/Sub probe outage', { skip: !emulatorHost }, () => {
   it('getTopics distinguishes pause from stop, bounds publish, and recovers', async () => {

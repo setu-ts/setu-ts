@@ -670,7 +670,10 @@ export class QueueService implements IQueue {
             observed?.settled('terminal-error', 'failed');
             throw error;
           }
-          observed?.settled('terminal-error', 'dead-lettered');
+          observed?.settled(
+            'terminal-error',
+            disposition === 'discarded' ? 'discarded' : 'dead-lettered',
+          );
           this.#collector?.jobSettled(
             storedJob.name,
             disposition === 'discarded' ? 'discarded' : 'dead_lettered',

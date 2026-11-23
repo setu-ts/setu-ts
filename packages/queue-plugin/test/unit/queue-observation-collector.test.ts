@@ -214,9 +214,15 @@ describe('QueueObservationCollector — attempts', () => {
     expect(target.read(0).attempts.length).toBe(1);
   });
 
-  it('records a completed call on an unconfirming adapter as unknown, keeping failed', () => {
+  it('records an unconfirmed call as unknown, keeping failed and intentional discard', () => {
     const { collector: target } = collector({}, false);
-    for (const settlement of ['acknowledged', 'requeued', 'dead-lettered', 'failed'] as const) {
+    for (const settlement of [
+      'acknowledged',
+      'requeued',
+      'dead-lettered',
+      'failed',
+      'discarded',
+    ] as const) {
       target.begin(NAME_CANARY, settlement, 1)!.settled('completed', settlement);
     }
     expect(target.read(0).attempts.map((a) => a.settlement)).toEqual([
@@ -224,6 +230,7 @@ describe('QueueObservationCollector — attempts', () => {
       'unknown',
       'unknown',
       'failed',
+      'discarded',
     ]);
   });
 

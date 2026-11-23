@@ -14,7 +14,7 @@
  *
  * Three transports ship: `'memory'` (the default, a real single-process bus),
  * `'messaging'` (over whatever broker is registered under
- * `CAPABILITIES.MESSAGING`, reusing all five of the messaging plugin's brokers
+ * `CAPABILITIES.MESSAGING`, reusing the messaging plugin's seven fan-out brokers
  * with no new dependency), and `'redis'` (Redis pub/sub over an inject-or-lazy
  * `ioredis`). A `'custom'` arm accepts any `IRealtimeBackplane`.
  *
@@ -80,3 +80,4 @@ export type {
 // Re-exported so a custom transport can honor the identical wire shape without
 // reaching past this package.
 export { CAPABILITIES, decodeFrameData, encodeFrameData } from '@setu-ts/common';
+export { BackplaneFanOutUnsupportedError } from './errors.ts';

@@ -60,7 +60,7 @@ class FakeBroker implements IMessageBroker {
   }
   subscribe<T>(_topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
     this.#handler = handler as MessageHandler<unknown>;
-    return Promise.resolve({ unsubscribe: () => Promise.resolve() });
+    return Promise.resolve({ fanOut: true, unsubscribe: () => Promise.resolve() });
   }
   request<TRes>(): Promise<TRes> {
     return Promise.reject(new Error('not used'));
@@ -129,6 +129,7 @@ async function setup(
     runtime: {
       uuid: (): string => 'uuid-1',
       hrtime: (): number => now,
+      now: (): number => now,
       setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
       clearTimeout: (handle: unknown): void =>
         clearTimeout(handle as ReturnType<typeof setTimeout>),

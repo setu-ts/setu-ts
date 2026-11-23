@@ -49,7 +49,7 @@ interface JobRunnerAdapter {
  *
  * Metrics are reported only after settlement resolves. Explicit SQS discard
  * is counted separately from work retained in a dead-letter store.
- * Diagnostics retain their common settlement vocabulary.
+ * Diagnostics report an intentional discard as `discarded` as well.
  *
  * @since 0.3.0
  */
@@ -245,7 +245,7 @@ async function settle<T, R>(
     notifySettled(hooks, outcome, 'failed', report);
     throw error;
   }
-  notifySettled(hooks, outcome, settlement, report);
+  notifySettled(hooks, outcome, result === 'discarded' ? 'discarded' : settlement, report);
   return result;
 }
 

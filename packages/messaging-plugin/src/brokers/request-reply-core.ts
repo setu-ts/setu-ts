@@ -66,6 +66,14 @@ interface ReplyEnvelope {
  * broker already implements these; the core needs nothing transport-specific.
  */
 export interface RequestReplyDeps {
+  /**
+   * Reports an ignored fanOut request on a responder.
+   * @param message - Fixed configuration warning
+   * @returns Nothing
+   * @throws Never; failures are swallowed by the core
+   * @since 0.14.0
+   */
+  warn?(message: string): void;
   /** Publish a serialized message to a topic (the broker's own `publish`). */
   publish(
     topic: string,
@@ -134,6 +142,7 @@ export class RequestReplyCore {
    * matches the current one before installing pending state or publishing.
    */
   #generation = 0;
+  #warnedFanOut = false;
 
   /**
    * @param deps - The broker primitives to compose over
@@ -221,6 +230,20 @@ export class RequestReplyCore {
     handler: (message: unknown, metadata: MessageMetadata) => unknown | Promise<unknown>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    if (options?.fanOut === true && !this.#warnedFanOut) {
+      this.#warnedFanOut = true;
+      try {
+        this.#deps.warn?.('Messaging respond ignores fanOut; responders use competing delivery');
+      } catch {
+        /* Reporting cannot prevent registration. */
+      }
+    }
+    const competing =
+      options?.fanOut === true
+        ? options.queue === undefined
+          ? undefined
+          : { queue: options.queue }
+        : options;
     return this.#deps.subscribe(
       requestChannel(topic),
       async (message, metadata) => {
@@ -238,7 +261,7 @@ export class RequestReplyCore {
         }
         await this.#deps.publish(replyTo, response);
       },
-      options,
+      competing,
     );
   }
 

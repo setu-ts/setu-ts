@@ -459,3 +459,27 @@ it('holds dispatch until the behavior gate resolves and retains a rejected gate'
   await expect(blocked(job)).rejects.toThrow('startup refused');
   expect(processor).toHaveBeenCalledTimes(2);
 });
+
+it('reports an intentional discard only after the final settlement resolves', async () => {
+  const pending = Promise.withResolvers<'discarded'>();
+  const deadLetter = vi.fn(() => pending.promise);
+  const observed = vi.fn();
+  const onFailed = vi.fn();
+  const completion = runJob(
+    new FakeRuntime(),
+    { ack: () => Promise.resolve(), requeue: () => Promise.resolve(), deadLetter },
+    { id: '1', name: 'drop', data: {}, attempts: 1, maxAttempts: 1, availableAtMs: 0 },
+    () => {
+      throw new Error('failed');
+    },
+    undefined,
+    { onFailed, onAttemptSettled: observed },
+  );
+  for (let n = 0; n < 10; n++) await Promise.resolve();
+  expect(onFailed).toHaveBeenCalledOnce();
+  expect(deadLetter).toHaveBeenCalledOnce();
+  expect(observed).not.toHaveBeenCalled();
+  pending.resolve('discarded');
+  await completion;
+  expect(observed).toHaveBeenCalledExactlyOnceWith('terminal-error', 'discarded');
+});

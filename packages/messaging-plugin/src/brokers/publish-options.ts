@@ -23,6 +23,11 @@
 import type { ParsedPublishOptions } from '@setu-ts/common';
 import { DEDUPLICATION_ID_HEADER, ORDERING_KEY_HEADER, parsePublishOptions } from '@setu-ts/common';
 
+/** Internal outbox intent: accepting a publish requires a bound route. @since 0.14.0 */
+export const PUBLISH_REQUIRE_ROUTE: unique symbol = Symbol('publish-require-route');
+/** Internal capability advertised by brokers needing confirms for routing. @since 0.14.0 */
+export const ROUTED_PUBLISH_AVAILABLE: unique symbol = Symbol('routed-publish-available');
+
 /** The validated, frozen form of caller-supplied publish options. @internal */
 export type ValidatedPublishOptions = ParsedPublishOptions;
 

@@ -1,3 +1,4 @@
+import { FrameAge, type BackplaneReporter } from './frame-age.ts';
 /**
  * Redis pub/sub backplane transport.
  *
@@ -62,6 +63,7 @@ export class RedisBackplane implements IRealtimeBackplane {
   /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
   readonly #handlerReporter: IRealtimeHandlerErrorReporter;
+  readonly #frameAge: FrameAge;
 
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
@@ -104,17 +106,22 @@ export class RedisBackplane implements IRealtimeBackplane {
    * @param options - The Redis arm's options
    * @param origin - This instance's identity
    * @param topic - The Redis channel every instance shares
-   * @param reporter - Optional subscriber failure and recovery sink; history is always retained
+   * @param reporter - Optional subscriber and transport diagnostic sink; history is always retained
+   * @param now - Optional wall clock for timestamps and frame age checks
+   * @returns The Redis transport
+   * @since 0.14.0
    * @throws {Error} When exactly one of `client` and `subscriber` is injected,
    * or when neither those nor a `url` is configured
    * @throws {RangeError} When `commandTimeoutMs` is not a number from `0` to
    * `2147483647` (the largest timer delay; beyond it the timer overflows to 1 ms)
+   * or maxFrameAgeMs is outside that finite range
    */
   constructor(
     options: RedisBackplaneOptions,
     origin: string,
     topic: string,
-    reporter?: IRealtimeHandlerErrorReporter,
+    reporter?: BackplaneReporter,
+    now?: () => number,
   ) {
     const hasClient = options.client !== undefined;
     const hasSubscriber = options.subscriber !== undefined;
@@ -155,6 +162,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.origin = origin;
     this.#topic = topic;
     this.#handlerReporter = createTransportHandlerReporter(this.#handlerErrors, reporter);
+    this.#frameAge = new FrameAge(options.maxFrameAgeMs ?? 0, now, reporter?.warn?.bind(reporter));
   }
 
   /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
@@ -521,8 +529,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     }
     // Always the publisher: the subscriber connection would reject this.
     try {
-      await publisher.publish(this.#topic, JSON.stringify(frame));
+      await publisher.publish(this.#topic, JSON.stringify(this.#frameAge.stamp(frame)));
     } catch (error) {
+      this.#frameAge.publishFailed();
       // M131a X88-5: a backend fault says whether the frame was applied.
       const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
       if (fault !== undefined) throw fault;
@@ -649,10 +658,12 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (!isRealtimeFrame(parsed) || parsed.origin === this.origin) {
       return;
     }
+    const frame = this.#frameAge.receive(parsed);
+    if (frame === null) return;
     // Isolated per handler: this runs inside ioredis's `message` listener,
     // where a throw would be unhandled, and the WebSocket and SSE plugins share
     // this subscription so one must not starve the other.
-    const delivered = dispatchRealtimeFrame(this.#handlers, parsed, this.#handlerReporter);
+    const delivered = dispatchRealtimeFrame(this.#handlers, frame, this.#handlerReporter);
     // M98l: counted only after the parse, shape and own-origin filters.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }

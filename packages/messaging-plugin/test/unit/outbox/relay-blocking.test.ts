@@ -1,3 +1,4 @@
+import { PUBLISH_REQUIRE_ROUTE } from '../../../src/brokers/publish-options.ts';
 /**
  * Blocking, retries, poison rows and trace re-parenting (M107 §3.7, §3.9):
  * a failed row blocks its key, an unkeyed row is never blocked, the tenant is
@@ -181,6 +182,7 @@ describe('relay trace re-parenting', () => {
     await edit(h.db, id, { traceparent: PARENT });
     await h.sweep();
     expect(h.broker.published[0]!.options).toEqual({
+      [PUBLISH_REQUIRE_ROUTE]: true,
       orderingKey: 'K',
       deduplicationId: id,
       headers: {},

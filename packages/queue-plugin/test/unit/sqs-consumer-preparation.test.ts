@@ -189,7 +189,7 @@ describe('SQS consumer preparation', () => {
       expect(inc).toHaveBeenCalledExactlyOnceWith(1, { name: 'build', outcome: 'discarded' });
       expect(observer.begin.mock.results.at(-1)!.value.settled).toHaveBeenCalledWith(
         'terminal-error',
-        'dead-lettered',
+        'discarded',
       );
       expect(processor).toHaveBeenCalledTimes(abandoned ? 0 : 1);
       expect(transport.depth('source')).toBe(0);

@@ -1,3 +1,4 @@
+import { ROUTED_PUBLISH_AVAILABLE } from '../brokers/publish-options.ts';
 /**
  * Internal behaviour-chain decorator for message brokers (M86 §3.8).
  *
@@ -104,7 +105,7 @@ export class PipelinedBroker implements MessageBrokerAdapter {
   readonly #clock: ChainGateClock | undefined;
 
   /**
-   * Prefix for a queue-less subscription's consumer id (M109a §3.19). The
+   * Prefix for a queue-less or fanOut subscription's consumer id (M109a §3.19). The
    * plugin passes a per-process UUID, so two app instances (or two replicas)
    * never mint the same id.
    */
@@ -134,6 +135,19 @@ export class PipelinedBroker implements MessageBrokerAdapter {
       },
       () => {},
     );
+  }
+
+  /**
+   * Forwards the underlying broker's required-route capability.
+   * @returns The broker's capability, or undefined for other transports
+   * @throws Never
+   * @since 0.14.0
+   * @internal
+   */
+  get [ROUTED_PUBLISH_AVAILABLE](): boolean | undefined {
+    return (
+      this.#broker as MessageBrokerAdapter & { readonly [ROUTED_PUBLISH_AVAILABLE]?: boolean }
+    )[ROUTED_PUBLISH_AVAILABLE];
   }
 
   connect(): Promise<void> {

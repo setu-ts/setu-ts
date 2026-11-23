@@ -36,6 +36,11 @@
  */
 
 // Plugin factories
+export {
+  UnroutableMessageError,
+  OutboxPublisherConfirmsRequiredError,
+  PubSubDeadLetterTopicMissingError,
+} from './errors.ts';
 export { MessagingPlugin } from './plugin/messaging-plugin.ts';
 export { EventsMessagingBridge } from './bridge/events-messaging-bridge.ts';
 

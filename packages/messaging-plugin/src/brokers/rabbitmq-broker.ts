@@ -1,3 +1,7 @@
+import { UnroutableMessageError } from '../errors.ts';
+import { PUBLISH_REQUIRE_ROUTE, ROUTED_PUBLISH_AVAILABLE } from './publish-options.ts';
+import { resolveConsumerRetry } from './consumer-retry.ts';
+import { wantsFanOut, markFanOut } from './fan-out.ts';
 import type {
   ISubscription,
   MessageHandler,
@@ -83,13 +87,11 @@ interface ConsumerOptions {
  * @throws {RangeError} For invalid budgets, delays, retention, or prefetch
  */
 export function resolveConsumerOptions(options: RabbitMqOptions = {}): ConsumerOptions {
-  const retry = options.consumerRetry;
-  if (retry !== undefined && retry !== false && (retry === null || typeof retry !== 'object')) {
-    throw new RangeError('RabbitMqBroker consumerRetry must be false or an options object');
-  }
-  const configured = retry === false ? undefined : retry;
-  const maxAttempts = configured?.maxAttempts ?? 5;
-  const delaysMs = [...(configured?.delaysMs ?? [5000, 30000, 120000, 600000])];
+  const { retry, maxAttempts, delaysMs, isRetryable } = resolveConsumerRetry(
+    options.consumerRetry,
+    'RabbitMqBroker',
+    { defaults: [5000, 30000, 120000, 600000] },
+  );
   const deadLetterMaxLength = options.deadLetterMaxLength ?? 10000;
   const prefetch = options.prefetch ?? 32;
   const positive = (name: string, value: number, max = Number.MAX_SAFE_INTEGER): void => {
@@ -97,27 +99,14 @@ export function resolveConsumerOptions(options: RabbitMqOptions = {}): ConsumerO
       throw new RangeError(`RabbitMqBroker ${name} must be a positive integer within its bound`);
     }
   };
-  positive('consumerRetry.maxAttempts', maxAttempts);
   positive('deadLetterMaxLength', deadLetterMaxLength);
   // AMQP basic.qos encodes prefetch-count as an unsigned short.
   positive('prefetch', prefetch, 65535);
-  if (delaysMs.length === 0) {
-    throw new RangeError('RabbitMqBroker consumerRetry.delaysMs must be nonempty');
-  }
-  for (const [index, delay] of delaysMs.entries()) {
-    positive('consumerRetry.delaysMs', delay, 2147483647);
-    if (index > 0 && delay < delaysMs[index - 1]!) {
-      throw new RangeError('RabbitMqBroker consumerRetry.delaysMs must be nondecreasing');
-    }
-  }
-  if (configured?.isRetryable !== undefined && typeof configured.isRetryable !== 'function') {
-    throw new RangeError('RabbitMqBroker consumerRetry.isRetryable must be a function');
-  }
   return {
-    retry: retry !== false,
+    retry,
     maxAttempts,
     delaysMs,
-    isRetryable: configured?.isRetryable,
+    isRetryable,
     deadLetterMaxLength,
     prefetch,
   };
@@ -295,6 +284,10 @@ function publishConfirmed(
         resolve();
         return;
       }
+      if (err instanceof UnroutableMessageError) {
+        reject(err);
+        return;
+      }
       reject(
         new Error(
           `RabbitMQ did not confirm the message published to exchange "${exchange}" ` +
@@ -317,7 +310,7 @@ function publishConfirmed(
           Object.hasOwn(headers, DISPOSITION_ID) &&
           headers[DISPOSITION_ID] === dispositionId
         ) {
-          settle(new Error('mandatory disposition publish was returned as unroutable'));
+          settle(new UnroutableMessageError(exchange, routingKey));
         }
       } catch {
         settle(new Error('RabbitMQ supplied an invalid publish return'));
@@ -512,6 +505,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     }
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => {
+        const logger = this.#logger;
+        (logger?.warn ?? logger?.error)?.call(logger, message);
+      },
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
@@ -721,6 +718,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
    * @since 0.1.0
    */
+  /**
+   * Whether this connection can confirm a required route.
+   * @returns True only with confirms and return listeners
+   * @throws Never
+   * @since 0.14.0
+   * @internal
+   */
+  get [ROUTED_PUBLISH_AVAILABLE](): boolean {
+    return this.#confirmed && isCloseObservable(this.#channel);
+  }
+
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
@@ -744,6 +752,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     if (!this.#channel) {
       throw new Error('RabbitMqBroker is not connected');
     }
+    const requireRoute =
+      (options as (PublishOptions & { [PUBLISH_REQUIRE_ROUTE]?: boolean }) | undefined)?.[
+        PUBLISH_REQUIRE_ROUTE
+      ] === true;
     const validated = await validatePublishOptions(options);
     const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
@@ -778,6 +790,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       topic,
       content,
       properties,
+      requireRoute,
     );
   }
 
@@ -796,7 +809,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // Normal pub/sub may legitimately have no interested queue. A disposition
     // may not: a positive confirm also arrives for an unroutable publish.
     if (requireRoute && (!confirmed || !isCloseObservable(channel))) {
-      throw new Error('RabbitMQ consumer recovery requires confirms and on/off return listeners');
+      throw new Error('RabbitMQ routed publish requires confirms and on/off return listeners');
     }
     const unencodable = amqpShortStringProblem(routingKey, properties);
     if (unencodable !== null) {
@@ -870,6 +883,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const independent = wantsFanOut(options);
     validateConsumerQueue(
       options?.queue,
       this.#consumerOptions,
@@ -953,29 +967,34 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       channel,
     });
 
-    return {
-      unsubscribe: async (): Promise<void> => {
-        const consumer = this.#activeConsumers.get(subscriptionId);
-        if (consumer) {
-          try {
-            const realCh = consumer.channel as unknown as { cancel(tag: string): Promise<void> };
-            await realCh.cancel(consumer.consumerTag);
-          } catch {
-            // Ignore errors
-          }
-          this.#activeConsumers.delete(subscriptionId);
-          // Delete exclusive queue on unsubscribe
-          if (isExclusive && this.#channel) {
+    return markFanOut(
+      {
+        unsubscribe: async (): Promise<void> => {
+          const consumer = this.#activeConsumers.get(subscriptionId);
+          if (consumer) {
             try {
-              const ch = this.#channel as unknown as { deleteQueue(queue: string): Promise<void> };
-              await ch.deleteQueue(queueName);
+              const realCh = consumer.channel as unknown as { cancel(tag: string): Promise<void> };
+              await realCh.cancel(consumer.consumerTag);
             } catch {
               // Ignore errors
             }
+            this.#activeConsumers.delete(subscriptionId);
+            // Delete exclusive queue on unsubscribe
+            if (isExclusive && this.#channel) {
+              try {
+                const ch = this.#channel as unknown as {
+                  deleteQueue(queue: string): Promise<void>;
+                };
+                await ch.deleteQueue(queueName);
+              } catch {
+                // Ignore errors
+              }
+            }
           }
-        }
+        },
       },
-    };
+      independent,
+    );
   }
 
   /** Subscribes through the header-aware internal path. @internal */
@@ -1182,8 +1201,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
               topic,
               messageId: (properties.messageId as string) ?? this.#runtime.uuid(),
               timestamp: (properties.timestamp as Date) ?? new Date(this.#runtime.now()),
-              headers: normalizeTransportHeaders(
-                properties.headers as Readonly<Record<string, TransportHeaderValue>> | undefined,
+              headers: Object.fromEntries(
+                Object.entries(
+                  normalizeTransportHeaders(
+                    properties.headers as
+                      Readonly<Record<string, TransportHeaderValue>> | undefined,
+                  ),
+                ).filter(([name]) => name !== DISPOSITION_ID),
               ),
             };
             await handler(deserialized, metadata);

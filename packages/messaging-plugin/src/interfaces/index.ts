@@ -37,6 +37,22 @@ export interface IRedisStreamsClient {
   ): Promise<string | number>;
   /** Read messages from consumer groups. */
   xreadgroup(...args: string[]): Promise<unknown[][] | null>;
+  /**
+   * Reads independently of consumer groups; required only for fanOut subscriptions.
+   * @param args - Positional XREAD arguments
+   * @returns Streams and entry arrays, or null for an empty read
+   * @throws {Error} When the Redis command fails
+   * @since 0.14.0
+   */
+  xread?(...args: string[]): Promise<unknown[][] | null>;
+  /**
+   * Captures the last stream ID at fanOut subscription time.
+   * @param args - Positional XREVRANGE arguments
+   * @returns Entries in reverse order
+   * @throws {Error} When the Redis command fails
+   * @since 0.14.0
+   */
+  xrevrange?(...args: string[]): Promise<Array<[string, string[]]>>;
   /** Extended PEL query: [id, owner, idle milliseconds, delivery count]. */
   xpending(...args: string[]): Promise<Array<[string, string, number, number]>>;
   /** Atomically claims idle entries, returning [id, field/value list]. */
@@ -361,6 +377,14 @@ export interface MessagingCommonOptions {
  */
 export interface InMemoryBrokerOptions {
   /**
+   * Reports ignored responder fan-out requests once per broker.
+   * @param message - Fixed configuration warning, without payloads or headers
+   * @returns Nothing
+   * @throws Never; warning failures are swallowed
+   * @since 0.14.0
+   */
+  readonly warn?: (message: string) => void;
+  /**
    * Called once per REJECTED subscription handler, with the error and the
    * message metadata of the failed dispatch. `publish` resolves on dispatch
    * hand-off — never on handler completion — so this reporter is the terminus
@@ -422,7 +446,7 @@ export interface MemoryMessagingOptions extends MessagingCommonOptions {
 export interface ConsumerRetryOptions {
   /** Positive safe integer delivery budget, including the initial attempt. @since 0.9.0 */
   readonly maxAttempts?: number;
-  /** Nonempty, nondecreasing positive integer milliseconds ≤2147483647. @since 0.9.0 */
+  /** Nonempty, nondecreasing integer milliseconds. RabbitMQ and Redis require positive delays ≤2147483647; Pub/Sub accepts one or two bounds from 0 to 600000, and Service Bus requires delays below 240000. @since 0.9.0 */
   readonly delaysMs?: readonly number[];
   /** False dead-letters immediately; a throwing classifier is logged and retries. @since 0.9.0 */
   readonly isRetryable?: (error: unknown) => boolean;
@@ -626,6 +650,22 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy, enabled by default; false restores immediate negative settlement.
+   * @returns The configured handler retry policy
+   * @throws {RangeError} At construction for an invalid retry policy
+   * @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+
+  /**
+   * Pre-existing topic for terminal deliveries; absent, retries have no platform limit.
+   * @returns The configured dead-letter topic
+   * @throws {RangeError} When isRetryable is configured without a target
+   * @since 0.14.0
+   */
+  deadLetterTopic?: string;
+
   /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -655,6 +695,22 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy, enabled by default; false restores immediate negative settlement.
+   * @returns The configured handler retry policy
+   * @throws {RangeError} At construction for an invalid retry policy
+   * @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+
+  /**
+   * Pre-existing topic for terminal deliveries; absent, retries have no platform limit.
+   * @returns The configured dead-letter topic
+   * @throws {RangeError} When isRetryable is configured without a target
+   * @since 0.14.0
+   */
+  deadLetterTopic?: string;
+
   /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -725,6 +781,14 @@ export interface ServiceBusRetryOptions {
  * @since 0.1.0
  */
 export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy, enabled by default; false restores immediate negative settlement.
+   * @returns The configured handler retry policy
+   * @throws {RangeError} At construction for an invalid retry policy
+   * @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+
   broker: 'service-bus';
   /** Injected transport (bypasses lazy SDK load). Required for this arm. */
   client: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
@@ -743,6 +807,14 @@ export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptio
  * @since 0.1.0
  */
 export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  /**
+   * Consumer retry policy, enabled by default; false restores immediate negative settlement.
+   * @returns The configured handler retry policy
+   * @throws {RangeError} At construction for an invalid retry policy
+   * @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+
   broker: 'service-bus';
   /** Connection string for the Service Bus namespace. Required for production. */
   connectionString: string;

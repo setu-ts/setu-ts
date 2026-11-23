@@ -1,3 +1,4 @@
+import { ROUTED_PUBLISH_AVAILABLE } from '../brokers/publish-options.ts';
 /** Internal telemetry decorator for message brokers. */
 
 import {
@@ -25,6 +26,19 @@ export class TracedBroker implements MessageBrokerAdapter {
     this.#broker = broker;
     this.#telemetry = telemetry;
     this.#system = system;
+  }
+
+  /**
+   * Forwards the underlying broker's required-route capability.
+   * @returns The broker's capability, or undefined for other transports
+   * @throws Never
+   * @since 0.14.0
+   * @internal
+   */
+  get [ROUTED_PUBLISH_AVAILABLE](): boolean | undefined {
+    return (
+      this.#broker as MessageBrokerAdapter & { readonly [ROUTED_PUBLISH_AVAILABLE]?: boolean }
+    )[ROUTED_PUBLISH_AVAILABLE];
   }
 
   connect(): Promise<void> {
