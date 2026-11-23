@@ -63,8 +63,8 @@ describe('isCoveredDotenvName', () => {
 
 describe('readEnvFilePath', () => {
   it('accepts an omitted flag and a valid nested relative path', () => {
-    expect(readEnvFilePath({})).toEqual({ ok: true });
-    expect(readEnvFilePath({ 'env-file': 'config/.env.local' })).toEqual({
+    expect(readEnvFilePath(undefined)).toEqual({ ok: true });
+    expect(readEnvFilePath('config/.env.local')).toEqual({
       ok: true,
       path: 'config/.env.local',
     });
@@ -72,7 +72,7 @@ describe('readEnvFilePath', () => {
 
   it('rejects a missing, empty, or non-string value', () => {
     for (const value of [true, '', ['.env']] as const) {
-      const result = readEnvFilePath({ 'env-file': value });
+      const result = readEnvFilePath(value);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('needs a relative path');
     }
@@ -80,7 +80,7 @@ describe('readEnvFilePath', () => {
 
   it('rejects absolute paths, traversal, and invalid path segments', () => {
     for (const value of ['/etc/env', '../.env', 'config/../.env', 'config//.env', 'env file']) {
-      const result = readEnvFilePath({ 'env-file': value });
+      const result = readEnvFilePath(value);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('inside the generated project');
     }
@@ -94,11 +94,11 @@ describe('readEnvFilePath', () => {
       '.env.EXAMPLE',
       'secrets.Example',
     ]) {
-      const result = readEnvFilePath({ 'env-file': value });
+      const result = readEnvFilePath(value);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.message).toContain('must not end in .example');
     }
-    expect(readEnvFilePath({ 'env-file': 'example.env' })).toEqual({
+    expect(readEnvFilePath('example.env')).toEqual({
       ok: true,
       path: 'example.env',
     });

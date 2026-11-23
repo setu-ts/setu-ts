@@ -43,14 +43,14 @@ that: both need every response to carry a refreshed cookie.)
 
 ## Choosing a strategy
 
-|                      | Cookie (default)               | Store (`store: …`)                     |
-| -------------------- | ------------------------------ | -------------------------------------- |
-| Where the payload is | In the cookie                  | Server-side; cookie holds an opaque id |
-| Infrastructure       | None                           | A cache, or your own `ISessionStore`   |
-| Immediate revocation | **No** — valid until `Max-Age` | **Yes** — delete the entry             |
-| Mass invalidation    | Rotate the secret              | Clear the store                        |
-| Size limit           | ~4 KB (browser cookie limit)   | Effectively none                       |
-| Cloudflare Workers   | Yes                            | Only with a Workers-compatible store   |
+|                      | Cookie (default)               | Store (`store: …`)                      |
+| -------------------- | ------------------------------ | --------------------------------------- |
+| Where the payload is | In the cookie                  | Server-side; cookie holds an opaque id  |
+| Infrastructure       | None                           | A cache, or your own `ISessionStore`    |
+| Immediate revocation | **No** — valid until `Max-Age` | **Yes** — on a store that keeps markers |
+| Mass invalidation    | Rotate the secret              | Clear the store                         |
+| Size limit           | ~4 KB (browser cookie limit)   | Effectively none                        |
+| Cloudflare Workers   | Yes                            | Only with a Workers-compatible store    |
 
 The cookie strategy's trade-off is real and worth stating plainly: a stolen cookie stays valid until
 it expires, because nothing server-side is consulted. If you need to log a specific user out right
@@ -62,11 +62,87 @@ a digest of a stamp kept on your user record and compares it on every request, s
 ends all of that user's sessions on the cookie strategy too. See the auth plugin's
 [Ending every session of a user](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#ending-every-session-of-a-user).
 
-Sessions also use whole-payload snapshot commits. Two overlapping requests that each change session
-state can therefore lose one change on both the cookie and store strategies; a store improves
-revocation, not concurrent-write merging. Keep writes to one session in one request, and keep state
-that must be concurrently updated out of the session (for example, in a database with an explicit
-concurrency strategy).
+### Revocation under concurrency
+
+On the store strategy, `destroy()` and `regenerate()` stay in force whatever request on that session
+was already in flight. A sign-out writes a marker, `revoked:<id>`, before it deletes the row; a
+regeneration writes `superseded:<old id>` (`revoked:<old id>` when it is a logout by `clear()` and
+`regenerate()`, so an in-flight regeneration on the old cookie is refused too). Every commit to a
+restored session writes its row and then reads the markers, and deletes its own write when one is
+present, so an in-flight request cannot put a signed-out session back. A refused commit sends no
+cookie. A regeneration whose source was signed out while it ran (a sign-in or step-up on another
+tab) is refused too, so it cannot carry the old session's data to a fresh id. A regeneration that
+stays in the store also writes a link, `successor:<old id>`, naming the new id, before its marker
+check (a regeneration refused there leaves a link to an id it deleted, which a sign-out revokes
+harmlessly), and a sign-out of the old id also revokes the id it names, along the whole chain: a
+sign-out that lands after a regeneration's marker check therefore still ends the regenerated
+session. Markers are written only for an id that had a row, so anonymous `POST /logout` traffic
+writes nothing; they expire one second after `maxAge` (for stores that round a TTL down), and a
+commit whose request loaded the session `maxAge` or more ago is refused, since no marker could still
+fence it (a regeneration or a `clear()` sign-out refused that way still revokes the old id). A
+commit that reaches its marker check that late, having passed the first check, cannot tell whether
+its session was signed out, so it ends the session (deleting its row under a `revoked` marker, which
+every commit and regeneration that checks its markers afterwards refuses (one that committed during
+the stall keeps its new id), without following its successor links; a stalled regeneration deletes
+only its new row). A failed regeneration's cleanup never touches the link. A link names one
+successor, which gives one limit: when two regenerations of one id both commit (a double-submitted
+sign-in, say), the later link replaces the earlier, and a sign-out that loaded the old id ends only
+the session the surviving link names. The other regenerated session stays valid until its row
+expires (under `rolling`, its own commits keep extending it). Both regenerations answered the same
+browser, which keeps whichever cookie reached it last; the sign-out's cleared cookie wins only if
+its response arrives after both. An application that must end every session of a user for certain
+sets `signIn.sessionStamp` (below).
+
+**Another limit.** A link lives one second past `maxAge` from the regeneration and is never renewed.
+Without `rolling` that is always enough: a regeneration keeps the session's expiry and only
+`rolling` moves it, so the regenerated session expires before its link. With `rolling: true`,
+rolling commits can keep the regenerated session alive past its link, so a single sign-out request
+that loaded the old id and runs longer than `maxAge` may no longer find the link and leave the
+regenerated session signed in; that request still clears its own browser's cookie. An application
+that must end every session of a user for certain sets `signIn.sessionStamp` in
+`@setu-ts/auth-plugin`: the stamp is read on every request, a session whose recorded stamp no longer
+matches is anonymous, and bumping the stamp on the user record is one write.
+
+**The one window.** A request that _starts_ during a racing commit, between that commit's write and
+its marker check, can restore the row for one store round trip. Set `restoreRevocationCheck: true`
+to close it: every store-held restore then reads both markers beside the row (two extra keys per
+restore, twice for a request authenticated by `auth-plugin`'s session strategy). Use it where no
+request after a sign-out may be served signed in (a bank, an admin console). It closes this window
+only: the limits above (two simultaneous regenerations of one id, a sign-out outliving `maxAge`
+under `rolling`) still apply, so such an application also sets `signIn.sessionStamp` in
+`@setu-ts/auth-plugin` to end every session of a user for certain.
+
+**Where the guarantee holds.** The store must be linearizable (a read sees every write that finished
+before it) and must not evict a live key:
+
+| Store                                               | Holds?                                                                                                         |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `store: 'memory'`                                   | Yes (one process)                                                                                              |
+| `store: 'cache'` over Redis with `noeviction`       | Yes                                                                                                            |
+| `store: 'cache'` over Redis with an evicting policy | No: `volatile-*` and `allkeys-*` policies evict markers; use `noeviction` or a dedicated instance for sessions |
+| `store: 'cache'` over cache-plugin's memory cache   | No: it evicts the oldest entry at `maxSize` (default 1000), markers and live sessions alike. Development only  |
+| Cloudflare `KvSessionStore` (Workers KV)            | No: KV is eventually consistent, so a marker may be invisible elsewhere for seconds                            |
+| Your own `ISessionStore`                            | When it is linearizable and does not evict                                                                     |
+
+An evicted or not-yet-visible marker reverts that one revocation to an unfenced delete. Your own
+store sees ids of the form `revoked:<uuid>`, `superseded:<uuid>` and `successor:<uuid>` beside
+session ids, holding the payload `{ "__setu_marker": "revoked" }` (or `"superseded"`), or
+`{ "__setu_marker": "successor", "next": "<new id>" }` for a link. The cookie strategy has no row to
+revoke; `signIn.sessionStamp` (above) is its answer.
+
+### Concurrent requests
+
+A store commit to a restored session writes this request's changes, not its whole payload
+(`storeCommit: 'changes'`, the default): it reads the current row, applies every key this request
+set or deleted (or its whole payload after `clear()`), and writes that. A key a concurrent request
+wrote survives, and a key it deleted stays deleted; a missing row refuses the commit. It is not a
+transaction: concurrent changes to one key keep the last writer's, and two commits that interleave
+between one's read and its write can still lose a key (one store round trip, where a whole-payload
+commit loses it for the whole request). `storeCommit: 'snapshot'` writes the request's whole
+payload, for an application whose keys must change together. The cookie strategy always writes the
+whole payload, so overlapping requests that each change it keep only the last response's cookie.
+Keep state that must be updated concurrently out of the session (for example, in a database with an
+explicit concurrency strategy).
 
 ```typescript
 SessionPlugin({ secret, store: 'memory' }); // single process, dev
@@ -399,11 +475,91 @@ ReactRouterPlugin({
 `getSession(ctx)` is the single accessor, so a loader and a handler see the identical session
 object.
 
+## Caching
+
+A shared cache (a CDN, a reverse proxy, `cacheMiddleware`) must never store a page tied to one
+visitor. The session middleware marks such a response `Cache-Control: private, no-store` with
+`Vary: Cookie` when any of these holds:
+
+- the request restored a session holding application data (a signed-in visitor, or one carrying
+  application keys): `Cache-Control: private, no-store` is set before the handler runs, so a session
+  read late, an error page, and a cache registered inside the session middleware all see it, and
+  `Vary: Cookie` follows at the first application read or after the handler (an error page carries
+  the `Cache-Control` alone);
+- the response carries the session cookie (a written commit or a destroy): marked at the first
+  application write, which also sets `PER_VISITOR_RESPONSE_STATE_KEY` (`@setu-ts/common`) on the
+  request, so `cacheMiddleware` inside the session middleware does not store it even when the
+  handler then sets `public`;
+- a CSRF token was read (`getCsrfToken`, `csrfTokenField`): marked at the read, which also sets
+  `PER_VISITOR_RESPONSE_STATE_KEY`, as does a read of a restored session holding application data.
+
+A response that only _read_ the session for an anonymous visitor is the anonymous variant of a page:
+it gets `Vary: Cookie` alone, and the read sets `COOKIE_DEPENDENT_RESPONSE_STATE_KEY`
+(`@setu-ts/common`), so `cacheMiddleware` keeps it apart from visitors with cookies even when the
+handler replaces that `Vary`. What counts as a read:
+
+| Read                                                                   | Counts |
+| ---------------------------------------------------------------------- | ------ |
+| `get`, `has` or `toJSON()` of an application key                       | Yes    |
+| The tenant-binding compare and the CSRF token check (reserved keys)    | No     |
+| `fromHeaders` (an auth strategy, a WebSocket handler): a separate view | No     |
+
+A page that touches no session, for a visitor with no session data, is not marked and stays
+cacheable. The tenant-mismatch `403` is answered `private, no-store`.
+
+**An application that caches a page deliberately** sets its own `Cache-Control` (a React Router
+route's `headers` export, or `ctx.response.header(...)`) after the handler's first session write or
+CSRF token read, since either one writes `private, no-store` over an earlier directive that is not
+shared-cacheable (`private, max-age=3600` included). The plugin then keeps it, except that no
+directive can make a session cookie safe to share:
+
+- a commit that writes application data, regenerates or destroys turns a shared-cacheable directive
+  into `private, no-store`;
+- on a shared-cacheable response, a commit that would only refresh the expiry (`rolling`,
+  `idleTimeoutMs`) or store a new session's reserved keys (a CSRF mint, a tenant binding) is
+  skipped, so a public asset stays public;
+- a public asset fetched by a signed-in visitor keeps the directive its handler sets and gets no
+  `Vary: Cookie`. A directive set by an outer middleware (below priority 260) before `next()` is a
+  default for every visitor and is replaced by `private, no-store` for a signed-in one before the
+  handler runs; set `public` in the handler, or in a middleware inside the session middleware, to
+  keep it.
+
+The plugin cannot see who a page was rendered for when it reads `ctx.request.user` rather than the
+session: `auth-plugin`'s session strategy restores the principal through `fromHeaders`, which counts
+as no read. Such a page with an explicit `public` directive keeps it with no `Vary: Cookie` and no
+warning, exactly like a public asset. Never mark a route behind `requireAuth()` `public`.
+
+So a page you mark `public` gets no session cookie for a new visitor's CSRF token or a `rolling`
+refresh: a form on such a page fails CSRF on submit. Do not mark a page carrying a form `public`.
+
+When it keeps a shared-cacheable directive on a response that read a CSRF token, or that a signed-in
+visitor's request read the session for, it logs one `warn` per route:
+`session-plugin: a per-visitor response carries a shared-cacheable Cache-Control set by the application`,
+with `{ method, route, signal }`. `route` is the path with each route parameter replaced by its name
+(`/orders/:id`), cut to 200 characters; no path value, query, id or cookie is logged. After 1,000
+routes one line says further warnings are suppressed.
+
+The recipe: cache the anonymous variant with `public, s-maxage=…` only when no session was restored
+(it still carries `Vary: Cookie`, so a CDN keys it apart and `cacheMiddleware` serves it only to
+requests carrying no cookie); read the CSRF token in a loader rather than in deferred data; register
+`cacheMiddleware` outside the session middleware where possible.
+
+**A missing asset starts no session.** A new session holding only reserved keys is not committed on
+a `404` to a request that is not a document navigation (`Sec-Fetch-Dest: document`, or, without
+`Sec-Fetch-Dest`, an `Accept` that includes `text/html`). Application data written during the
+request still commits.
+
+**Other packages reading the token.** The form-CSRF middleware publishes a frozen `ICsrfTokenAccess`
+(`@setu-ts/common`) under `CSRF_TOKEN_ACCESS_STATE_KEY`: the configured `headerName`, and
+`tokenForExistingSession()`, which returns the token of a session the request restored (minting it
+if absent) and `undefined` otherwise, so it never starts a session. Swagger UI's token route in
+`@setu-ts/openapi-plugin` reads it.
+
 ## Middleware priorities
 
 | Priority | Middleware           | Why there                                                                                                                                                                    |
 | -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)                                                                                                                              |
+| 260      | `sessionMiddleware`  | After CORS (125) and request size (180), before auth (300)                                                                                                                   |
 | 325      | `csrfFormMiddleware` | After the session loads (260) and after authentication (300), before authorization (350): the bearer exemption reads the credential source recorded and the session it parks |
 
 Session sits below authentication so an auth strategy can read it. Anything that reads the session
@@ -411,25 +567,27 @@ must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareM
 
 ## Options
 
-| Option              | Default          | Notes                                                                                                                                                                                                                                                                                      |
-| ------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                                                                                   |
-| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager, configuration, then the environment                                                                                                                                                                                                                      |
-| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                                                                               |
-| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                                                                               |
-| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                                                                                       |
-| `rolling`           | `false`          | Re-issue on every response                                                                                                                                                                                                                                                                 |
-| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                                                                                                                                                  |
-| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                                                                                                                                                |
-| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                                                                                                                                               |
-| `cookie.path`       | `/`              |                                                                                                                                                                                                                                                                                            |
-| `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                                                                                                                                           |
-| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                                                                                   |
-| `cookie.secure`     | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                                                                               |
-| `cookie.httpOnly`   | `true`           |                                                                                                                                                                                                                                                                                            |
-| `csrf`              | —                | Presence enables form CSRF                                                                                                                                                                                                                                                                 |
-| `csrf.exemptBearer` | `true`           | Only header credentials (Bearer or X-API-Key) with no non-Bearer Authorization that a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |
-| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                                                                                                                                                     |
+| Option                   | Default          | Notes                                                                                                                                                                                                                                                                                      |
+| ------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `secret`                 | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                                                                                   |
+| `secretName`             | `SESSION_SECRET` | Looked up in the secrets manager, configuration, then the environment                                                                                                                                                                                                                      |
+| `mode`                   | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                                                                               |
+| `store`                  | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                                                                               |
+| `maxAge`                 | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                                                                                       |
+| `rolling`                | `false`          | Re-issue on every response                                                                                                                                                                                                                                                                 |
+| `idleTimeoutMs`          | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                                                                                                                                                  |
+| `maxCookieBytes`         | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                                                                                                                                                |
+| `cookie.name`            | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                                                                                                                                               |
+| `cookie.path`            | `/`              |                                                                                                                                                                                                                                                                                            |
+| `cookie.domain`          | —                | Omitted means a host-only cookie                                                                                                                                                                                                                                                           |
+| `cookie.sameSite`        | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                                                                                   |
+| `cookie.secure`          | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                                                                               |
+| `cookie.httpOnly`        | `true`           |                                                                                                                                                                                                                                                                                            |
+| `csrf`                   | —                | Presence enables form CSRF                                                                                                                                                                                                                                                                 |
+| `csrf.exemptBearer`      | `true`           | Only header credentials (Bearer or X-API-Key) with no non-Bearer Authorization that a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |
+| `tenantBinding`          | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                                                                                                                                                     |
+| `storeCommit`            | `'changes'`      | Store strategy only: `'changes'` writes this request's changes onto the current row; `'snapshot'` writes its whole payload. A `TypeError` without `store`                                                                                                                                  |
+| `restoreRevocationCheck` | `false`          | Store strategy only: read the revocation markers on every store-held restore, closing the one-round-trip window. A `TypeError` without `store`                                                                                                                                             |
 
 ## Health
 
@@ -461,9 +619,11 @@ arriving while every session reads as absent.
 | `CsrfFormOptions`               | interface |
 | `MemorySessionStoreDeps`        | interface |
 | `PublishedCsrfConfig`           | interface |
+| `SessionCommitPolicy`           | interface |
 | `SessionCookieOptions`          | interface |
 | `SessionPluginOptions`          | interface |
 | `SessionServiceDeps`            | interface |
+| `SessionCommitOutcome`          | type      |
 | `SessionMode`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it

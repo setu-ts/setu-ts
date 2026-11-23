@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { createCsrfRequestInterceptor } from './swagger-interceptor.ts';
 
 /**
  * Swagger UI asset delivery. Self-hosting requires swagger-ui-dist and runtime.fs;
@@ -93,6 +94,12 @@ export interface SwaggerUiOptions {
   readonly specUrl: string;
   /** The title of the page. */
   readonly title?: string;
+  /**
+   * The plugin's form-CSRF token route. When set, the page installs a request interceptor that
+   * sends the token on same-origin unsafe Try-it-out calls.
+   * @since 0.14.0
+   */
+  readonly csrfTokenUrl?: string;
 }
 
 /**
@@ -135,7 +142,7 @@ const HTML_TEMPLATE = `<!DOCTYPE html>
           SwaggerUIBundle.presets.apis,
           SwaggerUIStandalonePreset,
         ],
-        layout: "StandaloneLayout",
+        layout: "StandaloneLayout",__INTERCEPTOR__
       });
     };
   </script>
@@ -208,6 +215,9 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
 
   // Escape both title and specUrl to prevent XSS via malicious input
   const escapedTitle = htmlEscape(title);
+  const interceptor = interceptorOption(
+    typeof options === 'string' ? undefined : options.csrfTokenUrl,
+  );
   const escapedSpecUrl = htmlEscape(specUrl);
 
   // Use function replacement for title to avoid JS $-pattern interpretation in replacement strings
@@ -216,5 +226,18 @@ export function swaggerUiHtml(options: SwaggerUiOptions | string): string {
     .replace(/__SPEC_URL__/g, () => escapedSpecUrl)
     .replace('__CSS_ASSET__', () => attributes[0]!)
     .replace('__BUNDLE_ASSET__', () => attributes[1]!)
-    .replace('__PRESET_ASSET__', () => attributes[2]!);
+    .replace('__PRESET_ASSET__', () => attributes[2]!)
+    .replace('__INTERCEPTOR__', () => interceptor);
+}
+
+/**
+ * The `requestInterceptor` option line for the page, or `''` without a token route. The URL is
+ * JSON-encoded with `<` escaped, so it cannot close the script element.
+ */
+function interceptorOption(tokenUrl: string | undefined): string {
+  if (tokenUrl === undefined) {
+    return '';
+  }
+  const url = JSON.stringify(tokenUrl).replace(/</g, '\\u003c');
+  return `\n        requestInterceptor: (${createCsrfRequestInterceptor.toString()})(${url}, window),`;
 }

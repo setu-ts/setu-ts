@@ -445,7 +445,7 @@ describe('setu generate module --page', () => {
     const h = project(manifest);
     expect(await h.run([...args, '--page', '--api'])).toBe(2);
     expect(h.err.text()).toContain(message);
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('lists the page route under --dry-run without writing it', async () => {

@@ -17,6 +17,15 @@
 import type { ResolvedHost } from './project-files.ts';
 import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
 
+/** The common OpenTelemetry peers needed by an exporter on every runtime. */
+export const TELEMETRY_PEERS: Readonly<Record<string, string>> = {
+  // OpenTelemetry 2.x peers require @opentelemetry/api <1.10.0.
+  '@opentelemetry/api': '~1.9.0',
+  '@opentelemetry/sdk-trace-base': '^2.9.0',
+  '@opentelemetry/resources': '^2.9.0',
+  '@opentelemetry/context-async-hooks': '^2.0.0',
+};
+
 /** Each client package and its compatible install range. */
 export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@aws-sdk/client-sqs': '^3',
@@ -27,11 +36,7 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@google-cloud/pubsub': '^6',
   graphql: '^16',
   '@modelcontextprotocol/server': '^2.4.0',
-  // OpenTelemetry 2.x peers require @opentelemetry/api <1.10.0.
-  '@opentelemetry/api': '~1.9.0',
-  '@opentelemetry/sdk-trace-base': '^2.9.0',
-  '@opentelemetry/resources': '^2.9.0',
-  '@opentelemetry/context-async-hooks': '^2.0.0',
+  ...TELEMETRY_PEERS,
   // `setu add telemetry` (M131a X88-10): the OTLP exporter, the ESM loader hook
   // the generated preload registers, and the Redis client's instrumentation.
   '@opentelemetry/exporter-trace-otlp-http': '^0.220.0',

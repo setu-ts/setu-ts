@@ -115,6 +115,29 @@ describe('generated code and guidance', () => {
     }
   });
 
+  it.each([
+    ['redis', 'Redis at REDIS_URL'],
+    ['rabbitmq', 'RabbitMQ at RABBITMQ_URL'],
+    ['nats', 'NATS at NATS_URL'],
+    ['kafka', 'Kafka at KAFKA_BROKERS'],
+    ['pubsub', 'the Pub/Sub emulator at PUBSUB_EMULATOR_HOST (project PUBSUB_PROJECT_ID)'],
+    ['service-bus', 'the Service Bus emulator at SERVICE_BUS_CONNECTION_STRING'],
+  ])('names the setting that holds the %s address', async (broker, target) => {
+    const h = harness();
+    expect(await h.run(['new', 'api', '--template', 'rest'])).toBe(0);
+    expect(await h.run(['add', 'messaging', '--broker', broker], '/work/api'), h.err.text()).toBe(
+      0,
+    );
+    expect(h.out.text()).toContain(
+      `  The app and generated tests now connect to ${target} during startup.\n`,
+    );
+  });
+
+  it('covers every broker with a connection in the address table', () => {
+    const named = BROKERS.filter((name) => brokerSpec(name)?.connection !== undefined);
+    expect(named).toEqual(['redis', 'rabbitmq', 'nats', 'kafka', 'pubsub', 'service-bus']);
+  });
+
   it('names every real Redis provider and its offline replacement', async () => {
     for (const [pkg, factory, flag] of [
       ['cache', CachePlugin, '--store'],
@@ -499,7 +522,7 @@ describe('generated code and guidance', () => {
     ).toBe(false);
     for (const quote of ["'", '"']) {
       const h = harness();
-      expect(await h.run(['new', 'api', '--template', 'rest', '--env-file', 'local.env'])).toBe(0);
+      expect(await h.run(['new', 'api', '--template', 'rest', '--dotenv', 'local.env'])).toBe(0);
       const config = h.fs
         .read('/work/api/setu.config.ts')
         .replace("envFilePath: 'local.env'", `envFilePath: ${quote}local.env${quote}`);
@@ -512,7 +535,7 @@ describe('generated code and guidance', () => {
     }
     const h = harness();
     expect(
-      await h.run(['new', 'api', '--template', 'rest', '--env-file', 'local.env', '--devtool']),
+      await h.run(['new', 'api', '--template', 'rest', '--dotenv', 'local.env', '--devtool']),
     ).toBe(0);
     expect(JSON.parse(h.fs.read('/work/api/package.json')).scripts.dev).toBe(
       'tsx --import ./instrumentation.mjs --env-file-if-exists=local.env main.dev.ts',

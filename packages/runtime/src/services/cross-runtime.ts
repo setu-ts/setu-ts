@@ -47,6 +47,25 @@ export function crossSetTimeout(fn: () => void, ms: number): TimerHandle {
   return globalThis.setTimeout(fn, ms);
 }
 
+/**
+ * Lets the process exit while a timer is pending: the handle's `unref()` on
+ * Node, Bun and Deno 2 (all return a timer object; measured on Deno 2.9.6),
+ * or `Deno.unrefTimer` for a numeric id where that exists; nothing elsewhere
+ * (workerd's numeric ids, where an isolate does not outlive its requests).
+ *
+ * @param handle - A timer handle from this runtime
+ */
+export function crossUnrefTimer(handle: TimerHandle): void {
+  if (typeof handle === 'object' && handle !== null) {
+    const unref = (handle as { unref?: unknown }).unref;
+    if (typeof unref === 'function') (unref as () => void).call(handle);
+    return;
+  }
+  if (typeof handle !== 'number') return;
+  const deno = (globalThis as { Deno?: { unrefTimer?: (id: number) => void } }).Deno;
+  deno?.unrefTimer?.(handle);
+}
+
 /** Cancels a setTimeout handle. */
 export function crossClearTimeout(handle: TimerHandle): void {
   globalThis.clearTimeout(handle as Parameters<typeof globalThis.clearTimeout>[0]);
@@ -82,6 +101,7 @@ export function mergeRuntimeServices(
     | 'workers'
     | 'dns'
     | 'onSignal'
+    | 'onFatalError'
     | 'reportError'
   >,
 ): IRuntimeServices {
@@ -93,6 +113,7 @@ export function mergeRuntimeServices(
     hrtime: crossHrtime,
     setTimeout: crossSetTimeout,
     clearTimeout: crossClearTimeout,
+    unrefTimer: crossUnrefTimer,
     setInterval: crossSetInterval,
     clearInterval: crossClearInterval,
     ...divergent,

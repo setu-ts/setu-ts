@@ -129,7 +129,9 @@ describe('anonymous traffic on the store strategy (V9-46)', () => {
       );
       expect(logout.status).toBe(200);
       await logout.body?.cancel();
-      expect(store.entries.size).toBe(0);
+      // Only the revocation marker of the signed-out id remains.
+      expect([...store.entries.keys()].every((key) => key.startsWith('revoked:'))).toBe(true);
+      expect(store.entries.size).toBe(1);
 
       // A copy of the signed-in cookie no longer restores the user.
       const replay = await app.fetch(

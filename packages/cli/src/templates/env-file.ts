@@ -29,7 +29,7 @@ export function renderConfigOptions(envFilePath: string): string {
  * so this returns `false` for it — not because it is a secret, but because the
  * generic dotenv rules deliberately exclude it from what they match.
  *
- * A custom `--env-file` name such as `local.env` or `secrets` is not covered and
+ * A custom `--dotenv` name such as `local.env` or `secrets` is not covered and
  * must be added to `.dockerignore` by hand.
  *
  * @param name - The final path segment of a dotenv file
@@ -48,12 +48,11 @@ export type EnvFilePathResult =
 
 /** Reads a relative environment-file path without permitting a project escape. */
 export function readEnvFilePath(
-  flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  value: string | boolean | readonly string[] | undefined,
 ): EnvFilePathResult {
-  const value = flags['env-file'];
   if (value === undefined) return { ok: true };
   if (typeof value !== 'string' || value === '') {
-    return { ok: false, message: '--env-file needs a relative path.' };
+    return { ok: false, message: '--dotenv needs a relative path.' };
   }
   if (
     value.startsWith('/') ||
@@ -65,7 +64,7 @@ export function readEnvFilePath(
   ) {
     return {
       ok: false,
-      message: '--env-file must be a relative path inside the generated project.',
+      message: '--dotenv must be a relative path inside the generated project.',
     };
   }
   // The CLI writes `<path>.example` as the committed example beside the file,
@@ -77,7 +76,7 @@ export function readEnvFilePath(
     return {
       ok: false,
       message:
-        '--env-file must not end in .example: that name is the committed example the CLI writes beside it.',
+        '--dotenv must not end in .example: that name is the committed example the CLI writes beside it.',
     };
   }
   return { ok: true, path: value };
@@ -135,7 +134,7 @@ export function envFileDeclaration(
     const paths: string[] = [];
     for (const placeholder of placeholders) {
       const path = quoted(placeholder);
-      const parsed = path === undefined ? undefined : readEnvFilePath({ 'env-file': path });
+      const parsed = path === undefined ? undefined : readEnvFilePath(path);
       const valid = parsed?.ok === true ? parsed.path : undefined;
       if (valid === undefined) return { kind: 'unreadable' };
       paths.push(valid);

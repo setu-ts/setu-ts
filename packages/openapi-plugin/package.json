@@ -56,10 +56,13 @@
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/metrics-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/session-plugin": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
     "@types/node": "^24",
     "@types/swagger-ui-dist": "^3.30.6",
+    "playwright": "1.63.0",
     "swagger-ui-dist": "^5",
+    "swagger-ui-dist-floor": "npm:swagger-ui-dist@5.0.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
     "zod-v4": "npm:zod@^4.6.6"

@@ -99,7 +99,7 @@ for (const template of [REST_TEMPLATE, FULL_STACK_TEMPLATE])
         : ts.createSourceFile(path, source, languageVersion, true);
     };
     const roots = [
-      ...new Set([...files.map((file) => `/app/${file.path}`), ...h.fs.writes]),
+      ...new Set([...files.map((file) => `/app/${file.path}`), ...h.fs.projectWrites]),
     ].filter(
       (path) =>
         /\.tsx?$/.test(path) &&
@@ -213,7 +213,7 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toEqual([
+    expect(h.fs.projectWrites).toEqual([
       '/app/src/modules/user/user.service.ts',
       '/app/src/modules/user/user.controller.ts',
       '/app/src/modules/user/user.module.ts',
@@ -235,7 +235,7 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toContain('/app/src/modules/user/user.controller.ts');
+    expect(h.fs.projectWrites).toContain('/app/src/modules/user/user.controller.ts');
     expect(h.fs.read('/app/src/modules/user/user.controller.ts')).toContain('status(201)');
   });
 
@@ -299,11 +299,11 @@ describe('setu generate module', () => {
     // not, so a repeat must still refuse rather than silently rewriting work.
     const h = harness();
     await h.run(['module', 'user']);
-    const writesBefore = h.fs.writes.length;
+    const writesBefore = h.fs.projectWrites.length;
 
     expect(await h.run(['module', 'user'])).toBe(1);
 
-    expect(h.fs.writes.length).toBe(writesBefore);
+    expect(h.fs.projectWrites.length).toBe(writesBefore);
     expect(h.err.text()).toContain('Refusing to overwrite existing files');
     expect(h.err.text()).toContain('/app/src/modules/user/user.service.ts');
     // The exemption must not leak into the error report.
@@ -315,8 +315,8 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user', '--dry-run'])).toBe(0);
 
-    expect(h.fs.writes).toEqual([]);
-    expect(h.fs.mkdirs).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
+    expect(h.fs.projectMkdirs).toEqual([]);
     const printed = h.out.lines.filter((l) => l.startsWith('would create'));
     expect(printed.length).toBe(8);
     expect(h.out.text()).toContain('would create /app/src/modules/index.ts');
@@ -327,8 +327,8 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user', '--dir', '/elsewhere'])).toBe(0);
 
-    expect(h.fs.writes).toContain('/elsewhere/src/modules/index.ts');
-    expect(h.fs.writes.every((p) => p.startsWith('/elsewhere/'))).toBe(true);
+    expect(h.fs.projectWrites).toContain('/elsewhere/src/modules/index.ts');
+    expect(h.fs.projectWrites.every((p) => p.startsWith('/elsewhere/'))).toBe(true);
   });
 
   it('succeeds in a project that has no src/modules directory yet', async () => {
@@ -346,7 +346,7 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', '2fa'])).toBe(2);
 
-    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.projectWrites).toEqual([]);
   });
 
   it('appears in the schematic list for a decorated project', async () => {

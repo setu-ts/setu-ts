@@ -384,7 +384,24 @@ export interface IRequestContext {
    * is sent immediately and cleanup waits for the running handler — even past
    * shutdown: a handler still running when `stop()`'s drain bound expires has
    * its cleanup run when it settles, after `stop()` returned. Streaming
-   * responses also wait for end, error, or cancellation.
+   * responses also wait for end, error, or cancellation, or for the request's
+   * own `AbortSignal` aborting, whichever comes first: a client that leaves a
+   * stream the runtime never cancels still runs them once (on Cloudflare
+   * Workers the signal needs the `enable_request_signal` compatibility flag
+   * before the 2026-11-17 compatibility date). On that abort the body is
+   * cancelled first and the cleanups run once its `cancel()` settles, with no
+   * time limit, so a `cancel()` that never settles keeps the request's
+   * resources. The kernel waits for the source's `cancel()`, not for its
+   * `pull` or any pump it started, which no reader can see: a source that
+   * does work of its own (in `pull`, or a pump it started) must make its
+   * `cancel()` wait for that work, and a source with no `cancel()` gets no
+   * wait, so a limit released through `defer` does not cover work in its
+   * `pull`. With a logger registered, a wait still pending after 30 s logs
+   * one `warn` line (`Request cleanup still waiting for the response stream
+   * to stop; its resources are still held`, with `requestId`, `method`,
+   * `path` and `waitedMs`); it releases nothing.
+   * An abort never runs cleanups under a running handler: they wait for it to
+   * settle, so a handler that never settles keeps what it holds.
    * Calls after completion run immediately. Failures are reported at warn.
    * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
    * continues with the next cleanup. Later settlement is ignored. Synchronous

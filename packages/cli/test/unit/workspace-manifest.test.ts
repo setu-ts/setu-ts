@@ -27,6 +27,17 @@ function baseManifest(members: WorkspaceManifest['members']): WorkspaceManifest 
 }
 
 describe('generatedSecrets in the workspace manifest', () => {
+  it('V13-140 reads stored member envFilePaths after the flag rename', async () => {
+    const manifest = {
+      ...baseManifest([]),
+      members: [{ name: 'api', port: 3000, envFilePaths: ['config/local.env', '.env'] }],
+    };
+    const read = await readWorkspaceManifest(
+      fsWith({ '/ws/setu.workspace.json': JSON.stringify(manifest) }),
+      '/ws',
+    );
+    expect(read.ok && read.manifest.members[0]?.envFilePaths).toEqual(['config/local.env', '.env']);
+  });
   it('round-trips valid names and drops absent or empty lists', async () => {
     for (const generatedSecrets of [undefined, [], ['SESSION_SECRET', 'JWT_SECRET']]) {
       const member = {
@@ -77,7 +88,7 @@ describe('generatedSecrets in the workspace manifest', () => {
     ['a//b.env'],
     ['bad name.env'],
     ['.env.example'],
-  ])('refuses member env file paths outside the --env-file grammar (%j)', async (envFilePaths) => {
+  ])('refuses member env file paths outside the --dotenv grammar (%j)', async (envFilePaths) => {
     const source = { ...baseManifest([]), members: [{ name: 'web', port: 3000, envFilePaths }] };
     expect(
       (

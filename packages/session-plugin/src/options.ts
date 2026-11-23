@@ -188,6 +188,29 @@ export interface SessionPluginOptions {
    * behaviour (no seal, no compare).
    */
   readonly tenantBinding?: boolean;
+  /**
+   * How a store commit writes a session restored from the store. `'changes'` (default) reads the
+   * current row and writes it with this request's changes applied, so a concurrent request's keys
+   * survive and a key it deleted stays deleted; a missing row refuses the commit. `'snapshot'`
+   * writes this request's whole payload, for an application whose keys must change together.
+   *
+   * Neither mode is a transaction: concurrent changes to ONE key keep the last writer's, and two
+   * commits that interleave between one's read and its write can still lose a key.
+   * Applies only to the store strategy: set without `store`, it throws a `TypeError`.
+   * @since 0.14.0
+   */
+  readonly storeCommit?: 'changes' | 'snapshot';
+  /**
+   * Check the revocation markers on every store-held restore. Default `false`.
+   *
+   * A sign-out or regeneration writes a marker that every commit checks, so a request already in
+   * flight cannot undo it. A request that STARTS during a racing commit can still restore the row
+   * for one store round trip, between that commit's write and its check. `true` closes that window
+   * by reading both markers beside the row on every store-held restore (two extra keys per restore).
+   * Applies only to the store strategy: set without `store`, it throws a `TypeError`.
+   * @since 0.14.0
+   */
+  readonly restoreRevocationCheck?: boolean;
 }
 
 /** Fully-defaulted configuration the service and middleware read. */
@@ -205,6 +228,8 @@ export interface ResolvedSessionConfig {
   readonly idleTimeoutMs?: number;
   readonly maxCookieBytes: number;
   readonly tenantBinding: boolean;
+  readonly storeCommit: 'changes' | 'snapshot';
+  readonly restoreRevocationCheck: boolean;
 }
 
 /**
@@ -213,7 +238,8 @@ export interface ResolvedSessionConfig {
  * @param options - The caller's options
  * @returns The resolved configuration
  * @throws {TypeError} If a numeric option is not positive, `cookie.secure` is invalid,
- *   or `cookie.secure: 'auto'` conflicts with `cookie.sameSite: 'none'`
+ *   `cookie.secure: 'auto'` conflicts with `cookie.sameSite: 'none'`, or `storeCommit` or
+ *   `restoreRevocationCheck` is invalid or set without `store`
  * @since 0.2.0
  */
 export function resolveSessionConfig(options: SessionPluginOptions = {}): ResolvedSessionConfig {
@@ -241,6 +267,19 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
     );
   }
 
+  if (options.storeCommit !== undefined) {
+    requireStore(options, 'storeCommit');
+    if (options.storeCommit !== 'changes' && options.storeCommit !== 'snapshot') {
+      throw new TypeError("SessionPlugin option 'storeCommit' must be 'changes' or 'snapshot'.");
+    }
+  }
+  if (options.restoreRevocationCheck !== undefined) {
+    requireStore(options, 'restoreRevocationCheck');
+    if (typeof options.restoreRevocationCheck !== 'boolean') {
+      throw new TypeError("SessionPlugin option 'restoreRevocationCheck' must be a boolean.");
+    }
+  }
+
   // Built in two steps because exactOptionalPropertyTypes forbids assigning
   // `undefined` to an optional property — the optional keys are spread in only
   // when they have a value.
@@ -256,6 +295,8 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
     rolling: options.rolling ?? false,
     maxCookieBytes,
     tenantBinding: options.tenantBinding ?? true,
+    storeCommit: options.storeCommit ?? 'changes',
+    restoreRevocationCheck: options.restoreRevocationCheck ?? false,
   } as const;
 
   return {
@@ -300,6 +341,15 @@ function resolveExemptBearer(value: unknown): boolean {
     throw new TypeError("SessionPlugin option 'csrf.exemptBearer' must be a boolean.");
   }
   return value;
+}
+
+/** Rejects a store-strategy option set without a store. */
+function requireStore(options: SessionPluginOptions, name: string): void {
+  if (options.store === undefined) {
+    throw new TypeError(
+      `SessionPlugin option '${name}' applies only to the store strategy; set 'store' as well.`,
+    );
+  }
 }
 
 /** Rejects a non-positive or non-finite numeric option at configuration time. */

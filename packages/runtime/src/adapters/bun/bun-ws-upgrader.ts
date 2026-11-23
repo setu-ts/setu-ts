@@ -19,6 +19,7 @@ import {
   normalizeFrame,
   toTransportError,
 } from '../shared/web-socket-transport.ts';
+import { BUN_WS_MAX_MESSAGE_BYTES } from '../shared/websocket-ceiling.ts';
 
 /**
  * The per-socket data Bun carries from `server.upgrade()` through to every
@@ -48,6 +49,11 @@ export interface BunServerWebSocket extends WebSocketLike {
  * @since 0.2.0
  */
 export interface BunWebSocketHandlers {
+  /**
+   * Bun's per-message ceiling (`maxPayloadLength`), in bytes.
+   * @since 0.14.0
+   */
+  readonly maxPayloadLength?: number;
   /**
    * Called once the socket is live.
    *
@@ -90,6 +96,7 @@ export interface BunWebSocketHandlers {
  */
 export function createBunWebSocketHandlers(): BunWebSocketHandlers {
   return {
+    maxPayloadLength: BUN_WS_MAX_MESSAGE_BYTES,
     open(ws: BunServerWebSocket): void {
       ws.data.sink.onOpen(createWebSocketTransport(ws));
     },

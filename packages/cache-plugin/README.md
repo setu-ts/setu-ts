@@ -90,13 +90,64 @@ aggregate every tenant using the instance.
 `ReadableStream` cannot be replayed from a cache, so those requests are marked `X-Cache: MISS` and
 pass straight through.
 
-Concurrent misses for the same key are coalesced within one process: one request reaches a
-cacheable, buffered origin response and waiters replay it with `X-Cache: COALESCED`. A failed,
-streaming, or otherwise uncacheable leader is not replayed; every waiter runs the origin itself.
-Separate processes do not coordinate, so one overlapping successful batch can produce at most one
-origin call per process. `CacheService.getOrSet()` applies the same per-store coalescing to
-programmatic read-through calls; the capability is typed as `ICacheStore`, so narrow it with
+Concurrent misses for the same key are coalesced within one process, for requests carrying no cookie
+and no `Authorization` (one carrying either runs its own origin): one request reaches a cacheable,
+buffered origin response and waiters replay it with `X-Cache: COALESCED`. A failed, streaming, or
+otherwise uncacheable leader is not replayed; every waiter runs the origin itself. Separate
+processes do not coordinate, so one overlapping successful batch can produce at most one origin call
+per process. `CacheService.getOrSet()` applies the same per-store coalescing to programmatic
+read-through calls; the capability is typed as `ICacheStore`, so narrow it with
 `instanceof CacheService` first.
+
+### Per-visitor responses
+
+`cacheMiddleware` stores nothing it can tell belongs to one visitor; a response the application
+itself marks `public` is the application's claim that it is shared (the exceptions are below):
+
+- A response is not stored when its `Cache-Control` holds `private` or `no-store` or is malformed
+  (an unclosed quoted-string), or when it sets a cookie (as before), whatever the request.
+- A request carrying `Authorization`, or a credential cookie, is **credentialed**. It is served a
+  `HIT` only from an entry stored with `Cache-Control: public` whose `Vary` names neither `Cookie`
+  nor `Authorization`, never shares an origin run with another request, and its own response is
+  stored only when that response says `public`, varies on neither, and passes the checks above. A
+  bearer API that marks its responses `public` without `Vary: Authorization` is still cached.
+- A response whose `Vary` names `Cookie` or `Authorization` is stored only from a request carrying
+  no cookie and no `Authorization` at all, so the entry is the cookie-less variant, and it is served
+  only to such requests — also when `credentialCookies` names fewer cookies: a request carrying only
+  cookies it does not name skips such entries and, like a credentialed one, never shares an origin
+  run. A `Vary: *` response is never stored. A localized application, whose responses vary on
+  `Cookie` by default, is still cached for visitors without cookies.
+
+The middleware cannot know which cookie identifies a visitor, so by default **any cookie** makes a
+request credentialed, an analytics or consent cookie included: such a request is taken out of the
+cache. An application whose every visitor carries an unrelated cookie gets nothing shared-cached
+until it marks responses `public` or names its session cookie in `credentialCookies`:
+
+```typescript
+import { cacheMiddleware } from '@setu-ts/cache-plugin';
+
+export const pageCache = cacheMiddleware({ ttlSeconds: 60, credentialCookies: ['setu_session'] });
+```
+
+`credentialCookies: []` leaves only `Authorization`. With `@setu-ts/session-plugin`, a response for
+a request that restored a session holding application data, that read a CSRF token, or whose commit
+writes the session cookie is marked `private` unless the handler sets its own shared-cacheable
+directive (see below; the cookie-writing case is `private` whatever the handler set); an anonymous
+page that only read the session is marked `Vary: Cookie`, so it is stored for visitors without
+cookies only. The session plugin also sets `PER_VISITOR_RESPONSE_STATE_KEY` on a request that writes
+its session (an application key set, deleted or cleared, a `regenerate()` or a `destroy()`), reads a
+CSRF token, or reads a restored session holding application data, and `cacheMiddleware` never stores
+such a response, even when the handler marks it `public`. One case stays the application's: a
+response personalised without the session API (through `ctx.request.user` or a bearer token, say)
+that the handler marks `public` keeps that directive with no `Vary: Cookie`, so it can be stored and
+replayed (`RequestCacheMarking.finish()` keeps an application directive, as it must for public
+assets). A page that read the session depends on the visitor's cookies even when its handler
+replaces the plugin's `Vary: Cookie` and sets `public`: the session plugin sets
+`COOKIE_DEPENDENT_RESPONSE_STATE_KEY` at the first read, and `cacheMiddleware` stores such a
+response only for a request carrying no cookie and no `Authorization`, with `Cookie` added to the
+stored `Vary`, whichever side of the session middleware it runs on. Never mark a personalised
+response `public`. Register `cacheMiddleware` outside the session middleware (a priority below 260)
+where you can, so a cached anonymous page is replayed before any session work.
 
 ## Exports
 

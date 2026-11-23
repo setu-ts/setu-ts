@@ -200,6 +200,9 @@ class FrameworkRequest implements IRequest {
    * On Node, `@hono/node-server`'s lightweight Request creates its
    * `AbortController` on first `signal` access, so reading it eagerly cost one
    * controller per request even for the majority of handlers that never abort.
+   * Request logging reads it once per logged request (the 499 rule), so an
+   * application that logs requests pays that controller; one that does not,
+   * does not.
    */
   get signal(): AbortSignal {
     return this.#raw.signal;

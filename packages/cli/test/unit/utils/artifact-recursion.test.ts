@@ -126,7 +126,7 @@ describe('recursive artifact identity', () => {
         expect(errors.join('\n')).toContain(`src/controllers/a/${name}.controller.ts`);
         expect(errors.join('\n')).toContain(`src/controllers/b/${name}.controller.ts`);
       }
-      expect(fs.writes).toEqual([]);
+      expect(fs.projectWrites).toEqual([]);
     });
 
     it(`refuses generating another ${name} beside a nested controller, without writes`, async () => {
@@ -145,7 +145,7 @@ describe('recursive artifact identity', () => {
         }),
       ).toBe(1);
       expect(errors.join('\n')).toContain(`the controller at billing/${name}`);
-      expect(fs.writes).toEqual([]);
+      expect(fs.projectWrites).toEqual([]);
     });
   }
 
@@ -271,7 +271,7 @@ describe('module declaration identity', () => {
           }),
         ).toBe(1);
         expect(errors.join('\n')).toContain(`the controller at controllers/${name}`);
-        expect(base.writes).toEqual([]);
+        expect(base.projectWrites).toEqual([]);
       }
     });
   }
@@ -378,7 +378,7 @@ describe('directory link handling', () => {
       expect(lines).toContain(
         `Skipped directory src/controllers/${name}: its path cannot be verified without following a link inside the project.`,
       );
-      expect(base.writes).toEqual([]);
+      expect(base.projectWrites).toEqual([]);
     }
   });
 
@@ -415,7 +415,7 @@ export const registerGeneratedRoutes = registerOrdersRoutes;
       expect(errors.join('\n')).toContain(`Skipped directory src/controllers/${folder}`);
       expect(base.read('/app/src/controllers/index.ts')).toBe(barrel);
       syntax(base.read('/app/src/controllers/index.ts'));
-      expect(base.writes).toEqual([]);
+      expect(base.projectWrites).toEqual([]);
     });
   }
 
@@ -448,7 +448,7 @@ export const registerGeneratedRoutes = registerOrdersRoutes;
       ).toBe(1);
       expect(base.read('/app/src/modules/index.ts')).toBe(barrel);
       syntax(base.read('/app/src/modules/index.ts'));
-      expect(base.writes).toEqual([]);
+      expect(base.projectWrites).toEqual([]);
     });
   }
 });

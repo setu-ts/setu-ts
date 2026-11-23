@@ -15,12 +15,15 @@ unregister the global provider. Use one global provider per process.
 Install peers within the ranges declared by this package's `peerDependencies`, where this package is
 installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
 be loaded by a root-hoisted plugin. `setu add telemetry` records `@opentelemetry/api`,
-`@opentelemetry/sdk-trace-base`, `@opentelemetry/resources` and
-`@opentelemetry/context-async-hooks`, plus `@opentelemetry/exporter-trace-otlp-http` everywhere but
-Cloudflare Workers; on Node it also records `@opentelemetry/instrumentation` and, when the project
-has a Redis client, its instrumentation (`@opentelemetry/instrumentation-ioredis` or
-`@opentelemetry/instrumentation-redis`). See
+`@opentelemetry/sdk-trace-base`, `@opentelemetry/resources` and `@opentelemetry/context-async-hooks`
+on every runtime; the microservice template lists these four peers too. It also records
+`@opentelemetry/exporter-trace-otlp-http` everywhere but Cloudflare Workers; on Node it records
+`@opentelemetry/instrumentation` and, when the project has a Redis client, its instrumentation
+(`@opentelemetry/instrumentation-ioredis` or `@opentelemetry/instrumentation-redis`). See
 [Optional peers in a workspace](https://setu-ts.dev/docs/plugins/#optional-peers-in-a-workspace).
+
+An application that also uses `@google-cloud/bigtable` must list `@opentelemetry/resources@^2.9.0`
+itself because Bigtable pulls version 1; the CLI writes this pin.
 
 ## Installation
 

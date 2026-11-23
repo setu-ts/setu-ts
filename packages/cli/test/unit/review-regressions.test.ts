@@ -139,7 +139,7 @@ describe('M113i review regressions', () => {
         error: error.sink,
       }),
     ).toBe(1);
-    expect(error.text()).toContain(`WOULD REFUSE: ${cwd}/app/main.ts already exists`);
+    expect(error.text()).toContain(`WOULD REFUSE: ${cwd}/app already exists and is not empty`);
   });
 
   it('classifies formatted managed custom output identically in dry and real runs', async () => {

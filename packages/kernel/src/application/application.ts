@@ -8,6 +8,7 @@
 import {
   CAPABILITIES,
   createRedactionService,
+  describeError,
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
@@ -64,8 +65,10 @@ import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
+import type { StallWatch } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { DispatchedRequest } from './dispatched-request.ts';
+import { StartCancelledError } from './start-cancelled-error.ts';
 import { guardEmptyChunks } from '../context/stream-guard.ts';
 import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
@@ -116,6 +119,35 @@ const URL_USERINFO_MASK = createRedactionService({ fields: {} });
  */
 export function collectorOf(app: IApplication): DiagnosticsCollector | undefined {
   return COLLECTORS.get(app);
+}
+
+/** Drain bound when `start()` names none. */
+const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
+/** Largest drain bound a runtime timer can honour. */
+const MAX_DRAIN_TIMEOUT_MS = 2_147_483_647;
+/** Interval between drain polls. */
+const DRAIN_POLL_MS = 50;
+
+/**
+ * Validates `StartOptions.drainTimeoutMs`.
+ *
+ * @param value - The supplied option
+ * @returns The bound to use
+ * @throws {TypeError} When it is not a whole number from 0 to 2 147 483 647
+ */
+function resolveDrainTimeout(value: unknown): number {
+  if (value === undefined) return DEFAULT_DRAIN_TIMEOUT_MS;
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > MAX_DRAIN_TIMEOUT_MS
+  ) {
+    throw new TypeError(
+      `start(): drainTimeoutMs must be a whole number of milliseconds from 0 to ${MAX_DRAIN_TIMEOUT_MS}.`,
+    );
+  }
+  return value;
 }
 
 /** Options for {@linkcode createApplication}. */
@@ -303,6 +335,29 @@ class Application implements IKernelApplication {
   #stopping = false;
   /** Cached in-flight/completed shutdown, so stop() runs its side effects once. */
   #stopPromise: Promise<void> | null = null;
+  /** The running `start()`, while it runs; `stop()` cancels it instead of stopping. */
+  #startPromise: Promise<void> | null = null;
+  /** Rejects the running start's awaited steps with {@linkcode StartCancelledError}. */
+  #cancelStart: (() => void) | null = null;
+  /** Settles (rejecting) when `stop()` cancels the running start. */
+  #startCancelled: Promise<never> | null = null;
+  #cancelled = false;
+  /** Set while a start that already failed runs its close hooks. */
+  #startFailing = false;
+  /** Created on first read of `ctx.signal`, so an unread signal costs nothing. */
+  #startAbort: AbortController | undefined;
+  /** Removes the kernel's fatal-error observer; set while subscribed. */
+  #unsubscribeFatal: (() => void) | undefined;
+  /** The drain bound `start()` accepted, read by `stop()`. */
+  #drainTimeoutMs = DEFAULT_DRAIN_TIMEOUT_MS;
+  /** Set once startup passed its last cancellation check; a stop then shuts down normally. */
+  #startCommitted = false;
+  /** Requests whose streamed RPC reply holds the shutdown drain until it ends. */
+  readonly #rpcStreams = new WeakSet<IRequestContext>();
+  /** Clears each pending stream-cancel stall timer; `stop()` runs them all. */
+  readonly #stallTimers = new Set<() => void>();
+  /** Set once `stop()` has cleared the stall timers: an abort after it sets no timer. */
+  #stallTimersClosed = false;
   /**
    * The kernel diagnostics collector — `undefined` unless the application was
    * created with `diagnostics` explicitly enabled. Every read of this field
@@ -538,16 +593,35 @@ class Application implements IKernelApplication {
           'Create a new application instead.',
       );
     }
+    // Refused before any plugin runs, so a wrong value is retryable.
+    this.#drainTimeoutMs = resolveDrainTimeout(options?.drainTimeoutMs);
     // Mark as started up-front so plugins cannot register more plugins during
     // startup, but roll it back if any startup step throws (see the catch
     // below) so a start that failed before any plugin registered can be
     // corrected and retried; later failures are refused above.
     this.#started = true;
+    this.#cancelled = false;
+    this.#startCommitted = false;
+    this.#startCancelled = new Promise<never>((_resolve, reject) => {
+      this.#cancelStart = () => reject(new StartCancelledError());
+    });
+    // Never an unhandled rejection: every awaited step races it, and a start
+    // that finishes first leaves it pending forever.
+    this.#startCancelled.catch(() => undefined);
+    // Tracked before any plugin code runs: a plugin that calls `stop()`
+    // synchronously from `register()` must find a start to cancel.
+    const starting = Promise.resolve().then(() => this.#start(options));
+    this.#startPromise = starting;
+    await starting;
+  }
+
+  async #start(options?: StartOptions): Promise<void> {
     try {
       await this.#runStartup(options);
       // Startup fully completed (including listen): the application serves.
       this.#collector?.markRunning();
     } catch (error) {
+      if (!this.#cancelled) this.#startFailing = true;
       // Plugins may have connected resources and registered their `onClose`
       // hook before a later registration, environment validation, or `onInit`
       // step fails. `stop()` deliberately no-ops after a failed start, so this
@@ -560,11 +634,124 @@ class Application implements IKernelApplication {
         // Best effort. A broken cleanup must not hide the startup failure, and
         // later hooks cannot be reached once `runClose()` rejects.
       }
+      this.#unsubscribeFatalErrors();
       this.#started = false;
       // Terminal failure state: retained node/edge/event buffers are cleared
       // inside, while the original error below is preserved untouched.
       this.#collector?.markStartupFailed();
       throw error;
+    } finally {
+      this.#startPromise = null;
+      this.#cancelStart = null;
+      this.#startFailing = false;
+    }
+  }
+
+  /**
+   * Races one awaited startup step against cancellation, so a plugin hook that
+   * never settles cannot hold `stop()`. The abandoned step's own rejection is
+   * swallowed: the start has already failed with the cancellation.
+   *
+   * @param step - The step being awaited
+   * @returns What the step resolved to
+   * @throws {StartCancelledError} When `stop()` cancelled the start first
+   */
+  #raceStart<T>(step: Promise<T>): Promise<T> {
+    const cancelled = this.#startCancelled;
+    if (cancelled === null) return step;
+    step.catch(() => undefined);
+    // Checked first: a step that has already resolved would otherwise win
+    // the race against a cancellation that came before it was awaited.
+    if (this.#cancelled) return cancelled;
+    // Re-checked after the race: a step can settle first while a `stop()`
+    // reached through a promise chain lands before this continuation runs.
+    return Promise.race([step, cancelled]).then((value) => (this.#cancelled ? cancelled : value));
+  }
+
+  /**
+   * Throws the start's cancellation when `stop()` has already been called.
+   * Synchronous, and called at each point where startup resumes after an
+   * await and would otherwise run further steps (the next plugin's
+   * `register`, environment checks, compile, seal, `setHandler`, `listen`),
+   * so no yield opens a gap. A bind that resolved before a late cancel is
+   * closed after the `listen` await.
+   *
+   * @throws {StartCancelledError} When the start was cancelled
+   */
+  #continueStart(): void {
+    if (this.#cancelled) throw new StartCancelledError();
+  }
+
+  /**
+   * Cancels the running start for `stop()`: aborts `ctx.signal`, rejects the
+   * awaited step, and puts the lifecycle into its post-cancellation mode
+   * before `start()`'s own catch runs the close hooks.
+   */
+  #cancelRunningStart(): void {
+    this.#cancelled = true;
+    this.#startAbort?.abort(new StartCancelledError());
+    this.#lifecycle.cancelRegistrations((hook) => {
+      void Promise.resolve()
+        .then(hook)
+        .catch((error: unknown) => {
+          this.#logSafely('warn', 'Close hook registered after a cancelled start failed', {
+            error: describeError(error),
+          });
+        });
+    });
+    this.#logSafely('warn', 'Startup cancelled');
+    this.#cancelStart?.();
+  }
+
+  /** The signal plugins see as `ctx.signal`, created on first read. */
+  #startSignal(): AbortSignal {
+    if (this.#startAbort === undefined) {
+      this.#startAbort = new AbortController();
+      if (this.#cancelled) this.#startAbort.abort(new StartCancelledError());
+    }
+    return this.#startAbort.signal;
+  }
+
+  /** Subscribes the fatal-error log once the runtime capability resolves. */
+  #subscribeFatalErrors(): void {
+    if (this.#unsubscribeFatal !== undefined || !this.#registry.has(CAPABILITIES.RUNTIME)) return;
+    const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    this.#unsubscribeFatal = runtime.onFatalError?.((error, origin) => {
+      this.#logSafely('fatal', 'Process failed', { origin, error: describeError(error) });
+    });
+  }
+
+  /** Removes the fatal-error log, if subscribed. */
+  #unsubscribeFatalErrors(): void {
+    const unsubscribe = this.#unsubscribeFatal;
+    this.#unsubscribeFatal = undefined;
+    try {
+      unsubscribe?.();
+    } catch {
+      // A broken runtime unsubscribe must not change a stop or a failed start.
+    }
+  }
+
+  /**
+   * Writes one kernel line through the registered logger. A missing or
+   * itself-broken logger degrades silently: no safe channel remains without
+   * violating the no-console rule, and logging must never change the outcome
+   * it reports.
+   *
+   * @param level - Log level
+   * @param message - Fixed message
+   * @param metadata - Structured fields
+   */
+  #logSafely(
+    level: 'info' | 'warn' | 'error' | 'fatal',
+    message: string,
+    metadata?: Record<string, unknown>,
+  ): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) return;
+      this.#registry.get<ILogger>(CAPABILITIES.LOGGER)[level](message, metadata);
+    } catch {
+      // See above.
     }
   }
 
@@ -660,6 +847,7 @@ class Application implements IKernelApplication {
     };
 
     const lazyGetters: Record<string, () => object> = {
+      signal: () => this.#startSignal(),
       runtime: () => registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
       config: () => registry.get<IConfig>(CAPABILITIES.CONFIG),
       logger: () => registry.get<ILogger>(CAPABILITIES.LOGGER),
@@ -667,6 +855,7 @@ class Application implements IKernelApplication {
       container: () => registry.get<IContainer>(CAPABILITIES.DI_CONTAINER),
     };
     const lazyAvailable: Record<string, () => boolean> = {
+      signal: () => true,
       runtime: () => registry.has(CAPABILITIES.RUNTIME),
       config: () => registry.has(CAPABILITIES.CONFIG),
       logger: () => registry.has(CAPABILITIES.LOGGER),
@@ -736,10 +925,15 @@ class Application implements IKernelApplication {
           optionalDependencies: plugin.optionalDependencies ?? [],
           consumes: plugin.consumes ?? [],
         });
+        // The next plugin's register() is a startup step too.
+        this.#continueStart();
         const registerOperation = collector?.beginOperation();
         try {
-          await plugin.register(ctx);
-          await this.#lifecycle.runRegister();
+          await this.#raceStart(Promise.resolve(plugin.register(ctx)));
+          // The runtime provider registers first; observe fatal errors from
+          // the moment it exists.
+          this.#subscribeFatalErrors();
+          await this.#raceStart(this.#lifecycle.runRegister());
         } catch (error) {
           if (registerOperation !== undefined) {
             collector?.observeLifecycleEvent(
@@ -764,6 +958,7 @@ class Application implements IKernelApplication {
       this.#registeringPlugin = undefined;
     }
 
+    this.#continueStart();
     // 4. Validate collected env specs against runtime.env
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
     // Fallback initialization for a runtime registered as a LAZY factory,
@@ -776,7 +971,8 @@ class Application implements IKernelApplication {
     this.#validateEnvironment(runtime);
 
     // 5. Run init hooks
-    await this.#lifecycle.runInit();
+    await this.#raceStart(this.#lifecycle.runInit());
+    this.#continueStart();
 
     // 5b. Warn about consumed capabilities that no plugin provides. Checked
     //     here — after all plugins have registered and run their init hooks —
@@ -803,7 +999,8 @@ class Application implements IKernelApplication {
     this.#errorResponder = this.#resolveErrorResponder(chain);
 
     // 7. Run bootstrap hooks
-    await this.#lifecycle.runBootstrap();
+    await this.#raceStart(this.#lifecycle.runBootstrap());
+    this.#continueStart();
     registry.seal();
 
     // 8. Set the handler (always, so app.fetch works even without listen — CF Workers path)
@@ -811,6 +1008,7 @@ class Application implements IKernelApplication {
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       adapter.setHandler((request: IRequest) => this.#handleRequest(request));
     }
+    this.#continueStart();
 
     // 9. Listen only if adapter + port are available
     if (options?.port !== undefined) {
@@ -822,22 +1020,80 @@ class Application implements IKernelApplication {
       }
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
       const listenOperation = collector?.beginOperation();
+      this.#continueStart();
+      const listening = adapter.listen(options.port, options.hostname);
       try {
-        this.#serverHandle = await adapter.listen(options.port, options.hostname);
+        this.#serverHandle = await this.#raceStart(listening);
       } catch (error) {
+        if (this.#cancelled) {
+          // A bind that completes after the cancellation must not stay open.
+          listening.then(
+            (handle) => adapter.close(handle).catch(() => undefined),
+            () => undefined,
+          );
+        }
         if (listenOperation !== undefined) {
           collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'error');
         }
         throw error;
       }
+      if (this.#cancelled) {
+        // A stop() that landed after the bind resolved: release the port and
+        // report the cancellation, as for a bind that resolved after it.
+        const handle = this.#serverHandle;
+        this.#serverHandle = null;
+        await adapter.close(handle).catch(() => undefined);
+        throw new StartCancelledError();
+      }
       if (listenOperation !== undefined) {
         collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
       }
+      // Committed before the listening line: a logger that calls stop() from
+      // it gets the normal shutdown, not a cancellation that cannot apply.
+      this.#startCommitted = true;
       this.#announceListening(options.port, options.hostname);
     }
+    // Past the last cancellation check: a stop() from here on waits for the
+    // start to settle and shuts down normally rather than reporting a
+    // cancellation that can no longer take effect.
+    this.#startCommitted = true;
   }
 
   stop(): Promise<void> {
+    // A stop during start cancels the start instead of running a shutdown
+    // beside it: the shutdown used to run before a plugin still connecting had
+    // registered its close hook, and the start then carried on to `listen`.
+    // The returned promise settles once the start has unwound (its own catch
+    // runs the close hooks). A start that finished before the cancellation
+    // reached it is stopped normally.
+    if (this.#startPromise !== null) {
+      // A start that has already failed is unwinding on its own: wait for it,
+      // and do not report it as cancelled.
+      if (this.#startFailing) {
+        return this.#startPromise.then(
+          () => undefined,
+          () => undefined,
+        );
+      }
+      if (this.#startCommitted) {
+        this.#stopPromise ??= this.#startPromise.then(
+          () => this.#doStop(),
+          () => undefined,
+        );
+        return this.#stopPromise;
+      }
+      if (this.#stopPromise === null) {
+        const starting = this.#startPromise;
+        // Published before the cancellation logs, so a logger that calls
+        // stop() from `Startup cancelled` shares it instead of cancelling again.
+        this.#stopPromise = starting.then(
+          () => this.#doStop(),
+          () => undefined,
+        );
+        this.#cancelRunningStart();
+      }
+      return this.#stopPromise;
+    }
     // No-op if the application never started (e.g. a failed start() or a
     // bare createApplication() used only for inject()). Avoids a confusing
     // "No service registered for capability 'runtime'" from #drainRequests.
@@ -851,8 +1107,15 @@ class Application implements IKernelApplication {
     if (this.#stopPromise !== null) {
       return this.#stopPromise;
     }
-    this.#stopPromise = this.#doStop();
-    return this.#stopPromise;
+    // Published before `#doStop()` runs its first log line, so a logger that
+    // calls stop() from it shares this shutdown instead of starting another.
+    let settle!: { resolve: () => void; reject: (error: unknown) => void };
+    const stopping = new Promise<void>((resolve, reject) => {
+      settle = { resolve, reject };
+    });
+    this.#stopPromise = stopping;
+    this.#doStop().then(settle.resolve, settle.reject);
+    return stopping;
   }
 
   async #doStop(): Promise<void> {
@@ -861,13 +1124,25 @@ class Application implements IKernelApplication {
     // `finally` below, whatever the shutdown outcome — including a rejecting
     // shutdown or close hook.
     this.#collector?.markStopping();
+    const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    const startedAt = runtime.hrtime();
+    this.#logSafely('info', 'Server stopping', { inFlight: this.#inFlight });
     let shutdownFailed = false;
     try {
       await this.#runShutdownSequence();
+      this.#logSafely('info', 'Server stopped', { durationMs: runtime.hrtime() - startedAt });
     } catch (error) {
       shutdownFailed = true;
+      this.#logSafely('warn', 'Server stopped', {
+        durationMs: runtime.hrtime() - startedAt,
+        error: describeError(error),
+      });
       throw error;
     } finally {
+      this.#unsubscribeFatalErrors();
+      // A stuck stream's stall warning has nothing left to say after stop.
+      this.#stallTimersClosed = true;
+      for (const clear of [...this.#stallTimers]) clear();
       this.#collector?.markClosed(shutdownFailed);
     }
   }
@@ -901,12 +1176,14 @@ class Application implements IKernelApplication {
     // Set before the next await so a request arriving during the drain window
     // sees the shutting-down state and gets a 503.
     this.#stopping = true;
+    this.#beginDrain();
 
-    // Wait for in-flight requests to drain (max 10s). A successfully-started
-    // application always has a runtime registered (start() requires a runtime
-    // provider) and stop() short-circuits before this when never started, so
-    // the runtime is always available here.
-    await this.#drainRequests();
+    // Wait for in-flight requests to drain, up to `drainTimeoutMs`. A
+    // successfully-started application always has a runtime registered
+    // (start() requires a runtime provider) and stop() short-circuits before
+    // this when never started, so the runtime is always available here.
+    const drain = await this.#drainRequests();
+    this.#logSafely(drain.timedOut ? 'warn' : 'info', 'Shutdown drain finished', drain);
 
     // Close server if listening
     if (this.#serverHandle !== null) {
@@ -942,7 +1219,18 @@ class Application implements IKernelApplication {
       );
     }
     const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
-    return await adapter.fetch(request);
+    const response = await adapter.fetch(request);
+    // A `HEAD` answer carries the `GET`'s headers and no body (RFC 9110 §9.3.2),
+    // as `dispatch()` and `inject()` give it; a native server strips it on the
+    // wire, but the `Response` handed back here is the caller's to read. A
+    // discarded stream is cancelled so its source and cleanups are released.
+    if (request.method !== 'HEAD' || response.body === null) return response;
+    void response.body.cancel().catch(() => {});
+    return new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
   }
 
   /** Runs a web request through the pipeline, preserving streams and cancellation. */
@@ -951,7 +1239,9 @@ class Application implements IKernelApplication {
     const snapshot = response.snapshot();
     // Match the adapters: the web Response constructor refuses even an empty
     // body at these statuses, and discarding a stream must release its source.
-    if ([204, 205, 304].includes(snapshot.status)) {
+    // A `HEAD` answer carries the `GET`'s headers and no body (RFC 9110 §9.3.2),
+    // as a real server sends it.
+    if ([204, 205, 304].includes(snapshot.status) || request.method === 'HEAD') {
       if (snapshot.streaming) void snapshot.body.cancel().catch(() => {});
       return new Response(null, { status: snapshot.status, headers: snapshot.headers });
     }
@@ -1028,7 +1318,7 @@ class Application implements IKernelApplication {
     }
 
     const syntheticRequest = new InjectedRequest(
-      request.method as HttpMethod,
+      request.method.toUpperCase() as HttpMethod,
       fullUrl,
       headers,
       bodyBytes,
@@ -1038,6 +1328,23 @@ class Application implements IKernelApplication {
 
     const response = await this.#handleRequest(syntheticRequest);
     const snapshot = response.snapshot();
+
+    // A `HEAD` answer has the `GET`'s headers and no body (RFC 9110 §9.3.2):
+    // what a real server sends, including for a streamed `GET`, whose source
+    // is cancelled so its producer stops and its cleanups run.
+    if (request.method.toUpperCase() === 'HEAD') {
+      // Started, not awaited: a source whose cancel() never settles keeps its
+      // request's resources, but must not keep this answer from returning.
+      if (snapshot.streaming) void snapshot.body.cancel().catch(() => undefined);
+      return {
+        statusCode: snapshot.status,
+        headers: snapshot.headers,
+        body: null,
+        json<T>(): T {
+          throw new Error('No JSON body available');
+        },
+      };
+    }
 
     // A streaming response cannot be presented as a `string` body without
     // draining the live stream, which would consume it. Say so explicitly
@@ -1119,7 +1426,7 @@ class Application implements IKernelApplication {
     let handle: RequestContextHandle;
     let path: string;
     try {
-      handle = createRequestContext(request, this.#registry, runtime);
+      handle = createRequestContext(request, this.#registry, runtime, this.#onRequestAborted);
       path = handle.ctx.request.path;
     } catch {
       return this.#badRequest(request);
@@ -1851,6 +2158,9 @@ class Application implements IKernelApplication {
     const response = ctx.response as ResponseBuilder;
     const pendingHandler = handle.pendingHandler;
     if (pendingHandler !== undefined && !handle.handlerSettled) {
+      // The early response is handed back now: an abort from here on is not a
+      // client that left before it.
+      handle.disarmAbort();
       // Keep the request in the shutdown drain, and leave defer open for work
       // registered by selector or handler work after this early response has been sent.
       const finish = async (): Promise<void> => {
@@ -1869,12 +2179,20 @@ class Application implements IKernelApplication {
         const complete = (): void => {
           void this.#drainTracked(handle, pendingHandler).then(finish);
         };
+        // The signal lets a client that leaves cancel the source even on a
+        // runtime that never cancels the body; the cleanups still wait for the
+        // running handler.
         response.stream(
           wrapDeferredStream(
-            guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+            this.#guardStream(ctx, streamed),
             [],
             this.#registry,
             complete,
+            ctx.request.signal,
+            undefined,
+            // A source whose cancel() never settles holds the handler's
+            // resources past its settle: report that wait as for any stream.
+            this.#stallWatch(ctx),
           ),
           response.streamOptions,
         );
@@ -1883,16 +2201,41 @@ class Application implements IKernelApplication {
     }
     const streamed = response.streamingBody;
     if (streamed !== undefined) {
+      // A streamed body watches the signal itself from here on.
+      handle.disarmAbort();
       // Every streamed body leaves through here (adapters and dispatch alike), so
       // this is the one place an empty-chunk source can be stopped from starving
       // the event loop.
-      response.stream(
-        guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
-        response.streamOptions,
-      );
+      response.stream(this.#guardStream(ctx, streamed), response.streamOptions);
     }
-    const cleanups = handle.takeDeferred();
+    // A streamed RPC reply holds the drain until it ends, so a gRPC server
+    // stream in flight at shutdown finishes instead of being cut, and so does
+    // a stream whose request registered `ctx.defer` cleanups. Other streams
+    // (SSE above all) are released here, as before: SSE closes its
+    // connections only in `onClose`, after the drain, so holding them would
+    // make every stop wait out the whole bound. They are still wrapped so a
+    // client that leaves cancels the source.
+    const cleanups =
+      handle.takeDeferred() ??
+      (streamed !== undefined && this.#rpcStreams.has(ctx) ? [] : undefined);
     if (cleanups === undefined) {
+      handle.disarmAbort();
+      if (streamed !== undefined) {
+        // A plain stream leaves the drain now, as before, but still learns
+        // that its client left: on a runtime that never cancels the body
+        // (workerd) the signal is the only notice. Its completion is not
+        // counted, so drain membership is unchanged.
+        response.stream(
+          wrapDeferredStream(
+            response.streamingBody ?? streamed,
+            [],
+            this.#registry,
+            () => {},
+            ctx.request.signal,
+          ),
+          response.streamOptions,
+        );
+      }
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
       return response;
@@ -1901,11 +2244,16 @@ class Application implements IKernelApplication {
     if (body === undefined) {
       const pending = runDeferred(cleanups, this.#registry);
       if (pending === undefined) {
+        handle.disarmAbort();
         this.#inFlight--;
         this.#completeRequest(ctx, outcome);
         return response;
       }
+      // The buffered response waits for its asynchronous cleanup: a client
+      // that leaves meanwhile has not received it, so the abort report stays
+      // armed until the hand-back.
       return pending.then(() => {
+        handle.disarmAbort();
         this.#inFlight--;
         this.#completeRequest(ctx, outcome);
         return response;
@@ -1916,11 +2264,88 @@ class Application implements IKernelApplication {
       this.#completeRequest(ctx, outcome);
     };
     response.stream(
-      wrapDeferredStream(body, cleanups, this.#registry, complete),
+      wrapDeferredStream(
+        body,
+        cleanups,
+        this.#registry,
+        complete,
+        ctx.request.signal,
+        () => {
+          // The context's watcher already reported an abort before settle.
+          if (!handle.abortReported) this.#onRequestAborted(ctx);
+        },
+        this.#stallWatch(ctx),
+      ),
       response.streamOptions,
     );
     return response;
   }
+
+  /**
+   * Wraps a streamed body in the empty-chunk guard, with a source failure
+   * logged once against this request before the adapter aborts the response.
+   *
+   * @param ctx - The request the body answers
+   * @param body - The handler's streamed body
+   * @returns The guarded body
+   */
+  #guardStream(ctx: IRequestContext, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+    // The status sent with this stream: a handler still running may change the
+    // builder's status after an early response, which the client never sees.
+    const status = ctx.response.snapshot().status;
+    return guardEmptyChunks(
+      body,
+      this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
+      (error) => {
+        this.#logSafely('error', 'Response stream failed', {
+          requestId: ctx.id,
+          method: ctx.request.method,
+          path: ctx.request.path,
+          status,
+          error: describeError(error),
+        });
+      },
+    );
+  }
+
+  /**
+   * The stall watch for a streamed body's abort, or none without a logger
+   * (then no timer is set). Its one line carries only the request id, method,
+   * path and the wait — never headers, query, body or error text.
+   */
+  #stallWatch(ctx: IRequestContext): StallWatch | undefined {
+    if (!this.#registry.has(CAPABILITIES.LOGGER)) return undefined;
+    return {
+      open: () => !this.#stallTimersClosed,
+      warn: (waitedMs) => {
+        this.#logSafely(
+          'warn',
+          'Request cleanup still waiting for the response stream to stop; its resources are still held',
+          { requestId: ctx.id, method: ctx.request.method, path: ctx.request.path, waitedMs },
+        );
+      },
+      track: (clear) => {
+        this.#stallTimers.add(clear);
+      },
+      untrack: (clear) => {
+        this.#stallTimers.delete(clear);
+      },
+    };
+  }
+
+  /**
+   * Logs a request whose own signal aborted before its response was sent (a
+   * client that left, or a caller's deadline). Its cleanups wait for the
+   * handler to settle; only a streamed body's run on the abort. An arrow
+   * property so it can be handed to every request context without a bind.
+   */
+  readonly #onRequestAborted = (ctx: IRequestContext): void => {
+    this.#logSafely('info', 'Request aborted before completion', {
+      requestId: ctx.id,
+      method: ctx.request.method,
+      path: ctx.request.path,
+    });
+  };
 
   /**
    * Tries a WebSocket upgrade after the middleware pipeline and before route
@@ -2260,6 +2685,7 @@ class Application implements IKernelApplication {
       return;
     }
     if (body instanceof ReadableStream) {
+      this.#rpcStreams.add(ctx);
       builder.stream(body, trailers === undefined ? undefined : { trailers });
       return;
     }
@@ -2609,25 +3035,49 @@ class Application implements IKernelApplication {
     }
   }
 
-  async #drainRequests(): Promise<void> {
+  /**
+   * Tells the adapter the drain has begun (HTTP/2 `GOAWAY`, idle keep-alive
+   * connections closed), so clients stop sending here while in-flight work
+   * finishes. A throw is logged and never stops the shutdown.
+   */
+  #beginDrain(): void {
+    const handle = this.#serverHandle;
+    if (handle === null || !this.#registry.has(CAPABILITIES.HTTP_ADAPTER)) return;
+    const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
+    if (adapter.beginDrain === undefined) return;
+    try {
+      adapter.beginDrain(handle);
+    } catch (error) {
+      this.#logSafely('warn', 'Beginning the shutdown drain failed', {
+        error: describeError(error),
+      });
+    }
+  }
+
+  async #drainRequests(): Promise<{ durationMs: number; remaining: number; timedOut: boolean }> {
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
     // Monotonic clock: this is a duration budget, so it must not be measured
     // with `now()` (wall clock), which an NTP step can move backwards — cutting
-    // the drain short or extending it past the intended 10s.
-    const deadline = runtime.hrtime() + 10_000;
+    // the drain short or extending it past the configured bound.
+    const startedAt = runtime.hrtime();
+    const deadline = startedAt + this.#drainTimeoutMs;
     // Iteration cap: a manual test clock that never advances would otherwise
-    // spin forever (the deadline never arrives). 200 polls × 50ms ≈ 10s of
-    // real polling under a normal clock, and a hard ceiling regardless.
+    // spin forever (the deadline never arrives). One poll per interval of the
+    // bound, plus one, is the bound's worth of real polling under a normal
+    // clock, and a hard ceiling regardless.
     let polls = 0;
-    const MAX_POLLS = 200;
+    const maxPolls = Math.ceil(this.#drainTimeoutMs / DRAIN_POLL_MS) + 1;
 
-    while (this.#inFlight > 0 && runtime.hrtime() < deadline && polls < MAX_POLLS) {
+    while (this.#inFlight > 0 && runtime.hrtime() < deadline && polls < maxPolls) {
       polls++;
-      // Poll via runtime.setTimeout (max 10s)
+      // Never past the deadline: the last poll waits only the time remaining.
+      const wait = Math.min(DRAIN_POLL_MS, Math.max(0, deadline - runtime.hrtime()));
       await new Promise<void>((resolve) => {
-        runtime.setTimeout(() => resolve(), 50);
+        runtime.setTimeout(() => resolve(), wait);
       });
     }
+    const remaining = this.#inFlight;
+    return { durationMs: runtime.hrtime() - startedAt, remaining, timedOut: remaining > 0 };
   }
 }
 

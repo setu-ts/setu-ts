@@ -34,7 +34,7 @@ export const REST_PLUGINS: readonly Wiring[] = [
   RUNTIME_WIRING,
   // No `args` here on purpose: the dotenv path is template MANIFEST data, and
   // `configModule` renders it through one shared `renderConfigOptions`. A
-  // literal here as well would be a second source of truth that `--env-file`
+  // literal here as well would be a second source of truth that `--dotenv`
   // silently overrides.
   { pkg: 'config-plugin', symbol: 'ConfigPlugin' },
   // Request logging is opted into by the scaffold, not by the plugin's default:

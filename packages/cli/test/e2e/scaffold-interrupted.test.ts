@@ -139,22 +139,32 @@ describe('interrupted scaffolding on the real filesystem', () => {
 
   it('identifies a pre-existing partial scaffold as interruption debris', async () => {
     await fixture(async (root, fs) => {
+      // Debris a killed run leaves: files the scaffold writes, each whole.
+      // Scaffolded under the same name elsewhere, so the bytes are the ones `app` gets.
+      await nodeFs.mkdir(`${root}/elsewhere`);
+      expect(await cli(`${root}/elsewhere`, fs).run(['new', 'app', '--template', 'rest'])).toBe(0);
+      const manifest = await nodeFs.readFile(`${root}/elsewhere/app/package.json`, 'utf8');
+      const main = await nodeFs.readFile(`${root}/elsewhere/app/main.ts`, 'utf8');
       await nodeFs.mkdir(`${root}/app`, { recursive: true });
-      // A file the scaffold would write — `package.json` on the Node default.
-      await nodeFs.writeFile(`${root}/app/package.json`, '{ "partial": true }\n');
+      await nodeFs.writeFile(`${root}/app/package.json`, manifest);
+      await nodeFs.writeFile(`${root}/app/main.ts`, main);
       const retry = cli(root, fs);
 
       expect(await retry.run(['new', 'app', '--template', 'rest'])).toBe(1);
       expect(retry.err.text()).toContain(`delete ${root}/app and run this again`);
-      expect(await nodeFs.readFile(`${root}/app/package.json`, 'utf8')).toBe(
-        '{ "partial": true }\n',
-      );
+      expect(await nodeFs.readFile(`${root}/app/package.json`, 'utf8')).toBe(manifest);
+
+      // A file of the user's own at the same path is not debris.
+      await nodeFs.writeFile(`${root}/app/package.json`, '{ "mine": true }\n');
+      const mine = cli(root, fs);
+      expect(await mine.run(['new', 'app', '--template', 'rest'])).toBe(1);
+      expect(mine.err.text()).not.toContain('delete');
     });
   });
 
   it('restores the starting tree when a nested write is refused and retries successfully', async () => {
     await fixture(async (root, fs) => {
-      await nodeFs.mkdir(`${root}/app/src`, { recursive: true });
+      await nodeFs.mkdir(`${root}/app`, { recursive: true });
       const before = await snapshot(root);
       let reject = true;
       const app = cli(root, {
@@ -270,7 +280,10 @@ describe('interrupted scaffolding on the real filesystem', () => {
       expect(await failing.run(adopt)).toBe(1);
       expect(failing.err.text()).toContain('read-only barrel');
       expect(failing.err.text()).not.toContain('rollback incomplete');
-      expect(await snapshot(project)).toEqual(before);
+      expect(await snapshot(project)).toEqual({ ...before, '.setu-ts': null });
+      await expect(fs.stat(`${project}/.setu-ts/write.lock`)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
       expect(await cli(project, fs).run(adopt)).toBe(0);
       expect(await nodeFs.readFile(barrel, 'utf8')).toContain('Orders');
     });
