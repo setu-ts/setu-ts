@@ -16706,7 +16706,8 @@ was known when the call started, only a `REFUSED_STREAM` on a sent list over 655
 may refuse it itself), with `size` equal to that RFC 7541 §4.1 list size and `limit` equal to the
 client's 65536-octet threshold. At or under 65536, a refusal still reports failure and is resent; an
 accepted larger list passes through. A refusal from a peer shutting down (its session closed or
-destroyed) stays a refused stream and is resent. All other unmarked errors fail. Streaming reports
+destroyed) stays a refused stream and is resent. Any other error follows the outcome rule above; a
+marked drain `Unavailable` reports failure too, whether or not it is resent. Streaming reports
 success at headers; later iteration errors report nothing. Aborting thousands of in-flight calls at
 once can trip a Node peer's stream-reset limit (GOAWAY `INTERNAL_ERROR`), which fails the session's
 calls and reports the instance failed, with the same ejection bounds. Tight caller deadlines can

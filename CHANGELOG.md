@@ -146,12 +146,14 @@ All notable changes to this project are documented here. The format follows
   shared 5 s provider-health cache and instance-address requirements for registration.
 - **BREAKING — `@setu-ts/resilience-plugin` (M143c; V13-104).** Every breaker policy now goes
   through `breakerPolicyRangeError`: an invalid `defaultCircuitBreaker` throws a `RangeError` at
-  `ResiliencePlugin()` registration and an invalid explicit policy at `wrap()`. Policies 0.13.0
-  accepted and now refuses: a `threshold` of 0, a non-integer or one above
-  `Number.MAX_SAFE_INTEGER`; a `timeout` of 0 or less, `Infinity`, `NaN` or above 2147483647; a
-  negative, infinite or over-range `resetTimeout`; a count policy that also sets `minimumCalls` or
-  `failureRateThreshold` (formerly ignored). Use a positive safe integer `threshold`, a `timeout` in
-  1..2147483647 and a `resetTimeout` in 0..2147483647, and choose one arm.
+  `ResiliencePlugin()` registration and an invalid explicit policy at `wrap()`. 0.13.0 checked only
+  that `threshold` was present, so it accepted, and now refuses: `NaN`, a numeric string (formerly
+  coerced) or a missing value for `threshold`, `timeout` or `resetTimeout`; a `threshold` of 0, a
+  non-integer or one above `Number.MAX_SAFE_INTEGER`; a `timeout` of 0 or less, `Infinity` or above
+  2147483647; a negative, infinite or over-range `resetTimeout`; a count policy that also sets
+  `minimumCalls` or `failureRateThreshold` (formerly ignored). Use a positive safe integer
+  `threshold`, a finite `timeout` greater than 0 (at least 10 on the rate arm) and at most
+  2147483647, a finite `resetTimeout` from 0 to 2147483647, and one arm.
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).
