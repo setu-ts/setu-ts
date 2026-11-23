@@ -58,6 +58,19 @@ internal.
   a handler that never settles keeps what it holds; a failed response stream is logged once as
   `Response stream failed`.
 
+## Reserved drain response (since 0.14.0)
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
+
+The marker is present through `inject()`, `dispatch()` and `app.fetch()`, as well as on the wire.
+Requests admitted before the drain retain their application response without a kernel marker.
+
 <!-- version:history -->
 
 ## Kernel diagnostics (optional, since 0.8.0)

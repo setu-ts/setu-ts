@@ -10,7 +10,9 @@
  * @module
  */
 
+import { createNodeServerDnsResolver } from '../shared/node-server-dns-resolver.ts';
 import type {
+  DnsResolverOptions,
   IDnsResolver,
   IFileSystem,
   IRuntimeServices,
@@ -207,6 +209,7 @@ export function buildNodeHost(
  * @param host - Injected Node host (defaults to real Node.js via static node: imports)
  * @param workers - Injected worker host (defaults to the `node:worker_threads` host)
  * @param dns - Injected DNS resolver (defaults to the `node:dns/promises` resolver)
+ * @param createDnsResolver - Injected creator for resolvers with chosen name servers
  * @returns Complete runtime services for Node.js
  */
 export function createNodeRuntimeServices(
@@ -217,6 +220,7 @@ export function createNodeRuntimeServices(
   host: NodeHost = buildNodeHost(),
   workers: IWorkerHost = createNodeWorkerHost(),
   dns: IDnsResolver = createNodeDnsResolver(),
+  createDnsResolver: (options: DnsResolverOptions) => IDnsResolver = createNodeServerDnsResolver,
 ): IRuntimeServices {
   const fsImpl: IFileSystem = {
     readFile: host.readFile,
@@ -261,5 +265,6 @@ export function createNodeRuntimeServices(
     fs: fsImpl,
     workers,
     dns,
+    createDnsResolver,
   });
 }

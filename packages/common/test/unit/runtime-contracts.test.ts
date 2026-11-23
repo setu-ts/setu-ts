@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import type { IFileSystem, IWorkerHandle, IWorkerHost } from '../../src/runtime.ts';
+import { describe, expect, it, expectTypeOf } from 'vitest';
+import type {
+  DnsResolverOptions,
+  IDnsResolver,
+  IRuntimeServices,
+  IFileSystem,
+  IWorkerHandle,
+  IWorkerHost,
+} from '../../src/runtime.ts';
 
 describe('IFileSystem.readStream is optional', () => {
   it('should satisfy IFileSystem without readStream', () => {
@@ -88,4 +95,36 @@ describe('IWorkerHandle.onExit and IWorkerHost.reportsExit are optional', () => 
     expect(silent.reportsExit?.() ?? false).toBe(false);
     expect(reporting.reportsExit?.() ?? false).toBe(true);
   });
+});
+
+it('keeps createDnsResolver optional and its options readonly', () => {
+  const runtime: IRuntimeServices = {
+    platform: () => 'node',
+    version: () => 'test',
+    hostname: () => 'test',
+    uuid: () => 'id',
+    randomBytes: () => new Uint8Array(),
+    subtle: {} as SubtleCrypto,
+    now: () => 0,
+    hrtime: () => 0,
+    setTimeout: () => 1,
+    clearTimeout: () => {},
+    setInterval: () => 1,
+    clearInterval: () => {},
+    env: {},
+    exit: () => {
+      throw new Error('exit');
+    },
+  };
+  const resolver: IDnsResolver = {
+    resolveHost: () => Promise.resolve([]),
+    resolveSrv: () => Promise.resolve([]),
+  };
+  const withCreator: IRuntimeServices = { ...runtime, createDnsResolver: () => resolver };
+  expect('createDnsResolver' in runtime).toBe(false);
+  expect(withCreator.createDnsResolver!({ servers: ['::1'], timeoutMs: 0 })).toBe(resolver);
+  expectTypeOf<DnsResolverOptions>().toEqualTypeOf<{
+    readonly servers: readonly string[];
+    readonly timeoutMs: number;
+  }>();
 });
