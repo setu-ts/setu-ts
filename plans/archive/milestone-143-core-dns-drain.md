@@ -1,6 +1,6 @@
 # Milestone 143 Core follow-up — DNS resolver with chosen name servers, and the drain marker (`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel`)
 
-> **Status:** Complete (PR pending); security-audited at 727b58da6, no findings. Branch:
+> **Status:** Complete (PR #613); security-audited at 727b58da6, no findings. Branch:
 > `feat/m143-core-dns-drain`. `develop` and `main` are protected; all work (implementation and
 > fixes) stays on this one branch until it merges through a single PR into `develop`. Ships in
 > `0.14.0`.

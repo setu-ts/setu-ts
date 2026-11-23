@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel`.** Optional
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
   the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
@@ -48,8 +48,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`@setu-ts/runtime`.** `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause
-  containing both address-family failures in A-then-AAAA order; migrate readers of
+- **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
+  cause containing both address-family failures in A-then-AAAA order; migrate readers of
   `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
