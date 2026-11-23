@@ -338,9 +338,14 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     // One tick: 'a' is idle but not yet removed by its own cleanup, so the
     // eviction for 'b' must consider (and silently forget) a key that never failed.
     await Promise.resolve();
-    await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
+    // Eviction for a new key runs synchronously inside run(): pin that 'a' was forgotten there.
+    const del = vi.spyOn(Map.prototype, 'delete');
+    const pendingB = gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
       Promise.resolve(false),
     );
+    expect(del).toHaveBeenCalledWith('a');
+    del.mockRestore();
+    await pendingB;
     expect(onRecentEviction).not.toHaveBeenCalled();
     await new Promise((resolve) => setTimeout(resolve, 0));
     broken = true;
