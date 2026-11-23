@@ -68,6 +68,7 @@
     "packages/runtime/test/e2e/worker-host-real.test.ts",
     "packages/runtime/test/e2e/deno-stop-bounded.test.ts",
     "packages/runtime/test/integration/deno-http-adapter.test.ts",
+    "packages/runtime/test/integration/dns-server-resolver-deno.test.ts",
     "packages/runtime/test/unit/deno-dns-resolver.test.ts",
     "packages/runtime/test/unit/deno-http-adapter-rpc.test.ts",
     "packages/runtime/test/unit/deno-http-adapter.test.ts",
