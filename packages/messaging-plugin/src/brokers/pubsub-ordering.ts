@@ -19,26 +19,45 @@ export interface IOrderedDelivery {
  * Most ordering keys whose state is kept. A key whose failed message was
  * dead-lettered never sees it again, so its hold-back state would otherwise
  * live until the stream closes; past this bound the least recently used idle
- * key is forgotten, which only drops a hold-back for a message Pub/Sub already
- * redelivers in order.
+ * key is forgotten. If that key's failed message is still awaiting redelivery,
+ * its next message can then run first (out of order); the gate reports that
+ * case through `onRecentEviction`.
  */
 export const MAX_ORDERING_KEYS = 10_000;
 
-type KeyState = { tail: Promise<void>; nacked: Set<string>; pending: number };
+/** Longest Pub/Sub retry backoff (600 s) plus a margin: a failure older than this has been redelivered or dead-lettered. */
+const REDELIVERY_WINDOW_MS = 660_000;
+
+type KeyState = {
+  tail: Promise<void>;
+  nacked: Set<string>;
+  pending: number;
+  failedAt: number;
+};
 
 /** Per-stream ordering state, cleared on stream closure. @since 0.14.0 */
 export class PubSubOrdering {
   readonly #keys = new Map<string, KeyState>();
   readonly #maxKeys: number;
+  readonly #now: () => number;
+  readonly #onRecentEviction: () => void;
   #generation = 0;
 
   /**
+   * @param now - Monotonic clock in milliseconds (`runtime.hrtime`)
+   * @param onRecentEviction - Called when a key is evicted whose failed message may still be redelivered
    * @param maxKeys - Most keys kept (tests lower it)
    * @returns The ordering gate
    * @throws Never
    * @since 0.14.0
    */
-  constructor(maxKeys: number = MAX_ORDERING_KEYS) {
+  constructor(
+    now: () => number,
+    onRecentEviction: () => void = () => {},
+    maxKeys: number = MAX_ORDERING_KEYS,
+  ) {
+    this.#now = now;
+    this.#onRecentEviction = onRecentEviction;
     this.#maxKeys = maxKeys;
   }
 
@@ -54,7 +73,12 @@ export class PubSubOrdering {
     const key = message.orderingKey;
     if (key === undefined || key === '') return dispatch().then(() => {});
     const existing = this.#keys.get(key);
-    const state = existing ?? { tail: Promise.resolve(), nacked: new Set<string>(), pending: 0 };
+    const state = existing ?? {
+      tail: Promise.resolve(),
+      nacked: new Set<string>(),
+      pending: 0,
+      failedAt: 0,
+    };
     // Re-insert so the map's order is least recently used first.
     if (existing !== undefined) this.#keys.delete(key);
     else this.#evictIdle();
@@ -71,7 +95,10 @@ export class PubSubOrdering {
         return;
       }
       const success = await dispatch();
-      if (!success && message.messageId !== undefined) state.nacked.add(message.messageId);
+      if (!success && message.messageId !== undefined) {
+        state.nacked.add(message.messageId);
+        state.failedAt = this.#now();
+      }
     });
     state.tail = task
       .catch(() => {})
@@ -91,7 +118,15 @@ export class PubSubOrdering {
     if (this.#keys.size < this.#maxKeys) return;
     for (const [key, state] of this.#keys) {
       if (this.#keys.size < this.#maxKeys) return;
-      if (state.pending === 0) this.#keys.delete(key);
+      if (state.pending !== 0) continue;
+      this.#keys.delete(key);
+      if (state.nacked.size > 0 && this.#now() - state.failedAt < REDELIVERY_WINDOW_MS) {
+        try {
+          this.#onRecentEviction();
+        } catch {
+          /* Diagnostics cannot change dispatch. */
+        }
+      }
     }
   }
 

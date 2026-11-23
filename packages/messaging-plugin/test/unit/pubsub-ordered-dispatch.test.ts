@@ -182,7 +182,7 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     await h.broker.disconnect();
   });
   it('supports empty keys, missing platform identity and dispatch rejection without retaining a broken tail', async () => {
-    const gate = new PubSubOrdering();
+    const gate = new PubSubOrdering(() => 0);
     const nack = vi.fn();
     await gate.run({ orderingKey: '', nack }, () => Promise.resolve(true));
     await gate.run({ orderingKey: 'key', nack }, () => Promise.resolve(false));
@@ -201,7 +201,7 @@ describe('Pub/Sub ordered async handler dispatch', () => {
   ])(
     'bounds held keys, forgetting the least recently used idle one ($maxKeys keys)',
     async ({ maxKeys, evicted }) => {
-      const gate = new PubSubOrdering(maxKeys);
+      const gate = new PubSubOrdering(() => 0, undefined, maxKeys);
       const fail = (): Promise<boolean> => Promise.resolve(false);
       // Three keys whose failed message never returns (dead-lettered).
       for (const key of ['a', 'b', 'c'])
@@ -217,7 +217,7 @@ describe('Pub/Sub ordered async handler dispatch', () => {
   );
 
   it('never evicts a key with work in flight', async () => {
-    const gate = new PubSubOrdering(1);
+    const gate = new PubSubOrdering(() => 0, undefined, 1);
     const held = Promise.withResolvers<boolean>();
     const busy = gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () => held.promise);
     await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
@@ -236,7 +236,7 @@ describe('Pub/Sub ordered async handler dispatch', () => {
   });
 
   it('evicts by recent use, not by first insertion', async () => {
-    const gate = new PubSubOrdering(2);
+    const gate = new PubSubOrdering(() => 0, undefined, 2);
     const fail = (): Promise<boolean> => Promise.resolve(false);
     await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, fail);
     await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, fail);
@@ -256,5 +256,66 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     await gate.run({ orderingKey: 'b', messageId: 'b2', nack: vi.fn() }, bDispatch);
     expect(bDispatch).toHaveBeenCalledOnce();
     gate.clear();
+  });
+
+  it.each([
+    { evictAtMs: 1_000, warned: true },
+    { evictAtMs: 660_000, warned: false },
+  ])(
+    'reports an eviction whose failed message may still return (evicted at $evictAtMs ms)',
+    async ({ evictAtMs, warned }) => {
+      let now = 0;
+      const onRecentEviction = vi.fn();
+      const gate = new PubSubOrdering(() => now, onRecentEviction, 1);
+      await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () =>
+        Promise.resolve(false),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      now = evictAtMs;
+      await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
+        Promise.resolve(true),
+      );
+      expect(onRecentEviction).toHaveBeenCalledTimes(warned ? 1 : 0);
+      gate.clear();
+    },
+  );
+
+  it('swallows a throwing eviction sink', async () => {
+    const onRecentEviction = vi.fn(() => {
+      throw new Error('sink down');
+    });
+    const gate = new PubSubOrdering(() => 0, onRecentEviction, 1);
+    const held = Promise.withResolvers<boolean>();
+    const first = gate.run(
+      { orderingKey: 'a', messageId: 'a1', nack: vi.fn() },
+      () => held.promise,
+    );
+    held.resolve(false);
+    await first;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
+      Promise.resolve(true),
+    );
+    expect(onRecentEviction).toHaveBeenCalledOnce();
+    gate.clear();
+  });
+
+  it('warns once through the broker when a recently failed key is forgotten', async () => {
+    const h = orderedBroker(true, () => {
+      throw new Error('failed');
+    });
+    await h.start();
+    // One failing message on each of 10,001 keys: the first key is forgotten
+    // while its failed message may still be redelivered.
+    for (let n = 0; n <= 10_000; n++) {
+      h.deliver(n, 'k' + n);
+      if (n % 500 === 0) await flushCloud();
+    }
+    await flushCloud();
+    const evicted = h.warn.mock.calls.filter(([message]) =>
+      String(message).includes('failing ordering keys'),
+    );
+    expect(evicted).toHaveLength(1);
+    await h.broker.disconnect();
   });
 });

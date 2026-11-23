@@ -1,4 +1,4 @@
-import { PubSubOrdering } from './pubsub-ordering.ts';
+import { MAX_ORDERING_KEYS, PubSubOrdering } from './pubsub-ordering.ts';
 /**
  * GCP Pub/Sub broker implementation over {@linkcode IPubSubTransport}.
  *
@@ -1090,7 +1090,16 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
             }
           : {}),
     };
-    const ordering = this.#enableMessageOrdering ? new PubSubOrdering() : undefined;
+    const ordering = this.#enableMessageOrdering
+      ? new PubSubOrdering(
+          () => this.#runtime.hrtime(),
+          () =>
+            this.#warnOnce(
+              'ordering-evicted:' + queue,
+              `Pub/Sub subscription ${JSON.stringify(queue)} holds more than ${MAX_ORDERING_KEYS} failing ordering keys; the oldest was forgotten while its failed message may still be redelivered, so later messages of that key can run out of order`,
+            ),
+        )
+      : undefined;
     let streamGeneration = 0;
     let ended = false;
     let current: IPubSubSubscription | undefined;
