@@ -178,8 +178,8 @@ call before admission: `NaN` and negative values used to disable the timeout sil
 values overflowed the timer and timed every task out after about 1 ms. Each option is read once and
 the pools use exactly the validated value; only the own enumerable keys of `pools` are read, so an
 entry inherited through a prototype is ignored. A per-call `signal` that is not an `AbortSignal`
-instance of this realm (a `null`, a signal-shaped object, or a signal from a `vm` context or jsdom)
-rejects that `run()` call with `TypeError` before admission, uncounted in the metrics.
+instance of this realm (a `null`, a signal-shaped object, or a signal another realm such as jsdom
+built) rejects that `run()` call with `TypeError` before admission, uncounted in the metrics.
 
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other

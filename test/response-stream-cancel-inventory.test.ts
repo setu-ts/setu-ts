@@ -173,6 +173,15 @@ const CONSTRUCTIONS: readonly Row[] = [
     evidence: /new ReadableStream<Uint8Array>\(\s*\{\s*start\(controller\)/,
   },
   {
+    // A pull stream over the GCS SDK's read iterator after its first chunk:
+    // `cancel()` destroys the source and returns the iterator's own `return()`.
+    file: 'packages/storage-plugin/src/providers/gcs-provider.ts',
+    count: 1,
+    cancelSettles: 'as-its-source',
+    kind: 'forwards-cancel',
+    evidence: /async cancel\(\): Promise<void> \{\s*release\(\);\s*await iterator\.return\?\.\(\);/,
+  },
+  {
     // Node Readable adapter (pull waits for 'readable'), the eager iterable
     // pump (in start), and the event-push adapter. Each cancel sets a flag
     // and returns without awaiting.
