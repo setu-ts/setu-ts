@@ -194,4 +194,45 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     expect(nack).not.toHaveBeenCalled();
     gate.clear();
   });
+
+  it.each([
+    { maxKeys: 2, evicted: true },
+    { maxKeys: 10, evicted: false },
+  ])(
+    'bounds held keys, forgetting the least recently used idle one ($maxKeys keys)',
+    async ({ maxKeys, evicted }) => {
+      const gate = new PubSubOrdering(maxKeys);
+      const fail = (): Promise<boolean> => Promise.resolve(false);
+      // Three keys whose failed message never returns (dead-lettered).
+      for (const key of ['a', 'b', 'c'])
+        await gate.run({ orderingKey: key, messageId: key + '1', nack: vi.fn() }, fail);
+      const dispatch = vi.fn(() => Promise.resolve(true));
+      const nack = vi.fn();
+      await gate.run({ orderingKey: 'a', messageId: 'a2', nack }, dispatch);
+      // Evicted: key 'a' starts fresh. Kept: its later message is held back.
+      expect(dispatch).toHaveBeenCalledTimes(evicted ? 1 : 0);
+      expect(nack).toHaveBeenCalledTimes(evicted ? 0 : 1);
+      gate.clear();
+    },
+  );
+
+  it('never evicts a key with work in flight', async () => {
+    const gate = new PubSubOrdering(1);
+    const held = Promise.withResolvers<boolean>();
+    const busy = gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () => held.promise);
+    await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
+      Promise.resolve(false),
+    );
+    const order: string[] = [];
+    const next = gate.run({ orderingKey: 'a', messageId: 'a2', nack: vi.fn() }, () => {
+      order.push('a2');
+      return Promise.resolve(true);
+    });
+    order.push('a1-pending');
+    held.resolve(true);
+    await busy;
+    await next;
+    expect(order).toEqual(['a1-pending', 'a2']);
+    gate.clear();
+  });
 });

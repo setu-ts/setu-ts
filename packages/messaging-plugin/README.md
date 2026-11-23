@@ -524,7 +524,9 @@ no check. A custom `IPubSubTransport` must report `created` from `open` for the 
 On a broker with `enableMessageOrdering`, handlers run one at a time per ordering key (see
 [What `orderingKey` promises](#what-orderingkey-promises)). Pub/Sub counts every nack as a delivery
 attempt, so with a `deadLetterTopic` the later messages of a failing key spend attempts too and can
-be dead-lettered with it; `connect()` warns once about this.
+be dead-lettered with it; `connect()` warns once about this. The broker keeps hold-back state for at
+most 10,000 ordering keys per subscription and forgets the least recently used idle key beyond that,
+so keys whose failed message was dead-lettered cannot grow memory without bound.
 
 **Stream recovery.** When the client library closes a subscription's stream on a non-retryable
 status (a deleted subscription, for example), the broker re-opens it (re-creating it when absent)
