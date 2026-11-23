@@ -51,6 +51,18 @@ describe('resolveOptions', () => {
     },
   );
 
+  it.each([
+    ['heartbeatMs', Number.NaN],
+    ['heartbeatMs', -1],
+    ['heartbeatMs', Infinity],
+    ['idleTimeoutMs', Number.NaN],
+    ['idleTimeoutMs', -5],
+  ] as const)('refuses %s = %s, which would spin or disable the sweep', (name, value) => {
+    expect(() => resolveOptions({ heartbeatMs: 1000, [name]: value })).toThrow(
+      `${name} must be a finite number of milliseconds from 0 (off)`,
+    );
+  });
+
   it('accepts the largest representable frame limit', () => {
     expect(resolveOptions({ maxMessageBytes: 2 ** 31 - 1 }).maxMessageBytes).toBe(2 ** 31 - 1);
   });

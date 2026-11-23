@@ -352,7 +352,11 @@ export class WorkersQueue implements IQueue {
           batch.queue,
           message,
           envelope,
-          !last ? 'retried' : target === false ? 'discarded' : 'dead-lettered',
+          !last
+            ? 'retried'
+            : target === false
+              ? 'discarded'
+              : 'forwarding to the dead-letter queue',
         );
         if (last) {
           // The platform's next exhaustion would delete it: keep it instead.
@@ -589,7 +593,7 @@ export class WorkersQueue implements IQueue {
     queue: string,
     message: IQueueMessage,
     envelope: JobEnvelope | undefined,
-    outcome: 'retried' | 'discarded' | 'dead-lettered' = 'retried',
+    outcome: 'retried' | 'discarded' | 'forwarding to the dead-letter queue' = 'retried',
   ): void {
     this.#logger?.()?.error(
       outcome === 'retried'

@@ -721,7 +721,7 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     queue.process('known', () => {});
     await queue.dispatch(new FakeQueueBatch('q', [delivered('unknown', {}, { attempts: 3 })]));
     expect(logger.messages()).toContain(
-      'cloudflare-queue: message not routable on its last attempt, dead-lettered',
+      'cloudflare-queue: message not routable on its last attempt, forwarding to the dead-letter queue',
     );
   });
 

@@ -131,10 +131,8 @@ export class RealtimeBackplaneObjectCore {
   async #publish(request: Request): Promise<Response> {
     const declared = Number(request.headers.get('content-length') ?? '0');
     if (declared > MAX_FRAME_BYTES) return new Response(null, { status: 413 });
-    const body = await request.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_FRAME_BYTES) {
-      return new Response(null, { status: 413 });
-    }
+    const body = await readBounded(request, MAX_FRAME_BYTES);
+    if (body === undefined) return new Response(null, { status: 413 });
     for (const socket of this.#state.getWebSockets()) {
       try {
         socket.send(body);
@@ -207,4 +205,39 @@ export class RealtimeBackplaneObjectCore {
       return;
     }
   }
+}
+
+/**
+ * Reads a request body as text, stopping as soon as it passes `limit` bytes
+ * (a body without `Content-Length` is otherwise read whole first).
+ *
+ * @returns The text, or `undefined` once the body is larger than `limit`
+ */
+async function readBounded(request: Request, limit: number): Promise<string | undefined> {
+  const stream = request.body;
+  if (stream === null) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The body is refused either way.
+      }
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }

@@ -17140,14 +17140,14 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `ProcessOptions.onFailed` runs once (guarded), then the envelope plus `failedAt`, `attempts` and a
   bounded `error` text is sent to the producer and the message acked; with `false` it is acked and
   warned about, never the payload. The platform's last delivery is kept in reserve: a failed send
-  retries, and the redelivery forwards again without a second `onFailed` (past the platform's
-  `maxRetries`, without the error text); if that send fails too, the job leaves the adapter (the
-  platform's `dead_letter_queue`, or deleted) and that is logged. On a queue with no dead-letter
-  target (producer-only), an unroutable message on its last attempt is retried for the platform's
-  own `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or a `deadLetter`
-  that is its own producer, is refused, since each exhausted job would loop. `retryDelaySeconds` (a
-  number, or a function of the failed attempt) passes `retry({ delaySeconds })`, bounded by
-  `maxDelaySeconds`.
+  retries, and the redelivery forwards again without a second `onFailed`, its `error` then the fixed
+  reason `attempt budget exhausted` (or, past `maxRetries`, no error text at all); if that send
+  fails too, the job leaves the adapter (the platform's `dead_letter_queue`, or deleted) and that is
+  logged. On a queue with no dead-letter target (producer-only), an unroutable message on its last
+  attempt is retried for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the
+  queue's own binding, or a `deadLetter` that is its own producer, is refused, since each exhausted
+  job would loop. `retryDelaySeconds` (a number, or a function of the failed attempt) passes
+  `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
   a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never

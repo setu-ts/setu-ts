@@ -97,7 +97,8 @@ const MAX_MESSAGE_BYTES_LIMIT = 2 ** 31 - 1;
  *
  * @param options - The caller's options
  * @returns The resolved options
- * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, an
+ * @throws {Error} If `heartbeatMs` or `idleTimeoutMs` is not a finite number
+ *   from 0, an idle timeout is set with no heartbeat to sweep on, an
  *   `allowedOrigins` entry is not an absolute http(s) origin, `checkOrigin`
  *   is not a boolean, or `maxMessageBytes` is not a whole number from 0 to
  *   2^31 - 1
@@ -106,6 +107,20 @@ const MAX_MESSAGE_BYTES_LIMIT = 2 ** 31 - 1;
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
   const heartbeatMs = options?.heartbeatMs ?? 0;
   const idleTimeoutMs = options?.idleTimeoutMs ?? 0;
+
+  // Finite and non-negative: `NaN` passes every `<= 0` check below, and a
+  // heartbeat interval of `NaN` fires with no delay — once per connection on
+  // Workers, where each connection runs its own.
+  for (const [name, value] of [
+    ['heartbeatMs', heartbeatMs],
+    ['idleTimeoutMs', idleTimeoutMs],
+  ] as const) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(
+        `WebSocketPlugin: ${name} must be a finite number of milliseconds from 0 (off).`,
+      );
+    }
+  }
 
   if (idleTimeoutMs > 0 && heartbeatMs <= 0) {
     throw new Error(

@@ -86,8 +86,10 @@ All notable changes to this project are documented here. The format follows
   check the binding's kind (V13-201).
 - **`@setu-ts/websocket-plugin` (M143o).** On Cloudflare Workers the service runs in request-bound
   mode: rooms deliver through per-connection links of the Durable Object backplane, each connection
-  runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the arm, `ws.room()`
-  and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the arm.
+  runs its own heartbeat, and `room.size` touches no socket (V13-195). `heartbeatMs` and
+  `idleTimeoutMs` must be finite numbers from 0: `NaN` used to start a zero-delay interval (now one
+  per connection on Workers). Without the arm, `ws.room()` and `ws.peek()` throw
+  `WebSocketRoomsUnavailableError` and the startup notice names the arm.
 
 - **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
   cause containing both address-family failures in A-then-AAAA order; migrate readers of

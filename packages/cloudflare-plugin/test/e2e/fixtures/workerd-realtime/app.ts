@@ -4,8 +4,8 @@
  * `@setu-ts/*` imports to `packages/<name>/src`).
  *
  * Routes:
- * - `GET /chat` (WebSocket): joins `lobby`; each message is broadcast to the
- *   room except its sender.
+ * - `GET /chat?room=<name>` (WebSocket): joins the room (default `lobby`);
+ *   each message is broadcast to that room except its sender.
  * - `POST /broadcast`: broadcasts the body to `lobby` from a route.
  * - `GET /size`: this isolate's `lobby` size.
  * - `GET /rooms-without-arm`: `ws.room()` on an app with no Durable Object arm.
@@ -52,11 +52,15 @@ function build(withArm: boolean): Promise<IKernelApplication> {
       return app;
     }
     ws().route('/chat', {
-      onOpen: (conn) => {
-        ws().room('lobby').add(conn);
+      onOpen: (conn, context) => {
+        const room = context.query['room'] ?? 'lobby';
+        conn.data.set('room', room);
+        ws().room(room).add(conn);
       },
       onMessage: (conn, data) => {
-        ws().room('lobby').broadcast(data, { except: conn });
+        ws()
+          .room(String(conn.data.get('room')))
+          .broadcast(data, { except: conn });
       },
     });
     app.router.post('/broadcast', {

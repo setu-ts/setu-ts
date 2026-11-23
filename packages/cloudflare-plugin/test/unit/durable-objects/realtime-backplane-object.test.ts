@@ -216,6 +216,30 @@ describe('RealtimeBackplaneObjectCore POST /publish', () => {
     expect(pairs[0]?.server.sent).toHaveLength(1);
   });
 
+  it('stops reading a body with no Content-Length once it passes 32 MiB', async () => {
+    const { core } = build();
+    let pulled = 0;
+    const chunk = new Uint8Array(1024 * 1024);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        if (pulled > 64) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+    const response = await core.fetch(
+      new Request('https://do/publish', { method: 'POST', body, duplex: 'half' } as RequestInit),
+    );
+    expect(response.status).toBe(413);
+    expect(pulled).toBeLessThan(40);
+  });
+
+  it('accepts an empty POST body', async () => {
+    const { core } = build();
+    const response = await core.fetch(new Request('https://do/publish', { method: 'POST' }));
+    expect(response.status).toBe(204);
+  });
+
   it('treats a POST to another path as a non-upgrade request (426)', async () => {
     const { core } = build();
     const response = await core.fetch(

@@ -239,6 +239,33 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
+    'isolates rooms across Workers: a member of room X never receives room Y traffic',
+    async () => {
+      const xa = await client('/a/chat?room=x');
+      const xb = await client('/b/chat?room=x');
+      const ya = await client('/a/chat?room=y');
+      const yb = await client('/b/chat?room=y');
+      await sleep(300);
+
+      xa.socket.send('for x');
+      yb.socket.send('for y');
+      await until(
+        () => xb.got.includes('for x') && ya.got.includes('for y'),
+        5000,
+        'room delivery',
+      );
+      await sleep(500);
+
+      expect(xb.got).toEqual(['for x']);
+      expect(ya.got).toEqual(['for y']);
+      expect(xa.got).toEqual([]);
+      expect(yb.got).toEqual([]);
+      for (const c of [xa, xb, ya, yb]) c.socket.close(1000);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
     'control: without the Durable Object arm, ws.room() answers the named error',
     async () => {
       const bare = await text('/a/rooms-without-arm');

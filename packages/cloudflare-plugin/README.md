@@ -193,7 +193,8 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
 - **One delivery stays in reserve.** The platform delivers a message up to `max_retries + 1` times
   and the budget stops one short, so a dead-letter send that fails is retried on a later delivery
   (on the default budget that is the last one, and the copy then carries no error text, to stay
-  under the message size limit). If that second send fails too, the job leaves the adapter's hands:
+  under the message size limit; on an earlier one its `error` is the fixed reason
+  `attempt budget exhausted`). If that second send fails too, the job leaves the adapter's hands:
   the platform writes it to `dead_letter_queue` when one is configured, or deletes it. That is why
   the stanza above sets both.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
