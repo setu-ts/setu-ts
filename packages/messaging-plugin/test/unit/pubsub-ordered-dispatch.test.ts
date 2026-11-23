@@ -335,7 +335,9 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     await gate.run({ orderingKey: 'a', messageId: 'a1', nack: vi.fn() }, () =>
       Promise.resolve(true),
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // One tick: 'a' is idle but not yet removed by its own cleanup, so the
+    // eviction for 'b' must consider (and silently forget) a key that never failed.
+    await Promise.resolve();
     await gate.run({ orderingKey: 'b', messageId: 'b1', nack: vi.fn() }, () =>
       Promise.resolve(false),
     );
