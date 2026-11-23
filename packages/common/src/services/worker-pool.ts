@@ -26,10 +26,12 @@ export interface WorkerRunOptions {
    */
   readonly timeoutMs?: number;
   /**
-   * Cancels this call. `@setu-ts/worker-pool-plugin`'s pool does not read it
-   * yet; once it does, an already-aborted signal rejects the call with
-   * `signal.reason`; a call still queued is withdrawn and rejects the same
-   * way; a running call's worker is terminated, as on a timeout.
+   * Cancels this call. In `@setu-ts/worker-pool-plugin`'s pool, an
+   * already-aborted signal rejects with `signal.reason` without queuing work.
+   * A queued call is withdrawn; a running call's worker is terminated and
+   * replaced, as on a timeout. Both reject with `signal.reason` unchanged.
+   * The framework's pool counts cancellation as `aborted` in the rejected-tasks
+   * metric, without incrementing completed or failed counts.
    *
    * @since 0.14.0
    */

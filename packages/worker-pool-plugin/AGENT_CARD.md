@@ -42,6 +42,10 @@ ctx.response.json(pools);
 - A pool is created on first use of each task-module specifier.
 - Payloads cross by structured clone; functions cannot be sent. Shared memory remains shared.
 - `taskTimeoutMs` defaults to 30000 ms; `0` disables it; per-call `timeoutMs` overrides it.
+- Per-call `signal` rejects with `signal.reason` unchanged: pre-aborted work is not queued, queued
+  work is withdrawn, and running work's worker is terminated and replaced as on timeout.
+  Cancellation increments only `worker_pool_tasks_rejected_total{reason="aborted"}`; the other
+  rejection reasons are `queue_full`, `pool_closed` and `unavailable`.
 - `maxQueue` defaults to 1024; `startupTimeoutMs` defaults to 10000 ms and cannot be disabled.
 - Without runtime worker support, registration succeeds but `run` rejects with
   `WorkerPoolUnavailableError`; the health indicator reports up with `available: false`.

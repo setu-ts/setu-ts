@@ -12,6 +12,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
+
+`WorkerRunOptions.signal` now withdraws queued work or terminates and replaces a running call's
+worker, rejecting with `signal.reason` unchanged. Pre-aborted calls reject without queuing work.
+Dashboards and alerts on `worker_pool_tasks_rejected_total` gain a `reason="aborted"` series for
+these cancellations, including calls aborted after admission. They do not increment completed or
+failed counts.
+
 ### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
 
 - **Outages are errors.** `exists()` and `delete()` reject on an outage or a refused credential on

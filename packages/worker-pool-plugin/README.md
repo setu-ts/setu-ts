@@ -30,9 +30,7 @@ deploys everywhere.
 
 ## Installation
 
-```typescript
-import { WorkerPoolPlugin } from '@setu-ts/worker-pool-plugin';
-```
+Import `WorkerPoolPlugin` from `@setu-ts/worker-pool-plugin`, as shown in Usage below.
 
 No third-party dependency. Threads are provided by the runtime adapter.
 
@@ -133,6 +131,29 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.
 
+## Cancelling a call
+
+Pass `WorkerRunOptions.signal` to withdraw a call. A pre-aborted signal rejects with `signal.reason`
+unchanged without queuing work; a queued call is removed; a running call's worker is terminated and
+replaced as on a timeout. Each cancellation counts once as `aborted` in
+`worker_pool_tasks_rejected_total`, without incrementing `completed` or `failed`. Aborting after
+settlement does nothing. Shutdown and abort races keep whichever result settles first.
+
+```typescript
+import type { IWorkerPool } from '@setu-ts/common';
+
+export async function resizeWithDeadline(pool: IWorkerPool, bytes: Uint8Array): Promise<Uint8Array> {
+  return await pool.run<Uint8Array, Uint8Array>(
+    new URL('./tasks/resize-image.task.ts', import.meta.url).href,
+    bytes,
+    { signal: AbortSignal.timeout(5_000) },
+  );
+}
+```
+
+Timeout validation, a shut-down service and an unavailable worker host take precedence over
+cancellation; within an open pool a pre-aborted signal takes precedence over a full queue.
+
 ## Sizing and shared memory
 
 Each module has its own pool; `size` bounds that pool and `maxWorkers` bounds their sum. The
@@ -160,10 +181,11 @@ entry inherited through a prototype is ignored.
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
 task modules wait (until their own timeouts, or forever if theirs are disabled too) until the
-process restarts. The pool does not reclaim a running task the application allowed to run
-indefinitely; `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers` (a per-call
-`timeoutMs: 0` cannot be seen at registration, so it gets no warning). Keep a timeout on modules
-that share the budget, or opt out of the bound with `maxWorkers: Infinity`.
+process restarts or the caller aborts its signal. Without cancellation the pool does not reclaim a
+running task the application allowed to run indefinitely; `register()` warns when `taskTimeoutMs` is
+`0` under a finite `maxWorkers` (a per-call `timeoutMs: 0` cannot be seen at registration, so it
+gets no warning). Keep a timeout on modules that share the budget, or opt out of the bound with
+`maxWorkers: Infinity`.
 
 **Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
 `--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
@@ -270,10 +292,11 @@ if `CAPABILITIES.METRICS` does.
 | `worker_pool_queued_tasks`          | gauge   | `task_module`          | Tasks waiting in the queue        |
 | `worker_pool_tasks_completed_total` | counter | `task_module`          | Tasks that completed successfully |
 | `worker_pool_tasks_failed_total`    | counter | `task_module`,`reason` | Admitted tasks that then failed   |
-| `worker_pool_tasks_rejected_total`  | counter | `task_module`,`reason` | Tasks refused before admission    |
+| `worker_pool_tasks_rejected_total`  | counter | `task_module`,`reason` | Calls refused or caller-aborted   |
 
 `reason` is `handler` | `timeout` | `crash` | `clone` | `shutdown` on the failure counter, and
-`queue_full` | `pool_closed` | `unavailable` on the rejection counter.
+`queue_full` | `pool_closed` | `unavailable` | `aborted` on the rejection counter. `aborted` covers
+signals aborted before admission, while queued, or while running.
 
 **Saturation** — the question a pool exists to raise — reads as `worker_pool_queued_tasks` rising
 while `worker_pool_busy_workers` sits at `worker_pool_workers`, with
@@ -281,8 +304,8 @@ while `worker_pool_busy_workers` sits at `worker_pool_workers`, with
 overflowed.
 
 The two counters are deliberately separate. `..._failed_total` summed over `reason` always equals
-the `failed` count in the health payload; `..._rejected_total` covers refusals that never became
-tasks, which the health payload cannot see at all.
+the `failed` count in the health payload; `..._rejected_total` covers pool-state refusals and caller
+cancellation, neither of which increments that count.
 
 The gauges are written from the same snapshot the health indicator reads, on every pool state change
 — no polling interval is armed, so there is no timer to leak at shutdown.

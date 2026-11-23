@@ -38,7 +38,7 @@ export const WORKER_POOL_METRICS = {
   COMPLETED: 'worker_pool_tasks_completed_total',
   /** Counter: admitted tasks that then failed. */
   FAILED: 'worker_pool_tasks_failed_total',
-  /** Counter: tasks never admitted to a pool. */
+  /** Counter: calls refused by pool state or aborted by their caller. */
   REJECTED: 'worker_pool_tasks_rejected_total',
 } as const;
 
@@ -56,16 +56,18 @@ export const WORKER_POOL_METRICS = {
 export type TaskFailureReason = 'handler' | 'timeout' | 'crash' | 'clone' | 'shutdown';
 
 /**
- * Why a task was never admitted. These are deliberately NOT counted as
- * failures: they never became a task, so `TaskPoolStats.failed` cannot see
- * them either (`TaskPool.run` rejects before constructing one).
+ * Why a call did not produce a result for a reason other than a task failure.
+ * These do not increment `TaskPoolStats.failed`, including cancellation of
+ * work that was already admitted.
  *
  * - `queue_full` — the pending queue was at its bound. The saturation signal.
  * - `pool_closed` — `run()` was called after the pool was shut down.
  * - `unavailable` — the runtime provides no worker host (e.g. Cloudflare
  *   Workers), so no pool exists at all.
+ * - `aborted` — the caller's `WorkerRunOptions.signal` aborted before
+ *   admission, while queued, or while running.
  */
-export type TaskRejectionReason = 'queue_full' | 'pool_closed' | 'unavailable';
+export type TaskRejectionReason = 'queue_full' | 'pool_closed' | 'unavailable' | 'aborted';
 
 /** Name of one of the three pool-state gauges. */
 export type GaugeName =
@@ -113,7 +115,7 @@ export const COUNTER_OPTIONS: Readonly<Record<CounterName, MetricOptions>> = {
     labels: [TASK_MODULE_LABEL, REASON_LABEL],
   },
   [WORKER_POOL_METRICS.REJECTED]: {
-    help: 'Total worker tasks rejected before admission',
+    help: 'Total worker calls refused by pool state or aborted by the caller',
     labels: [TASK_MODULE_LABEL, REASON_LABEL],
   },
 };

@@ -29,6 +29,36 @@ const importThrowsTaskUrl = new URL('../fixtures/import-throws-task.ts', import.
 const lateThrowTaskUrl = new URL('../fixtures/late-throw-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
+  it('aborts a running real task promptly and serves the same module on a replacement', async () => {
+    const runtime = createRuntimeServices();
+    const service = new WorkerPoolService({ maxWorkers: 1, taskTimeoutMs: 0 }, runtime);
+    const taskUrl = new URL('../fixtures/wait-task.ts', import.meta.url).href;
+    const state = new SharedArrayBuffer(8);
+    const flags = new Int32Array(state);
+    const controller = new AbortController();
+    const reason = { message: 'caller withdrew task' };
+    try {
+      const result = service.run(taskUrl, { state, waitMs: 15_000 }, { signal: controller.signal });
+      const assertion = expect(result).rejects.toBe(reason);
+      const startedAt = runtime.hrtime();
+      while (Atomics.load(flags, 0) === 0 && runtime.hrtime() - startedAt < 5_000) {
+        await new Promise<void>((resolve) => runtime.setTimeout(resolve, 10));
+      }
+      expect(Atomics.load(flags, 0)).toBe(1);
+      const abortedAt = runtime.hrtime();
+      controller.abort(reason);
+      await assertion;
+      expect(runtime.hrtime() - abortedAt).toBeLessThan(1_000);
+      expect(service.stats()[0]).toMatchObject({ completed: 0, failed: 0, busy: 0 });
+      await expect(
+        service.run(taskUrl, { state: new SharedArrayBuffer(8), waitMs: 0 }, { timeoutMs: 5_000 }),
+      ).resolves.toBe('done');
+      expect(service.stats()[0]).toMatchObject({ completed: 1, failed: 0 });
+    } finally {
+      await service.shutdown();
+    }
+  }, 12_000);
+
   it('completes two modules under one slot and shares SAB writes with the caller', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1 })],

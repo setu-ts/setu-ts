@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/worker-pool-plugin` (M143r; V13-131).** `WorkerRunOptions.signal` cancels a call with
+  `signal.reason` unchanged: pre-aborted work is not queued, queued work is withdrawn, and a running
+  call's worker is terminated and replaced as on timeout. Each cancellation increments
+  `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
+  counts; aborting after settlement does nothing.
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -19,9 +24,8 @@ All notable changes to this project are documented here. The format follows
   `IHttpAdapter.beginDrain` lets the Node adapter (which also serves Bun's HTTP/2) send HTTP/2
   `GOAWAY` when the drain begins. `IPluginContext.signal` aborts when `stop()` is called during
   `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
-  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`;
-  `@setu-ts/worker-pool-plugin` does not read it yet (V13-131's worker-pool half, M143r). V13-11,
-  V13-12, V13-13, V13-23, V13-26, V13-43.
+  `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`, consumed by
+  `@setu-ts/worker-pool-plugin` in M143r (V13-131). V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns

@@ -186,8 +186,8 @@ export class WorkerPoolService implements IWorkerPool {
       assertTaskTimeout(timeoutMs, 'timeoutMs');
     } catch (error) {
       // Refused before admission and before any pool exists. Not counted in
-      // worker_pool_tasks_rejected_total: that series' reasons describe pool
-      // state, and an invalid argument says nothing about the pool.
+      // worker_pool_tasks_rejected_total: invalid arguments are outside its
+      // vocabulary of pool-state refusals and caller cancellation.
       return Promise.reject(error);
     }
     if (this.closed) {
@@ -216,7 +216,7 @@ export class WorkerPoolService implements IWorkerPool {
     }
     // The worker protocol erases types across the thread boundary; the cast
     // re-attaches the caller's declared output type.
-    return pool.run(input, timeoutMs as number | undefined) as Promise<TOutput>;
+    return pool.run(input, timeoutMs as number | undefined, options?.signal) as Promise<TOutput>;
   }
 
   /**

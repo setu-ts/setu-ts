@@ -880,8 +880,8 @@ here.
 - **Milestone 143r** (`storage-plugin` + `secrets-plugin` + `mail-plugin` + `feature-flags-plugin`
   - `notification-plugin` + `localization-plugin` + additive `common` — provider arms and their
     options: every cloud arm bounded by `requestTimeoutMs`, outages as 503/504, one
-    `exists`/`delete` answer, GCS/Azure/B2/SES endpoints, the LaunchDarkly boot bound; V13-131's
-    worker-pool half follows M143i) — complete (PR pending).
+    `exists`/`delete` answer, GCS/Azure/B2/SES endpoints, the LaunchDarkly boot bound, worker-pool
+    calls cancelled by `WorkerRunOptions.signal`) — complete (PR pending).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.

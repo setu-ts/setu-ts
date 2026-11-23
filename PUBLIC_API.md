@@ -6095,7 +6095,14 @@ app.router.post('/thumbnail', async (ctx) => {
 - `TaskPoolOptions` / `WorkerPoolPluginOptions` — the per-module overrides and plugin options in the
   table above.
 - `IWorkerPool.run<TInput, TOutput>(taskModule, input, options?): Promise<TOutput>` — run a task,
-  creating the pool for `taskModule` lazily on first use.
+  creating the pool for `taskModule` lazily on first use. `WorkerRunOptions` accepts
+  `timeoutMs?: number` and `signal?: AbortSignal`. A pre-aborted signal rejects with `signal.reason`
+  unchanged without queuing work; queued work is withdrawn; running work's worker is terminated and
+  replaced as on timeout, rejecting with the same reason. Cancellation counts once as `aborted` in
+  `worker_pool_tasks_rejected_total`, without increasing completed or failed counts. Later aborts do
+  nothing; shutdown/abort races keep the first result. Timeout validation, a shut-down service and
+  an unavailable host retain precedence over abort; within an open pool, pre-aborted work is refused
+  before checking queue capacity.
 - `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
   (`{ taskModule, workers, busy, queued, completed, failed }`).
 - `IWorkerPool.shutdown(): Promise<void>` — terminate every worker, reject pending tasks (called by
@@ -6142,10 +6149,11 @@ entry inherited through a prototype is ignored.
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
 task modules wait (until their own timeouts, or forever if theirs are disabled too) until the
-process restarts. The pool does not reclaim a running task the application allowed to run
-indefinitely; `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers` (a per-call
-`timeoutMs: 0` cannot be seen at registration, so it gets no warning). Keep a timeout on modules
-that share the budget, or opt out of the bound with `maxWorkers: Infinity`.
+process restarts or the caller aborts its signal. Without cancellation the pool does not reclaim a
+running task the application allowed to run indefinitely; `register()` warns when `taskTimeoutMs` is
+`0` under a finite `maxWorkers` (a per-call `timeoutMs: 0` cannot be seen at registration, so it
+gets no warning). Keep a timeout on modules that share the budget, or opt out of the bound with
+`maxWorkers: Infinity`.
 
 **Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
 `--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
@@ -6238,11 +6246,12 @@ remain usable.
   `worker_pool_workers`, `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
   `worker_pool_tasks_completed_total`, `worker_pool_tasks_failed_total` (also labelled `reason`:
   `handler`/`timeout`/`crash`/`clone`/`shutdown`) and `worker_pool_tasks_rejected_total` (`reason`:
-  `queue_full`/`pool_closed`/`unavailable`). No plugin option enables them and none disables them —
-  the instruments exist exactly when the metrics capability does. `..._failed_total` summed over
-  `reason` equals the health payload's `failed`; `..._rejected_total` counts refusals that never
-  became tasks, which the health payload cannot see. Gauges are written from the health snapshot on
-  each state change, so the two surfaces cannot disagree, and no interval timer is armed.
+  `queue_full`/`pool_closed`/`unavailable`/`aborted`). No plugin option enables them and none
+  disables them — the instruments exist exactly when the metrics capability does. `..._failed_total`
+  summed over `reason` equals the health payload's `failed`; `..._rejected_total` counts pool-state
+  refusals and caller cancellation (before admission, queued or running), which do not increase that
+  count. Gauges are written from the health snapshot on each state change, so the two surfaces
+  cannot disagree, and no interval timer is armed.
 
 ---
 
@@ -14331,9 +14340,11 @@ Contract notes:
   the Node adapter sends HTTP/2 `GOAWAY` to every session (and to any that opens later) and closes
   idle HTTP/1.1 connections. Deno omits it (`Deno.serve` has no session control) and says so once at
   `listen` when HTTP/2 is configured; Bun serves HTTP/2 through the Node adapter.
-- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; `@setu-ts/worker-pool-plugin` does not read it
-  yet, V13-131, M143r) is to cancel a worker-pool call: an aborted signal rejects with
-  `signal.reason`, a queued call is withdrawn, a running call's worker is terminated.
+- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; V13-131, M143r) cancels a worker-pool call in
+  `@setu-ts/worker-pool-plugin`: a pre-aborted signal rejects with `signal.reason` unchanged without
+  queuing work, a queued call is withdrawn, and a running call's worker is terminated and replaced
+  as on timeout. Each cancellation counts as `aborted` in the rejected-tasks metric, without
+  incrementing completed or failed counts.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop
