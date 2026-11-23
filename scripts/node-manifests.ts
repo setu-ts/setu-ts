@@ -1064,6 +1064,7 @@ export function sourcePaths(prefix = './'): Record<string, string[]> {
     '@setu-ts/microservice-starter': ['./packages/starters/microservice-starter/src/index.ts'],
     '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
     '@setu-ts/*': ['./packages/*/src/index.ts'],
+    '@setu-ts/common/breaker-window': ['./packages/common/src/services/breaker-window.ts'],
     '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
     '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
     '@setu-ts/cli/node-version': ['./packages/cli/src/utils/node-version.ts'],

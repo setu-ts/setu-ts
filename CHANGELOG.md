@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker).** A circuit breaker
+  can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
+  `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
+  beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
+  rule both breakers share (returning an `IBreakerWindow`), also served alone as
+  `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one policy check.
+  The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin` still takes only
+  the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds the breaker.
+  V13-104.
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
   through the registered logger: `IRuntimeServices.onFatalError` (with the `FatalErrorOrigin` type)
@@ -41,6 +50,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104).**
+  `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads `.threshold` off
+  a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`). The SDK's breaker
+  runs on the shared window: a success no longer empties it, so `threshold` failures within
+  `timeout` trip the circuit however many successes fall between them; a call that succeeds after
+  the circuit tripped no longer closes it (only a half-open probe does); on the rate arm a 4xx
+  counts as a call the origin answered. An invalid policy now throws a `RangeError` naming the
+  field, whether the client comes from `createClient` or `new HttpClient`
+  (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
+  `circuitBreaker.threshold must be >= 1`).
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A

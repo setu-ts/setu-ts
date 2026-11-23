@@ -63,6 +63,26 @@ cutting a release renames that heading to the version and is a rename, not a rec
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
 
+### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`)
+
+- **Reading a policy.** `CircuitBreakerPolicy` is now a union of the count arm
+  (`{ threshold, timeout, resetTimeout }`) and the rate arm
+  (`{ failureRateThreshold, minimumCalls, timeout, resetTimeout }`). Code that reads
+  `policy.threshold` must narrow first: `if (policy.threshold !== undefined) { … }`
+  (`'threshold' in policy` does not narrow). Policy literals written before still type-check.
+- **The SDK client's breaker no longer resets on success.** Before, any success emptied the failure
+  window, so `threshold` meant "failures in a row". Now it means failures within `timeout`, as it
+  always did in the resilience plugin: a flaky origin answering two calls in three can trip a
+  `threshold: 5` breaker it never tripped before. Raise `threshold`, shorten `timeout`, or move to
+  the rate arm (`failureRateThreshold`, `minimumCalls`). A call that succeeds after the circuit
+  tripped no longer closes it; only the half-open probe does.
+- **The SDK refuses an invalid policy everywhere.** `new HttpClient(...)` now checks the policy as
+  `createClient` does, and the message names the field and value
+  (`circuitBreaker.threshold must be a positive safe integer; received 0`). A test matching the old
+  `circuitBreaker.threshold must be >= 1` text needs the new one.
+- **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
+  rate policy throws a `RangeError` when `wrap()` builds the breaker.
+
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 
 Replace `setu new … --env-file <path>` and `setu generate app … --env-file <path>` with

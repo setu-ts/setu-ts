@@ -1,8 +1,9 @@
 /**
  * SDK trace-context request interceptor.
  *
- * The SDK keeps imports from `@setu-ts/common` type-only, so this module
- * mirrors the W3C validation performed by common's `contextToTraceparent`.
+ * The SDK keeps imports from `@setu-ts/common` type-only (apart from the
+ * dependency-free `@setu-ts/common/breaker-window`), so this module mirrors
+ * the W3C validation performed by common's `contextToTraceparent`.
  *
  * @module
  */

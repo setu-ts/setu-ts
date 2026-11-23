@@ -89,21 +89,82 @@ export interface ICircuitBreaker {
 export type BackoffStrategy = 'fixed' | 'exponential';
 
 /**
- * Circuit breaker policy consumed by the ResiliencePlugin's breaker pattern.
+ * Count arm of {@linkcode CircuitBreakerPolicy}: the breaker trips when
+ * `threshold` failures fall within the rolling `timeout` window.
+ *
+ * @since 0.14.0
+ */
+export interface CircuitBreakerCountPolicy {
+  /**
+   * Failures within the `timeout` window that trip the breaker open. A
+   * positive safe integer.
+   */
+  readonly threshold: number;
+  /**
+   * Rolling failure window in milliseconds of the monotonic clock. Each
+   * failure is timestamped exactly and dropped once it is `timeout` old.
+   * Finite, greater than `0` and at most `2147483647`.
+   */
+  readonly timeout: number;
+  /**
+   * Cooldown in milliseconds before an open breaker moves to half-open.
+   * Finite, `0` to `2147483647`.
+   */
+  readonly resetTimeout: number;
+  /** Not part of the count arm: setting it with `threshold` is refused. */
+  readonly failureRateThreshold?: never;
+  /** Not part of the count arm: setting it with `threshold` is refused. */
+  readonly minimumCalls?: never;
+}
+
+/**
+ * Rate arm of {@linkcode CircuitBreakerPolicy}: the breaker trips when the
+ * window holds at least `minimumCalls` calls and at least
+ * `failureRateThreshold` percent of them failed.
+ *
+ * @since 0.14.0
+ */
+export interface CircuitBreakerRatePolicy {
+  /**
+   * Percent of the calls in the window that must be failures for the breaker
+   * to trip, compared with `>=`. Finite, `1` to `100`.
+   */
+  readonly failureRateThreshold: number;
+  /**
+   * Calls (successes and failures) the window must hold before the rate is
+   * checked. A positive safe integer.
+   */
+  readonly minimumCalls: number;
+  /**
+   * Rolling window in milliseconds of the monotonic clock, kept as ten buckets
+   * of `timeout / 10` ms, so a call counts for between `0.9 · timeout` and
+   * `timeout` after it was recorded. Finite, `10` to `2147483647`.
+   */
+  readonly timeout: number;
+  /**
+   * Cooldown in milliseconds before an open breaker moves to half-open.
+   * Finite, `0` to `2147483647`.
+   */
+  readonly resetTimeout: number;
+  /** Not part of the rate arm: setting it with a rate field is refused. */
+  readonly threshold?: never;
+}
+
+/**
+ * Circuit breaker policy consumed by the ResiliencePlugin's breaker pattern
+ * and the SDK client's per-origin breaker.
+ *
+ * Either the count arm ({@linkcode CircuitBreakerCountPolicy}, `threshold`
+ * failures within `timeout`) or the rate arm
+ * ({@linkcode CircuitBreakerRatePolicy}, `failureRateThreshold` percent of at
+ * least `minimumCalls` calls within `timeout`). A policy holding fields of
+ * both arms, or of neither, is refused by `breakerPolicyRangeError`. Narrow
+ * with `policy.threshold !== undefined`; `'threshold' in policy` does not
+ * narrow this union.
  *
  * @since 0.1.0
  */
-export interface CircuitBreakerPolicy {
-  /** Failures within the `timeout` window that trip the breaker open. */
-  readonly threshold: number;
-  /**
-   * Rolling failure window in milliseconds; failures older than this (measured
-   * by the monotonic clock) are dropped before the threshold check.
-   */
-  readonly timeout: number;
-  /** Cooldown in milliseconds before an open breaker moves to half-open. */
-  readonly resetTimeout: number;
-}
+export type CircuitBreakerPolicy = CircuitBreakerCountPolicy | CircuitBreakerRatePolicy;
 
 /**
  * Retry policy consumed by the ResiliencePlugin's retry pattern.

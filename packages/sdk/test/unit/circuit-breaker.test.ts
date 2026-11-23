@@ -2,7 +2,7 @@
  * Tests for the internal circuit breaker.
  *
  * Covers rolling-window trip, open→reject, half-open recovery,
- * injected isFailure predicate arms, and concurrent probe rejection.
+ * injected classifier outcomes, the shared window, and concurrent probe rejection.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 3, timeout: 1000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
     const result = await cb.execute(() => Promise.resolve('ok'));
     expect(result).toEqual('ok');
@@ -35,7 +35,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 3, timeout: 1000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     for (let i = 0; i < 3; i++) {
@@ -54,7 +54,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 2000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     // Trip the breaker.
@@ -82,7 +82,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 5000, resetTimeout: 2000 },
       timing,
-      () => true,
+      () => 'failure',
     );
     let calls = 0;
     const failing = () => {
@@ -124,7 +124,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 1000, resetTimeout: 10_000 },
       timing,
-      () => true,
+      () => 'failure',
     );
     let calls = 0;
     const failing = () => {
@@ -163,7 +163,8 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 5000, resetTimeout: 500 },
       timing,
-      (err: unknown) => !(err instanceof Error && err.message === 'user-error'),
+      (err: unknown) =>
+        err instanceof Error && err.message === 'user-error' ? 'ignore' : 'failure',
     );
 
     // Trip on two counting failures.
@@ -196,7 +197,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 3, timeout: 1000, resetTimeout: 5000 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     // One failure every 900ms: never three inside any 1000ms window.
@@ -224,7 +225,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 2000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     // Trip.
@@ -249,7 +250,7 @@ describe('createCircuitBreaker', () => {
     expect(result).toEqual('ok');
   });
 
-  it('isFailure predicate false does not count as failure', async () => {
+  it('a rejection the classifier ignores does not count as failure', async () => {
     const timeNow = 0;
     const timing: IClientTiming = {
       now: () => timeNow,
@@ -258,7 +259,8 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 1000, resetTimeout: 500 },
       timing,
-      (err: unknown) => !(err instanceof Error && err.message === 'not-counted'),
+      (err: unknown) =>
+        err instanceof Error && err.message === 'not-counted' ? 'ignore' : 'failure',
     );
 
     await expect(cb.execute(() => Promise.reject(new Error('not-counted')))).rejects.toThrow(
@@ -273,7 +275,7 @@ describe('createCircuitBreaker', () => {
     expect(result).toEqual('ok');
   });
 
-  it('isFailure predicate true counts as failure', async () => {
+  it('a rejection the classifier marks a failure counts', async () => {
     const timeNow = 0;
     const timing: IClientTiming = {
       now: () => timeNow,
@@ -282,7 +284,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 1000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     await expect(cb.execute(() => Promise.reject(new Error('counted')))).rejects.toThrow('counted');
@@ -301,7 +303,7 @@ describe('createCircuitBreaker', () => {
     const cb = createCircuitBreaker(
       { threshold: 2, timeout: 1000, resetTimeout: 500 },
       timing,
-      () => true,
+      () => 'failure',
     );
 
     // Two failures at t=0.
@@ -314,5 +316,129 @@ describe('createCircuitBreaker', () => {
     // Should be closed again — failures expired.
     const result = await cb.execute(() => Promise.resolve('ok'));
     expect(result).toEqual('ok');
+  });
+
+  it('a success between failures does not clear them: the count arm trips within timeout', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = { now: () => timeNow, sleep: () => Promise.resolve() };
+    const cb = createCircuitBreaker(
+      { threshold: 3, timeout: 1000, resetTimeout: 500 },
+      timing,
+      () => 'failure',
+    );
+    for (const at of [0, 100]) {
+      timeNow = at;
+      await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+      timeNow = at + 50;
+      await expect(cb.execute(() => Promise.resolve('ok'))).resolves.toBe('ok');
+    }
+    timeNow = 200;
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    // The third failure (at 200) tripped the circuit despite the successes.
+    await expect(cb.execute(() => Promise.resolve('ok'))).rejects.toThrow(ClientCircuitOpenError);
+  });
+
+  it('a call admitted while closed that succeeds after the trip leaves the circuit open', async () => {
+    const timing: IClientTiming = { now: () => 0, sleep: () => Promise.resolve() };
+    const cb = createCircuitBreaker(
+      { threshold: 1, timeout: 1000, resetTimeout: 500 },
+      timing,
+      () => 'failure',
+    );
+    let release: (value: string) => void = () => {};
+    const slow = cb.execute(
+      () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+        }),
+    );
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    release('late');
+    await expect(slow).resolves.toBe('late');
+    await expect(cb.execute(() => Promise.resolve('ok'))).rejects.toThrow(ClientCircuitOpenError);
+  });
+
+  it('the rate arm trips on the failure rate and then fails fast', async () => {
+    const timing: IClientTiming = { now: () => 0, sleep: () => Promise.resolve() };
+    const cb = createCircuitBreaker(
+      { failureRateThreshold: 50, minimumCalls: 4, timeout: 1000, resetTimeout: 500 },
+      timing,
+      () => 'failure',
+    );
+    await cb.execute(() => Promise.resolve('ok'));
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    await cb.execute(() => Promise.resolve('ok'));
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    let called = false;
+    await expect(
+      cb.execute(() => {
+        called = true;
+        return Promise.resolve('ok');
+      }),
+    ).rejects.toThrow(
+      new ClientCircuitOpenError('Circuit breaker open for origin; 2 failures in window'),
+    );
+    expect(called).toBe(false);
+  });
+
+  it('rejections classified as success sit in the rate denominator; ignored ones do not', async () => {
+    const timing: IClientTiming = { now: () => 0, sleep: () => Promise.resolve() };
+    const outcome = (error: unknown) =>
+      error instanceof Error && error.message === 'not-found'
+        ? 'success'
+        : error instanceof Error && error.message === 'aborted'
+          ? 'ignore'
+          : 'failure';
+    const policy = { failureRateThreshold: 50, minimumCalls: 3, timeout: 1000, resetTimeout: 500 };
+
+    const answered = createCircuitBreaker(policy, timing, outcome);
+    for (const message of ['not-found', 'not-found', 'down']) {
+      await expect(answered.execute(() => Promise.reject(new Error(message)))).rejects.toThrow(
+        message,
+      );
+    }
+    // One failure in three calls: closed.
+    await expect(answered.execute(() => Promise.resolve('ok'))).resolves.toBe('ok');
+
+    const left = createCircuitBreaker(policy, timing, outcome);
+    for (const message of ['aborted', 'aborted', 'down', 'down']) {
+      await expect(left.execute(() => Promise.reject(new Error(message)))).rejects.toThrow(message);
+    }
+    // Aborts did not count toward minimumCalls: two calls, so still closed.
+    await expect(left.execute(() => Promise.resolve('ok'))).resolves.toBe('ok');
+  });
+
+  it('a failed probe then a refused call reports one failure in the window', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = { now: () => timeNow, sleep: () => Promise.resolve() };
+    const cb = createCircuitBreaker(
+      { threshold: 2, timeout: 10_000, resetTimeout: 500 },
+      timing,
+      () => 'failure',
+    );
+    await expect(cb.execute(() => Promise.reject(new Error('a')))).rejects.toThrow('a');
+    await expect(cb.execute(() => Promise.reject(new Error('b')))).rejects.toThrow('b');
+    timeNow = 600;
+    await expect(cb.execute(() => Promise.reject(new Error('probe')))).rejects.toThrow('probe');
+    await expect(cb.execute(() => Promise.resolve('ok'))).rejects.toThrow(
+      new ClientCircuitOpenError('Circuit breaker open for origin; 1 failures in window'),
+    );
+  });
+
+  it('a probe rejected with a success outcome leaves the circuit probeable', async () => {
+    let timeNow = 0;
+    const timing: IClientTiming = { now: () => timeNow, sleep: () => Promise.resolve() };
+    const cb = createCircuitBreaker(
+      { threshold: 1, timeout: 10_000, resetTimeout: 500 },
+      timing,
+      (error) => (error instanceof Error && error.message === 'not-found' ? 'success' : 'failure'),
+    );
+    await expect(cb.execute(() => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    timeNow = 600;
+    await expect(cb.execute(() => Promise.reject(new Error('not-found')))).rejects.toThrow(
+      'not-found',
+    );
+    // Not closed by the 4xx probe and not reopened: the next call is a probe.
+    await expect(cb.execute(() => Promise.resolve('ok'))).resolves.toBe('ok');
   });
 });

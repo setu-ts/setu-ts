@@ -6,8 +6,9 @@ per-origin retry with backoff, circuit breaker, and sliding-window rate limiting
 generator that turns OpenAPI 3.1 documents into type-checked TypeScript client source.
 
 This package does **not** register a plugin or resolve capability tokens. It is an external-consumer
-library with no dependency on `kernel`, `runtime`, or any plugin — its only in-repo import is
-type-level from `@setu-ts/common`.
+library with no dependency on `kernel`, `runtime`, or any plugin. Its imports from `@setu-ts/common`
+are type-level, except `@setu-ts/common/breaker-window`: the circuit-breaker trip rule, a module
+that imports nothing at run time.
 
 ## Realtime clients
 
@@ -88,7 +89,7 @@ console.log(res.data); // User
 | `fetch`                | `typeof fetch`                | global `fetch`                          | Injected transport.                                                     |
 | `timing`               | `IClientTiming`               | `performance.now()` + abort-aware sleep | Clock and sleep seam, so tests need no real time.                       |
 | `retry`                | `ClientRetryPolicy`           | off                                     | Retry with fixed or exponential backoff.                                |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Rolling-window breaker.                                                 |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | off                                     | Count or failure-rate breaker over a rolling window.                    |
 | `rateLimit`            | `ClientRateLimitPolicy`       | off                                     | Sliding-window limiter.                                                 |
 | `idempotency`          | `ClientIdempotencyOptions`    | off                                     | Generated keys for `POST`/`PATCH`; see [Keyed retries](#keyed-retries). |
 | `requestInterceptors`  | `ClientRequestInterceptor[]`  | `[]`                                    | Run in order before the request.                                        |
@@ -116,7 +117,7 @@ injected `fetch` is always used as-is, which is what tests rely on.)
 | `fetch`                | `Function`                    | Injectable fetch seam (default bound to the global realm)                                              |
 | `timing`               | `IClientTiming`               | Injectable timing seam (defaults to `createDefaultClientTiming()`)                                     |
 | `retry`                | `ClientRetryPolicy`           | Retry policy (transport failures + 408/425/429/5xx on safe methods; any method, and `409`, when keyed) |
-| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy                                                                      |
+| `circuitBreaker`       | `CircuitBreakerPolicy`        | Per-origin circuit breaker policy: count arm or rate arm                                               |
 | `rateLimit`            | `ClientRateLimitPolicy`       | Per-origin sliding-window rate limiter                                                                 |
 | `idempotency`          | `ClientIdempotencyOptions`    | Generated idempotency keys; see [Keyed retries](#keyed-retries)                                        |
 | `requestInterceptors`  | `ClientRequestInterceptor[]`  | Run once before resilient execution                                                                    |
@@ -268,25 +269,47 @@ const client = createClient({
 });
 ```
 
-Per-origin rolling-window circuit breaker. An open circuit throws `ClientCircuitOpenError` before
-consuming a rate-limit slot. The breaker counts one failure per exhausted transient sequence (not
-one per retry attempt).
+Or trip on a failure rate instead of a count:
+
+```typescript
+const client = createClient({
+  baseUrl: 'https://api.example.com',
+  circuitBreaker: {
+    failureRateThreshold: 50, // percent of the calls in the window
+    minimumCalls: 20,
+    timeout: 30_000,
+    resetTimeout: 10_000,
+  },
+});
+```
+
+Per-origin circuit breaker, on the same trip rule as the resilience plugin (`createBreakerWindow`
+from `@setu-ts/common`). An open circuit throws `ClientCircuitOpenError` before consuming a
+rate-limit slot. The breaker counts one failure per exhausted transient sequence (not one per retry
+attempt). A success never clears recorded failures: five failures within `timeout` trip the count
+arm above however many successes fall between them. An invalid policy, or one mixing both arms,
+throws a `RangeError` naming the field when the client is built.
 
 The two windows are independent:
 
-- `timeout` is the rolling window used to decide when the circuit **trips** — `threshold` counted
-  failures inside it open the circuit.
+- `timeout` is the rolling window used to decide when the circuit **trips**. On the count arm,
+  `threshold` failures less than `timeout` old open the circuit. On the rate arm, the window is ten
+  buckets of `timeout / 10` ms, so a call counts for between `0.9 · timeout` and `timeout`, and the
+  circuit opens on a failure once the window holds at least `minimumCalls` calls of which at least
+  `failureRateThreshold` percent failed.
 - `resetTimeout` is how long the circuit **stays open**, measured from the moment it tripped. It is
   not shortened by `timeout` elapsing, so `timeout` may safely be shorter than `resetTimeout`.
 
 After `resetTimeout` elapses, exactly one half-open probe is admitted; concurrent callers get
-`ClientCircuitOpenError`. A successful probe closes the circuit and clears the window. A **failed**
-probe reopens it and restarts `resetTimeout`, so a dead dependency is probed once per cooldown
-rather than on every request.
+`ClientCircuitOpenError`. Only a successful probe closes the circuit, and it clears the window: a
+call admitted before the trip that succeeds afterwards leaves the circuit open. A **failed** probe
+reopens it and restarts `resetTimeout`, so a dead dependency is probed once per cooldown rather than
+on every request.
 
 What counts as a failure: a 5xx response, a transport rejection, or an exhausted retry sequence. A
 4xx `HttpClientError` does **not** — a bad request means the caller was wrong, not that the origin
-is unhealthy — and neither does a caller abort.
+is unhealthy — and on the rate arm it counts as a call the origin answered, so a mostly-404 client
+does not trip on a rare 5xx. A caller abort is not recorded at all.
 
 ### Rate Limiting
 
@@ -329,7 +352,8 @@ execute once in registration order before the outbound attempt sequence.
 Use `createTraceContextInterceptor(telemetry)` to propagate the active span as a W3C `traceparent`.
 It reads `activeSpanContext()` per request, preserves a caller-supplied header, and omits invalid or
 absent contexts. The telemetry service is structural and imported type-only, so the SDK keeps its
-zero-runtime-dependency boundary.
+zero-runtime-dependency boundary (its one runtime import from `common` is the dependency-free
+breaker window).
 
 ### Response Interceptors
 
@@ -636,7 +660,6 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `ClientCircuitOpenError`        | class     |
 | `HttpClientError`               | class     |
 | `OpenApiCodegenError`           | class     |
-| `CircuitBreakerPolicy`          | interface |
 | `ClientIdempotencyOptions`      | interface |
 | `ClientOptions`                 | interface |
 | `ClientRateLimitPolicy`         | interface |
@@ -668,6 +691,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `SseEvent`                      | interface |
 | `SseReconnectOptions`           | interface |
 | `BackoffStrategy`               | type      |
+| `CircuitBreakerPolicy`          | type      |
 | `ClientRequestInterceptor`      | type      |
 | `ClientResponseInterceptor`     | type      |
 | `ClientRetryPolicy`             | type      |

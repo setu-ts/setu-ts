@@ -315,4 +315,81 @@ describe('client resilience composition', () => {
     expect(attempts).toBe(1);
     expect(sleepDelays).toEqual([]);
   });
+
+  it('trips a rate breaker through createClient and then fails fast without fetching', async () => {
+    const { timing } = createTiming();
+    let fetchCount = 0;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: () => {
+        fetchCount++;
+        const status = fetchCount % 2 === 0 ? 503 : 200;
+        return Promise.resolve(new Response('{}', { status }));
+      },
+      circuitBreaker: {
+        failureRateThreshold: 50,
+        minimumCalls: 4,
+        timeout: 10_000,
+        resetTimeout: 5000,
+      },
+    });
+
+    await client.request({ method: 'GET', path: 'x' });
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    await client.request({ method: 'GET', path: 'x' });
+    // Fourth call: four calls in the window, two failed — 50 % trips.
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    expect(fetchCount).toBe(4);
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      ClientCircuitOpenError,
+    );
+    expect(fetchCount).toBe(4);
+  });
+
+  it('refuses an invalid circuit-breaker policy on direct construction', () => {
+    const { timing } = createTiming();
+    expect(
+      () =>
+        new HttpClient({
+          baseUrl: 'https://api.example.com',
+          timing,
+          fetch,
+          circuitBreaker: {
+            failureRateThreshold: 50,
+            minimumCalls: 0,
+            timeout: 1000,
+            resetTimeout: 0,
+          },
+        }),
+    ).toThrow(
+      new RangeError('circuitBreaker.minimumCalls must be a positive safe integer; received 0'),
+    );
+  });
+
+  it('keeps the validated breaker policy when the caller mutates it later', async () => {
+    const { timing } = createTiming();
+    let fetchCount = 0;
+    const policy = { threshold: 1, timeout: 10_000, resetTimeout: 5000 };
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      timing,
+      fetch: () => {
+        fetchCount++;
+        return Promise.resolve(new Response('', { status: 503 }));
+      },
+      circuitBreaker: policy,
+    });
+
+    // Raised before the first request builds the origin's breaker: the copy
+    // taken at construction still trips on one failure.
+    policy.threshold = 100;
+
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(
+      ClientCircuitOpenError,
+    );
+    expect(fetchCount).toBe(1);
+  });
 });
