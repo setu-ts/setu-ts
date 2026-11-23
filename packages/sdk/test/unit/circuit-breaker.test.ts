@@ -2,7 +2,7 @@
  * Tests for the internal circuit breaker.
  *
  * Covers rolling-window trip, open→reject, half-open recovery,
- * injected classifier outcomes, the shared window, and concurrent probe rejection.
+ * injected classifier outcomes, the common breaker window, and concurrent probe rejection.
  */
 
 import { describe, expect, it } from 'vitest';

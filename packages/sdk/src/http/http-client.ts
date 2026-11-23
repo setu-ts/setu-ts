@@ -151,8 +151,9 @@ export class HttpClient implements IHttpClient {
     this.#fetch = options.fetch ?? createDefaultFetch();
     this.#timing = options.timing;
     if (options.retry !== undefined) this.#retry = validateRetryPolicy(options.retry);
-    // `null` from JavaScript or configuration means no breaker, as it did before.
-    if (options.circuitBreaker !== undefined && options.circuitBreaker !== null) {
+    // Any falsy value (`null`, `false`, `0`, `''` from JavaScript or
+    // configuration) means no breaker, as it did before.
+    if (options.circuitBreaker) {
       this.#circuitBreaker = snapshotBreakerPolicy(options.circuitBreaker);
     }
     this.#maxRequests = options.rateLimit?.maxRequests;

@@ -1,7 +1,7 @@
 /**
  * Internal per-origin circuit breaker for the SDK HTTP client.
  *
- * Closed/open/half-open states over the shared trip rule from
+ * Closed/open/half-open states over the trip rule from
  * `@setu-ts/common/breaker-window` (count or rate arm), with an injected
  * classifier that decides how each rejection is recorded.
  *

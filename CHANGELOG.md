@@ -53,16 +53,17 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104).**
   `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads `.threshold` off
   a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`). The SDK's breaker
-  runs on the shared window: a success no longer empties it, so `threshold` failures within
+  runs on `createBreakerWindow`: a success no longer empties it, so `threshold` failures within
   `timeout` trip the circuit however many successes fall between them; a call that succeeds after
   the circuit tripped no longer closes it (only a half-open probe does); on the rate arm a 4xx
   counts as a call the origin answered. An invalid policy now throws a `RangeError` naming the
   field, whether the client comes from `createClient` or `new HttpClient`
   (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
   `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
-  non-integer `threshold`, a `timeout` of 0 or less, `Infinity` or above 2147483647, and a negative,
-  infinite or over-range `resetTimeout`, `NaN` or numeric strings for either window, and a missing
-  `timeout` or `resetTimeout`.
+  non-integer `threshold` or one above `Number.MAX_SAFE_INTEGER`; a missing `threshold` (with no
+  rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old code
+  coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
+  negative, infinite or over-range `resetTimeout`, or a missing one.
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
   `HEAD` route still wins at equal rank, and a specific `GET` beats a catch-all `HEAD` (V13-113). A

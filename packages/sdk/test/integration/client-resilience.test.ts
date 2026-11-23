@@ -418,25 +418,28 @@ describe('client resilience composition', () => {
     expect(fetchCount).toBe(1);
   });
 
-  it('treats a null circuitBreaker from JavaScript as no breaker', async () => {
-    const { timing } = createTiming();
-    let fetchCount = 0;
-    const client = createClient({
-      baseUrl: 'https://api.example.com',
-      timing,
-      fetch: () => {
-        fetchCount++;
-        return Promise.resolve(new Response('', { status: 503 }));
-      },
-      circuitBreaker: null as unknown as {
-        threshold: number;
-        timeout: number;
-        resetTimeout: number;
-      },
-    });
-    for (let i = 0; i < 3; i++) {
-      await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
-    }
-    expect(fetchCount).toBe(3);
-  });
+  it.each([null, false, 0, ''])(
+    'treats a falsy circuitBreaker (%j) from JavaScript as no breaker',
+    async (value) => {
+      const { timing } = createTiming();
+      let fetchCount = 0;
+      const client = createClient({
+        baseUrl: 'https://api.example.com',
+        timing,
+        fetch: () => {
+          fetchCount++;
+          return Promise.resolve(new Response('', { status: 503 }));
+        },
+        circuitBreaker: value as unknown as {
+          threshold: number;
+          timeout: number;
+          resetTimeout: number;
+        },
+      });
+      for (let i = 0; i < 3; i++) {
+        await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow('503');
+      }
+      expect(fetchCount).toBe(3);
+    },
+  );
 });
