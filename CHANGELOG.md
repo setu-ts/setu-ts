@@ -55,15 +55,15 @@ All notable changes to this project are documented here. The format follows
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
 
-- **`@setu-ts/queue-plugin` (M143p).** `SnsPublisher.publishJob(name, data, options?)` publishes the
-  job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped (SNS
-  `Notification`) subscription; with the new `SnsPublisherOptions.telemetry` the publish runs in a
-  producer span and carries its `traceparent` in the envelope, and `SnsPublisherOptions.runtime`
-  supplies job ids (V13-212). `SqsDeadLetterTargetMissingError` and its
-  `SqsDeadLetterTargetMissingReason` are exported. `ISqsTransport` gains optional
+- **`@setu-ts/queue-plugin` (M143p, #616).** `SnsPublisher.publishJob(name, data, options?)`
+  publishes the job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped
+  (SNS `Notification`) subscription; with the new `SnsPublisherOptions.telemetry` the publish runs
+  in a producer span and carries its `traceparent` in the envelope, and
+  `SnsPublisherOptions.runtime` supplies job ids (V13-212). `SqsDeadLetterTargetMissingError` and
+  its `SqsDeadLetterTargetMissingReason` are exported. `ISqsTransport` gains optional
   `getQueueAttributes` and `getQueueUrl` and an `attributes` argument on `send`;
   `SqsReceivedMessage` gains `messageId`.
-- **`@setu-ts/common`, `@setu-ts/messaging-plugin` (M143p).** `SubscribeOptions.fanOut` asks a
+- **`@setu-ts/common`, `@setu-ts/messaging-plugin` (M143p, #616).** `SubscribeOptions.fanOut` asks a
   broker for a subscription that receives every message published after it subscribed, independently
   of other instances, and `ISubscription.fanOut` confirms that the broker gave one. Every built-in
   broker honours it (memory, Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub, Service Bus); `fanOut`
@@ -72,17 +72,18 @@ All notable changes to this project are documented here. The format follows
   Bus `consumerRetry`. New errors: `UnroutableMessageError`, `OutboxPublisherConfirmsRequiredError`,
   `PubSubDeadLetterTopicMissingError`; new types `PubSubCreateOptions`, `PubSubOpenOptions`.
   `QueueSettlementState` gains `'discarded'`.
-- **`@setu-ts/realtime-backplane-plugin` (M143p).** `maxFrameAgeMs` (opt-in, default `0`) on the
-  `'messaging'` and `'redis'` transports drops a frame older than the bound by the receiver's clock;
-  frames carry the sender's `sentAtMs`. `BackplaneFanOutUnsupportedError` and `BackplaneReporter`
-  are exported; `createBackplane`, `MessagingBackplane` and `RedisBackplane` take an optional `now`
-  clock. A publish whose outcome is unknown (it timed out, or the connection was lost after the
-  write) logs one `warn` per failing state, `publish failed; the frame may still arrive late`; a
-  RabbitMQ channel that closes before its confirm logs none.
+- **`@setu-ts/realtime-backplane-plugin` (M143p, #616).** `maxFrameAgeMs` (opt-in, default `0`) on
+  the `'messaging'` and `'redis'` transports drops a frame older than the bound by the receiver's
+  clock; frames carry the sender's `sentAtMs`. `BackplaneFanOutUnsupportedError` and
+  `BackplaneReporter` are exported; `createBackplane`, `MessagingBackplane` and `RedisBackplane`
+  take an optional `now` clock. A publish whose outcome is unknown (it timed out, or the connection
+  was lost after the write) logs one `warn` per failing state,
+  `publish failed; the frame may still arrive late`; a RabbitMQ channel that closes before its
+  confirm logs none.
 
 ### Changed
 
-- **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p).**
+- **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p, #616).**
   - A job longer than `visibilityTimeoutSeconds` runs once: the adapter extends its visibility every
     third of the timeout, up to SQS's 12-hour limit (V13-198). `visibilityTimeoutSeconds` outside 1
     to 43,200 is refused with a `RangeError`.
@@ -103,10 +104,10 @@ All notable changes to this project are documented here. The format follows
     source and warns when its claim lapsed during the forward.
   - Consuming needs `sqs:GetQueueAttributes` (not for a `false` entry; with an explicit target URL a
     refused read only warns), and `sqs:GetQueueUrl` and `sqs:SendMessage` on a policy target.
-- **`@setu-ts/queue-plugin`, every adapter (M143p).** `queue_jobs_total` counts an outcome only
-  after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle that
-  fails is no longer counted.
-- **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p).**
+- **`@setu-ts/queue-plugin`, every adapter (M143p, #616).** `queue_jobs_total` counts an outcome
+  only after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle
+  that fails is no longer counted.
+- **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p, #616).**
   - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`
     with `BackplaneFanOutUnsupportedError` a broker that does not confirm it (Cloudflare's
     `WorkersBroker`, a `custom` broker that ignores the option); a Redis Streams client without

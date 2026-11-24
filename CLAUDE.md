@@ -882,7 +882,7 @@ here.
   start refusal, `publishJob`, unreadable retirement; `fanOut` subscriptions on every broker and the
   backplane's refusal without them; Pub/Sub and Service Bus `consumerRetry`, Pub/Sub stream recovery
   and per-key ordering; a routed RabbitMQ outbox; opt-in `maxFrameAgeMs`; 11 rows; ships in
-  `0.14.0`) — complete (PR pending).
+  `0.14.0`) — complete (PR #616).
 - **Milestone 143 Core follow-up — circuit breaker** (`common` + `sdk`, plus a one-line
   `resilience-plugin` guard — V13-104's Core and SDK halves: the `CircuitBreakerPolicy` union with a
   failure-rate arm, `createBreakerWindow` and `breakerPolicyRangeError` at
