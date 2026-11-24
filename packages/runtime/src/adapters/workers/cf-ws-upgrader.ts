@@ -156,7 +156,7 @@ export function createDefaultCloudflareWebSocketHost(): CloudflareWebSocketHost 
  * message closes the socket with 1009; there is no setting to raise it.
  * @since 0.14.0
  */
-export const WORKERS_WS_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+export const WORKERS_WS_MAX_MESSAGE_BYTES: number = 32 * 1024 * 1024;
 
 /**
  * Close codes a peer may send, so the adapter may echo them in its reply.

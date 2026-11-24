@@ -44,8 +44,10 @@ describe('realtime-clients example', () => {
   });
 
   it('works from workerd', async () => {
-    // `npx wrangler` downloads Wrangler on first use, which on a cold runner
-    // takes longer than the readiness budget below. Resolve it first.
+    // The example pins its own wrangler (the CLI Workers scaffold's), so `npx`
+    // runs that bin rather than downloading one; without it, npm finds the
+    // cloudflare-plugin's devDependency through the workspace links and then
+    // has no bin to run. Resolve it before the readiness budget below starts.
     await runOrFail('npx', ['--yes', 'wrangler', '--version']);
 
     const workerdPort = await freePort();

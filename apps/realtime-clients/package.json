@@ -12,7 +12,9 @@
     "@setu-ts/websocket-plugin": "workspace:^",
     "@setu-ts/sdk": "workspace:^"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "wrangler": "~4.148.0"
+  },
   "scripts": {
     "start": "tsx main.ts",
     "smoke": "tsx smoke.ts",
