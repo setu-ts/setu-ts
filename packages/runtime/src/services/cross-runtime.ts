@@ -100,6 +100,7 @@ export function mergeRuntimeServices(
     | 'fs'
     | 'workers'
     | 'dns'
+    | 'createDnsResolver'
     | 'onSignal'
     | 'onFatalError'
     | 'reportError'

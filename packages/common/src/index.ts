@@ -254,7 +254,9 @@ export type { FormFileMetadata } from './form/form-file-metadata.ts';
 export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding.ts';
 
 // Runtime abstraction
+export { UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from './unprocessed-response.ts';
 export type {
+  DnsResolverOptions,
   FatalErrorOrigin,
   IDnsResolver,
   IFileSystem,
@@ -473,7 +475,9 @@ export type { AuditEntry, IAuditLogger } from './services/audit.ts';
 export type {
   BackoffStrategy,
   BulkheadPolicy,
+  CircuitBreakerCountPolicy,
   CircuitBreakerPolicy,
+  CircuitBreakerRatePolicy,
   CircuitState,
   HardenedCall,
   ICircuitBreaker,
@@ -482,6 +486,9 @@ export type {
   RetryPolicy,
   WrapOptions,
 } from './services/resilience.ts';
+// Circuit-breaker trip rule (the SDK client's breaker runs on it)
+export { breakerPolicyRangeError, createBreakerWindow } from './services/breaker-window.ts';
+export type { IBreakerWindow } from './services/breaker-window.ts';
 export type { IStorage, PutObjectOptions, SignedUrlOptions } from './services/storage.ts';
 export type { IMailer, MailAttachment, MailMessage } from './services/mail.ts';
 export type { ChannelSendResult, INotifier, NotificationMessage } from './services/notification.ts';

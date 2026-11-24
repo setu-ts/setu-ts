@@ -39,7 +39,12 @@ export interface ITimers {
  * @since 0.1.0
  */
 export interface ResiliencePluginOptions {
-  /** Default circuit-breaker policy used when a `wrap` sets `circuitBreaker: true`. */
+  /**
+   * Default circuit-breaker policy used when a `wrap` sets `circuitBreaker: true`.
+   * Count arm only in this release: a rate policy (`failureRateThreshold`)
+   * throws a `RangeError` when `wrap()` builds the breaker, and rate fields set
+   * beside `threshold` are ignored.
+   */
   readonly defaultCircuitBreaker?: CircuitBreakerPolicy;
   /** Default retry policy used when a `wrap` sets `retry: true`. */
   readonly defaultRetry?: RetryPolicy;

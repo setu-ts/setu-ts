@@ -125,6 +125,13 @@
         "signature": "clearTimeout(handle:TimerHandle):void"
       },
       {
+        "kind": "method",
+        "name": "createDnsResolver",
+        "readonly": false,
+        "optional": true,
+        "signature": "createDnsResolver?(options:DnsResolverOptions):IDnsResolver"
+      },
+      {
         "kind": "property",
         "name": "dns",
         "readonly": true,

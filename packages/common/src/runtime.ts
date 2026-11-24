@@ -288,13 +288,26 @@ export interface IDnsResolver {
    *
    * Concatenates `A` and `AAAA` results. A host with only one family present
    * resolves successfully with just that family's addresses; the lookup
-   * rejects only when both families fail.
+   * rejects only when both families fail. The error's cause is an AggregateError
+   * whose errors contain the A failure followed by the AAAA failure.
    *
    * @param hostname - Hostname to resolve
    * @returns IPv4 and IPv6 address literals, possibly empty
    * @throws {Error} If both address families fail to resolve
    */
   resolveHost(hostname: string): Promise<readonly string[]>;
+}
+
+/**
+ * Chosen DNS servers and a whole-lookup bound for a new resolver.
+ *
+ * @since 0.14.0
+ */
+export interface DnsResolverOptions {
+  /** Non-empty IP literals, optionally with ports; IPv6 ports require brackets. */
+  readonly servers: readonly string[];
+  /** Integer 0..2_147_483_647; zero leaves only the runtime's own timeout. */
+  readonly timeoutMs: number;
 }
 
 /**
@@ -438,6 +451,16 @@ export interface IRuntimeServices {
    * @since 0.2.0
    */
   readonly dns?: IDnsResolver;
+
+  /**
+   * Creates a resolver using chosen name servers; absent on Workers.
+   *
+   * @param options - IP-literal servers and a whole-lookup timeout in milliseconds
+   * @returns A new resolver, independent of other lookups and runtime.dns
+   * @throws {RangeError} If servers or timeoutMs are invalid
+   * @since 0.14.0
+   */
+  createDnsResolver?(options: DnsResolverOptions): IDnsResolver;
 
   /**
    * Registers a handler for a process-termination signal, so an application

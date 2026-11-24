@@ -22,6 +22,8 @@ import type { CircuitBreakerPolicy } from '@setu-ts/common';
 import { HttpClientError } from '../errors.ts';
 import { encodeMultipart } from './multipart.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
+import { classifyBreakerOutcome } from '../circuit-breaker/classify.ts';
+import { breakerPolicyRangeError } from '@setu-ts/common/breaker-window';
 import { markExecuted, runWithRetry, validateRetryPolicy } from '../retry/retry-strategy.ts';
 import type { ResolvedClientIdempotencyOptions } from './idempotency-key.ts';
 import {
@@ -53,16 +55,28 @@ function isJsonMediaType(contentType: string): boolean {
 }
 
 /**
- * Whether an error represents a caller-initiated abort.
- *
- * `AbortSignal.reason` defaults to a `DOMException` named `AbortError`, but a
- * caller may abort with ANY value, so the name is checked structurally rather
- * than by `instanceof DOMException` alone.
+ * Reads each circuit-breaker field once (own or inherited) into a frozen copy,
+ * then checks that copy. The copy is what every origin's breaker gets, so a
+ * caller mutating its object later — or a getter answering differently on a
+ * second read — cannot change a later origin's window or the cooldown the
+ * breaker reads on every call, nor make a later origin's first request throw.
  */
-function isAbortError(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
-  );
+function snapshotBreakerPolicy(policy: CircuitBreakerPolicy): CircuitBreakerPolicy {
+  const read: Record<string, unknown> = {};
+  for (const field of [
+    'threshold',
+    'failureRateThreshold',
+    'minimumCalls',
+    'timeout',
+    'resetTimeout',
+  ] as const) {
+    const value = policy[field];
+    if (value !== undefined) read[field] = value;
+  }
+  const copy = Object.freeze(read) as unknown as CircuitBreakerPolicy;
+  const refused = breakerPolicyRangeError(copy);
+  if (refused !== null) throw refused;
+  return copy;
 }
 
 // Origin-keyed breaker and limiter maps.
@@ -137,7 +151,11 @@ export class HttpClient implements IHttpClient {
     this.#fetch = options.fetch ?? createDefaultFetch();
     this.#timing = options.timing;
     if (options.retry !== undefined) this.#retry = validateRetryPolicy(options.retry);
-    this.#circuitBreaker = options.circuitBreaker;
+    // Any falsy value (`null`, `false`, `0`, `''` from JavaScript or
+    // configuration) means no breaker, as it did before.
+    if (options.circuitBreaker) {
+      this.#circuitBreaker = snapshotBreakerPolicy(options.circuitBreaker);
+    }
     this.#maxRequests = options.rateLimit?.maxRequests;
     this.#windowMs = options.rateLimit?.windowMs;
     this.#requestInterceptors = options.requestInterceptors ?? [];
@@ -254,15 +272,7 @@ export class HttpClient implements IHttpClient {
     // Get or create origin breaker.
     let breaker = this.#breakers.get(origin);
     if (this.#circuitBreaker && !breaker) {
-      breaker = createCircuitBreaker(this.#circuitBreaker, this.#timing, (error) => {
-        // Dependency failures trip the breaker; user/input errors and caller
-        // aborts do not. A 4xx means the request was wrong, not that the origin
-        // is unhealthy — counting those would let ordinary 404 traffic take an
-        // API offline for every caller sharing this client.
-        if (error instanceof HttpClientError) return error.status >= 500;
-        if (isAbortError(error)) return false;
-        return true;
-      });
+      breaker = createCircuitBreaker(this.#circuitBreaker, this.#timing, classifyBreakerOutcome);
       this.#breakers.set(origin, breaker);
     }
 

@@ -714,4 +714,29 @@ describe('HttpClient', () => {
     // Fail-fast: no further request was dispatched.
     expect(serverCalls).toBe(2);
   });
+
+  it('counts a 4xx as a call the origin answered on the rate arm, so one 5xx in many 404s does not trip', async () => {
+    let calls = 0;
+    const client = new HttpClient({
+      baseUrl: 'https://api.example.com',
+      timing: fakeTiming,
+      circuitBreaker: {
+        failureRateThreshold: 50,
+        minimumCalls: 2,
+        timeout: 10_000,
+        resetTimeout: 10_000,
+      },
+      fetch: () => {
+        calls++;
+        return Promise.resolve(new Response('{}', { status: calls >= 4 ? 503 : 404 }));
+      },
+    });
+    for (let i = 0; i < 5; i++) {
+      await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(HttpClientError);
+    }
+    // Two failures in five calls is 40 %: still closed, so the sixth call is
+    // sent. Were the 404s left out, the two 503s would be 100 % of the window.
+    await expect(client.request({ method: 'GET', path: 'x' })).rejects.toThrow(HttpClientError);
+    expect(calls).toBe(6);
+  });
 });

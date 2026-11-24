@@ -47,6 +47,21 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                                                  |
 | Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                                                  |
 
+## DNS and unprocessed responses (since 0.14.0)
+
+`DnsResolverOptions` configures the optional `IRuntimeServices.createDnsResolver` with readonly
+IP-literal `servers` and a whole-lookup `timeoutMs`. Node, Bun and Deno implement it; Workers omits
+it. `IDnsResolver.resolveHost` rejects with an `AggregateError` cause holding both family errors in
+A-then-AAAA order when both fail. One successful family is still returned.
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
+
 ## Usage
 
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
@@ -143,6 +158,36 @@ omitted. Classifier strings are capped at 512 Unicode code points, aggregate err
 eight direct members, and the complete serialized tree is bounded to 64 nodes. An aggregate that is
 truncated reports `omittedErrorCount`.
 
+## Circuit-breaker window
+
+`createBreakerWindow(policy, now)` is the circuit-breaker trip rule, written once; the SDK client's
+per-origin breaker runs on it. (The resilience plugin still keeps an equivalent count-arm window of
+its own in this release.) `CircuitBreakerPolicy` has two arms:
+
+- **count** — `{ threshold, timeout, resetTimeout }`: trips when `threshold` failures are less than
+  `timeout` ms old. Failures are timestamped exactly.
+- **rate** — `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }`: trips when the window
+  holds at least `minimumCalls` calls and at least `failureRateThreshold` percent of them failed.
+  The window is ten buckets of `timeout / 10` ms aligned on the clock, so a call counts for between
+  `0.9 · timeout` and `timeout`. Only a failure can trip it.
+
+A success never clears recorded failures. `now` is a monotonic millisecond clock. An invalid policy,
+or one mixing both arms, is refused by `breakerPolicyRangeError` (thrown by `createBreakerWindow`).
+The module imports nothing at run time and is also served alone as `@setu-ts/common/breaker-window`.
+
+```typescript
+import { createBreakerWindow } from '@setu-ts/common/breaker-window';
+
+const window = createBreakerWindow(
+  { failureRateThreshold: 50, minimumCalls: 20, timeout: 10_000, resetTimeout: 5_000 },
+  () => performance.now(),
+);
+window.recordSuccess();
+if (window.recordFailure()) {
+  // open the circuit
+}
+```
+
 ## Redaction
 
 Classification and redaction live in `@setu-ts/common` so every egress plugin shares one policy
@@ -229,6 +274,8 @@ package fits the plugin architecture.
 
 ## Exports
 
+### `@setu-ts/common`
+
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
 | `assertPrimaryKeyUnchanged`           | function  |
@@ -237,6 +284,7 @@ package fits the plugin architecture.
 | `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
+| `breakerPolicyRangeError`             | function  |
 | `cacheControlDirectives`              | function  |
 | `causeMessage`                        | function  |
 | `checkWritePrecondition`              | function  |
@@ -244,6 +292,7 @@ package fits the plugin architecture.
 | `composeBehaviorChain`                | function  |
 | `contentTypeFor`                      | function  |
 | `contextToTraceparent`                | function  |
+| `createBreakerWindow`                 | function  |
 | `createCachedProbe`                   | function  |
 | `createCapabilityToken`               | function  |
 | `createConnectionErrorReporter`       | function  |
@@ -419,6 +468,8 @@ package fits the plugin architecture.
 | `TELEMETRY_CONTEXT_OPAQUE`            | const     |
 | `TRACEPARENT_HEADER`                  | const     |
 | `TRACESTATE_HEADER`                   | const     |
+| `UNPROCESSED_HEADER`                  | const     |
+| `UNPROCESSED_SHUTDOWN`                | const     |
 | `UPGRADE_INTENT`                      | const     |
 | `VALIDATION_METADATA`                 | const     |
 | `AddJobOptions`                       | interface |
@@ -439,7 +490,8 @@ package fits the plugin architecture.
 | `CacheDiagnosticsSnapshot`            | interface |
 | `CachedProbeOptions`                  | interface |
 | `CapabilityServices`                  | interface |
-| `CircuitBreakerPolicy`                | interface |
+| `CircuitBreakerCountPolicy`           | interface |
+| `CircuitBreakerRatePolicy`            | interface |
 | `ClassProvider`                       | interface |
 | `ConfigDiagnosticsSnapshot`           | interface |
 | `ConfigProvenanceEntry`               | interface |
@@ -458,6 +510,7 @@ package fits the plugin architecture.
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
 | `DispatchOptions`                     | interface |
+| `DnsResolverOptions`                  | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |
@@ -498,6 +551,7 @@ package fits the plugin architecture.
 | `IAuthService`                        | interface |
 | `IAuthSessionService`                 | interface |
 | `IAuthStrategy`                       | interface |
+| `IBreakerWindow`                      | interface |
 | `ICacheDiagnosticsSource`             | interface |
 | `ICacheStore`                         | interface |
 | `ICircuitBreaker`                     | interface |
@@ -777,6 +831,7 @@ package fits the plugin architecture.
 | `CapabilityKey`                       | type      |
 | `CapabilityToken`                     | type      |
 | `ChannelSendResult`                   | type      |
+| `CircuitBreakerPolicy`                | type      |
 | `CircuitState`                        | type      |
 | `CliCommandHandler`                   | type      |
 | `Component`                           | type      |
@@ -925,6 +980,14 @@ package fits the plugin architecture.
 | `WebSocketUpgradeRouter`              | type      |
 | `WritePrecondition`                   | type      |
 | `WritePreconditionCheck`              | type      |
+
+### `@setu-ts/common/breaker-window`
+
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `breakerPolicyRangeError` | function  |
+| `createBreakerWindow`     | function  |
+| `IBreakerWindow`          | interface |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -16,7 +16,9 @@
  * @module
  */
 
+import { createNodeServerDnsResolver } from '../shared/node-server-dns-resolver.ts';
 import type {
+  DnsResolverOptions,
   IDnsResolver,
   IFileSystem,
   IRuntimeServices,
@@ -107,6 +109,7 @@ export interface BunFileInfo {
  * @param workers - Injected worker host (defaults to the web `Worker` host)
  * @param dns - Injected DNS resolver (defaults to the shared `node:dns/promises`
  * resolver, which Bun implements)
+ * @param createDnsResolver - Injected creator for resolvers with chosen name servers
  * @returns Complete runtime services for Bun
  */
 export function createBunRuntimeServices(
@@ -116,6 +119,7 @@ export function createBunRuntimeServices(
   // depends on a task timeout to notice one.
   workers: IWorkerHost = createWebWorkerHost(readWebWorkerGlobals(), { exitEventName: 'close' }),
   dns: IDnsResolver = createNodeDnsResolver(),
+  createDnsResolver: (options: DnsResolverOptions) => IDnsResolver = createNodeServerDnsResolver,
 ): IRuntimeServices {
   const fs: IFileSystem = {
     readFile: (path: string) => {
@@ -212,6 +216,7 @@ export function createBunRuntimeServices(
     fs,
     workers,
     dns,
+    createDnsResolver,
   });
 }
 

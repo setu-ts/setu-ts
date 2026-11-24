@@ -77,6 +77,22 @@ can consume only names with a `deadLetterQueues` entry.
   clocks must agree); the default delivers them as before.
 - **`QueueSettlementState`** gains `'discarded'`: an exhaustive `switch` over it needs a new arm.
 
+### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
+
+`IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.
+Code reading `error.cause.code` must inspect `error.cause.errors` instead, in A-then-AAAA order;
+only classify a name as absent when every member indicates absence. One successful family continues
+to return addresses. Runtime error codes otherwise remain unchanged; Deno 2.9.6 also reports
+SERVFAIL as `NotFound`.
+
+The response header `x-setu-unprocessed: shutdown` (`UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN`,
+since 0.14.0) is reserved for the kernel's pre-pipeline shutdown answer. No request lifecycle hook,
+middleware or handler ran; an error responder may format the answer. Its meaning is independent of
+status (503 by default), and covers the Setu server, not work done by a proxy. Compare the value
+exactly; other values are reserved. The kernel does not remove the header from other responses. An
+application that sets it claims the request was not processed, and a client that honours the marker
+may send that request again.
+
 ### Process signals, the drain and runtime differences (`@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/common`, `@setu-ts/logger-plugin`)
 
 - **Drain bound.** Pass `drainTimeoutMs` to `app.start({ port, drainTimeoutMs })` to change the 10 s
@@ -127,6 +143,31 @@ can consume only names with a `deadLetterQueues` entry.
 - **Workers.** A streamed body's `ctx.defer` cleanups run when a client leaves only if the request's
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
+
+### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`)
+
+- **Reading a policy.** `CircuitBreakerPolicy` is now a union of the count arm
+  (`{ threshold, timeout, resetTimeout }`) and the rate arm
+  (`{ failureRateThreshold, minimumCalls, timeout, resetTimeout }`). Code that reads
+  `policy.threshold` must narrow first: `if (policy.threshold !== undefined) { … }`
+  (`'threshold' in policy` does not narrow). Policy literals written before still type-check.
+- **The SDK client's breaker no longer resets on success.** Before, any success emptied the failure
+  window, so `threshold` meant "failures in a row". Now it means failures within `timeout`, as it
+  always did in the resilience plugin: a flaky origin answering two calls in three can trip a
+  `threshold: 5` breaker it never tripped before. Raise `threshold`, shorten `timeout`, or move to
+  the rate arm (`failureRateThreshold`, `minimumCalls`). A call that succeeds after the circuit
+  tripped no longer closes it; only the half-open probe does.
+- **The SDK refuses an invalid policy everywhere.** `new HttpClient(...)` now checks the policy as
+  `createClient` does, and the message names the field and value
+  (`circuitBreaker.threshold must be a positive safe integer; received 0`). A test matching the old
+  `circuitBreaker.threshold must be >= 1` text needs the new one. Values accepted before and refused
+  now: a non-integer `threshold` or one above `Number.MAX_SAFE_INTEGER`; a missing `threshold` (with
+  no rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old
+  code coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
+  negative, infinite or over-range `resetTimeout`, or a missing one. A `timeout: Infinity` once
+  meant "failures in a row": use a finite window, or the rate arm.
+- **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
+  rate policy throws a `RangeError` when `wrap()` builds the breaker.
 
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 
