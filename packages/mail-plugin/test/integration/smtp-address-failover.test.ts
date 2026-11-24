@@ -9,7 +9,7 @@
  *
  * @module
  */
-import { createServer } from 'node:net';
+import { connect, createServer } from 'node:net';
 import type { Server, Socket } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SmtpProvider } from '../../src/providers/smtp-provider.ts';
@@ -90,5 +90,37 @@ describe('SMTP failover with the real nodemailer', () => {
     });
     expect(messages).toBe(1);
     await provider.disconnect();
+  });
+
+  it('the stand-in server completes a message whose terminator arrives split', async (context) => {
+    if (!available) context.skip();
+    const before = messages;
+    const socket = connect(port, '127.0.0.2');
+    let received = '';
+    const waitFor = (text: string): Promise<void> =>
+      new Promise((resolve) => {
+        const check = (): void => {
+          if (received.includes(text)) {
+            socket.off('data', onData);
+            resolve();
+          }
+        };
+        const onData = (chunk: Buffer): void => {
+          received += chunk.toString();
+          check();
+        };
+        socket.on('data', onData);
+        check();
+      });
+    await waitFor('220 ');
+    socket.write('DATA\r\n');
+    await waitFor('354 ');
+    // The body's `CRLF.` and the final `CRLF` go out as separate writes.
+    socket.write('Subject: s\r\n\r\nbody\r\n.');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    socket.write('\r\n');
+    await waitFor('250 queued');
+    expect(messages).toBe(before + 1);
+    socket.end('QUIT\r\n');
   });
 });
