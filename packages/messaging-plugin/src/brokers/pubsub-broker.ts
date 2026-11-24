@@ -404,7 +404,7 @@ export interface PubSubOptions {
   consumerRetry?: false | ConsumerRetryOptions;
   /** Pre-existing topic receiving exhausted or non-retryable messages. @since 0.14.0 */
   deadLetterTopic?: string;
-  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  /** Publish bound in ms, default 15000; 0 disables it except terminal dead-letter forwards (always 15000). A timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
   /** GCP project ID. Required unless {@link client} is injected. */
   projectId?: string;
@@ -946,7 +946,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     if (this.#enableMessageOrdering && this.#deadLetterTopic !== undefined)
       this.#warnOnce(
         'ordered-dead-letter',
-        'Pub/Sub later messages of a failing ordering key also spend delivery attempts and may be dead-lettered',
+        'Pub/Sub later messages of a failing ordering key also spend delivery attempts and may be dead-lettered; order is best effort once a message is dead-lettered',
       );
   }
 
@@ -1107,11 +1107,25 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     let closing: Promise<void> | undefined;
     let timer: TimerHandle | undefined;
     let failures = 0;
+    const checks = new Map<TimerHandle, () => void>();
+    const timing = {
+      hrtime: () => this.#runtime.hrtime(),
+      setTimer: (fn: () => void, ms: number): TimerHandle => {
+        const handle = this.#runtime.setTimeout(fn, ms);
+        checks.set(handle, fn);
+        return handle;
+      },
+      clearTimer: (handle: TimerHandle): void => {
+        this.#runtime.clearTimeout(handle);
+        checks.delete(handle);
+      },
+    };
     const state: ActivePubSubSubscription = {
       closed: false,
       close: () => {
         if (closing !== undefined) return closing;
         ended = true;
+        for (const cancel of checks.values()) cancel();
         ordering?.clear();
         streamGeneration++;
         if (timer !== undefined) this.#runtime.clearTimeout(timer);
@@ -1135,7 +1149,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       },
     };
     const dispatch = async (msg: PubSubMessage, deliveryGeneration: number): Promise<boolean> => {
-      if (ended || state.closed || deliveryGeneration !== streamGeneration) return true;
+      if (ended || deliveryGeneration !== streamGeneration) return true;
       let failed = false;
       let failure: unknown;
       try {
@@ -1166,8 +1180,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       if (!independent && !retryable && this.#deadLetterTopic !== undefined) {
         const deadLetterTopic = this.#deadLetterTopic;
         try {
-          // Bounded like every publish: a hung forward must not hold the
-          // message's lease (and, when ordered, its key) indefinitely.
+          // Terminal forwards always have a finite 15 s bound, including when
+          // ordinary publishing is unbounded, so a stalled send releases the key.
           await withDeadline(
             () =>
               transport.publish(
@@ -1176,13 +1190,13 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
                 { ...msg.attributes, 'setu-dead-letter-reason': 'not-retryable' },
               ),
             {
-              timeoutMs: this.#publishTimeoutMs,
+              timeoutMs: 15000,
               onTimeout: () =>
                 new PublishTimeoutError(
                   `Pub/Sub dead-letter forward to ${JSON.stringify(deadLetterTopic)} timed out`,
-                  { topic: deadLetterTopic, timeoutMs: this.#publishTimeoutMs },
+                  { topic: deadLetterTopic, timeoutMs: 15000 },
                 ),
-              timing: resolveProbeTiming(this.#runtime),
+              timing,
             },
           );
         } catch {
@@ -1203,14 +1217,35 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       }, delay);
     };
     const onClosed = (): void => {
-      if (ended || state.closed) return;
+      if (ended) return;
+      const alreadyClosed = state.closed;
       state.closed = true;
       streamGeneration++;
       ordering?.clear();
-      this.#write('Pub/Sub subscription stream closed; re-opening');
-      schedule();
+      if (!alreadyClosed) this.#write('Pub/Sub subscription stream closed; re-opening');
+      // Initial setup owns its handle until it commits or disposes it. Starting
+      // recovery before that finishes could orphan a replacement on refusal.
+      if (opened) schedule();
     };
-    const open = async (): Promise<IPubSubSubscription> => {
+    const disposeClosed = async (subscription: IPubSubSubscription): Promise<never> => {
+      try {
+        await subscription.close();
+      } finally {
+        if (independent && subscription.created === true)
+          await transport
+            .deleteSubscription(queue)
+            .catch((error: unknown) =>
+              this.#write(
+                `Pub/Sub fan-out subscription ${JSON.stringify(queue)} was not deleted (code ${errorCode(error)}); it expires after one idle day`,
+              ),
+            );
+      }
+      throw new Error('Pub/Sub stream closed while opening');
+    };
+    const open = async (): Promise<{
+      subscription: IPubSubSubscription;
+      closed: () => boolean;
+    }> => {
       const openingGeneration = streamGeneration;
       let closedDuringOpen = false;
       const subscription = await this.#openConsumer(
@@ -1231,24 +1266,25 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
             onClosed();
           },
         },
+        timing,
       );
-      if (closedDuringOpen) {
-        await subscription.close();
-        throw new Error('Pub/Sub stream closed while opening');
-      }
-      return subscription;
+      if (closedDuringOpen) return disposeClosed(subscription);
+      return { subscription, closed: () => closedDuringOpen };
     };
     const reopen = async (): Promise<void> => {
       try {
         const previous = current;
         current = undefined;
         await previous?.close();
-        const replacement = await open();
+        if (ended || generation !== this.#generation) return;
+        const result = await open();
+        const replacement = result.subscription;
         if (ended || generation !== this.#generation) {
           await replacement.close();
           if (independent) await transport.deleteSubscription(queue);
           return;
         }
+        if (result.closed()) await disposeClosed(replacement);
         current = replacement;
         opened = true;
         state.closed = false;
@@ -1261,16 +1297,21 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     };
     this.#subscriptions.set(subscriptionId, state);
     try {
-      const initial = await open();
+      const result = await open();
+      const initial = result.subscription;
       if (ended || generation !== this.#generation) {
         await initial.close();
         if (independent) await transport.deleteSubscription(queue);
         throw new Error('GcpPubSubBroker disconnected while subscribing');
       }
+      if (result.closed()) await disposeClosed(initial);
       current = initial;
       opened = true;
     } catch (error) {
       ended = true;
+      streamGeneration++;
+      ordering?.clear();
+      for (const cancel of checks.values()) cancel();
       if (timer !== undefined) this.#runtime.clearTimeout(timer);
       this.#subscriptions.delete(subscriptionId);
       throw error;
@@ -1304,6 +1345,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     queue: string,
     onMessage: Parameters<IPubSubTransport['open']>[2],
     options: PubSubOpenOptions,
+    timing: ReturnType<typeof resolveProbeTiming>,
   ): Promise<IPubSubSubscription> {
     const target = options.create?.deadLetterPolicy?.deadLetterTopic;
     let subscription: IPubSubSubscription;
@@ -1363,22 +1405,26 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       if (transport.topicHasSubscriptions === undefined) {
         this.#warnOnce(
           'target:' + target,
-          `Pub/Sub cannot check subscriptions on dead-letter topic ${JSON.stringify(target)}; dead letters are dropped until it has a subscription`,
+          `Pub/Sub cannot check subscriptions on dead-letter topic ${JSON.stringify(target)}; dead letters are lost unless the topic has a subscription or message retention enabled`,
         );
       } else {
         try {
-          const subscribed = await transport.topicHasSubscriptions(target);
+          const subscribed = await withDeadline(() => transport.topicHasSubscriptions!(target), {
+            timeoutMs: 1500,
+            onTimeout: () => new Error('Pub/Sub dead-letter subscription check timed out'),
+            timing,
+          });
           if (!subscribed)
             this.#warnOnce(
               'target:' + target,
-              `Pub/Sub dead-letter topic ${JSON.stringify(target)} has no subscription; dead letters are dropped until it has a subscription`,
+              `Pub/Sub dead-letter topic ${JSON.stringify(target)} has no subscription; dead letters are lost unless the topic has a subscription or message retention enabled`,
             );
         } catch (error) {
           const permission = errorCode(error) === '7';
           this.#warnOnce(
             'target:' + target,
             permission
-              ? `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code 7); grant pubsub.topics.get and pubsub.topics.listSubscriptions (roles/pubsub.viewer) to run the check; roles/pubsub.subscriber lacks pubsub.topics.get`
+              ? `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code 7); grant roles/pubsub.viewer on the topic to run the check; roles/pubsub.subscriber lacks pubsub.topics.get`
               : `Pub/Sub cannot check dead-letter topic ${JSON.stringify(target)} subscriptions (code ${errorCode(error)})`,
             permission,
           );

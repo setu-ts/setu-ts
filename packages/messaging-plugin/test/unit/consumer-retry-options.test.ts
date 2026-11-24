@@ -7,6 +7,19 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import type { ConsumerRetryOptions } from '../../src/interfaces/index.ts';
 
 describe('consumer retry validation', () => {
+  it.each(['RabbitMqBroker', 'RedisStreamsBroker', 'GcpPubSubBroker', 'ServiceBusBroker'])(
+    'refuses non-array delays for %s with RangeError',
+    (broker) => {
+      for (const delaysMs of [5000, {}, 'secret', null]) {
+        expect(() =>
+          resolveConsumerRetry({ delaysMs: delaysMs as never }, broker, { defaults: [1] }),
+        ).toThrow(RangeError);
+        expect(() =>
+          resolveConsumerRetry({ delaysMs: delaysMs as never }, broker, { defaults: [1] }),
+        ).toThrow(`${broker} consumerRetry.delaysMs must be an array`);
+      }
+    },
+  );
   it.each([0, -1, 1.5, NaN, Infinity])(
     'refuses invalid budgets %s in both existing arms',
     (maxAttempts) => {

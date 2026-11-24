@@ -23,6 +23,7 @@ import type { IRuntimeServices, QueueDepthScope, TimerHandle } from '@setu-ts/co
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { notifyFailed, runJob, toJob } from '../processors/job-processor.ts';
+import { SqsDeadLetterTargetMissingError } from '../errors.ts';
 import { toReportableError } from './reportable-error.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import type { QueueCollector } from '../metrics/queue-collector.ts';
@@ -98,6 +99,8 @@ export class QueueService implements IQueue {
   #connected = false;
   #preparations = new Map<string, Promise<void>>();
   #preparationRefused = new Set<string>();
+  #preparationReported = new Set<string>();
+  #preparationRetry = new Map<string, { failures: number; nextAttemptAt: number }>();
   #generation = 0;
   #logger: QueueLogger | undefined;
   /**
@@ -253,6 +256,8 @@ export class QueueService implements IQueue {
     await Promise.allSettled(this.#preparations.values());
     this.#preparations.clear();
     this.#preparationRefused.clear();
+    this.#preparationReported.clear();
+    this.#preparationRetry.clear();
   }
 
   isReady(): boolean {
@@ -303,7 +308,18 @@ export class QueueService implements IQueue {
   prepare(name: string): Promise<void> {
     let pending = this.#preparations.get(name);
     if (pending === undefined) {
-      pending = Promise.resolve().then(() => this.#adapter.prepareConsumer?.(name));
+      const generation = this.#generation;
+      pending = Promise.resolve()
+        .then(() => this.#adapter.prepareConsumer?.(name))
+        .catch((error: unknown) => {
+          if (
+            generation === this.#generation &&
+            this.#transientPreparation(error) &&
+            this.#preparations.get(name) === pending
+          )
+            this.#preparations.delete(name);
+          throw error;
+        });
       this.#preparations.set(name, pending);
     }
     return pending;
@@ -329,11 +345,32 @@ export class QueueService implements IQueue {
     if (!this.#connected || this.#adapter.prepareConsumer === undefined) return;
     const generation = this.#generation;
     void this.prepare(name).catch((error: unknown) => {
-      if (generation === this.#generation && !this.#preparationRefused.has(name)) {
-        this.#preparationRefused.add(name);
-        this.#report('queue consumer preparation failed', error, { name });
-      }
+      if (generation === this.#generation) this.#preparationFailed(name, error);
     });
+  }
+
+  #transientPreparation(error: unknown): boolean {
+    return (
+      error instanceof SqsDeadLetterTargetMissingError &&
+      (error.reason === 'attributes-unavailable' || error.reason === 'target-unresolvable')
+    );
+  }
+
+  /** Refuses definite failures; transient failures back off without polling SQS. */
+  #preparationFailed(name: string, error: unknown): void {
+    if (this.#transientPreparation(error)) {
+      const now = this.#runtime.hrtime();
+      const previous = this.#preparationRetry.get(name);
+      if (previous === undefined || previous.nextAttemptAt <= now) {
+        const failures = (previous?.failures ?? 0) + 1;
+        const delay = [1000, 2000, 5000, 10000, 30000][Math.min(failures - 1, 4)]!;
+        this.#preparationRetry.set(name, { failures, nextAttemptAt: now + delay });
+      }
+    } else this.#preparationRefused.add(name);
+    if (!this.#preparationReported.has(name)) {
+      this.#preparationReported.add(name);
+      this.#report('queue consumer preparation failed', error, { name });
+    }
   }
 
   async addRecurring<T>(name: string, data: T, options: RecurringOptions): Promise<void> {
@@ -547,8 +584,10 @@ export class QueueService implements IQueue {
     const generation = this.#generation;
 
     for (const [name, reg] of this.#processors.entries()) {
-      // A refused imperative consumer stays stopped until disconnect.
+      // Definite refusals stay stopped; transient preparation waits for its backoff.
       if (this.#preparationRefused.has(name)) continue;
+      const retry = this.#preparationRetry.get(name);
+      if (retry !== undefined && retry.nextAttemptAt > this.#runtime.hrtime()) continue;
       // Skip if reserve is already in progress for this name
       if (reg.reserveInProgress) {
         continue;
@@ -569,11 +608,13 @@ export class QueueService implements IQueue {
         if (this.#adapter.prepareConsumer !== undefined) {
           try {
             await this.prepare(name);
-          } catch {
-            // process() owns the once-only error report.
+          } catch (error) {
+            if (this.#connected && generation === this.#generation)
+              this.#preparationFailed(name, error);
             continue;
           }
           if (!this.#connected || generation !== this.#generation) return;
+          this.#preparationRetry.delete(name);
         }
         let jobs: readonly StoredJob<unknown>[];
         try {

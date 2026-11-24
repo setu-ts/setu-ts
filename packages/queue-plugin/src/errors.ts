@@ -64,7 +64,7 @@ export class SqsDeadLetterTargetMissingError extends Error {
     super(
       `SQS job "${jobName}" at "${queueUrl}" has no dead-letter target: ${TARGET_MISSING_TEXT[reason]}. ` +
         `Add a deadLetterQueues entry, configure a redrive policy on the queue, or set deadLetterQueues: { '${jobName}': false } to discard exhausted jobs. ` +
-        'Required IAM rights: sqs:GetQueueAttributes on the source, sqs:GetQueueUrl for a policy target, sqs:SendMessage on the target, and kms:GenerateDataKey for a customer-managed encrypted target.',
+        'Required IAM rights: sqs:GetQueueAttributes on the source, sqs:GetQueueUrl for a policy target, sqs:SendMessage on the target, and kms:GenerateDataKey and kms:Decrypt for a customer-managed encrypted target.',
       cause === undefined ? undefined : { cause },
     );
     this.name = 'SqsDeadLetterTargetMissingError';

@@ -4,6 +4,10 @@ import type { IMetricsService } from '@setu-ts/common';
 import { QueueCollector } from '../../src/metrics/queue-collector.ts';
 import { QueueService } from '../../src/services/queue-service.ts';
 
+async function flushRetirement(): Promise<void> {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+}
+
 describe('SQS unreadable messages', () => {
   it('never writes the unreadable payload into warnings or errors', async () => {
     const { queue, transport, logger } = await sqsHarness();
@@ -25,6 +29,7 @@ describe('SQS unreadable messages', () => {
       const { queue, transport, logger, runtime } = await sqsHarness();
       await transport.send('source', body);
       expect(await queue.reserve('build', 1, 0)).toEqual([]);
+      await flushRetirement();
       expect(transport.sent.at(-1)).toMatchObject({
         queueUrl: 'dead',
         body,
@@ -33,6 +38,7 @@ describe('SQS unreadable messages', () => {
       expect(transport.depth('source')).toBe(0);
       await runtime.advanceMs(4000);
       expect(await queue.reserve('build', 1, runtime.now())).toEqual([]);
+      await flushRetirement();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringMatching(/build.*msg-1/));
       expect(JSON.stringify([logger.warn.mock.calls, logger.error.mock.calls])).not.toContain(
         'payload-canary',
@@ -58,6 +64,7 @@ describe('SQS unreadable messages', () => {
         },
       );
       expect(await queue.reserve('build', 1, 0)).toEqual([]);
+      await flushRetirement();
       expect(transport.sent.at(-1)!.attributes!['setu-attempts']!.StringValue).toBe('0');
       expect(transport.deleted).toEqual([{ queueUrl: 'source', receiptHandle: 'receipt' }]);
       await queue.disconnect();
@@ -71,8 +78,10 @@ describe('SQS unreadable messages', () => {
       .mockRejectedValueOnce(new Error('down'))
       .mockRejectedValueOnce(new Error('down'));
     expect(await queue.reserve('build', 1, 0)).toEqual([]);
+    await flushRetirement();
     await runtime.advanceMs(3000);
     expect(await queue.reserve('build', 1, runtime.now())).toEqual([]);
+    await flushRetirement();
     expect(send).toHaveBeenCalledTimes(2);
     expect(transport.depth('source')).toBe(1);
     expect(transport.deleted).toEqual([]);

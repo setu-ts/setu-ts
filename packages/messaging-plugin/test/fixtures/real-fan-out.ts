@@ -96,7 +96,10 @@ export async function realFanOutPair(
   } else if (arm === 'rabbitmq') {
     const amqp = await import('amqplib');
     const admin = await amqp.connect(process.env['RABBITMQ_URL']!);
-    const channel = await admin.createChannel();
+    const channel = await admin.createChannel().catch(async (error: unknown) => {
+      await admin.close().catch(() => {});
+      throw error;
+    });
     const queues = new Set<string>();
     const clients: IAmqpConnection[] = [];
     try {
@@ -124,7 +127,7 @@ export async function realFanOutPair(
       }
     } catch (error) {
       await Promise.allSettled(clients.map((client) => client.close()));
-      await admin.close();
+      await Promise.allSettled([channel.close(), admin.close()]);
       throw error;
     }
     brokers = clients.map(
@@ -165,7 +168,10 @@ export async function realFanOutPair(
   } else if (arm === 'nats') {
     const nats = await import('nats');
     const admin = await nats.connect({ servers: process.env['NATS_URL']! });
-    const manager = await admin.jetstreamManager();
+    const manager = await admin.jetstreamManager().catch(async (error: unknown) => {
+      await admin.close().catch(() => {});
+      throw error;
+    });
     brokers = [0, 1].map(
       () =>
         new NatsBroker(runtime, serializer, {

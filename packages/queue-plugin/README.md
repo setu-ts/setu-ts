@@ -467,16 +467,16 @@ injected transport).
 #### Long jobs
 
 While a processor runs, the adapter extends the message's visibility every third of
-`visibilityTimeoutSeconds`, so a job longer than the timeout runs once. Renewal also continues
-through `onFailed` and the dead-letter forward, and stops only for the final delete or visibility
-change. SQS caps a message's visibility at 12 hours from the receive; the adapter asks for no more
-than the time left and stops extending at the cap, after which the job is reported as stale
-(`queue job claim renewal failed`) and SQS delivers it again. A settle (`ack`, retry or dead-letter)
-for a claim the adapter no longer holds fails and is reported as `queue job settlement failed`; it
-is not counted. One exception: once a dead letter's copy has reached its target, the source delete
-is always attempted and the settle counts; if the claim lapsed during the forward, a warning says
-the source may be delivered and dead-lettered again (SQS ignores a delete through a superseded
-receipt handle).
+`visibilityTimeoutSeconds`, reducing timeout-driven redelivery. SQS can still deliver more than
+once, so keep processors idempotent. Renewal also continues through `onFailed` and the dead-letter
+forward, and stops only for the final delete or visibility change. SQS caps a message's visibility
+at 12 hours from the receive; the adapter asks for no more than the time left and stops extending at
+the cap, after which the job is reported as stale (`queue job claim renewal failed`) and SQS
+delivers it again. A settle (`ack`, retry or dead-letter) for a claim the adapter no longer holds
+fails and is reported as `queue job settlement failed`; it is not counted. One exception: once a
+dead letter's copy has reached its target, the source delete is always attempted and the settle
+counts; if the claim lapsed during the forward, a warning says the source may be delivered and
+dead-lettered again (SQS ignores a delete through a superseded receipt handle).
 
 #### SQS Retry and DLQ
 
@@ -494,8 +494,10 @@ With none of these, the consumer is refused with `SqsDeadLetterTargetMissingErro
 says why (`no-target`, `policy-unreadable`, `attributes-unavailable` or `target-unresolvable`) and
 whose `cause` holds the read error when there was one. A processor declared in
 `QueuePlugin({ processors })` makes `app.start()` fail; an imperative `process()` is reported once
-and that name is not polled, its messages left in SQS. A name the process only enqueues to is never
-checked.
+and that name is not polled until a target is proved, its messages left in SQS. Only
+`attributes-unavailable` and `target-unresolvable` are retried on later polls, after 1, 2, 5, 10,
+then 30 seconds (repeated); other refusal reasons stay stopped until reconnect. A name the process
+only enqueues to is never checked.
 
 A job that exhausts its attempts, or that a dead worker abandoned, is sent unchanged to the target
 with three message attributes, then deleted from the source:
@@ -506,10 +508,12 @@ with three message attributes, then deleted from the source:
 | `setu-attempts`           | `Number` | The receive count                                          |
 | `setu-source-message-id`  | `String` | The source message's SQS id, as in the warning and the log |
 
-No error text is attached, and attributes the producer set are not carried over. If the send fails,
-the source is kept and the job comes back after its visibility timeout, takes the dead-worker path,
-runs `onFailed` again and is forwarded again. Without a redrive policy on the queue, a send that
-keeps failing (target deleted, `sqs:SendMessage` or KMS denied) repeats that every timeout; a
+No error text is attached, and attributes the producer set are not carried over. On `SendMessage`
+error code `InvalidParameterValue` (the size refusal), the adapter warns once and retries the
+unchanged body once without the `setu-` attributes, which count toward the size limit. If the send
+fails, the source is kept and the job comes back after its visibility timeout, takes the dead-worker
+path, runs `onFailed` again and is forwarded again. Without a redrive policy on the queue, a send
+that keeps failing (target deleted, `sqs:SendMessage` or KMS denied) repeats that every timeout; a
 redrive policy bounds it, because SQS then takes the message itself. If the delete fails after the
 send, a duplicate-risk error is logged.
 
@@ -530,9 +534,9 @@ delivered to the queue is retired this way: confirm a subscription from the cons
 
 **AWS rights a consumer needs:** `sqs:GetQueueAttributes` on the source queue (not for a name set to
 `false`), `sqs:GetQueueUrl` when the redrive policy names the target, `sqs:SendMessage` on the
-target, and `kms:GenerateDataKey` when the target uses a customer-managed KMS key. With
-`deadLetterQueues[name]` a URL and the attribute read refused, the adapter warns once and continues
-without lowering attempts.
+target, and `kms:GenerateDataKey` and `kms:Decrypt` when the target uses a customer-managed KMS key.
+With `deadLetterQueues[name]` a URL and the attribute read refused, the adapter warns once and
+continues without lowering attempts.
 
 #### SNS to SQS
 

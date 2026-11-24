@@ -53,16 +53,16 @@ const credentials = { accessKeyId: 'test', secretAccessKey: 'test' };
 /** Queue names this run owns, suffixed so repeated runs never share state. */
 const runId = crypto.randomUUID().slice(0, 8);
 const NAMES = {
-  round: `e2e-round-${runId}`,
-  alpha: `e2e-alpha-${runId}`,
-  beta: `e2e-beta-${runId}`,
-  retry: `e2e-retry-${runId}`,
-  dlqSource: `e2e-dlq-source-${runId}`,
-  dlqTarget: `e2e-dlq-target-${runId}`,
-  policySource: `e2e-policy-source-${runId}`,
-  policyTarget: `e2e-policy-target-${runId}`,
-  unreadableSource: `e2e-unreadable-source-${runId}`,
-  unreadableTarget: `e2e-unreadable-target-${runId}`,
+  round: `m143p-e2e-round-${runId}`,
+  alpha: `m143p-e2e-alpha-${runId}`,
+  beta: `m143p-e2e-beta-${runId}`,
+  retry: `m143p-e2e-retry-${runId}`,
+  dlqSource: `m143p-e2e-dlq-source-${runId}`,
+  dlqTarget: `m143p-e2e-dlq-target-${runId}`,
+  policySource: `m143p-e2e-policy-source-${runId}`,
+  policyTarget: `m143p-e2e-policy-target-${runId}`,
+  unreadableSource: `m143p-e2e-unreadable-source-${runId}`,
+  unreadableTarget: `m143p-e2e-unreadable-target-${runId}`,
 } as const;
 
 /** Live queue URLs, filled by {@linkcode beforeAll} from `CreateQueue`. */
@@ -301,7 +301,11 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
       }),
     );
     const runtime = createRuntime();
-    const queue = new SqsQueue(runtime, { ...baseOptions(), queues: { work: sourceUrl } });
+    const queue = new SqsQueue(runtime, {
+      ...baseOptions(),
+      queues: { work: sourceUrl },
+      visibilityTimeoutSeconds: 2,
+    });
     await queue.connect();
     try {
       await queue.enqueue({
@@ -319,7 +323,11 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
         Messages: { Body: string }[];
       };
       expect(JSON.parse(received.Messages[0]!.Body).data).toEqual({ kept: true });
-      expect(await queue.reserve('work', 1, runtime.now())).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const source = (await sqsClient!.send(
+        new sdk.ReceiveMessageCommand({ QueueUrl: sourceUrl, WaitTimeSeconds: 0 }),
+      )) as { Messages?: unknown[] };
+      expect(source.Messages ?? []).toEqual([]);
     } finally {
       await queue.disconnect();
     }
@@ -339,10 +347,12 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
       ...baseOptions(),
       queues: { work: urls[NAMES.unreadableSource]! },
       deadLetterQueues: { work: urls[NAMES.unreadableTarget]! },
+      visibilityTimeoutSeconds: 2,
     });
     await queue.connect();
     try {
       expect(await queue.reserve('work', 1, runtime.now())).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
       const result = (await sqsClient!.send(
         new sdk.ReceiveMessageCommand({
           QueueUrl: urls[NAMES.unreadableTarget]!,
@@ -358,7 +368,13 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
       expect(result.Messages[0]!.MessageAttributes['setu-source-message-id']!.StringValue).toBe(
         sent.MessageId,
       );
-      expect(await queue.reserve('work', 1, runtime.now())).toEqual([]);
+      const source = (await sqsClient!.send(
+        new sdk.ReceiveMessageCommand({
+          QueueUrl: urls[NAMES.unreadableSource]!,
+          WaitTimeSeconds: 0,
+        }),
+      )) as { Messages?: unknown[] };
+      expect(source.Messages ?? []).toEqual([]);
     } finally {
       await queue.disconnect();
     }

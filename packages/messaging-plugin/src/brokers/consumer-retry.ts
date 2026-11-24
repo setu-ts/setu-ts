@@ -46,6 +46,8 @@ export function resolveConsumerRetry(
       `${broker} consumerRetry.maxAttempts must be a positive integer within its bound`,
     );
   }
+  if (configured?.delaysMs !== undefined && !Array.isArray(configured.delaysMs))
+    throw new RangeError(`${broker} consumerRetry.delaysMs must be an array`);
   const delaysMs = [...(configured?.delaysMs ?? bounds.defaults)];
   if (delaysMs.length === 0)
     throw new RangeError(`${broker} consumerRetry.delaysMs must be nonempty`);

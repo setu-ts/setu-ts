@@ -17,6 +17,41 @@ function harness(options: ConstructorParameters<typeof ServiceBusBroker>[2] = {}
 }
 
 describe('Service Bus consumer retry', () => {
+  it('scopes fan-out inspection warnings to each subscription lifetime', async () => {
+    const h = harness();
+    vi.spyOn(h.runtime, 'uuid').mockReturnValue('00000000-0000-4000-8000-000000000000');
+    vi.mocked(h.transport.getSubscription!).mockRejectedValue(new Error('admin'));
+    await h.broker.connect();
+    for (let i = 0; i < 3; i++) {
+      const sub = await h.broker.subscribe('orders', () => {}, { fanOut: true });
+      await sub.unsubscribe();
+    }
+    expect(h.logger.warn).toHaveBeenCalledTimes(3);
+    await h.broker.disconnect();
+  });
+  it('cancels a stalled inspection during disconnect without opening a late receiver', async () => {
+    const h = harness();
+    vi.mocked(h.transport.getSubscription!).mockReturnValue(new Promise(() => {}));
+    await h.broker.connect();
+    const pending = h.broker.subscribe('orders', () => {});
+    let finished = false;
+    void pending.then(
+      () => {
+        finished = true;
+      },
+      () => {
+        finished = true;
+      },
+    );
+    const refusal = expect(pending).rejects.toThrow('disconnected while subscribing');
+    await flushCloud();
+    await h.broker.disconnect();
+    await flushCloud();
+    expect(finished).toBe(true);
+    await refusal;
+    expect(h.transport.open).not.toHaveBeenCalled();
+    expect(h.timerCount()).toBe(0);
+  });
   it('treats deliveryCount as prior deliveries, holding first through fourth and dead-lettering fifth', async () => {
     const h = harness();
     await h.broker.connect();

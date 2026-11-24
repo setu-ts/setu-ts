@@ -16,6 +16,7 @@
 
 import {
   createCachedProbe,
+  withDeadline,
   type ISubscription,
   type MessageHandler,
   type MessageMetadata,
@@ -1153,6 +1154,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     let created = false;
     let current: IServiceBusSubscription | undefined;
     const holds = new Set<() => Promise<void>>();
+    let cancelInspection: (() => void) | undefined;
+    const warnings = independent ? new Set<string>() : this.#warnings;
     const deleteCreated = async (): Promise<void> => {
       if (!created) return;
       created = false;
@@ -1168,6 +1171,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const close = (): Promise<void> => {
       if (closing !== undefined) return closing;
       ended = true;
+      cancelInspection?.();
+      if (independent) warnings.clear();
       closing = (async () => {
         await Promise.all([...holds].map((cancel) => cancel()));
         try {
@@ -1184,8 +1189,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     let budget = this.#retry.maxAttempts;
     const warnOnce = (kind: string, message: string): void => {
       const key = kind + ':' + topic + '/' + queue;
-      if (this.#warnings.has(key)) return;
-      this.#warnings.add(key);
+      if (warnings.has(key)) return;
+      warnings.add(key);
       this.#write(message);
     };
     try {
@@ -1207,7 +1212,23 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       }
       if (this.#retry.retry && transport.getSubscription !== undefined) {
         try {
-          const { maxDeliveryCount } = await transport.getSubscription(topic, queue);
+          const { maxDeliveryCount } = await withDeadline(
+            () => transport.getSubscription!(topic, queue),
+            {
+              timeoutMs: 5000,
+              onTimeout: () => new Error('Service Bus subscription inspection timed out'),
+              timing: {
+                setTimer: (fn, ms) => {
+                  cancelInspection = fn;
+                  return this.#runtime.setTimeout(fn, ms);
+                },
+                clearTimer: (handle) => {
+                  this.#runtime.clearTimeout(handle);
+                  cancelInspection = undefined;
+                },
+              },
+            },
+          );
           if (
             maxDeliveryCount !== undefined &&
             Number.isSafeInteger(maxDeliveryCount) &&

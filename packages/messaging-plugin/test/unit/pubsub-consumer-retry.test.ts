@@ -119,7 +119,7 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
     await h.broker.disconnect();
   });
 
-  it('bounds a hung not-retryable forward by publishTimeoutMs and then nacks', async () => {
+  it('bounds a terminal forward at fifteen seconds even with a shorter ordinary publish timeout', async () => {
     const h = harness({
       deadLetterTopic: 'dead',
       publishTimeoutMs: 1000,
@@ -136,6 +136,10 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
     await flushCloud();
     expect(nack).not.toHaveBeenCalled();
     await h.advance(1000);
+    expect(nack).not.toHaveBeenCalled();
+    await h.advance(13999);
+    expect(nack).not.toHaveBeenCalled();
+    await h.advance(1);
     await flushCloud();
     expect(nack).toHaveBeenCalledOnce();
     expect(ack).not.toHaveBeenCalled();
@@ -251,6 +255,18 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
       await h.broker.subscribe('orders', () => {});
       await h.broker.subscribe('other', () => {});
       expect(kind === 'permission' ? h.logger.info : h.logger.warn).toHaveBeenCalledOnce();
+      if (kind === 'permission') {
+        expect(h.logger.info).toHaveBeenCalledWith(
+          expect.stringContaining('grant roles/pubsub.viewer on the topic'),
+        );
+        expect(JSON.stringify(h.logger.info.mock.calls)).not.toContain('listSubscriptions');
+      }
+      if (kind === 'empty' || kind === 'missing-method')
+        expect(h.logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'dead letters are lost unless the topic has a subscription or message retention enabled',
+          ),
+        );
       expect(
         JSON.stringify([...h.logger.warn.mock.calls, ...h.logger.info.mock.calls]),
       ).not.toContain('secret');

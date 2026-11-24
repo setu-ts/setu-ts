@@ -493,13 +493,13 @@ Since 0.14.0 a failing Pub/Sub handler is retried with a delay by default (`cons
 RabbitMQ and Redis Streams. Pub/Sub has no per-message delay, so the broker sets the subscription's
 own policies when it creates a subscription:
 
-| Option                      | Default           | Mapping                                                                                                                                                                                                      |
-| --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `consumerRetry.delaysMs`    | `[10000, 600000]` | `retryPolicy`: the first entry is the minimum backoff, the last the maximum; one or two nondecreasing entries, each 0 to 600,000 ms                                                                          |
-| `consumerRetry.maxAttempts` | `5`               | `deadLetterPolicy.maxDeliveryAttempts`, 5 to 100, used only with `deadLetterTopic`                                                                                                                           |
-| `consumerRetry.isRetryable` | absent            | `false` forwards the message to `deadLetterTopic` with `setu-dead-letter-reason: not-retryable` and acks it once the forward is published (bounded by `publishTimeoutMs`); refused without `deadLetterTopic` |
-| `deadLetterTopic`           | absent            | `deadLetterPolicy.deadLetterTopic`; without it a failing message is redelivered without limit, and `connect()` warns once                                                                                    |
-| `consumerRetry`             | enabled           | `false` restores the immediate nack; a `deadLetterTopic` is then ignored, with one warning                                                                                                                   |
+| Option                      | Default           | Mapping                                                                                                                                                                                                                                     |
+| --------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `consumerRetry.delaysMs`    | `[10000, 600000]` | `retryPolicy`: the first entry is the minimum backoff, the last the maximum; one or two nondecreasing entries, each 0 to 600,000 ms                                                                                                         |
+| `consumerRetry.maxAttempts` | `5`               | `deadLetterPolicy.maxDeliveryAttempts`, 5 to 100, used only with `deadLetterTopic`                                                                                                                                                          |
+| `consumerRetry.isRetryable` | absent            | `false` forwards the message to `deadLetterTopic` with `setu-dead-letter-reason: not-retryable` and acks it once the forward is published (always bounded at 15,000 ms, even with `publishTimeoutMs: 0`); refused without `deadLetterTopic` |
+| `deadLetterTopic`           | absent            | `deadLetterPolicy.deadLetterTopic`; without it a failing message is redelivered without limit, and `connect()` warns once                                                                                                                   |
+| `consumerRetry`             | enabled           | `false` restores the immediate nack; a `deadLetterTopic` is then ignored, with one warning                                                                                                                                                  |
 
 The policies apply only when the broker **creates** the subscription. An existing subscription keeps
 its settings; when they differ from the configured ones, the broker warns once naming it. A
@@ -512,8 +512,8 @@ When the broker creates a subscription with a dead-letter policy:
 - a `deadLetterTopic` that does not exist makes that `subscribe()` reject with
   `PubSubDeadLetterTopicMissingError` (Pub/Sub itself refuses the create; the SDK error is the
   `cause`); for a declared subscription, `app.start()` fails;
-- a `deadLetterTopic` with no subscription is warned about once: Pub/Sub drops what is published to
-  a topic with no subscription;
+- a `deadLetterTopic` with no subscription is warned about once: dead letters are lost unless the
+  topic has a subscription or message retention enabled;
 - when that check cannot read the topic, a permission refusal is logged once at `info` (the check
   needs `pubsub.topics.get`, which `roles/pubsub.subscriber` lacks; `roles/pubsub.viewer` on the
   topic has it) and any other failure warns once; the subscribe continues either way.
@@ -524,12 +524,13 @@ no check. A custom `IPubSubTransport` must report `created` from `open` for the 
 On a broker with `enableMessageOrdering`, handlers run one at a time per ordering key (see
 [What `orderingKey` promises](#what-orderingkey-promises)). Pub/Sub counts every nack as a delivery
 attempt, so with a `deadLetterTopic` the later messages of a failing key spend attempts too and can
-be dead-lettered with it; `connect()` warns once about this. The broker keeps hold-back state for at
-most 10,000 ordering keys per subscription and forgets the least recently used idle key beyond that,
-so keys whose failed message was dead-lettered cannot grow memory without bound. When the forgotten
-key failed within the last 11 minutes, its failed message may still be redelivered (Pub/Sub applies
-its retry policy best effort, so a later redelivery is possible too), and that key's next message
-can run before it; the broker warns once per subscription when it forgets such a key.
+be dead-lettered with it; `connect()` warns once about this and that order is best effort once a
+message is dead-lettered. The broker keeps hold-back state for at most 10,000 ordering keys per
+subscription and forgets the least recently used idle key beyond that, so keys whose failed message
+was dead-lettered cannot grow memory without bound. When the forgotten key failed within the last 11
+minutes, its failed message may still be redelivered (Pub/Sub applies its retry policy best effort,
+so a later redelivery is possible too), and that key's next message can run before it; the broker
+warns once per subscription when it forgets such a key.
 
 **Stream recovery.** When the client library closes a subscription's stream on a non-retryable
 status (a deleted subscription, for example), the broker re-opens it (re-creating it when absent)
@@ -728,10 +729,11 @@ Per-broker limits:
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.
 
-`respond()` ignores `fanOut` and warns once (a responder fanned out would answer each request once
-per instance). `onIntegrationEvent` with `inbox` refuses `fanOut` with a `RangeError`, because the
-inbox would drop it. A declarative subscription that asked for `fanOut` and got no marker back warns
-once.
+`respond()` ignores `fanOut` and warns once: responders get the broker's queue-less delivery
+(fan-out on RabbitMQ and memory, where the first reply wins, as on NATS core). Pass `queue` to make
+responders compete. `onIntegrationEvent` with `inbox` refuses `fanOut` with a `RangeError`, because
+the inbox would drop it. A declarative subscription that asked for `fanOut` and got no marker back
+warns once.
 
 ## Request-reply
 
@@ -1798,9 +1800,12 @@ concurrent failures can record one increment), so parking comes one attempt late
 RabbitMQ, Redis Streams, Service Bus and Pub/Sub (with a `deadLetterTopic`) `consumerRetry` (default
 5 attempts) also applies, and whichever budget runs out first wins: set `maxAttempts` at or below
 `consumerRetry.maxAttempts`, or set `consumerRetry: false`, or the broker dead-letters the delivery
-before it is ever parked. On a backend that defers writes, a concurrent delivery's park can commit
-while a sibling's successful transaction is still open; the sibling then rolls back and
-acknowledges, and the event ends parked — recoverable through `release('retry')`.
+before it is ever parked. On Service Bus the subscription's platform `maxDeliveryCount` still
+applies even with `consumerRetry: false`: set it above the inbox `maxAttempts`. An existing Pub/Sub
+subscription's dead-letter policy likewise still applies. On a backend that defers writes, a
+concurrent delivery's park can commit while a sibling's successful transaction is still open; the
+sibling then rolls back and acknowledges, and the event ends parked — recoverable through
+`release('retry')`.
 
 ```typescript
 import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';

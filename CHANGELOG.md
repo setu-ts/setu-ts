@@ -84,9 +84,10 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p, #616).**
-  - A job longer than `visibilityTimeoutSeconds` runs once: the adapter extends its visibility every
-    third of the timeout, up to SQS's 12-hour limit (V13-198). `visibilityTimeoutSeconds` outside 1
-    to 43,200 is refused with a `RangeError`.
+  - Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`: the
+    adapter extends visibility every third of the timeout, up to SQS's 12-hour limit (V13-198).
+    `visibilityTimeoutSeconds` outside 1 to 43,200 is refused with a `RangeError`. SQS can still
+    deliver more than once; keep processors idempotent.
   - A consumed name needs a dead-letter target: `deadLetterQueues[name]`, the queue's own redrive
     policy, or `deadLetterQueues[name]: false` to discard exhausted jobs. Without one the consumer
     is refused before its first poll with `SqsDeadLetterTargetMissingError`, so a declared processor
@@ -96,7 +97,9 @@ All notable changes to this project are documented here. The format follows
     job's attempts are lowered to `maxReceiveCount - 1` (at least 1) with one warning per name, so
     `onFailed` runs before SQS takes the message (V13-214).
   - A forwarded dead letter carries `setu-dead-letter-reason`, `setu-attempts` and
-    `setu-source-message-id` message attributes. A failed forward keeps the source message.
+    `setu-source-message-id` message attributes. On size-refusal code `InvalidParameterValue`, the
+    forward is retried once without those attributes, with a warning. A failed forward keeps the
+    source message.
   - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
     deleted, and its warning carries the message id, never the body (V13-213).
   - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
@@ -107,6 +110,9 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/queue-plugin`, every adapter (M143p, #616).** `queue_jobs_total` counts an outcome
   only after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle
   that fails is no longer counted.
+- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
+  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+
 - **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p, #616).**
   - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`
     with `BackplaneFanOutUnsupportedError` a broker that does not confirm it (Cloudflare's
@@ -114,7 +120,8 @@ All notable changes to this project are documented here. The format follows
     `xread` fails it with a `TypeError`, and Service Bus without `Manage` with the SDK's error. On
     Kafka, NATS, Redis Streams, Pub/Sub and Service Bus every replica now receives every frame;
     before, a shared consumer group handed each frame to one replica (V13-258).
-  - Pub/Sub and Service Bus retry a failing handler with a delay and a limit by default; set
+  - Pub/Sub retries a failing handler with a delay by default, and limits attempts only with
+    `deadLetterTopic`; Service Bus retries with a delay and a limit by default. Set
     `consumerRetry: false` for the old immediate nack or abandon (V13-261). Pub/Sub sets the
     subscription's retry and dead-letter policies only when it creates the subscription; a missing
     `deadLetterTopic` then fails the subscribe with `PubSubDeadLetterTopicMissingError`.

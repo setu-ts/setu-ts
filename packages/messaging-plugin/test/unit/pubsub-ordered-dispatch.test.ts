@@ -113,6 +113,9 @@ describe('Pub/Sub ordered async handler dispatch', () => {
       }
     });
     await h.start();
+    expect(h.warn).toHaveBeenCalledWith(
+      expect.stringContaining('order is best effort once a message is dead-lettered'),
+    );
     for (let n = 0; n < 7; n++) h.deliver(n, 'key');
     await flushCloud();
     expect(starts).toEqual([0, 1, 2, 3, 4]);

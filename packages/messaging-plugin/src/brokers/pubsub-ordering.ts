@@ -32,6 +32,9 @@ export const MAX_ORDERING_KEYS = 10_000;
  */
 const REDELIVERY_WINDOW_MS = 660_000;
 
+/** Bound delivery identities retained during one key's retry hold. */
+const MAX_NACKED_IDS = 1000;
+
 type KeyState = {
   tail: Promise<void>;
   nacked: Set<string>;
@@ -39,7 +42,7 @@ type KeyState = {
   failedAt: number;
 };
 
-/** Per-stream ordering state, cleared on stream closure. @since 0.14.0 */
+/** Per-key completion barriers survive stream replacement; buffered callbacks do not. @since 0.14.0 */
 export class PubSubOrdering {
   readonly #keys = new Map<string, KeyState>();
   readonly #maxKeys: number;
@@ -94,12 +97,13 @@ export class PubSubOrdering {
       if (message.messageId !== undefined && state.nacked.has(message.messageId))
         state.nacked.clear();
       if (state.nacked.size > 0) {
-        if (message.messageId !== undefined) state.nacked.add(message.messageId);
+        if (message.messageId !== undefined && state.nacked.size < MAX_NACKED_IDS)
+          state.nacked.add(message.messageId);
         message.nack();
         return;
       }
       const success = await dispatch();
-      if (!success && message.messageId !== undefined) {
+      if (generation === this.#generation && !success && message.messageId !== undefined) {
         state.nacked.add(message.messageId);
         state.failedAt = this.#now();
       }
@@ -134,13 +138,14 @@ export class PubSubOrdering {
   }
 
   /**
-   * Drops buffered callbacks without settling messages on a closed stream.
+   * Drops buffered callbacks and nack holds without settling closed-stream messages.
+   * Retains completion barriers so running handlers finish before replacement work.
    * @returns Nothing
    * @throws Never
    * @since 0.14.0
    */
   clear(): void {
     this.#generation++;
-    this.#keys.clear();
+    for (const state of this.#keys.values()) state.nacked.clear();
   }
 }

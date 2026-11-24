@@ -82,6 +82,7 @@ describe('SQS consumer dead-letter targets', () => {
         'sqs:GetQueueUrl',
         'sqs:SendMessage',
         'kms:GenerateDataKey',
+        'kms:Decrypt',
       ]) {
         expect((error as Error).message).toContain(text);
       }

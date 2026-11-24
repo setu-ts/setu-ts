@@ -1919,6 +1919,7 @@ describe('SqsQueue — B4 envelope validation', () => {
 
     const jobs = await queue.reserve('jobs', 10, 1000000);
     expect(jobs).toHaveLength(0);
+    await queue.disconnect(); // Drains detached unreadable retirement and its diagnostic.
     expect(diagnostic).toContain('invalid envelope');
   });
 

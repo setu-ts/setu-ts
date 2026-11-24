@@ -6,45 +6,52 @@ describe('adaptSqsModule', () => {
   it('maps attributes, policy reads, URL resolution and source message ids through SDK commands', async () => {
     const commands: Record<string, unknown>[] = [];
     let response: unknown = {};
-    class Command {
-      constructor(readonly input: Record<string, unknown>) {}
-    }
+    const command = (name: string) =>
+      class {
+        readonly name = name;
+        constructor(readonly input: Record<string, unknown>) {}
+      };
     const sdk: SqsSdkModule = {
       SQSClient: class {
         send(command: unknown): Promise<unknown> {
-          commands.push((command as Command).input);
+          commands.push(command as Record<string, unknown>);
           return Promise.resolve(response);
         }
         destroy(): Promise<void> {
           return Promise.resolve();
         }
       },
-      SendMessageCommand: Command,
-      ReceiveMessageCommand: Command,
-      ChangeMessageVisibilityCommand: Command,
-      DeleteMessageCommand: Command,
-      GetQueueAttributesCommand: Command,
-      GetQueueUrlCommand: Command,
+      SendMessageCommand: command('SendMessageCommand'),
+      ReceiveMessageCommand: command('ReceiveMessageCommand'),
+      ChangeMessageVisibilityCommand: command('ChangeMessageVisibilityCommand'),
+      DeleteMessageCommand: command('DeleteMessageCommand'),
+      GetQueueAttributesCommand: command('GetQueueAttributesCommand'),
+      GetQueueUrlCommand: command('GetQueueUrlCommand'),
     };
     const transport = adaptSqsModule(sdk, {});
     const attributes = { reason: { DataType: 'String' as const, StringValue: 'unreadable' } };
     await transport.send('dead', 'body', undefined, attributes);
     expect(commands.at(-1)).toEqual({
-      QueueUrl: 'dead',
-      MessageBody: 'body',
-      MessageAttributes: attributes,
+      name: 'SendMessageCommand',
+      input: { QueueUrl: 'dead', MessageBody: 'body', MessageAttributes: attributes },
     });
     response = { Attributes: { RedrivePolicy: 'policy' } };
     expect(await transport.getQueueAttributes!('source', ['RedrivePolicy'])).toEqual({
       RedrivePolicy: 'policy',
     });
-    expect(commands.at(-1)).toEqual({ QueueUrl: 'source', AttributeNames: ['RedrivePolicy'] });
+    expect(commands.at(-1)).toEqual({
+      name: 'GetQueueAttributesCommand',
+      input: { QueueUrl: 'source', AttributeNames: ['RedrivePolicy'] },
+    });
     response = {};
     expect(await transport.getQueueAttributes!('source', ['RedrivePolicy'])).toEqual({});
     await expect(transport.getQueueUrl!('dead', '123')).rejects.toThrow('no QueueUrl');
     response = { QueueUrl: 'resolved' };
     expect(await transport.getQueueUrl!('dead', '123')).toBe('resolved');
-    expect(commands.at(-1)).toEqual({ QueueName: 'dead', QueueOwnerAWSAccountId: '123' });
+    expect(commands.at(-1)).toEqual({
+      name: 'GetQueueUrlCommand',
+      input: { QueueName: 'dead', QueueOwnerAWSAccountId: '123' },
+    });
     response = {
       Messages: [
         {
@@ -58,6 +65,10 @@ describe('adaptSqsModule', () => {
     expect(await transport.receive('source', 1, 30)).toEqual([
       { messageId: 'mid', body: 'body', receiptHandle: 'receipt', approximateReceiveCount: '2' },
     ]);
+    expect(commands.at(-1)).toMatchObject({
+      name: 'ReceiveMessageCommand',
+      input: { QueueUrl: 'source' },
+    });
     await transport.close();
   });
   function createFakeSdkModule(): SqsSdkModule & {

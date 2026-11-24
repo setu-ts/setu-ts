@@ -7347,7 +7347,8 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   /**
    * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
    * failing message is redelivered without limit. A missing topic makes the subscription
-   * create fail with `PubSubDeadLetterTopicMissingError`. @since 0.14.0
+   * create fail with `PubSubDeadLetterTopicMissingError`. Dead letters are lost unless
+   * the topic has a subscription or message retention enabled. @since 0.14.0
    */
   deadLetterTopic?: string;
 }
@@ -7385,7 +7386,8 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   /**
    * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
    * failing message is redelivered without limit. A missing topic makes the subscription
-   * create fail with `PubSubDeadLetterTopicMissingError`. @since 0.14.0
+   * create fail with `PubSubDeadLetterTopicMissingError`. Dead letters are lost unless
+   * the topic has a subscription or message retention enabled. @since 0.14.0
    */
   deadLetterTopic?: string;
 }
@@ -7640,7 +7642,9 @@ respond<TReq, TRes>(
 ```
 
 Pass `options.queue` to `respond` to load-balance requests across competing responders. `respond`
-ignores `fanOut` and warns once.
+ignores `fanOut` and warns once: responders get the broker's queue-less delivery (fan-out on
+RabbitMQ and memory, with the first reply winning, as on NATS core); pass `queue` to make them
+compete.
 
 **Fan-out subscriptions (0.14.0).** `SubscribeOptions.fanOut: true` (from `@setu-ts/common`) asks
 for a subscription that receives every message published after it subscribed, independently of every
@@ -8104,12 +8108,13 @@ An omitted transport probe means unknown. Unknown still reports up. See the
 
 The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS plugin arms — and their `KafkaOptions`,
 `PubSubOptions`, `RabbitMqOptions`, `RedisStreamsOptions` and `NatsOptions` shapes — accept
-`publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
-`RangeError` at `MessagingPlugin(...)` and at broker construction. Every publish entry point, RPC
-and outbox relay publishes use the bound; the timeout is the exported `PublishTimeoutError`, which
-names the broker, topic and bound and warns that delivery may still occur. It does not cancel the
-transport. On Redis Streams the bound covers the publish's `XADD` only; on NATS it is passed to the
-client as its own publish `timeout` as well.
+`publishTimeoutMs` (default 15000 ms, `0` unbounded). Pub/Sub terminal dead-letter forwards are the
+one exception: they always have a finite 15,000 ms bound, even with `publishTimeoutMs: 0`.
+Out-of-range or non-finite values throw `RangeError` at `MessagingPlugin(...)` and at broker
+construction. Every publish entry point, RPC and outbox relay publishes use the bound; the timeout
+is the exported `PublishTimeoutError`, which names the broker, topic and bound and warns that
+delivery may still occur. It does not cancel the transport. On Redis Streams the bound covers the
+publish's `XADD` only; on NATS it is passed to the client as its own publish `timeout` as well.
 
 Fresh Kafka groups whose every partition offset is `-1` capture high watermarks before `run()`. On
 the first join, members seek assigned, still-uncommitted partitions to the minimum start offset

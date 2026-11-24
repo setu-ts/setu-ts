@@ -410,6 +410,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   /** The reporter and reconnect counter on `#client`; detached on disconnect. */
   #watch: ConnectionWatch | undefined;
   #ready = false;
+  #disconnecting = false;
   #activeSubscriptions: Map<string, ActiveSubscription>;
   #maxAttempts: number;
   #delaysMs: readonly number[];
@@ -507,6 +508,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
+    this.#disconnecting = false;
     const resolved = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     const { client, watch } = resolved;
     this.#client = client;
@@ -558,6 +560,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#disconnecting = true;
     this.#generation++;
     // Stop the shared timers first: a tick landing after a subscription has
     // been removed would find nothing to serve, and a tick during the drain
@@ -721,6 +724,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (!this.#client) {
       throw new Error('RedisStreamsBroker is not connected');
     }
+    if (this.#disconnecting) throw new Error('RedisStreamsBroker disconnected while subscribing');
 
     if (independent) return this.#subscribeFanOut(topic, handler);
 
@@ -795,7 +799,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (typeof client.xrevrange !== 'function')
       throw new TypeError('RedisStreamsBroker fanOut requires client.xrevrange');
     const latest = await client.xrevrange(topic, '+', '-', 'COUNT', '1');
-    if (generation !== this.#generation)
+    if (this.#disconnecting || generation !== this.#generation)
       throw new Error('RedisStreamsBroker disconnected while subscribing');
     let lastId = latest[0]?.[0] ?? '0-0';
     let stopped = false;

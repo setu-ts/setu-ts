@@ -216,15 +216,17 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
 
 - **Decision:** `SqsQueue` defines `claimRenewal` with
   `intervalMs = Math.floor(visibilityTimeoutSeconds * 1000 / 3)` (the Redis rule,
-  `redis-queue.ts:357`). Each receipt entry records `receivedAtMs` (the adapter's `runtime.now()` at
-  the receive that produced it; `reserve` overwrites the entry on a redelivery, so the value is per
-  receipt). `extend(name, id, claimToken)`:
+  `redis-queue.ts:357`). Each receipt entry records `receivedAtMs` (the adapter's `runtime.now()`
+  before the receive request that produced it; `reserve` overwrites the entry on a redelivery, so
+  the value is per receipt). `extend(name, id, claimToken)`:
   1. looks the entry up with the same expiry check the settles use (`findReceiptEntry`), and returns
      `false` when it is absent, expired by the adapter's clock, or holds a different token. A claim
      the settles would already refuse is never revived;
-  2. computes `remaining = 43,200 - floor((now - receivedAtMs) / 1000)` seconds and requests
-     `min(visibilityTimeoutSeconds, remaining)`; when `remaining <= 0` it returns `false` without a
-     call. AWS refuses a value above the time left and does not recalculate it (SDK JSDoc,
+  2. computes `remaining = Math.floor((43_200_000 - (now - receivedAtMs) - 1_000) / 1_000)` seconds
+     and requests `min(visibilityTimeoutSeconds, remaining)`; when `remaining < 1` it returns
+     `false` without a call. The one-second allowance covers request latency; rounding the remaining
+     millisecond budget down avoids exceeding the fractional remainder. Requeue visibility uses the
+     same cap. AWS refuses a value above the time left and does not recalculate it (SDK JSDoc,
      `ChangeMessageVisibilityCommand.d.ts:59-61`; API page, Compared with row 8), so requesting the
      full timeout near the ceiling would report a valid lease as stale;
   3. calls `changeVisibility(queueUrl, receiptHandle, seconds)` and replaces the entry with
@@ -349,9 +351,9 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
   per name).
 
 - **Rights:** consuming now needs `sqs:GetQueueAttributes` on the source queue, `sqs:GetQueueUrl`
-  when the policy names the target, `sqs:SendMessage` on the target, and `kms:GenerateDataKey` when
-  the target is encrypted with a customer-managed KMS key. Native redrive needed none of them. The
-  README, the upgrade note and the refusal message list them.
+  when the policy names the target, `sqs:SendMessage` on the target, and `kms:GenerateDataKey` and
+  `kms:Decrypt` when the target is encrypted with a customer-managed KMS key. Native redrive needed
+  none of them. The README, the upgrade note and the refusal message list them.
 - **Why:** V13-199 and V13-214 are one seam, "where does an exhausted job go". Compared with, rows 2
   and 3: memory, Redis, RabbitMQ, BullMQ and Sidekiq keep the job with nothing configured;
   MassTransit creates an error queue; Spring Cloud AWS and the .NET framework defer to the redrive
@@ -689,7 +691,7 @@ Where the camps split (rows 2, 4, 5, 6 and the frame-age bound), the choice went
       topic's subscriptions; none → warn once per topic and continue (Google: dead letters published
       to a topic with no subscription are lost; neither Spring Cloud GCP nor Dapr checks, and a
       subscription can be added after deploy, row 23). The warning names the topic and says dead
-      letters are dropped until it has a subscription.
+      letters are lost unless the topic has a subscription or message retention enabled.
     - **The read fails:** PERMISSION_DENIED (gRPC 7) → one `info` line naming the topic and the role
       needed (`roles/pubsub.subscriber` lacks `pubsub.topics.get`, row 34); any other failure → warn
       once naming the topic and the error code. In both cases the subscribe continues.
@@ -914,12 +916,13 @@ when that is smaller; an unreadable message is moved to the dead-letter target i
 the source queue; a forwarded copy carries three `setu-` attributes and not the producer's; an SQS
 `visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a stale SQS settle now reports a
 settlement failure; `queue_jobs_total` counts an outcome only after its settle succeeds, on every
-adapter. Part B: Pub/Sub and Service Bus failing handlers are now delayed and limited by default; an
-unroutable RabbitMQ outbox row is retried and then failed instead of marked sent, and an outbox on a
-RabbitMQ connection without publisher confirms refuses to start; a Pub/Sub consumer whose
-`deadLetterTopic` does not exist is refused when the broker creates its subscription; the backplane
-`messaging` transport refuses a broker without fan-out. Frames are not dropped by age unless
-`maxFrameAgeMs` is set (D5), so the backplane's delivery is unchanged by default.
+adapter. Part B: Pub/Sub failing handlers are delayed by default and limited only with
+`deadLetterTopic`; Service Bus failing handlers are delayed and limited by default; an unroutable
+RabbitMQ outbox row is retried and then failed instead of marked sent, and an outbox on a RabbitMQ
+connection without publisher confirms refuses to start; a Pub/Sub consumer whose `deadLetterTopic`
+does not exist is refused when the broker creates its subscription; the backplane `messaging`
+transport refuses a broker without fan-out. Frames are not dropped by age unless `maxFrameAgeMs` is
+set (D5), so the backplane's delivery is unchanged by default.
 
 | Exported symbol                                                                                      | Kind               | Consumer / real code path that READS it                                                                                                                                                                                                                                                                     |
 | ---------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1119,10 +1122,11 @@ report, not assumed. The `common` and `diagnostics-plugin` changes run under the
 - **Hold-then-abandon on Service Bus blocks a concurrency slot** → delay refused at 240,000 ms or
   more; M143m's concurrency option documents it.
 - **Consumer roles commonly lack the new rights** (`sqs:GetQueueAttributes`, `sqs:GetQueueUrl`,
-  `sqs:SendMessage` on the target, `kms:GenerateDataKey` for an encrypted target) → the refusal and
-  the forward-failure report name the right; the README and the upgrade note list them. Without
-  `SendMessage` every forward fails and SQS's own redrive takes the message one receive later, after
-  `onFailed` may have run twice (final failure, then the dead-worker path); the payload is kept.
+  `sqs:SendMessage` on the target, `kms:GenerateDataKey` and `kms:Decrypt` for an encrypted target)
+  → the refusal and the forward-failure report name the right; the README and the upgrade note list
+  them. Without `SendMessage` every forward fails and SQS's own redrive takes the message one
+  receive later, after `onFailed` may have run twice (final failure, then the dead-worker path); the
+  payload is kept.
 - **The SNS to SQS suite has no CI service**: no LocalStack in `.github/` or the CI backend set, and
   ElasticMQ has no SNS → the wrapped shape is also unit-tested against AWS's documented notification
   example; the guarded suite runs locally against the shared `smoke-localstack` container

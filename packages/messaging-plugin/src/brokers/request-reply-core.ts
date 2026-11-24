@@ -233,7 +233,9 @@ export class RequestReplyCore {
     if (options?.fanOut === true && !this.#warnedFanOut) {
       this.#warnedFanOut = true;
       try {
-        this.#deps.warn?.('Messaging respond ignores fanOut; responders use competing delivery');
+        this.#deps.warn?.(
+          "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (pass queue to make responders compete)",
+        );
       } catch {
         /* Reporting cannot prevent registration. */
       }

@@ -22,6 +22,7 @@ import {
   QueueBackendUnavailableError,
   StaleClaimError,
   SqsDelayTooLongError,
+  SqsDeadLetterTargetMissingError,
   SqsQueueNotConfiguredError,
 } from '../errors.ts';
 
@@ -341,6 +342,8 @@ export class SqsQueue implements QueueAdapter {
   #defaultMaxAttempts: number;
   #redrive = new SqsRedrive();
   #preparations = new Map<string, Promise<ISqsRedriveTarget>>();
+  #connection = 0;
+  readonly #retirements = new Set<Promise<void>>();
   #targets = new Map<string, ISqsRedriveTarget>();
   #clampWarned = new Set<string>();
   /**
@@ -441,6 +444,7 @@ export class SqsQueue implements QueueAdapter {
       });
     }
 
+    this.#connection++;
     this.#redrive = new SqsRedrive();
     this.#ready = true;
     this.#installProbe();
@@ -461,9 +465,11 @@ export class SqsQueue implements QueueAdapter {
   }
 
   async disconnect(): Promise<void> {
+    this.#connection++;
     this.#ready = false;
     this.#redrive.close();
     await Promise.allSettled(this.#preparations.values());
+    await Promise.allSettled(this.#retirements);
     this.#preparations.clear();
     this.#targets.clear();
     this.#clampWarned.clear();
@@ -509,7 +515,8 @@ export class SqsQueue implements QueueAdapter {
   }
 
   /**
-   * Prepares one consumed name once; concurrent callers share the same read.
+   * Coalesces preparation of one consumed name. Successful targets and definite
+   * refusals are retained; transient attribute or URL failures can be retried.
    * @param name - Consumed job name
    * @returns Resolves after a target is proved
    * @throws {SqsDeadLetterTargetMissingError} If no target is available
@@ -521,6 +528,7 @@ export class SqsQueue implements QueueAdapter {
     let preparation = this.#preparations.get(name);
     if (!preparation) {
       const transport = this.#transport;
+      const connection = this.#connection;
       preparation = this.#redrive
         .resolve(
           this.#runtime,
@@ -531,30 +539,45 @@ export class SqsQueue implements QueueAdapter {
           (message) => this.#logger?.warn(message),
         )
         .then((target) => {
-          if (!this.#ready || this.#transport !== transport)
+          if (!this.#ready || this.#connection !== connection)
             throw new Error('SqsQueue is not connected');
           this.#targets.set(name, target);
           return target;
         });
       this.#preparations.set(name, preparation);
+      const pending = preparation;
+      void pending.catch((error: unknown) => {
+        if (
+          error instanceof SqsDeadLetterTargetMissingError &&
+          (error.reason === 'attributes-unavailable' || error.reason === 'target-unresolvable') &&
+          this.#preparations.get(name) === pending
+        )
+          this.#preparations.delete(name);
+      });
     }
     await preparation;
   }
 
   async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
+    const connection = this.#connection;
     await this.prepareConsumer(name);
     const transport = this.#transport;
-    if (!this.#ready || !transport) throw new Error('SqsQueue is not connected');
+    if (!this.#ready || !transport || this.#connection !== connection)
+      throw new Error('SqsQueue is not connected');
     const queueUrl = this.#getQueueUrl(name);
     const target = this.#targets.get(name)!;
+    const receivedAtMs = this.#runtime.now();
     const messages = await transport.receive(
       queueUrl,
       Math.min(limit, SQS_MAX_RECEIVE),
       this.#visibilityTimeoutSeconds,
     );
-    if (!this.#ready || this.#transport !== transport) throw new Error('SqsQueue is not connected');
-    const receivedAtMs = this.#runtime.now();
+    if (!this.#ready || this.#connection !== connection)
+      throw new Error('SqsQueue is not connected');
+    // Waiting for a long poll is not time spent handling its returned delivery.
+    // Keep the request start only for the conservative twelve-hour ceiling.
+    const claimExpiresAtMs = this.#runtime.now() + this.#visibilityTimeoutSeconds * 1000;
     const jobs: StoredJob<T>[] = [];
     for (const msg of messages) {
       if (!msg.receiptHandle) {
@@ -567,23 +590,9 @@ export class SqsQueue implements QueueAdapter {
       const validCount = Number.isInteger(attempts) && attempts >= 1;
       if (!decoded.ok || !validCount) {
         const reason = !decoded.ok ? decoded.reason : 'invalid ApproximateReceiveCount';
-        try {
-          const disposition = await this.#retire(
-            name,
-            msg.body,
-            msg.receiptHandle,
-            msg.messageId ?? 'unknown',
-            validCount ? attempts : 0,
-            'unreadable',
-          );
-          this.#logger?.warn(
-            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; ${disposition === 'discarded' ? 'discarded; deadLetterQueues[name] is false' : 'forwarded unchanged to its dead-letter target and deleted'}`,
-          );
-        } catch {
-          this.#logger?.warn(
-            `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; forwarding or deletion failed; left for its visibility timeout`,
-          );
-        }
+        const retirement = this.#retireUnreadable(name, msg, validCount ? attempts : 0, reason);
+        this.#retirements.add(retirement);
+        void retirement.finally(() => this.#retirements.delete(retirement));
         continue;
       }
       const envelope = decoded.envelope;
@@ -615,7 +624,7 @@ export class SqsQueue implements QueueAdapter {
         name,
         receiptHandle: msg.receiptHandle,
         receivedAtMs,
-        claimExpiresAtMs: receivedAtMs + this.#visibilityTimeoutSeconds * 1000,
+        claimExpiresAtMs,
         body: msg.body,
         claimToken,
         attempts,
@@ -633,6 +642,8 @@ export class SqsQueue implements QueueAdapter {
         ...(headers === undefined ? {} : { headers }),
       });
     }
+    if (!this.#ready || this.#connection !== connection)
+      throw new Error('SqsQueue is not connected');
     return jobs;
   }
 
@@ -653,7 +664,13 @@ export class SqsQueue implements QueueAdapter {
     return this.#settle(name, id, claimToken, async (entry, fence, transport) => {
       await fence();
       const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
-      await transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+      const remaining = this.#remainingVisibility(entry);
+      if (remaining >= 1)
+        await transport.changeVisibility(
+          this.#getQueueUrl(name),
+          entry.receiptHandle,
+          Math.min(seconds, remaining),
+        );
     });
   }
 
@@ -664,9 +681,12 @@ export class SqsQueue implements QueueAdapter {
    * @param _nowMs - Caller time (receipt expiry uses the adapter clock)
    * @param claimToken - Delivery fence
    * @param reason - Final failure or dead-worker abandonment
+   * A copy reaching the target is counted as dead-lettered even if the claim
+   * lapses during forwarding; a warning records the at-least-once duplicate risk.
    * @returns Discard marker only after a successful opt-out deletion
-   * @throws {StaleClaimError} If this delivery no longer owns the claim
-   * @throws {Error} On transport rejection; the receipt is retained for retry
+   * @throws {StaleClaimError} If stale before forwarding or before an explicit discard
+   * @throws {Error} On transport rejection; the receipt is kept until its visibility
+   * timeout. A later delivery may forward a second copy after a failed source delete.
    * @since 0.14.0
    */
   deadLetter(
@@ -742,7 +762,9 @@ export class SqsQueue implements QueueAdapter {
     id = messageId,
     fence?: (recheck?: boolean) => Promise<boolean>,
   ): Promise<void | 'discarded'> {
-    await this.prepareConsumer(name);
+    // reserve already prepared unreadable work; claimed settles keep renewing
+    // while their own preparation completes.
+    if (reason !== 'unreadable') await this.prepareConsumer(name);
     const transport = this.#transport!;
     const target = this.#targets.get(name)!;
     if (target.url === false) {
@@ -755,11 +777,27 @@ export class SqsQueue implements QueueAdapter {
       }
       return 'discarded';
     }
-    await transport.send(target.url, body, undefined, {
-      'setu-dead-letter-reason': { DataType: 'String', StringValue: reason },
-      'setu-attempts': { DataType: 'Number', StringValue: String(attempts) },
-      'setu-source-message-id': { DataType: 'String', StringValue: messageId },
-    });
+    try {
+      await transport.send(target.url, body, undefined, {
+        'setu-dead-letter-reason': { DataType: 'String', StringValue: reason },
+        'setu-attempts': { DataType: 'Number', StringValue: String(attempts) },
+        'setu-source-message-id': { DataType: 'String', StringValue: messageId },
+      });
+    } catch (error) {
+      // SendMessage size refusal confirmed with the installed SDK against
+      // LocalStack. Attributes count towards the limit; never match error text.
+      if (
+        typeof error !== 'object' ||
+        error === null ||
+        !('name' in error) ||
+        error.name !== 'InvalidParameterValue'
+      )
+        throw error;
+      this.#logger?.warn(
+        `SQS deadLetter: forwarding "${name}" without setu- attributes after InvalidParameterValue; dead-letter metadata omitted`,
+      );
+      await transport.send(target.url, body);
+    }
     try {
       const owned = fence === undefined ? true : await fence(false);
       await transport.delete(this.#getQueueUrl(name), receiptHandle);
@@ -797,6 +835,44 @@ export class SqsQueue implements QueueAdapter {
     }
   }
 
+  /** Whole seconds remaining, rounded down with one second of request headroom. */
+  #remainingVisibility(entry: ReceiptEntry): number {
+    return Math.max(
+      0,
+      Math.floor((43_200_000 - (this.#runtime.now() - entry.receivedAtMs) - 1000) / 1000),
+    );
+  }
+
+  /** Retires unreadable bytes independently of the valid batch claims. */
+  async #retireUnreadable(
+    name: string,
+    msg: SqsReceivedMessage,
+    attempts: number,
+    reason: string,
+  ): Promise<void> {
+    try {
+      const disposition = await this.#retire(
+        name,
+        msg.body,
+        msg.receiptHandle!,
+        msg.messageId ?? 'unknown',
+        attempts,
+        'unreadable',
+      );
+      this.#logger?.warn(
+        `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; ${disposition === 'discarded' ? 'discarded; deadLetterQueues[name] is false' : 'forwarded unchanged to its dead-letter target and deleted'}`,
+      );
+    } catch {
+      try {
+        this.#logger?.warn(
+          `SQS unreadable message on "${name}", message id "${msg.messageId ?? 'unknown'}": ${reason}; forwarding or deletion failed; left for its visibility timeout`,
+        );
+      } catch {
+        /* Diagnostics cannot reject detached retirement. */
+      }
+    }
+  }
+
   async #renewReceipt(
     name: string,
     id: string,
@@ -804,7 +880,7 @@ export class SqsQueue implements QueueAdapter {
     transport: ISqsTransport,
   ): Promise<boolean> {
     const now = this.#runtime.now();
-    const remaining = 43_200 - Math.floor((now - entry.receivedAtMs) / 1000);
+    const remaining = this.#remainingVisibility(entry);
     if (remaining <= 0) return false;
     const seconds = Math.min(this.#visibilityTimeoutSeconds, remaining);
     try {

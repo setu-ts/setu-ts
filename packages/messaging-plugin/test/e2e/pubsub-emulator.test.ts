@@ -55,9 +55,12 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
         projectId,
         deadLetterTopic: prefix + '-absent',
       });
+      const createdTopics: string[] = [];
       try {
         await admin.createTopic(topic);
+        createdTopics.push(topic);
         await admin.createTopic(target);
+        createdTopics.push(target);
         await admin.topic(target).createSubscription(prefix + '-sink');
         await broker.connect();
         await broker.subscribe(topic, () => {}, { queue });
@@ -77,13 +80,21 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
         expect(refusal).toBeInstanceOf(PubSubDeadLetterTopicMissingError);
         expect((refusal as Error).cause).toMatchObject({ code: 5 });
       } finally {
-        await broker.disconnect();
-        await absent.disconnect();
-        for (const name of [topic, target]) {
-          for (const sub of (await admin.topic(name).getSubscriptions())[0]) await sub.delete();
-          await admin.topic(name).delete();
+        try {
+          await Promise.allSettled([broker.disconnect(), absent.disconnect()]);
+          await Promise.allSettled(
+            createdTopics.map(async (name) => {
+              try {
+                const [subs] = await admin.topic(name).getSubscriptions();
+                await Promise.allSettled(subs.map((sub) => sub.delete()));
+              } finally {
+                await admin.topic(name).delete();
+              }
+            }),
+          );
+        } finally {
+          await Promise.allSettled([admin.close()]);
         }
-        await admin.close();
       }
     },
   );
@@ -96,12 +107,14 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
       const topic = 'm143p-' + crypto.randomUUID();
       const queue = topic + '-consumer';
       const received: unknown[] = [];
+      let created = false;
       const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
         projectId,
         consumerRetry: false,
       });
       try {
         await admin.createTopic(topic);
+        created = true;
         await broker.connect();
         await broker.subscribe(
           topic,
@@ -118,10 +131,22 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
         expect(received).toEqual([{ recovered: true }]);
         expect(await broker.reachability()).toBe(true);
       } finally {
-        await broker.disconnect();
-        for (const sub of (await admin.topic(topic).getSubscriptions())[0]) await sub.delete();
-        await admin.topic(topic).delete();
-        await admin.close();
+        try {
+          await Promise.allSettled([broker.disconnect()]);
+          if (created)
+            await Promise.allSettled([
+              (async () => {
+                try {
+                  const [subs] = await admin.topic(topic).getSubscriptions();
+                  await Promise.allSettled(subs.map((sub) => sub.delete()));
+                } finally {
+                  await admin.topic(topic).delete();
+                }
+              })(),
+            ]);
+        } finally {
+          await Promise.allSettled([admin.close()]);
+        }
       }
     },
   );
@@ -143,8 +168,10 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
       let active = 0;
       let maxActive = 0;
       let fail = true;
+      let created = false;
       try {
         await admin.createTopic(topic);
+        created = true;
         await broker.connect();
         await broker.subscribe<number>(
           topic,
@@ -167,11 +194,24 @@ describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
         expect(maxActive).toBe(1);
         expect(starts.slice(0, 5)).toEqual([0, 1, 2, 3, 4]);
         expect(starts.filter((n) => n === 4)).toHaveLength(2);
+        expect(starts.indexOf(5)).toBeGreaterThan(starts.lastIndexOf(4));
       } finally {
-        await broker.disconnect();
-        for (const sub of (await admin.topic(topic).getSubscriptions())[0]) await sub.delete();
-        await admin.topic(topic).delete();
-        await admin.close();
+        try {
+          await Promise.allSettled([broker.disconnect()]);
+          if (created)
+            await Promise.allSettled([
+              (async () => {
+                try {
+                  const [subs] = await admin.topic(topic).getSubscriptions();
+                  await Promise.allSettled(subs.map((sub) => sub.delete()));
+                } finally {
+                  await admin.topic(topic).delete();
+                }
+              })(),
+            ]);
+        } finally {
+          await Promise.allSettled([admin.close()]);
+        }
       }
     },
   );

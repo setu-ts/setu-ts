@@ -27,6 +27,29 @@ import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 import { pubSubTransport, serviceBusTransport } from '../fixtures/cloud-transports.ts';
 
 describe('M113a plugin option forwarding', () => {
+  it('keeps a declarative subscription active when its fan-out diagnostic sink throws', async () => {
+    const h = createFakeContext();
+    const warn = vi.fn(() => {
+      throw new Error('logger');
+    });
+    Object.defineProperty(h.ctx, 'logger', { value: { warn } });
+    const subscribe = vi.fn(() => Promise.resolve({ unsubscribe: () => Promise.resolve() }));
+    const instance = new InMemoryBroker(h.ctx.runtime, new JsonSerializer());
+    vi.spyOn(instance, 'subscribe').mockImplementation(subscribe);
+    try {
+      await expect(
+        MessagingPlugin({
+          broker: 'custom',
+          instance,
+          subscriptions: [{ topic: 'orders', handler: () => {}, options: { fanOut: true } }],
+        }).register(h.ctx),
+      ).resolves.toBeUndefined();
+      expect(subscribe).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      for (const close of h.onCloseHandlers) await close();
+    }
+  });
   it.each(['pubsub', 'service-bus'] as const)(
     'validates %s consumer retry at plugin construction',
     (broker) => {

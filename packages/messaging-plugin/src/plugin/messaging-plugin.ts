@@ -754,8 +754,13 @@ async function subscribeDefinition(
     definition.handler,
     definition.options,
   );
-  if (definition.options?.fanOut === true && subscription.fanOut !== true)
-    warn('Messaging declarative fanOut subscription was not confirmed by the broker');
+  if (definition.options?.fanOut === true && subscription.fanOut !== true) {
+    try {
+      warn('Messaging declarative fanOut subscription was not confirmed by the broker');
+    } catch {
+      /* Diagnostics cannot change subscription startup. */
+    }
+  }
 }
 
 /**

@@ -90,6 +90,9 @@ describe('fan-out subscription contract', () => {
     expect(subscribe.mock.calls[0]![2]).toEqual({ queue: 'workers' });
     expect(subscribe.mock.calls[1]![2]).toBeUndefined();
     expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (pass queue to make responders compete)",
+    );
     await broker.disconnect();
     const throwing = new InMemoryBroker(clock.runtime, new JsonSerializer(), {
       warn: () => {
@@ -121,6 +124,22 @@ describe('fan-out subscription contract', () => {
 });
 
 describe('Redis Streams independent reader', () => {
+  it('refuses new readers during disconnect and never revives them on reconnect', async () => {
+    const clock = clockRuntime();
+    const client = new FakeRedisStreamsClient();
+    const broker = new RedisStreamsBroker(clock.runtime, new JsonSerializer(), { client });
+    await broker.connect();
+    const shutdown = broker.disconnect();
+    await expect(broker.subscribe('frames', () => {}, { fanOut: true })).rejects.toThrow(
+      'disconnected while subscribing',
+    );
+    await shutdown;
+    await broker.connect();
+    await clock.advance(500);
+    expect(client.calls.filter((call) => call.method === 'xread')).toEqual([]);
+    await broker.disconnect();
+    expect(clock.timerCount()).toBe(0);
+  });
   it('stops between batch entries when unsubscribe lands during a handler', async () => {
     const clock = clockRuntime();
     const client = new FakeRedisStreamsClient();

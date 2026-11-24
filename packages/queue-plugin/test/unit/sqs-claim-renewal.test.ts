@@ -80,14 +80,14 @@ describe('SQS delivery leases', () => {
     const [first] = await queue.reserve('build', 1, 0);
     await runtime.advanceMs(43_190_000);
     expect(await queue.claimRenewal.extend('build', 'j1', first!.claimToken!)).toBe(true);
-    expect(transport.visibilityChanges.at(-1)?.seconds).toBe(10);
+    expect(transport.visibilityChanges.at(-1)?.seconds).toBe(9);
     await runtime.advanceMs(10_000);
     const calls = transport.visibilityChanges.length;
     expect(await queue.claimRenewal.extend('build', 'j1', first!.claimToken!)).toBe(false);
     expect(transport.visibilityChanges).toHaveLength(calls);
     const [second] = await queue.reserve('build', 1, runtime.now());
     expect(await queue.claimRenewal.extend('build', 'j1', second!.claimToken!)).toBe(true);
-    expect(transport.visibilityChanges.at(-1)?.seconds).toBe(43_200);
+    expect(transport.visibilityChanges.at(-1)?.seconds).toBe(43_199);
     await queue.disconnect();
   });
   it('returns false on transport rejection and can recover before expiry', async () => {

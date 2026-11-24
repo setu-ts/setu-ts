@@ -29,20 +29,24 @@ dead-lettered.
 
 A consumer role now needs `sqs:GetQueueAttributes` on the source queue (not for a name set to
 `false`; with an explicit target URL a refused read only warns), plus `sqs:GetQueueUrl` and
-`sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` for a customer-managed KMS
-key). With a redrive policy whose `maxReceiveCount` is at or below a job's `maxAttempts`, attempts
-are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set `maxReceiveCount` to
-`maxAttempts + 1` to keep them all.
+`sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` and `kms:Decrypt` for a
+customer-managed KMS key). With a redrive policy whose `maxReceiveCount` is at or below a job's
+`maxAttempts`, attempts are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set
+`maxReceiveCount` to `maxAttempts + 1` to keep them all.
 
-Other changes you may notice: a job longer than `visibilityTimeoutSeconds` now runs once instead of
-again on every timeout, and `visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a message the
-adapter cannot read moves to the dead-letter target instead of returning every timeout; a stale
-settle is reported as `queue job settlement failed`; and on every adapter `queue_jobs_total` counts
-an outcome only after its settle succeeded. A custom `ISqsTransport` without `getQueueAttributes`
-can consume only names with a `deadLetterQueues` entry.
+Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`; SQS can
+still deliver more than once, so keep processors idempotent. Other changes you may notice:
+`visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a message the adapter cannot read moves
+to the dead-letter target instead of returning every timeout; a stale settle is reported as
+`queue job settlement failed`; and on every adapter `queue_jobs_total` counts an outcome only after
+its settle succeeded. A custom `ISqsTransport` without `getQueueAttributes` can consume only names
+with a `deadLetterQueues` entry.
 
 `SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
 `publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
+
+- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
+  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
 
 ### Fan-out, consumer retries and the RabbitMQ outbox (`@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/common`)
 
@@ -57,14 +61,14 @@ can consume only names with a `deadLetterQueues` entry.
   and `xrevrange`. `ioredis` and `fromNodeRedis` provide both; a hand-written `IRedisStreamsClient`
   without them is refused at that `subscribe()` with a `TypeError` naming the method. Add both
   methods (positional arguments, as `ioredis` takes them).
-- **BREAKING: Pub/Sub and Service Bus retry by default.** A failing handler is now redelivered with
-  a delay and a limit instead of at once and forever. Set `consumerRetry: false` to keep the old
-  behaviour. On Pub/Sub, give `deadLetterTopic` (an existing topic with a subscription) to bound the
-  attempts; the policies apply only to subscriptions the broker creates, so an existing subscription
-  keeps its settings, with one warning, until you change it in Google Cloud. A `deadLetterTopic`
-  that does not exist fails the subscribe with `PubSubDeadLetterTopicMissingError`. On Service Bus a
-  retry holds the message (and, at the default single concurrent call, the subscription) for its
-  delay.
+- **BREAKING: Pub/Sub and Service Bus retry by default.** Pub/Sub redelivers a failing handler with
+  a delay by default, and limits attempts only with `deadLetterTopic`; Service Bus uses a delay and
+  a limit. Set `consumerRetry: false` to keep the old behaviour. On Pub/Sub, give `deadLetterTopic`
+  (an existing topic with a subscription) to bound the attempts; the policies apply only to
+  subscriptions the broker creates, so an existing subscription keeps its settings, with one
+  warning, until you change it in Google Cloud. A `deadLetterTopic` that does not exist fails the
+  subscribe with `PubSubDeadLetterTopicMissingError`. On Service Bus a retry holds the message (and,
+  at the default single concurrent call, the subscription) for its delay.
 - **BREAKING: RabbitMQ outbox rows must be routable.** The relay now marks an unroutable row
   `failed` after its retries instead of `sent`: bind a queue for every outbox topic before rows are
   relayed. An outbox on an injected connection without `createConfirmChannel` and return listeners
