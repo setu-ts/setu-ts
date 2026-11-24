@@ -757,6 +757,10 @@ export class TenantColumnUnresolvedError extends Error {
   }
 }
 
+/** Why `NO_BACKSLASH_ESCAPES` is refused, shared by both refusal messages. */
+const SQL_MODE_HAZARD =
+  ": mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement.";
+
 /**
  * Drizzle over mysql2 refuses a MySQL session whose `sql_mode` includes
  * `NO_BACKSLASH_ESCAPES`: mysql2 writes bound strings into the statement
@@ -765,8 +769,8 @@ export class TenantColumnUnresolvedError extends Error {
  * session (the primary's or a `withReplicas()` replica's) reports the mode,
  * or when the mode cannot be read within 2000 ms (the driver error or the
  * expiry is the `cause`), and, once a connection a pool opened later
- * reported the mode, by every later call on the adapter. This configuration
- * fault has no HTTP status hint.
+ * reported the mode, by every later call on the adapter. The unread case
+ * carries `unreadReason`. This configuration fault has no HTTP status hint.
  * @since 0.14.0
  */
 export class UnsupportedSqlModeError extends Error {
@@ -775,17 +779,27 @@ export class UnsupportedSqlModeError extends Error {
   /** The refused `sql_mode` flag. */
   readonly mode = 'NO_BACKSLASH_ESCAPES';
   /**
+   * Why the mode could not be read, when it could not; absent for a session
+   * that reported the mode. Present means MySQL did not answer the check
+   * (unreachable, stalled or an unexpected result), not that the mode is set.
+   */
+  declare readonly unreadReason?: string;
+  /**
    * Creates the refusal, naming the mode and the ways out.
    * @param unread - Set when the mode could not be read: why, and the driver
    * error or expiry as `cause`
    */
   constructor(unread?: { readonly reason: string; readonly cause?: unknown }) {
     super(
-      (unread === undefined
-        ? 'Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES'
-        : `Drizzle over mysql2 could not read @@SESSION.sql_mode (${unread.reason}), so it cannot rule out NO_BACKSLASH_ESCAPES`) +
-        ": mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement. Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version).",
+      unread === undefined
+        ? 'Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES' +
+            SQL_MODE_HAZARD +
+            " Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version)."
+        : `Drizzle over mysql2 could not read @@SESSION.sql_mode (${unread.reason}), so it cannot rule out NO_BACKSLASH_ESCAPES` +
+            SQL_MODE_HAZARD +
+            ' Start the application once MySQL answers, or retry connect(); the cause holds the driver error or the expiry.',
       unread?.cause === undefined ? undefined : { cause: unread.cause },
     );
+    if (unread !== undefined) this.unreadReason = unread.reason;
   }
 }

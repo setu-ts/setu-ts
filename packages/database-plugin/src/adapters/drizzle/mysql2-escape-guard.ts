@@ -78,21 +78,26 @@ export function isMysql2Database(database: unknown, entityKind: unknown): boolea
 }
 
 /**
- * The mysql2 databases behind a configured instance: the instance itself, or
- * a `withReplicas()` wrapper's `$primary` and every `$replicas` entry, each of
- * which holds its own `$client`. Databases on another driver are skipped.
+ * The mysql2 databases behind a configured instance: the instance itself, or,
+ * for a `withReplicas()` wrapper, the mysql2 databases behind its `$primary`
+ * and every `$replicas` entry, each of which holds its own `$client`.
+ *
+ * A wrapper is recognised by its shape (`$primary` or `$replicas` present),
+ * not by its brand: it spreads its primary, so a primary on another driver
+ * hides mysql2 replicas behind a brand that is not mysql2. Nested wrappers are
+ * walked, and only members that pass {@link isMysql2Database} are returned.
  *
  * @param database - The configured Drizzle database
  * @param entityKind - Drizzle's `entityKind` symbol
  * @returns The databases to read and watch; empty off mysql2
- * @throws {UnsupportedSqlModeError} For a mysql2 replicas wrapper whose
- * primary or replicas cannot be read
+ * @throws {UnsupportedSqlModeError} For a replicas wrapper whose primary or
+ * replicas cannot be read, when the wrapper or any member it holds is on
+ * mysql2
  */
 export function mysql2Targets(database: unknown, entityKind: unknown): readonly Mysql2Target[] {
-  if (!isMysql2Database(database, entityKind)) return [];
-  const wrapper = database as { $primary?: unknown; $replicas?: unknown };
-  if (wrapper.$primary === undefined && wrapper.$replicas === undefined) {
-    return [database as Mysql2Target];
+  const wrapper = database as { $primary?: unknown; $replicas?: unknown } | null | undefined;
+  if (wrapper?.$primary === undefined && wrapper?.$replicas === undefined) {
+    return isMysql2Database(database, entityKind) ? [database as Mysql2Target] : [];
   }
   const members = [
     wrapper.$primary,
@@ -104,11 +109,17 @@ export function mysql2Targets(database: unknown, entityKind: unknown): readonly 
       (member) => typeof (member as { execute?: unknown } | null)?.execute !== 'function',
     )
   ) {
+    if (
+      !isMysql2Database(database, entityKind) &&
+      !members.some((member) => isMysql2Database(member, entityKind))
+    ) {
+      return [];
+    }
     throw new UnsupportedSqlModeError({
       reason: 'a withReplicas() wrapper whose $primary and $replicas cannot all be read',
     });
   }
-  return members.filter((member) => isMysql2Database(member, entityKind)) as Mysql2Target[];
+  return members.flatMap((member) => mysql2Targets(member, entityKind));
 }
 
 /**

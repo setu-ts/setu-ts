@@ -102,6 +102,7 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
     expect((refusal as Error).message).toContain('sql_mode includes NO_BACKSLASH_ESCAPES');
     expect((refusal as Error).message).toContain('init_connect');
     expect((refusal as Error).message).toContain('sidorares/node-mysql2#4684');
+    expect(refusal).not.toHaveProperty('unreadReason');
     expect(adapter.isReady()).toBe(false);
     expect(pool.listenerCount('connection')).toBe(0);
   });
@@ -116,6 +117,11 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
     expect((unread as Error).message).toMatch(
       /could not read @@SESSION\.sql_mode \(the result held no sql_mode\)/,
     );
+    expect(unread).toMatchObject({ unreadReason: 'the result held no sql_mode' });
+    expect((unread as Error).message).toMatch(
+      /Start the application once MySQL answers, or retry connect\(\)/,
+    );
+    expect((unread as Error).message).not.toContain('Turn NO_BACKSLASH_ESCAPES off');
     expect(unreadable.listenerCount('connection')).toBe(0);
     const down = new FakePool();
     down.failure = new Error('connect ECONNREFUSED');
@@ -123,6 +129,7 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
       .connect()
       .catch((error: unknown) => error);
     expect(failed).toBeInstanceOf(UnsupportedSqlModeError);
+    expect(failed).toMatchObject({ unreadReason: 'the read failed' });
     expect((failed as Error).cause).toBeInstanceOf(DrizzleQueryError);
     expect(((failed as Error).cause as Error).cause).toBe(down.failure);
     expect(down.listenerCount('connection')).toBe(0);
@@ -246,6 +253,25 @@ describe('mysql2 escape-guard helpers', () => {
     // A replica on another driver is not read.
     const other = { execute: () => Promise.resolve([]) };
     expect(mysql2Targets({ ...db, $primary: db, $replicas: [other] }, entityKind)).toEqual([db]);
+  });
+
+  it('reads every mysql2 member of a nested replicas wrapper', () => {
+    const [m2, r1, r1b] = [0, 1, 2].map(() => drizzle(new FakePool() as never));
+    const nested = withReplicas(m2!, [withReplicas(r1!, [r1b!])]);
+    expect(mysql2Targets(nested, entityKind)).toEqual([m2, r1, r1b]);
+  });
+
+  it('reads the mysql2 replicas behind a primary on another driver', () => {
+    const [r1, r2] = [0, 1].map(() => drizzle(new FakePool() as never));
+    const proxy = { session: {}, execute: () => Promise.resolve([]) };
+    const mixed = { ...proxy, $primary: proxy, $replicas: [r1, r2] };
+    expect(mysql2Targets(mixed, entityKind)).toEqual([r1, r2]);
+    // Malformed, but with nothing on mysql2 to guard.
+    expect(mysql2Targets({ ...proxy, $primary: proxy }, entityKind)).toEqual([]);
+    // Malformed, with a mysql2 member.
+    expect(() => mysql2Targets({ ...proxy, $primary: r1 }, entityKind)).toThrow(
+      UnsupportedSqlModeError,
+    );
   });
 
   it('refuses a mysql2 replicas wrapper whose members cannot all be read', () => {

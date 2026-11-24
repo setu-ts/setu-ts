@@ -2204,17 +2204,16 @@ probe that exists and did not answer inside the 2-second bound reports `'unknown
 indicator used to read the lifecycle `isReady()`, which reports that `connect()` once succeeded and
 says nothing about the backend now). An adapter that ships NO probe reports `up` with `reachable`
 OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe that was never written is
-evidence of nothing, and mapping a missing probe to `degraded` would fail `/ready` for every healthy
-Cosmos, Bigtable and DynamoDB application on upgrade (`degraded` already answers 503). Shipped
-probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe
-for instances without `execute()`), memory (its own connection state — the process is the backend),
-and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read of the absent
-key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped entity; with
-none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by 2000 ms, or by
-`requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's bound), and
-rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access, unreachable
-service) is `false`. The concrete `DatabaseService` exposes the seam the indicator reads:
-`hasReachabilityProbe` (a synchronous presence read) and `reachability()`
+evidence of nothing about the backend, so a missing probe is not mapped to `degraded` (which answers
+503). Shipped probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle
+omits the probe for instances without `execute()`), memory (its own connection state — the process
+is the backend), and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read
+of the absent key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped
+entity; with none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by
+2000 ms, or by `requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's
+bound), and rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access,
+unreachable service) is `false`. The concrete `DatabaseService` exposes the seam the indicator
+reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
 (`Promise<boolean | undefined>` — the bounded probe, `undefined` when no answer was produced), the
 database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
 adapter whose own probe does not re-derive `isReady()` cannot report `up` for a connection it has
@@ -2433,7 +2432,7 @@ and that read is reported as not found. Both refuse before any I/O with
 non-negative safe integer or a `data` that sets the version field (an empty `field` option is a
 configuration fault: a `TypeError`, served as a masked `500`), and with `'conditional-write'`
 (`501`) when the repository has no conditional member — which is also what a buffered transaction
-source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle, Prisma and MongoDB
+source answers (memory overlay and D1; Drizzle, Prisma, MongoDB, DynamoDB, Cosmos and Bigtable
 transactions apply it).
 
 | Symbol                                                                                                                                                             | Shape                                                                                                                                                                                                              |
@@ -2706,8 +2705,12 @@ its literal. Since 0.14.0 it is refused: `connect()` throws `UnsupportedSqlModeE
 `'UnsupportedSqlModeError'`, `mode` `'NO_BACKSLASH_ESCAPES'`, no HTTP hint, so a masked `500`) when
 `@@SESSION.sql_mode` includes it on the primary or on any `withReplicas()` replica, or when a read
 fails or gets no answer within 2000 ms (the readiness probe's bound; the driver error or the expiry
-is the `cause`), so `connect()` now fails when MySQL is unreachable or stalls. On each mysql2 pool
-(primary and replicas) the adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each
+is the `cause`), so `connect()` now fails when MySQL is unreachable or stalls. That unread case
+carries `unreadReason` (a string naming why; absent when a session reported the mode), and its
+message asks to start once MySQL answers or to retry `connect()` rather than to turn the mode off. A
+`withReplicas()` wrapper is recognised by its `$primary`/`$replicas` shape, nested wrappers are
+walked, and every mysql2 member is checked, even behind a primary on another driver. On each mysql2
+pool (primary and replicas) the adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each
 connection the pool opens later, then refuses. Each new connection reads its mode, then sets its
 session `sql_mode` without the flag. The strip runs on the server before the statement mysql2 has
 already formatted for the pool's caller, which closing the connection after the read could not stop.
