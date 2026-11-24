@@ -14,14 +14,16 @@ import { createDefaultClientTiming } from './http/timing.ts';
 /**
  * Create a configured HTTP client.
  *
- * Validates policy values at construction (the retry checks are owned by
- * `validateRetryPolicy`, which `HttpClient` itself runs, so they hold however
- * the client is built):
+ * Validates policy values at construction (the retry and circuit-breaker
+ * checks are owned by `validateRetryPolicy` and common's
+ * `breakerPolicyRangeError`, which `HttpClient` itself runs, so they hold
+ * however the client is built):
  * - `retry.limit` is a positive safe integer
  * - `retry.delay` and `retry.maxRetryAfterMs` are finite, non-negative, and
  *   within the maximum timer delay
  * - the largest exponential retry delay remains finite and timer-safe
- * - `circuitBreaker.threshold >= 1`
+ * - `circuitBreaker` is one arm of `CircuitBreakerPolicy` with valid fields
+ *   (a `RangeError` naming the field otherwise)
  * - `rateLimit.maxRequests >= 1` and `rateLimit.windowMs > 0`
  *
  * Defaults `timing` to `createDefaultClientTiming()` when omitted.
@@ -33,13 +35,6 @@ import { createDefaultClientTiming } from './http/timing.ts';
 export function createClient(options: ClientOptions): IHttpClient {
   // Default timing.
   const timing = options.timing ?? createDefaultClientTiming();
-
-  // Validate circuit breaker policy.
-  if (options.circuitBreaker) {
-    if (options.circuitBreaker.threshold < 1) {
-      throw new Error('circuitBreaker.threshold must be >= 1');
-    }
-  }
 
   // Validate rate limit policy.
   if (options.rateLimit) {

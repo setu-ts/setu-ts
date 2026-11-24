@@ -26,7 +26,15 @@ All notable changes to this project are documented here. The format follows
   `maxRetries`, `deadLetterQueue` and `retryDelaySeconds` (`RetryDelaySeconds` type on
   `WorkersQueueOptions`, which also gains `deadLetter` and `now`), and `cacheApiMiddleware` gains
   `credentialCookies`.
-
+- **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
+  breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
+  `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
+  beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
+  rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
+  served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
+  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
+  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
+  the breaker. V13-104.
 - **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
   a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
@@ -92,7 +100,20 @@ All notable changes to this project are documented here. The format follows
   `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when `WebSocketPlugin()` is
   called; use `0` to disable. Each used to start a heartbeat timer of about 1 ms (one per connection
   on Workers) or leave the idle sweep off.
-
+- **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
+  #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
+  `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).
+  The SDK's breaker runs on `createBreakerWindow`: a success no longer empties it, so `threshold`
+  failures within `timeout` trip the circuit however many successes fall between them; a call that
+  succeeds after the circuit tripped no longer closes it (only a half-open probe does); on the rate
+  arm a 4xx counts as a call the origin answered. An invalid policy now throws a `RangeError` naming
+  the field, whether the client comes from `createClient` or `new HttpClient`
+  (`circuitBreaker.threshold must be a positive safe integer; received 0`, where it read
+  `circuitBreaker.threshold must be >= 1`). Values the SDK accepted before and now refuses: a
+  non-integer `threshold` or one above `Number.MAX_SAFE_INTEGER`; a missing `threshold` (with no
+  rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old code
+  coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
+  negative, infinite or over-range `resetTimeout`, or a missing one.
 - **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
   cause containing both address-family failures in A-then-AAAA order; migrate readers of
   `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
