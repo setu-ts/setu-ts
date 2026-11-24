@@ -1,3 +1,4 @@
+import { wantsFanOut, markFanOut, fanOutName } from './fan-out.ts';
 import { createCachedProbe, withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type {
   ISubscription,
@@ -226,13 +227,14 @@ export class NatsBroker implements MessageBrokerAdapter {
   #sweepActive: { active: boolean } | null = null;
   #streamSubjects: readonly string[] | undefined;
   #headersFactory: (() => INatsHeaders) | undefined;
-  #logger: { error: (msg: string) => void } | undefined;
+  #logger: { error: (msg: string) => void; warn?: (msg: string) => void } | undefined;
   /** Guards the no-header-channel report so it is emitted once, not per publish. */
   #headerWarningEmitted = false;
   #connection: INatsConnection | null = null;
   #js: unknown | null = null;
   #ready = false;
   #activeConsumers: Map<string, ActiveConsumer>;
+  #generation = 0;
   /** Consumer name → raw queue for this broker's own subscriptions (M101b collision refusal). */
   #consumerQueues = new Map<string, string>();
   #rr: RequestReplyCore;
@@ -261,6 +263,10 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#logger = options?.logger;
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => {
+        const logger = this.#logger;
+        (logger?.warn ?? logger?.error)?.call(logger, message);
+      },
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
@@ -454,6 +460,7 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#generation++;
     this.#supervisor.stop();
     if (this.#sweepActive) this.#sweepActive.active = false;
     await this.#rr.close();
@@ -660,6 +667,8 @@ export class NatsBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const independent = wantsFanOut(options);
+    const generation = this.#generation;
     if (!this.#connection) {
       throw new Error('NatsBroker is not connected');
     }
@@ -669,8 +678,11 @@ export class NatsBroker implements MessageBrokerAdapter {
     // refuses in a consumer name (the reply inbox's `rr.inbox.<uuid>` always
     // does), so it is encoded; the SUBJECT filter below stays verbatim.
     const transient =
+      independent ||
       (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true;
-    const queue = options?.queue ?? `${this.#defaultQueue}.${topic}`;
+    const queue = independent
+      ? fanOutName(this.#defaultQueue, this.#runtime.uuid())
+      : (options?.queue ?? `${this.#defaultQueue}.${topic}`);
     const consumerName = toJetStreamConsumerName(queue);
     const mappedQueue = this.#consumerQueues.get(consumerName);
     if (!transient && mappedQueue !== undefined && mappedQueue !== queue) {
@@ -755,6 +767,7 @@ export class NatsBroker implements MessageBrokerAdapter {
 
     const consumeOptions = {
       callback: (msg: unknown) => {
+        if (generation !== this.#generation) return;
         const msgTyped = msg as unknown as {
           data: Uint8Array;
           seq: number;
@@ -857,6 +870,10 @@ export class NatsBroker implements MessageBrokerAdapter {
       },
     };
     this.#activeConsumers.set(subscriptionId, activeConsumer);
+    if (generation !== this.#generation) {
+      await activeConsumer.close();
+      throw new Error('NatsBroker disconnected while subscribing');
+    }
 
     const startConsuming = async (): Promise<unknown> => {
       const replacement = await realJsTyped.consumers.get(this.#streamName, consumerName);
@@ -910,7 +927,7 @@ export class NatsBroker implements MessageBrokerAdapter {
       }
     };
     if (transient) void watch(subscription);
-    return { unsubscribe: activeConsumer.close };
+    return markFanOut({ unsubscribe: activeConsumer.close }, independent);
   }
 
   /**

@@ -1394,9 +1394,13 @@ cron-driven recurring scheduling) and delegates storage to an internal `QueueAda
 seam. `MemoryQueue` and `RedisQueue` (ioredis-based delayed queue using Redis sorted sets) implement
 this seam in M15. `RabbitMqQueue` (implemented in M15b) uses polling via `basicGet` over a ready
 queue and per-message TTL + dead-letter-exchange for delayed enqueue/requeue. `SqsQueue` (M54) uses
-AWS SQS with visibility timeouts, envelope-based retry tracking, and DLQ promotion when
-`maxAttempts` is reached — the DLQ adapter forwards the original message body to the DLQ queue URL
-then deletes the source message, with separate diagnostics for send vs delete failures. The
+AWS SQS with visibility timeouts, attempts counted from SQS's `ApproximateReceiveCount`, and DLQ
+promotion when
+`maxAttempts` is reached. Since 0.14.0 the target comes from `deadLetterQueues[name]` or the queue's
+own redrive policy (attempts are lowered to `maxReceiveCount - 1`, at least 1, when that is smaller); the adapter forwards the original
+body with three `setu-*` attributes (reason, attempts, source message id) and then deletes the
+source, `false` discards instead, and a consumed name with no target is refused before its first
+poll. The
 `SnsPublisher` export is a separate AWS SNS fan-out helper (not a `QueueAdapter`): it publishes to a
 single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam as `SqsQueue`.
 
@@ -2713,18 +2717,18 @@ contribution-token pattern `HEALTH_INDICATOR` already uses — and the connector
 finds at bootstrap (at most 16), identifying each only by a `q<N>` position so registry names and
 tokens never reach the wire.
 
-The second is the settlement boundary. The queue's existing outcome notification (the metrics sink)
-fires BEFORE the adapter's settlement call is awaited, so it is not proof that a job was durably
-acknowledged, requeued or dead-lettered. The runner therefore has two hooks: the metrics hook keeps
-its timing, and the diagnostics hook fires only after the settlement promise settled — with the
-requested settlement on resolution, `failed` on rejection (which is then rethrown unchanged) — and
-the collector records `unknown` in place of a completed call on an adapter that cannot confirm its
-settlement calls (RabbitMQ's unconfirmed channel operations; SQS, which absorbs a lapsed claim or a
-failed dead-letter send). Minimization is again structural: the observer is handed a job name (for
-the exact allowlist lookup), a raw job id (for the bounded LRU alias lookup) and the attempt number
-at dispatch, and fixed outcome/settlement primitives afterwards — its signatures cannot accept a
-payload, a header, a claim token, the attempt limit or a thrown value. Everything retained is
-bounded (1,024 attempts, 4,096 aliases, 2,048 observed in flight, 64 latest depths).
+The second is the settlement boundary. Since 0.14.0 the queue's outcome notification (the metrics
+sink) fires only after the adapter's settlement call resolved, and is not counted when it rejects.
+The diagnostics hook also fires only after the settlement promise settled — with the requested
+settlement on resolution, `failed` on rejection (which is then rethrown unchanged) — and the
+collector records `unknown` in place of a completed call on an adapter that cannot confirm its
+settlement calls (RabbitMQ's unconfirmed channel operations; SQS, where a delete through a receipt
+handle the server has already replaced can succeed without deleting). Minimization is again
+structural: the observer is handed a job name (for the exact allowlist lookup), a raw job id (for
+the bounded LRU alias lookup) and the attempt number at dispatch, and fixed outcome/settlement
+primitives afterwards — its signatures cannot accept a payload, a header, a claim token, the attempt
+limit or a thrown value. Everything retained is bounded (1,024 attempts, 4,096 aliases, 2,048
+observed in flight, 64 latest depths).
 
 Depths are counted only by a separately opted-in scheduler (non-overlapping cycles, `concurrency`
 1–4, a reporting `timeoutMs` that never cancels — a hung count keeps its slot until it settles), and

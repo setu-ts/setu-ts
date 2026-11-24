@@ -35,6 +35,8 @@ describe('fromNodeRedis', () => {
     ['eval', ['return ARGV[1]', 0, 'v'], ['EVAL', 'return ARGV[1]', '0', 'v']],
     ['xadd', ['s', '*', 'f', 'v'], ['XADD', 's', '*', 'f', 'v']],
     ['xgroup', ['CREATE', 's', 'g', '0'], ['XGROUP', 'CREATE', 's', 'g', '0']],
+    ['xread', ['COUNT', 1, 'STREAMS', 's', '1-0'], ['XREAD', 'COUNT', '1', 'STREAMS', 's', '1-0']],
+    ['xrevrange', ['s', '+', '-', 'COUNT', 1], ['XREVRANGE', 's', '+', '-', 'COUNT', '1']],
     [
       'xreadgroup',
       ['GROUP', 'g', 'c', 'STREAMS', 's', '>'],
@@ -69,6 +71,9 @@ describe('fromNodeRedis', () => {
     expect(raw.sendCommand).toHaveBeenLastCalledWith(['CONFIG', 'GET', 'maxmemory-policy']);
     raw.sendCommand.mockResolvedValue({ s: [['1-0', ['f', 'v']]] });
     expect(await adapter.xreadgroup('STREAMS', 's', '>')).toEqual([['s', [['1-0', ['f', 'v']]]]]);
+    expect(await adapter.xread('STREAMS', 's', '0-0')).toEqual([['s', [['1-0', ['f', 'v']]]]]);
+    raw.sendCommand.mockResolvedValue([['1-0', ['f', 'v']]]);
+    expect(await adapter.xrevrange('s', '+', '-', 'COUNT', 1)).toEqual([['1-0', ['f', 'v']]]);
   });
 
   it('coalesces lazy and explicit connect, including while isOpen becomes true', async () => {

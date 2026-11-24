@@ -53,12 +53,16 @@ const credentials = { accessKeyId: 'test', secretAccessKey: 'test' };
 /** Queue names this run owns, suffixed so repeated runs never share state. */
 const runId = crypto.randomUUID().slice(0, 8);
 const NAMES = {
-  round: `e2e-round-${runId}`,
-  alpha: `e2e-alpha-${runId}`,
-  beta: `e2e-beta-${runId}`,
-  retry: `e2e-retry-${runId}`,
-  dlqSource: `e2e-dlq-source-${runId}`,
-  dlqTarget: `e2e-dlq-target-${runId}`,
+  round: `m143p-e2e-round-${runId}`,
+  alpha: `m143p-e2e-alpha-${runId}`,
+  beta: `m143p-e2e-beta-${runId}`,
+  retry: `m143p-e2e-retry-${runId}`,
+  dlqSource: `m143p-e2e-dlq-source-${runId}`,
+  dlqTarget: `m143p-e2e-dlq-target-${runId}`,
+  policySource: `m143p-e2e-policy-source-${runId}`,
+  policyTarget: `m143p-e2e-policy-target-${runId}`,
+  unreadableSource: `m143p-e2e-unreadable-source-${runId}`,
+  unreadableTarget: `m143p-e2e-unreadable-target-${runId}`,
 } as const;
 
 /** Live queue URLs, filled by {@linkcode beforeAll} from `CreateQueue`. */
@@ -114,6 +118,7 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
       queues: { test: urls[NAMES.round]! },
+      deadLetterQueues: { test: 'https://sqs.local/dead' },
       ...baseOptions(),
     });
 
@@ -149,6 +154,7 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
       queues: { alpha: urls[NAMES.alpha]!, beta: urls[NAMES.beta]! },
+      deadLetterQueues: { alpha: 'https://sqs.local/dead', beta: 'https://sqs.local/dead' },
       ...baseOptions(),
     });
 
@@ -178,6 +184,7 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
       queues: { retry: urls[NAMES.retry]! },
+      deadLetterQueues: { retry: 'https://sqs.local/dead' },
       ...baseOptions(),
       // Long claim, so only the explicit requeue can make the job visible again
       // — otherwise a lapsing visibility window would produce the same result
@@ -271,5 +278,105 @@ describe('SqsQueue — ElasticMQ E2E', { skip: !endpoint }, () => {
     expect(sourceAfter.length).toBe(0);
 
     await queue.disconnect();
+  });
+  it('resolves the real redrive target and clamps the processor budget', async () => {
+    const sdk = await import('@aws-sdk/client-sqs');
+    const targetUrl = urls[NAMES.policyTarget]!;
+    const sourceUrl = urls[NAMES.policySource]!;
+    const attributes = (await sqsClient!.send(
+      new sdk.GetQueueAttributesCommand({
+        QueueUrl: targetUrl,
+        AttributeNames: ['QueueArn'],
+      }),
+    )) as { Attributes: { QueueArn: string } };
+    await sqsClient!.send(
+      new sdk.SetQueueAttributesCommand({
+        QueueUrl: sourceUrl,
+        Attributes: {
+          RedrivePolicy: JSON.stringify({
+            deadLetterTargetArn: attributes.Attributes.QueueArn,
+            maxReceiveCount: '3',
+          }),
+        },
+      }),
+    );
+    const runtime = createRuntime();
+    const queue = new SqsQueue(runtime, {
+      ...baseOptions(),
+      queues: { work: sourceUrl },
+      visibilityTimeoutSeconds: 2,
+    });
+    await queue.connect();
+    try {
+      await queue.enqueue({
+        id: 'policy-job',
+        name: 'work',
+        data: { kept: true },
+        maxAttempts: 8,
+        attempts: 0,
+        availableAtMs: 0,
+      });
+      const [job] = await queue.reserve('work', 1, runtime.now());
+      expect(job!.maxAttempts).toBe(2);
+      await queue.deadLetter('work', job!.id, runtime.now(), job!.claimToken!);
+      const received = (await sqsClient!.send(receiveFromDlq(targetUrl))) as {
+        Messages: { Body: string }[];
+      };
+      expect(JSON.parse(received.Messages[0]!.Body).data).toEqual({ kept: true });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const source = (await sqsClient!.send(
+        new sdk.ReceiveMessageCommand({ QueueUrl: sourceUrl, WaitTimeSeconds: 0 }),
+      )) as { Messages?: unknown[] };
+      expect(source.Messages ?? []).toEqual([]);
+    } finally {
+      await queue.disconnect();
+    }
+  });
+
+  it('retires unreadable real messages unchanged with source identity metadata', async () => {
+    const sdk = await import('@aws-sdk/client-sqs');
+    const body = '{payload-canary';
+    const sent = (await sqsClient!.send(
+      new sdk.SendMessageCommand({
+        QueueUrl: urls[NAMES.unreadableSource]!,
+        MessageBody: body,
+      }),
+    )) as { MessageId: string };
+    const runtime = createRuntime();
+    const queue = new SqsQueue(runtime, {
+      ...baseOptions(),
+      queues: { work: urls[NAMES.unreadableSource]! },
+      deadLetterQueues: { work: urls[NAMES.unreadableTarget]! },
+      visibilityTimeoutSeconds: 2,
+    });
+    await queue.connect();
+    try {
+      expect(await queue.reserve('work', 1, runtime.now())).toEqual([]);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const result = (await sqsClient!.send(
+        new sdk.ReceiveMessageCommand({
+          QueueUrl: urls[NAMES.unreadableTarget]!,
+          MessageAttributeNames: ['All'],
+        }),
+      )) as {
+        Messages: { Body: string; MessageAttributes: Record<string, { StringValue: string }> }[];
+      };
+      expect(result.Messages[0]!.Body).toBe(body);
+      expect(result.Messages[0]!.MessageAttributes['setu-dead-letter-reason']!.StringValue).toBe(
+        'unreadable',
+      );
+      expect(result.Messages[0]!.MessageAttributes['setu-source-message-id']!.StringValue).toBe(
+        sent.MessageId,
+      );
+      const source = (await sqsClient!.send(
+        new sdk.ReceiveMessageCommand({
+          QueueUrl: urls[NAMES.unreadableSource]!,
+          WaitTimeSeconds: 0,
+        }),
+      )) as { Messages?: unknown[] };
+      expect(source.Messages ?? []).toEqual([]);
+    } finally {
+      await queue.disconnect();
+    }
   });
 });

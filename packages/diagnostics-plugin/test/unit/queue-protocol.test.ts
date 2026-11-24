@@ -41,6 +41,13 @@ describe('parseTarget — the queues operation', () => {
 });
 
 describe('readQueueSourceBatch', () => {
+  it('accepts an intentional discard settlement', () => {
+    const value = sourceBatch({
+      attempts: [{ ...sourceAttempt(1), settlement: 'discarded' }],
+      next: 1,
+    });
+    expect(readQueueSourceBatch(value, 0)?.attempts[0]?.settlement).toBe('discarded');
+  });
   it('copies a valid batch field by field', () => {
     const value = sourceBatch({
       attempts: [sourceAttempt(3), sourceAttempt(4)],

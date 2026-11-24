@@ -609,14 +609,18 @@ export type QueueProcessorOutcome = 'completed' | 'retryable-error' | 'terminal-
  * call completed against an adapter that confirms its settlement calls.
  * `failed` means the settlement call rejected. `unknown` means the call
  * completed but the adapter cannot confirm the backend applied it — RabbitMQ's
- * channel operations are unconfirmed, and SQS absorbs a lapsed claim or a
- * failed dead-letter send without rejecting — so a completed call there is
- * never presented as settlement proof.
+ * channel operations are unconfirmed, and an SQS delete with a receipt that
+ * went stale on the server can succeed without deleting. Stale local SQS
+ * claims and failed dead-letter sends reject and report `failed`.
+ * `discarded` means the adapter intentionally deleted an exhausted job because
+ * its dead-letter target was explicitly disabled. It records the adapter's
+ * decision to drop the job, even on a non-confirming adapter; it does not
+ * claim that the backend applied a settlement.
  *
  * @since 0.8.0
  */
 export type QueueSettlementState =
-  'acknowledged' | 'requeued' | 'dead-lettered' | 'failed' | 'unknown';
+  'acknowledged' | 'requeued' | 'dead-lettered' | 'discarded' | 'failed' | 'unknown';
 
 /**
  * What a queue depth observation counts (M98f).

@@ -877,6 +877,12 @@ here.
   telemetry peers on every runtime, Pub/Sub emulator host in the dotenv, view CSS before tests, an
   empty workspace's root test; V13-36, V13-140…V13-143, V13-145, V13-148, V13-154, V13-161, V13-166,
   V13-168) — complete (PR #610).
+- **Milestone 143p** (`queue-plugin` + `messaging-plugin` + `realtime-backplane-plugin` + `common` —
+  queued work and frames that are lost or repeated: SQS claim renewal, dead-letter targets or a
+  start refusal, `publishJob`, unreadable retirement; `fanOut` subscriptions on every broker and the
+  backplane's refusal without them; Pub/Sub and Service Bus `consumerRetry`, Pub/Sub stream recovery
+  and per-key ordering; a routed RabbitMQ outbox; opt-in `maxFrameAgeMs`; 11 rows; ships in
+  `0.14.0`) — complete (PR #616).
 - **Milestone 143 Core follow-up — circuit breaker** (`common` + `sdk`, plus a one-line
   `resilience-plugin` guard — V13-104's Core and SDK halves: the `CircuitBreakerPolicy` union with a
   failure-rate arm, `createBreakerWindow` and `breakerPolicyRangeError` at

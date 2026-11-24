@@ -39,7 +39,11 @@ describe('QueuePlugin sqs arm — through a real kernel application', () => {
         QueuePlugin({
           adapter: 'sqs',
           pollIntervalMs: POLL_MS,
-          sqs: { queues: { report: QUEUE_URL }, client: transport },
+          sqs: {
+            queues: { report: QUEUE_URL },
+            deadLetterQueues: { report: 'https://sqs.local/dead' },
+            client: transport,
+          },
         }),
       ],
     });
@@ -72,7 +76,11 @@ describe('QueuePlugin sqs arm — through a real kernel application', () => {
           adapter: 'sqs',
           pollIntervalMs: POLL_MS,
           defaultMaxAttempts: 3,
-          sqs: { queues: { flaky: QUEUE_URL }, client: transport },
+          sqs: {
+            queues: { flaky: QUEUE_URL },
+            deadLetterQueues: { flaky: 'https://sqs.local/dead' },
+            client: transport,
+          },
         }),
       ],
     });
@@ -140,7 +148,11 @@ describe('QueuePlugin sqs arm — through a real kernel application', () => {
         QueuePlugin({
           adapter: 'sqs',
           pollIntervalMs: POLL_MS,
-          sqs: { queues: { alpha: alphaUrl, beta: betaUrl }, client: transport },
+          sqs: {
+            queues: { alpha: alphaUrl, beta: betaUrl },
+            deadLetterQueues: { alpha: 'https://sqs.local/dead', beta: 'https://sqs.local/dead' },
+            client: transport,
+          },
         }),
       ],
     });

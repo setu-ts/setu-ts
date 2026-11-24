@@ -2813,6 +2813,9 @@ importers:
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel
+      '@setu-ts/messaging-plugin':
+        specifier: workspace:^
+        version: link:../messaging-plugin
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
