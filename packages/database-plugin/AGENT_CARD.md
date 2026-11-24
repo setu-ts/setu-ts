@@ -53,7 +53,7 @@ await db.transaction(async (uow) => {
 - Unsupported isolation levels reject.
 - `query` rejects on memory; `migrate` on every adapter.
 - DynamoDB/Cosmos/Bigtable calls end at `requestTimeoutMs` (15000, `0` off): 504.
-- DynamoDB/Bigtable `/ready` reads `readinessEntity` (default: first entity).
+- `/ready`: DynamoDB/Bigtable read `readinessEntity`; Cosmos `database.read()`.
 - Give a Drizzle `pg` Pool an `'error'` listener (README).
 
 ## Other options

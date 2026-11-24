@@ -292,7 +292,8 @@ export async function editArticle(
   Prisma's `P2025` is the miss. Every other connector, and one that cannot be determined, takes the
   count path: `updateMany`/`deleteMany` with the key and the predicate, where `count: 0` is the
   miss, followed for `updateWhere` by a `findUnique` read-back of the key on the same transaction
-  client. Outside a unit of work the pair runs in a short `$transaction` with the unit of work's own
+  client (`deleteWhere` decides from the count alone). Outside a unit of work the write, with its
+  read-back, runs in a short `$transaction` with the unit of work's own
   `{ maxWait: 2000, timeout: transactionTimeout }`, so it holds a pool connection while it runs and
   a pool that cannot supply one within 2 s answers `503` (`P2028`); inside a unit of work it runs on
   that transaction's client. A `count` above 1 means `keyColumns` do not name the table's key: it

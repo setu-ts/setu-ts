@@ -278,10 +278,10 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   `clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
 - **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
   connector except `postgresql` / `postgres` (and when the connector cannot be determined),
-  `updateWhere`, `deleteWhere`, `updateVersioned` and `deleteVersioned` run `updateMany` /
-  `deleteMany` with the key and the predicate, then a `findUnique` read-back. A lost race on MySQL
-  now answers `409` / `404` instead of reporting success. A `keyColumns` that matches several rows
-  throws and rolls back: make `keyColumns` name the table's key.
+  `updateWhere` and `updateVersioned` run `updateMany` with the key and the predicate, then a
+  `findUnique` read-back; `deleteWhere` and `deleteVersioned` run `deleteMany` and decide from its
+  count. A lost race on MySQL now answers `409` / `404` instead of reporting success. A `keyColumns`
+  that matches several rows throws and rolls back: make `keyColumns` name the table's key.
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.
