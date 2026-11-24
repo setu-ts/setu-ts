@@ -89,10 +89,12 @@ export class RealtimeBackplaneObjectCore {
   }
 
   /**
-   * Answers a replica's WebSocket upgrade.
+   * Answers a replica's WebSocket upgrade, or a `POST /publish`.
    *
    * @param request - The request the stub forwarded
-   * @returns A 101 carrying the client half, or a 426 for a non-upgrade request
+   * @returns A 101 carrying the client half, or a 426 for a non-upgrade
+   *   request; for `POST /publish`, 204, 413 above 33,554,432 bytes, or 400 for
+   *   a body that is not valid UTF-8
    * @throws {Error} When `WebSocketPair` is unavailable and no host was injected
    */
   fetch(request: Request): Promise<Response> {

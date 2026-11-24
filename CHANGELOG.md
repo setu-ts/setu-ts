@@ -18,14 +18,14 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/common`, `@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin` (M143o).**
   `IRealtimeConnectionLink`, `IRealtimeLinkBackplane` and `hasConnectionLinks` let a backplane give
   each WebSocket connection its own link; `DurableObjectBackplane` implements them
-  (`openConnectionLink`, `publishViaHub`) and the hub object answers `POST /publish`.
-  `WebSocketRoomsUnavailableError` is thrown by `ws.room()`/`ws.peek()` on Workers without the
-  Durable Object arm. `cacheApiKey` and `purgeCacheApi` (with `CacheApiKeyInput`,
-  `PurgeCacheApiTarget`) name and evict the edge-cache entry the middleware stored, in the current
-  data center (V13-202). `isServiceBinding` checks a service binding. The queue arm gains
-  `maxRetries`, `deadLetterQueue` and `retryDelaySeconds` (`RetryDelaySeconds` type on
-  `WorkersQueueOptions`, which also gains `deadLetter` and `now`), and `cacheApiMiddleware` gains
-  `credentialCookies`.
+  (`openConnectionLink`, `publishViaHub`) and the hub object answers `POST /publish` (204; 413 above
+  32 MiB; 400 for a body that is not valid UTF-8). `WebSocketRoomsUnavailableError` is thrown by
+  `ws.room()`/`ws.peek()` on Workers without the Durable Object arm. `cacheApiKey` and
+  `purgeCacheApi` (with `CacheApiKeyInput`, `PurgeCacheApiTarget`) name and evict the edge-cache
+  entry the middleware stored, in the current data center (V13-202). `isServiceBinding` checks a
+  service binding. The queue arm gains `maxRetries`, `deadLetterQueue` and `retryDelaySeconds`
+  (`RetryDelaySeconds` type on `WorkersQueueOptions`, which also gains `deadLetter` and `now`), and
+  `cacheApiMiddleware` gains `credentialCookies`.
 - **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
   breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
   `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
@@ -98,8 +98,9 @@ All notable changes to this project are documented here. The format follows
   and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the arm.
 - **BREAKING — `@setu-ts/websocket-plugin` (M143o).** A negative, infinite or `NaN` `heartbeatMs` or
   `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when `WebSocketPlugin()` is
-  called; use `0` to disable. Each used to start a heartbeat timer of about 1 ms (one per connection
-  on Workers) or leave the idle sweep off.
+  called; use `0` to disable. A negative value used to turn the option off; a `NaN`, infinite or
+  over-range `heartbeatMs` started a timer of about 1 ms (one per connection on Workers), and a
+  `NaN` or infinite `idleTimeoutMs` left the idle sweep off.
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).

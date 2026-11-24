@@ -17037,13 +17037,13 @@ schema-ignorant — a future widening of `RealtimeFrame` needs no redeploy of th
 to the request that created it, so `DurableObjectBackplane` implements `IRealtimeLinkBackplane`
 (`@setu-ts/common`): `openConnectionLink(connectionId, deliver)` opens one link per client
 connection from that connection's own request, and `publishViaHub(frame)` POSTs a frame to the hub
-(`POST /publish`, 204; 413 above 33,554,432 bytes) from any request, handed to `waitUntil` when the
-plugin has a host. `websocket-plugin` uses these on Workers (request-bound mode). A link queues up
-to 64 frames while it opens (oldest dropped, one warning), reopens a lost socket three times (0.5 s,
-1 s, 2 s), then logs `cloudflare: backplane link lost` once with `{ topic, connection }`. The
-isolate socket (`connect`/`publish`/`subscribe`) stays for `sse-plugin` and other runtimes: it opens
-lazily, a publish that finds it dead reopens once and resends the frame, and a retired socket is
-closed rather than left open at the hub.
+(`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
+request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
+(request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning),
+reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost`
+once with `{ topic, connection }`. The isolate socket (`connect`/`publish`/`subscribe`) stays for
+`sse-plugin` and other runtimes: it opens lazily, a publish that finds it dead reopens once and
+resends the frame, and a retired socket is closed rather than left open at the hub.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses

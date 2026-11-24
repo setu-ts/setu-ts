@@ -48,8 +48,8 @@ ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
 - Without an adapter upgrade seam `available` is false and `route` throws
   `WebSocketUnavailableError`. `app.fetch` and `app.inject` do not establish Node sockets.
 - `room` creates a room; `peek` does not. Closing leaves every room.
-- `heartbeatMs`/`idleTimeoutMs` default to `0` (off); an idle timeout needs a heartbeat; NaN/<0
-  throws. `maxConnections` defaults to `0` (unlimited) and refuses excess upgrades with 503.
+- `heartbeatMs`/`idleTimeoutMs` default to `0` (off; invalid throws); idle needs a heartbeat.
+  `maxConnections` defaults to `0` (unlimited) and refuses excess upgrades with 503.
 - Rooms are local without a backplane. With one, sizes stay local and `except` applies only on the
   originating replica.
 - Workers rooms need `CloudflarePlugin({ durableObject })`, else `room`/`peek` throw

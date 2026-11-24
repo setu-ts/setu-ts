@@ -95,7 +95,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'swagger-ui-dist-floor': 'npm:swagger-ui-dist@5.0.0',
   'react-router': '^8',
   // cloudflare-plugin's workerd e2e suites: the `wrangler dev` they run and its
-  // config reader; the 4.148 line the CLI's Workers scaffold resolves to.
+  // config reader; the CLI Workers scaffold's pin (a cloudflare-plugin test ties them).
   wrangler: '~4.148.0',
   ws: '^8.18.0',
   zod: '^4.6.6',
