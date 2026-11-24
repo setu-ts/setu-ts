@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import type { IS3Backend, StorageProvider } from '../../src/interfaces/index.ts';
+import type { IGcsClient, IS3Backend, StorageProvider } from '../../src/interfaces/index.ts';
 import type { AzureOperationOptions, AzureSdkModule } from '../../src/providers/azure-provider.ts';
 import {
   adaptAzureModule,
@@ -93,6 +93,75 @@ describe('Azure distinguishes blob misses from container faults', () => {
       expect(seen).toBeInstanceOf(AbortSignal);
     });
   }
+});
+
+describe('an adapted Azure SDK client is aborted by the provider deadline', () => {
+  it('hands the provider deadline signal to every SDK call', async () => {
+    const seen: AbortSignal[] = [];
+    const hang = (opts?: AzureOperationOptions): Promise<never> => {
+      if (opts?.abortSignal !== undefined) seen.push(opts.abortSignal);
+      return new Promise<never>(() => {});
+    };
+    const mod = {
+      BlobServiceClient: {
+        fromConnectionString: () => ({
+          getContainerClient: () => ({
+            getBlockBlobClient: () => ({
+              uploadData: (_data: Uint8Array, opts?: AzureOperationOptions) => hang(opts),
+              download: (_o?: number, _l?: number, opts?: AzureOperationOptions) => hang(opts),
+              delete: (opts?: AzureOperationOptions) => hang(opts),
+              exists: (opts?: AzureOperationOptions) => hang(opts),
+              getProperties: (opts?: AzureOperationOptions) => hang(opts),
+            }),
+          }),
+        }),
+      },
+    } as unknown as AzureSdkModule;
+    // The adapter keeps its 30 s default; only the provider's 20 ms bound can
+    // abort these calls, so each signal is aborted only if it is the provider's.
+    const provider = new AzureBlobProvider({
+      containerName: 'c',
+      requestTimeoutMs: 20,
+      client: adaptAzureModule(mod, { containerName: 'c', connectionString: 'cs' }),
+    });
+    await provider.connect();
+    await expect(provider.put('k', new Uint8Array([1]))).rejects.toThrow();
+    await expect(provider.get('k')).rejects.toThrow();
+    await expect(provider.getStream('k')).rejects.toThrow();
+    await expect(provider.delete('k')).rejects.toThrow();
+    await expect(provider.exists('k')).rejects.toThrow();
+    expect(seen).toHaveLength(5);
+    expect(seen.every((signal) => signal.aborted)).toBe(true);
+  });
+  it('bounds a facade call made without a signal', async () => {
+    let seen: AbortSignal | undefined;
+    const mod = {
+      BlobServiceClient: {
+        fromConnectionString: () => ({
+          getContainerClient: () => ({
+            getBlockBlobClient: () => ({
+              delete: (opts?: AzureOperationOptions) => {
+                seen = opts?.abortSignal;
+                return new Promise<never>(() => {});
+              },
+            }),
+          }),
+        }),
+      },
+    } as unknown as AzureSdkModule;
+    const client = adaptAzureModule(
+      mod,
+      { containerName: 'c', connectionString: 'cs' },
+      { timeoutMs: 20 },
+    );
+    const blob = (
+      client.getContainerClient('c') as {
+        getBlockBlobClient(name: string): { delete(): Promise<unknown> };
+      }
+    ).getBlockBlobClient('k');
+    await expect(blob.delete()).rejects.toThrow(/did not answer within 20 ms/);
+    expect(seen?.aborted).toBe(true);
+  });
 });
 
 describe('an injected Azure SDK client keeps the container code on exists', () => {
@@ -219,6 +288,20 @@ describe('GCS refuses endpoint beside STORAGE_EMULATOR_HOST', () => {
     expect(() => make(undefined, 'http://one.test')).not.toThrow();
     expect(() => make('http://one.test', '')).not.toThrow();
     expect(() => make('http://one.test', 'http://two.test', true)).not.toThrow();
+  });
+  it('refuses a direct endpoint with no environment, and accepts one beside a client', () => {
+    expect(() => new GcsProvider({ bucket: 'b', endpoint: 'http://one.test' })).toThrow(
+      /endpoint needs the runtime environment/,
+    );
+    expect(
+      () =>
+        new GcsProvider({
+          bucket: 'b',
+          endpoint: 'http://one.test',
+          client: { bucket: () => ({}) } as unknown as IGcsClient,
+        }),
+    ).not.toThrow();
+    expect(() => new GcsProvider({ bucket: 'b' })).not.toThrow();
   });
   it('rechecks the environment on connect', async () => {
     const env: Record<string, string | undefined> = {};

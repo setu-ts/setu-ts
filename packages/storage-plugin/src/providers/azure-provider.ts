@@ -226,8 +226,9 @@ export function buildAzureServiceClient(
 
 /**
  * Adapts the Azure SDK module to the structural {@linkcode IAzureBlobClient}
- * facade: the SDK's own clients, each operation bounded and given the bound's
- * `abortSignal`, plus a container probe. Pure — unit-tested with a fake module.
+ * facade: the SDK's own clients, each operation given the caller's `abortSignal`
+ * (bounded here only when none is passed), plus a container probe. Pure — unit-tested
+ * with a fake module.
  *
  * @param mod - The Azure SDK module (real or fake)
  * @param options - Azure connection options
@@ -242,6 +243,14 @@ export function adaptAzureModule(
   const serviceClient = buildAzureServiceClient(mod, options);
   const bound = <T>(operation: StorageOperation, run: (signal: AbortSignal) => Promise<T>) =>
     runBounded(deadline, 'azure', operation, run);
+  // The provider bounds each call and passes its deadline's signal; that signal
+  // reaches the SDK as given, so the provider's deadline is the one that aborts
+  // it. A facade used without a signal bounds the call itself.
+  const call = <T>(
+    operation: StorageOperation,
+    signal: unknown,
+    run: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => (signal instanceof AbortSignal ? run(signal) : bound(operation, run));
 
   return {
     getContainerClient(name: string): unknown {
@@ -251,12 +260,17 @@ export function adaptAzureModule(
           const blob = container.getBlockBlobClient(blobName);
           return {
             uploadData: (data, opts) =>
-              bound('put', (abortSignal) => blob.uploadData(data, { ...opts, abortSignal })),
-            download: (offset, length) =>
-              bound('get', (abortSignal) => blob.download(offset, length, { abortSignal })),
-            delete: () => bound('delete', (abortSignal) => blob.delete({ abortSignal })),
-            exists: () =>
-              bound('exists', async (abortSignal) => {
+              call('put', opts?.['abortSignal'], (abortSignal) =>
+                blob.uploadData(data, { ...opts, abortSignal }),
+              ),
+            download: (offset, length, opts) =>
+              call('get', opts?.abortSignal, (abortSignal) =>
+                blob.download(offset, length, { abortSignal }),
+              ),
+            delete: (opts) =>
+              call('delete', opts?.abortSignal, (abortSignal) => blob.delete({ abortSignal })),
+            exists: (opts) =>
+              call('exists', opts?.abortSignal, async (abortSignal) => {
                 try {
                   await blob.getProperties({ abortSignal });
                   return true;
@@ -424,9 +438,9 @@ export class AzureBlobProvider implements StorageProvider {
   /**
    * Runs one call under the bound — the whole call, a body read included — and
    * classifies its rejection. `run` receives the bound's signal (a body still
-   * streaming is destroyed when it expires); the adapted client also hands each
-   * SDK operation a signal of its own. `notFound` names the value Azure's
-   * not-found answer stands for.
+   * streaming is destroyed when it expires); the adapted client passes that
+   * signal to the SDK as given, so this bound is the one that cancels the call.
+   * `notFound` names the value Azure's not-found answer stands for.
    */
   async #call<T>(
     operation: StorageOperation,

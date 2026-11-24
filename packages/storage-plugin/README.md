@@ -189,7 +189,8 @@ A presigned URL serves the object under whatever content type it was stored with
 takes one — see [Object metadata](#object-metadata).
 
 `GcsProvider` and `AzureBlobProvider` read the clock the plugin hands them (`runtime.now()`). A
-direct GCS caller passes the runtime environment as the fourth constructor argument so a set
+direct GCS caller that sets `endpoint` without a `client` must pass the runtime environment as the
+fourth constructor argument (without it the constructor throws a `RangeError`), so a set
 `STORAGE_EMULATOR_HOST` beside `endpoint` is refused; the plugin supplies it automatically. A
 provider constructed directly needs `now` as its second argument; without one, `getSignedUrl`
 rejects by name. The Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob

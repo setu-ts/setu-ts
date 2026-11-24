@@ -9576,7 +9576,8 @@ buffered fallback over `get`; an implemented member returning `null` makes the s
 `runtime.env.STORAGE_EMULATOR_HOST` is set, with `RangeError` (the SDK sends JSON requests to the
 variable and uploads to `endpoint`); an injected `client` is not checked. Direct
 `GcsProvider(options, now?, timing?, env?)` callers pass the runtime environment as the fourth
-argument for this check; it runs at construction and connect.
+argument for this check; it runs at construction and connect. A direct caller that sets `endpoint`
+without a `client` and without `env` is refused with `RangeError` at construction.
 
 All cloud providers support an injectable `client` option that bypasses the lazy import, but the
 three types are NOT alike and the difference decides what you can pass:

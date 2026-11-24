@@ -5,7 +5,8 @@
  *
  * Each block is guarded on its stand-in's variable and skips without it:
  *
- * - `GCS_EMULATOR_URL` — fake-gcs-server (`fsouza/fake-gcs-server`, `-scheme http`)
+ * - `GCS_EMULATOR_URL` — fake-gcs-server (`fsouza/fake-gcs-server`, `-scheme http` and
+ *   `-public-host <host:port>`, or a signed URL's object answers 404)
  * - `AZURITE_CONNECTION_STRING` — Azurite's blob service
  * - `S3_ENDPOINT_URL` — MinIO (keys `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`,
  *   default `minioadmin`)
@@ -62,6 +63,8 @@ describe.skipIf(GCS === undefined)('gcs on fake-gcs-server', () => {
     const provider = new GcsProvider(
       { bucket, projectId: 'p', endpoint: GCS, endpointAuth: false },
       NOW,
+      undefined,
+      {},
     );
     await provider.connect();
     await roundTrip(provider, 'docs/a.txt');
@@ -94,6 +97,8 @@ describe.skipIf(GCS === undefined)('gcs on fake-gcs-server', () => {
       const provider = new GcsProvider(
         { bucket, projectId: 'p', endpoint: GCS, endpointAuth: false },
         NOW,
+        undefined,
+        {},
       );
       await provider.connect();
       await provider.put('signed.txt', encoder.encode('signed body'), {
@@ -123,6 +128,8 @@ describe.skipIf(GCS === undefined)('gcs on fake-gcs-server', () => {
     const provider = new GcsProvider(
       { bucket: 'b', projectId: 'p', endpoint: 'http://127.0.0.1:1', endpointAuth: false },
       NOW,
+      undefined,
+      {},
     );
     await provider.connect();
     await expect(provider.exists('k')).rejects.toBeInstanceOf(BackendUnavailableError);

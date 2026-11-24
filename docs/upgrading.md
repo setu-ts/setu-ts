@@ -47,8 +47,10 @@ be ignored.
   `endpointAuth: false`. Install `@google-cloud/storage@^7.18.0`. With credentials on, `put` to a
   custom endpoint uploads in one multipart request, because the SDK's resumable upload sends none.
   Setting `endpoint` while `STORAGE_EMULATOR_HOST` is set is refused with `RangeError` (the SDK
-  sends JSON requests to the variable and uploads to `endpoint`); set one or the other. Buffered
-  downloads release their streams at the deadline.
+  sends JSON requests to the variable and uploads to `endpoint`); set one or the other. A
+  `GcsProvider` built directly with `endpoint` and no `client` now needs `runtime.env` as its fourth
+  argument, or the constructor throws `RangeError`. Buffered downloads release their streams at the
+  deadline.
 - **Azure storage.** `connectionString` now works as documented; a SAS-URL passed as
   `connectionString` is no longer accepted (use the SAS connection-string form).
 - **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.

@@ -200,7 +200,8 @@ All notable changes to this project are documented here. The format follows
   `ENOENT` (a local file error) reject instead of signalling an absent object. Azure rejects
   unsupported body-less downloads and injected cloud calls receive deadline signals. GCS buffered
   downloads stop at the deadline; failed first reads release iterators. A GCS `endpoint` set beside
-  `STORAGE_EMULATOR_HOST` is refused and the GCS peer floor is `^7.18.0`; a `put` to an
+  `STORAGE_EMULATOR_HOST` is refused, as is a directly built `GcsProvider` with `endpoint`, no
+  `client` and no `env` (pass `runtime.env`), and the GCS peer floor is `^7.18.0`; a `put` to an
   authenticated custom endpoint uploads in one multipart request, which carries the credential the
   SDK's resumable upload drops. Bun filesystem errors preserve their codes. Vault HTTP 5xx
   reads/writes use `SecretProviderUnavailableError`. A failed or timed-out LaunchDarkly startup

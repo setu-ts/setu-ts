@@ -98,13 +98,18 @@ describe('requestTimeoutMs bounds every call on the real SDKs (V13-216)', () => 
   });
 
   it('gcs: a read is a 503 and a write a 504 within the bound', async () => {
-    const provider = new GcsProvider({
-      bucket: 'b',
-      projectId: 'p',
-      endpoint: `http://127.0.0.1:${blackHolePort}`,
-      endpointAuth: false,
-      requestTimeoutMs: BOUND_MS,
-    });
+    const provider = new GcsProvider(
+      {
+        bucket: 'b',
+        projectId: 'p',
+        endpoint: `http://127.0.0.1:${blackHolePort}`,
+        endpointAuth: false,
+        requestTimeoutMs: BOUND_MS,
+      },
+      undefined,
+      undefined,
+      {},
+    );
     await provider.connect();
     expectBounded(await timed(() => provider.exists('k')), BackendUnavailableError);
     expectBounded(await timed(() => provider.getStream('k')), BackendUnavailableError);
@@ -144,13 +149,18 @@ describe('gcs: a 502 or 503 on a download rejects and the process lives (V13-235
   for (const status of [502, 503]) {
     it(`get, getStream and exists answer a 503-class error for a backend ${status}`, async () => {
       failingStatus = status;
-      const provider = new GcsProvider({
-        bucket: 'b',
-        projectId: 'p',
-        endpoint: `http://127.0.0.1:${failingPort}`,
-        endpointAuth: false,
-        requestTimeoutMs: 10_000,
-      });
+      const provider = new GcsProvider(
+        {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${failingPort}`,
+          endpointAuth: false,
+          requestTimeoutMs: 10_000,
+        },
+        undefined,
+        undefined,
+        {},
+      );
       await provider.connect();
       // Before the fix the SDK's retry path rejected unhandled with
       // ERR_STREAM_UNABLE_TO_PIPE, which ends the process and fails this run.

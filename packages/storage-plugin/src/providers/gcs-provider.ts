@@ -376,8 +376,8 @@ export class GcsProvider implements StorageProvider {
    *   when absent)
    * @param env - Runtime environment for checking `STORAGE_EMULATOR_HOST`
    * @throws {RangeError} When `requestTimeoutMs` is out of range, or an
-   *   `endpoint` is given while the runtime's `STORAGE_EMULATOR_HOST` is set
-   *   (and no `client` is injected)
+   *   `endpoint` is given (and no `client` is injected) either without `env`
+   *   or while `env.STORAGE_EMULATOR_HOST` is set
    */
   constructor(
     options?: GcsProviderOptions,
@@ -417,12 +417,21 @@ export class GcsProvider implements StorageProvider {
    * Refuses `endpoint` beside `STORAGE_EMULATOR_HOST` for the SDK this provider
    * builds: the SDK sends JSON API calls to the variable's raw value (no
    * `/storage/v1`, no scheme added) and uploads to `endpoint`, so the two
-   * settings would split one object's reads and writes. An injected client
-   * never reads the variable, so it is not checked.
+   * settings would split one object's reads and writes. An injected client is
+   * the caller's to configure, so it is not checked; without `env` the check
+   * cannot run, so the endpoint is refused.
    */
   #checkEndpoint(): void {
     if (this.#options.client !== undefined || this.#options.endpoint === undefined) return;
-    const emulator = this.#env?.STORAGE_EMULATOR_HOST;
+    // Without the environment the SDK reads, the split cannot be ruled out, so
+    // a direct caller that sets `endpoint` must pass it (the plugin always does).
+    if (this.#env === undefined) {
+      throw new RangeError(
+        'GcsProvider: endpoint needs the runtime environment (the fourth constructor argument) ' +
+          'to check STORAGE_EMULATOR_HOST, which the SDK reads itself',
+      );
+    }
+    const emulator = this.#env.STORAGE_EMULATOR_HOST;
     if (emulator !== undefined && emulator !== '') {
       throw new RangeError(
         'GcsProvider: set either endpoint or STORAGE_EMULATOR_HOST, not both: the SDK sends ' +

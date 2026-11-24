@@ -98,13 +98,18 @@ describe('real GCS SDK drip download stops at its deadline', () => {
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     try {
-      const provider = new GcsProvider({
-        bucket: 'b',
-        projectId: 'p',
-        endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
-        endpointAuth: false,
-        requestTimeoutMs: 200,
-      });
+      const provider = new GcsProvider(
+        {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+          endpointAuth: false,
+          requestTimeoutMs: 200,
+        },
+        undefined,
+        undefined,
+        {},
+      );
       await provider.connect();
       const started = performance.now();
       await expect(provider.get('k')).rejects.toBeInstanceOf(BackendUnavailableError);
