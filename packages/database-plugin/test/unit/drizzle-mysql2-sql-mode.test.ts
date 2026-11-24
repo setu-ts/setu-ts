@@ -118,9 +118,8 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
       /could not read @@SESSION\.sql_mode \(the result held no sql_mode\)/,
     );
     expect(unread).toMatchObject({ unreadReason: 'the result held no sql_mode' });
-    expect((unread as Error).message).toMatch(
-      /Start the application once MySQL answers, or retry connect\(\)/,
-    );
+    expect((unread as Error).message).toMatch(/this is not a transient fault/);
+    expect((unread as Error).message).not.toMatch(/retry connect\(\)/);
     expect((unread as Error).message).not.toContain('Turn NO_BACKSLASH_ESCAPES off');
     expect(unreadable.listenerCount('connection')).toBe(0);
     const down = new FakePool();

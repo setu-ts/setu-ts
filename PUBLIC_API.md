@@ -2704,24 +2704,27 @@ escapes `'` in a bound string as `\'`, which that mode does not honour, so a bou
 its literal. Since 0.14.0 it is refused: `connect()` throws `UnsupportedSqlModeError` (`name`
 `'UnsupportedSqlModeError'`, `mode` `'NO_BACKSLASH_ESCAPES'`, no HTTP hint, so a masked `500`) when
 `@@SESSION.sql_mode` includes it on the primary or on any `withReplicas()` replica, or when a read
-fails or gets no answer within 2000 ms (the readiness probe's bound; the driver error or the expiry
-is the `cause`), so `connect()` now fails when MySQL is unreachable or stalls. That unread case
-carries `unreadReason` (a string naming why; absent when a session reported the mode), and its
-message asks to start once MySQL answers or to retry `connect()` rather than to turn the mode off. A
-`withReplicas()` wrapper is recognised by its `$primary`/`$replicas` shape, nested wrappers are
-walked, and every mysql2 member is checked, even behind a primary on another driver. On each mysql2
-pool (primary and replicas) the adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each
-connection the pool opens later, then refuses. Each new connection reads its mode, then sets its
-session `sql_mode` without the flag. The strip runs on the server before the statement mysql2 has
-already formatted for the pool's caller, which closing the connection after the read could not stop.
-After a new connection reported the flag, every adapter call throws the same error and one `warn` is
-logged. Three cases are not covered: a session the application switches itself with `SET SESSION`
-after the check (mysql2 reports the flag on no `SELECT` result), connections the pool opened before
-`connect()` beyond the one it reads, and mysql-proxy (its callback owns how statements reach the
-server; the adapter holds no connection). Drizzle detects its dialect from the instance and needs
-the option only when detection fails; either way, an adapter that cannot determine the syntax
-**refuses by name** rather than emitting a guess — a guessed syntax returns wrong rows on the engine
-it guessed wrong about, where a refusal names the option that fixes it.
+fails or gets no answer within a fixed 2000 ms (the readiness probe's default bound;
+`requestTimeoutMs` does not change it; the driver error or the expiry is the `cause`), so
+`connect()` now fails when MySQL is unreachable or stalls. Every unread case carries `unreadReason`
+(a string naming why; absent when a session reported the mode). A failed or expired read is
+transient, and its message asks to start once MySQL answers or to retry `connect()`; a result with
+no `sql_mode`, or a `withReplicas()` wrapper whose members cannot all be read, is a configuration
+fault with no `cause`, and its message says a retry does not help. A `withReplicas()` wrapper is
+recognised by its `$primary`/`$replicas` shape, nested wrappers are walked, and every mysql2 member
+is checked, even behind a primary on another driver. On each mysql2 pool (primary and replicas) the
+adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each connection the pool opens later,
+then refuses. Each new connection reads its mode, then sets its session `sql_mode` without the flag.
+The strip runs on the server before the statement mysql2 has already formatted for the pool's
+caller, which closing the connection after the read could not stop. After a new connection reported
+the flag, every adapter call throws the same error and one `warn` is logged. Three cases are not
+covered: a session the application switches itself with `SET SESSION` after the check (mysql2
+reports the flag on no `SELECT` result), connections the pool opened before `connect()` beyond the
+one it reads, and mysql-proxy (its callback owns how statements reach the server; the adapter holds
+no connection). Drizzle detects its dialect from the instance and needs the option only when
+detection fails; either way, an adapter that cannot determine the syntax **refuses by name** rather
+than emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about,
+where a refusal names the option that fixes it.
 
 ```typescript
 DatabasePlugin({

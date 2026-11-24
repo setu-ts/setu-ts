@@ -247,10 +247,10 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
   `GOOGLE_CLOUD_UNIVERSE_DOMAIN`), the lazy arm passes it so the first call skips the SDK's
   credentials lookup. Emulator boot gets faster. A project with no `apiEndpoint` and no emulator
-  variable, or with `sslCreds` beside its `apiEndpoint`, sees no change. A private `apiEndpoint`
-  without `sslCreds` and with no universe configured also gets the `googleapis.com` default; if that
-  endpoint serves another universe, set `clientOptions.universeDomain` or
-  `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
+  variable, or with `sslCreds` beside its `apiEndpoint` and no emulator variable, sees no change. A
+  private `apiEndpoint` without `sslCreds` and with no universe configured also gets the
+  `googleapis.com` default; if that endpoint serves another universe, set
+  `clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
 - **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
   connector except `postgresql` / `postgres` (and when the connector cannot be determined),
   `updateWhere`, `deleteWhere`, `updateVersioned` and `deleteVersioned` run `updateMany` /

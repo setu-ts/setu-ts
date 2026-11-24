@@ -1366,7 +1366,7 @@ export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions,
    * `metricsEnabled: true` here to keep them. Against an emulator —
    * `BIGTABLE_EMULATOR_HOST`, or an endpoint with no `sslCreds` here — the arm
    * also passes `universeDomain: 'googleapis.com'`, unless a universe is
-   * configured here (`universeDomain`) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`
+   * configured here (`universeDomain` or `universe_domain`) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`
    * read by the plugin; a caller's `universeDomain` is passed unchanged.
    * Unread when `client` is injected.
    *
