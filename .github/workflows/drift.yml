@@ -462,7 +462,7 @@ jobs:
         continue-on-error: true
         run: |
           node scripts/codemods/std-to-vitest.ts --check
-          (cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm dlx prisma@7.10.1 generate --config prisma.config.ts)
+          (cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts)
           pnpm test:coverage
           pnpm run test:deno-lane
           pnpm run test:tooling:coverage

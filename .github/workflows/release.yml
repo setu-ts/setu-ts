@@ -485,7 +485,7 @@ jobs:
 
       - name: Generate the MySQL Prisma fixture
         if: matrix.shard == 'packages'
-        run: cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm dlx prisma@7.10.1 generate --config prisma.config.ts
+        run: cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts
 
       - name: Node package tests with coverage (all other members)
         if: matrix.shard == 'packages'
