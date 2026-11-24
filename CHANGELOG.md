@@ -17,12 +17,12 @@ All notable changes to this project are documented here. The format follows
   policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
   still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
   the breaker. V13-104.
-- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (#613).** Optional
-  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
-  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
-  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
-  independent of status. An application setting the marker claims no processing and a client that
-  honours the marker may send that request again.
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (M143 Core follow-up, DNS and drain
+  marker, #613).** Optional `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select
+  IP-literal name servers with a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and
+  `UNPROCESSED_SHUTDOWN` export the reserved `x-setu-unprocessed: shutdown` marker set on the
+  kernel's pre-pipeline drain answer, independent of status. An application setting the marker
+  claims no processing and a client that honours the marker may send that request again.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
@@ -81,9 +81,10 @@ All notable changes to this project are documented here. The format follows
   rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old code
   coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
   negative, infinite or over-range `resetTimeout`, or a missing one.
-- **`@setu-ts/runtime` (#613).** `IDnsResolver.resolveHost` now rejects with an `AggregateError`
-  cause containing both address-family failures in A-then-AAAA order; migrate readers of
-  `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
+- **`@setu-ts/runtime` (M143 Core follow-up, DNS and drain marker, #613).**
+  `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause containing both
+  address-family failures in A-then-AAAA order; migrate readers of `error.cause.code` to inspect
+  `error.cause.errors`. One successful family still wins.
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
