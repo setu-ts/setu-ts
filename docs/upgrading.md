@@ -263,6 +263,14 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   filter escapes with `!`. On mysql-proxy a write's read-back runs outside a transaction and the
   adapter logs one `warn`; use mysql2 when the read-back must be the row this write produced. Pass
   `dialect: 'mysql'` when the instance's class name does not reveal MySQL.
+- **Drizzle on mysql2 refuses `NO_BACKSLASH_ESCAPES`.** Under that mode a bound string holding `'`
+  could end its literal and change the statement, so `connect()` now throws
+  `UnsupportedSqlModeError` when `@@SESSION.sql_mode` includes it, and every later call refuses once
+  a connection the pool opened later reported it (that connection's session first has the flag
+  stripped, so the statement it was opened for runs without it). Remove `NO_BACKSLASH_ESCAPES` from
+  the global `sql_mode`, from `init_connect`, and from any `SET SESSION` the application runs. A
+  mysql2 release containing sidorares/node-mysql2#4684 fixes the escaping once it is stable, but
+  this version still refuses the mode whatever mysql2 is installed.
 - **Errors through `query()` on MySQL.** A Prisma `P2010` carrying a duplicate key or a write
   conflict now answers `409` where it was `500`, mysql2 `ER_LOCK_DEADLOCK` answers `409`, and a
   closed mysql2 connection answers `503`. Code that caught the `500` should catch

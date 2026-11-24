@@ -952,12 +952,37 @@ pool's flags, so keep the default.
 
 **`dialect: 'mysql'`** also selects two MySQL forms. A `contains` filter is `LIKE … ESCAPE '!'` with
 `!`, `%` and `_` in the value escaped by `!`, and a backslash in the value sent as `char(92)` rather
-than inside a string. Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES` for bound values:
-mysql2 writes each bound string into the query text with backslash escapes, so a value holding `'`
-does not parse under that mode. Keep MySQL's default `sql_mode`. A `findAll` with an `offset` and no
-`limit` carries `LIMIT 18446744073709551615`, MySQL's documented "to the end" value, because MySQL
-has no `OFFSET` outside `LIMIT`. The adapter detects MySQL from the instance's class name; pass
-`dialect` when that cannot name it, or a `contains` keeps the backslash form.
+than inside a string. A `findAll` with an `offset` and no `limit` carries
+`LIMIT 18446744073709551615`, MySQL's documented "to the end" value, because MySQL has no `OFFSET`
+outside `LIMIT`. The adapter detects MySQL from the instance's class name; pass `dialect` when that
+cannot name it, or a `contains` keeps the backslash form.
+
+**`NO_BACKSLASH_ESCAPES` is refused on mysql2.** Drizzle on mysql2 does not support it for bound
+values: mysql2 writes each bound string into the query text, escaping `'` as `\'`, and under that
+mode the quote ends the literal, so a value such as `' OR 1=1 -- ` changes the statement. Since
+0.14.0 the adapter refuses it. `connect()` reads `@@SESSION.sql_mode` and throws
+`UnsupportedSqlModeError` when the mode is set, or when it cannot read the mode.
+
+On a mysql2 pool the adapter also strips `NO_BACKSLASH_ESCAPES` from the session mode of every
+connection the pool opens later, then refuses. Each new connection first reads its mode, then sets
+its session `sql_mode` without the flag. The strip is there because mysql2 has already formatted the
+statement the pool opened the connection for. Reading the mode and closing the connection would be
+too late for that statement, while the server runs the strip before it. If a new connection reported
+the flag, every later adapter call throws `UnsupportedSqlModeError` and the adapter logs one `warn`.
+
+Three cases are not covered:
+
+- A session the application itself switches with `SET SESSION` after the check. mysql2 reports the
+  server's flag on no `SELECT` result, so a per-statement check would cost a round trip per
+  statement.
+- Connections the pool opened before `connect()`, beyond the one `connect()` reads.
+- The mysql-proxy driver. Its callback decides how a statement reaches the server, and the adapter
+  holds no connection to read the mode from.
+
+Turn `NO_BACKSLASH_ESCAPES` off for the application's sessions (the global `sql_mode`,
+`init_connect`, the application's own `SET SESSION`). A mysql2 release containing
+sidorares/node-mysql2#4684 fixes the escaping once it is stable, but this refusal does not read the
+mysql2 version.
 
 **mysql-proxy.** Drizzle's `drizzle-orm/mysql-proxy` driver refuses `transaction()`, so on it the
 write and its read-back run unwrapped. The outcome is still decided by the write's count, but the
@@ -1891,6 +1916,7 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `UnsupportedSqlModeError`                 | class     |
 | `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |

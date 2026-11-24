@@ -150,7 +150,11 @@ All notable changes to this project are documented here. The format follows
   repository (it was a masked 500); its `contains` escapes with `!`; on mysql-proxy a write's
   read-back runs outside a transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key
   or a write conflict through `query()` answers 409 where it was 500; mysql2 `ER_LOCK_DEADLOCK`
-  answers 409; a closed mysql2 connection answers 503.
+  answers 409; a closed mysql2 connection answers 503. Drizzle on mysql2 refuses a session whose
+  `sql_mode` includes `NO_BACKSLASH_ESCAPES`: `connect()` throws `UnsupportedSqlModeError` (new),
+  and so does every later call once a connection the pool opened later reports it; such a connection
+  has the flag stripped from its session `sql_mode` first. Turn the mode off for the application's
+  sessions (global `sql_mode`, `init_connect`, the application's own `SET SESSION`).
 
 ### Fixed
 
@@ -234,6 +238,18 @@ All notable changes to this project are documented here. The format follows
   sets `PUBSUB_EMULATOR_HOST`, `setu add` names it as the emulator's address, and the generated
   `test` scripts load the dotenv the way `start` does. A new npm or Bun workspace's root `test`
   passes while it has no members, through a generated `scripts/test.mjs`.
+
+### Security
+
+- **`@setu-ts/database-plugin` (M143q, #TBD).** Drizzle on mysql2 under `NO_BACKSLASH_ESCAPES` was
+  open to SQL injection through any bound string: mysql2 3.24 writes bound values into the query
+  text, escaping `'` as `\'`, and under that mode the quote ends the literal, so a value such as
+  `' OR 1=1 -- ` matched every row. The adapter now refuses the mode with `UnsupportedSqlModeError`
+  at `connect()`. On a pool, each connection opened later reads its mode and has the flag removed
+  before its first caller statement, and once one reported it every later adapter call refuses. A
+  session the application switches itself with `SET SESSION` after the check, connections the pool
+  opened before `connect()`, and mysql-proxy (no connection held) are not covered. mysql2 fixes the
+  escaping in sidorares/node-mysql2#4684, not yet in a stable release.
 
 ## [0.13.0] — 2026-11-17
 

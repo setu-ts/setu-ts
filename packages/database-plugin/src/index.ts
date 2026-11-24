@@ -122,6 +122,7 @@ export {
   UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
+  UnsupportedSqlModeError,
   VersionConflictError,
 } from './errors.ts';
 

@@ -4,7 +4,7 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { mysqlHarness } from '../fixtures/mysql-harness.ts';
 
 describe('Drizzle real MySQL repository', { skip: !process.env['MYSQL_URL'] }, () => {
-  it('writes, reads, escapes literal contains under both sql modes, and pages without a limit', async () => {
+  it('writes, reads, escapes literal contains, refuses NO_BACKSLASH_ESCAPES at connect, and pages without a limit', async () => {
     const h = await mysqlHarness('drizzle');
     try {
       const repo = h.database.getRepository<Record<string, unknown>>('Row');
@@ -20,41 +20,58 @@ describe('Drizzle real MySQL repository', { skip: !process.env['MYSQL_URL'] }, (
           'SELECT @@session.sql_mode AS mode',
         );
         const original = String(settings[0]!.mode);
-        for (const mode of [original, `${original},NO_BACKSLASH_ESCAPES`]) {
-          // Pin the pool to one connection while the session mode is changed.
-          await connection.query('SET SESSION sql_mode = ?', [mode]);
-          const { drizzle } = await import('drizzle-orm/mysql2');
-          const { createDrizzleDatabase, DrizzleAdapter, DatabaseService } =
-            await import('../../src/index.ts');
-          const { mysqlTables } = await import('../fixtures/mysql-tables.ts');
-          const adapter = new DrizzleAdapter({
+        const { drizzle } = await import('drizzle-orm/mysql2');
+        const { eq } = await import('drizzle-orm');
+        const { createDrizzleDatabase, DrizzleAdapter, DatabaseService, UnsupportedSqlModeError } =
+          await import('../../src/index.ts');
+        const { mysqlTables } = await import('../fixtures/mysql-tables.ts');
+        // One pinned connection, so the session mode set here is the one the adapter reads.
+        const adapterOn = () =>
+          new DrizzleAdapter({
             drizzleInstance: createDrizzleDatabase(drizzle(connection), (db, work) =>
               db.transaction(work),
             ),
             drizzleTables: mysqlTables,
             dialect: 'mysql',
           });
-          await adapter.connect();
-          const db = new DatabaseService(
-            adapter,
-            (entity) => adapter.createDataSource(entity),
-            'drizzle',
-          );
-          try {
-            for (const value of ['%', '_', '!', '\\']) {
-              expect(
-                (
-                  await db.getRepository<Record<string, unknown>>('Row').findAll({
-                    filter: { type: 'comparison', field: ['name'], operator: 'contains', value },
-                  })
-                ).map((row) => row.id),
-              ).toEqual(['a']);
-            }
-          } finally {
-            await db.close();
+        const adapter = adapterOn();
+        await adapter.connect();
+        const db = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        );
+        try {
+          for (const value of ['%', '_', '!', '\\']) {
+            expect(
+              (
+                await db.getRepository<Record<string, unknown>>('Row').findAll({
+                  filter: { type: 'comparison', field: ['name'], operator: 'contains', value },
+                })
+              ).map((row) => row.id),
+            ).toEqual(['a']);
           }
+          expect(
+            await db.getRepository<Record<string, unknown>>('Row').findAll({
+              filter: { type: 'comparison', field: ['id'], operator: 'eq', value: "' OR 1=1 -- " },
+            }),
+          ).toEqual([]);
+        } finally {
+          await db.close();
         }
-        await connection.query('SET SESSION sql_mode = ?', [original]);
+        await connection.query('SET SESSION sql_mode = ?', [`${original},NO_BACKSLASH_ESCAPES`]);
+        try {
+          await expect(adapterOn().connect()).rejects.toBeInstanceOf(UnsupportedSqlModeError);
+          // Negative control: the same bound value through the raw Drizzle instance,
+          // which the refusal stands in front of, breaks out of its literal.
+          const injected = await drizzle(connection)
+            .select()
+            .from(mysqlTables.Row)
+            .where(eq(mysqlTables.Row.id, "' OR 1=1 -- "));
+          expect(injected.map((row) => row.id).sort()).toEqual(['a', 'b', 'c']);
+        } finally {
+          await connection.query('SET SESSION sql_mode = ?', [original]);
+        }
       } finally {
         connection.release();
       }
@@ -72,3 +89,88 @@ describe('Drizzle real MySQL repository', { skip: !process.env['MYSQL_URL'] }, (
     }
   });
 });
+
+/**
+ * Changes @@GLOBAL.sql_mode for every client of the server, so it runs only on
+ * an explicit opt-in (MYSQL_GLOBAL_MODE=1) beside MYSQL_URL, and restores it.
+ */
+describe(
+  'Drizzle real MySQL pool connections opened under a global NO_BACKSLASH_ESCAPES',
+  { skip: !process.env['MYSQL_URL'] || process.env['MYSQL_GLOBAL_MODE'] !== '1' },
+  () => {
+    it('lands the injection on an unguarded new connection; the guard strips it, then refuses by name with one warn', async () => {
+      const { createConnection, createPool } = await import('mysql2/promise');
+      const { drizzle } = await import('drizzle-orm/mysql2');
+      const { eq } = await import('drizzle-orm');
+      const { createDrizzleDatabase, DrizzleAdapter, DatabaseService, UnsupportedSqlModeError } =
+        await import('../../src/index.ts');
+      const { mysqlTables } = await import('../fixtures/mysql-tables.ts');
+      const h = await mysqlHarness('drizzle', 4);
+      const endpoint = new URL(process.env['MYSQL_URL']!);
+      const options = {
+        host: endpoint.hostname,
+        port: Number(endpoint.port || 3306),
+        user: decodeURIComponent(endpoint.username),
+        password: decodeURIComponent(endpoint.password),
+        database: h.name,
+      };
+      const admin = await createConnection(options);
+      const [saved] = await admin.query<RowDataPacket[]>('SELECT @@GLOBAL.sql_mode AS mode');
+      const original = String(saved[0]!.mode);
+      const payload = "' OR 1=1 -- ";
+      try {
+        const repo = h.database.getRepository<Record<string, unknown>>('Row');
+        for (const id of ['a', 'b']) await repo.create({ id, name: id, version: 1, balance: 1 });
+
+        // Guarded pool, checked under the default mode; its one connection is then held,
+        // so the repository's next statement runs on a connection opened under the mode.
+        const guardedPool = createPool({ ...options, connectionLimit: 4 });
+        const warnings: string[] = [];
+        const adapter = new DrizzleAdapter(
+          {
+            drizzleInstance: createDrizzleDatabase(drizzle(guardedPool), (db, work) =>
+              db.transaction(work),
+            ),
+            drizzleTables: mysqlTables,
+            dialect: 'mysql',
+          },
+          (message) => warnings.push(message),
+        );
+        await adapter.connect();
+        const held = await guardedPool.getConnection();
+        const controlPool = createPool({ ...options, connectionLimit: 1 });
+        const db = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+        try {
+          await admin.query('SET GLOBAL sql_mode = ?', [`${original},NO_BACKSLASH_ESCAPES`]);
+          // Negative control: the first statement on a new unguarded pooled connection.
+          const injected = await drizzle(controlPool)
+            .select()
+            .from(mysqlTables.Row)
+            .where(eq(mysqlTables.Row.id, payload));
+          expect(injected.map((row) => row.id).sort()).toEqual(['a', 'b']);
+
+          const guardedRepo = db.getRepository<Record<string, unknown>>('Row');
+          const findPayload = () =>
+            guardedRepo.findAll({
+              filter: { type: 'comparison', field: ['id'], operator: 'eq', value: payload },
+            });
+          expect(await findPayload()).toEqual([]);
+          await expect(findPayload()).rejects.toBeInstanceOf(UnsupportedSqlModeError);
+          expect(warnings).toHaveLength(1);
+          expect(warnings[0]).toContain('NO_BACKSLASH_ESCAPES');
+        } finally {
+          await admin.query('SET GLOBAL sql_mode = ?', [original]);
+          held.release();
+          await db.close();
+          await guardedPool.end();
+          await controlPool.end();
+        }
+      } finally {
+        const [after] = await admin.query<RowDataPacket[]>('SELECT @@GLOBAL.sql_mode AS mode');
+        expect(String(after[0]!.mode)).toBe(original);
+        await admin.end();
+        await h.dispose();
+      }
+    });
+  },
+);

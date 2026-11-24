@@ -756,3 +756,25 @@ export class TenantColumnUnresolvedError extends Error {
     );
   }
 }
+
+/**
+ * Drizzle over mysql2 refuses a MySQL session whose `sql_mode` includes
+ * `NO_BACKSLASH_ESCAPES`: mysql2 writes bound strings into the statement
+ * text escaping `'` as `\'`, which that mode does not honour, so a bound
+ * value could end its literal and append SQL. Thrown by `connect()` and,
+ * once a connection the pool opened later reported the mode, by every later
+ * call on the adapter. This configuration fault has no HTTP status hint.
+ * @since 0.14.0
+ */
+export class UnsupportedSqlModeError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'UnsupportedSqlModeError';
+  /** The refused `sql_mode` flag. */
+  readonly mode = 'NO_BACKSLASH_ESCAPES';
+  /** Creates the refusal, naming the mode and the ways out. */
+  constructor() {
+    super(
+      "Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES: mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement. Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version).",
+    );
+  }
+}

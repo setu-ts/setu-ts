@@ -2700,10 +2700,23 @@ column.
 syntax differs per connector and neither library publishes a discriminant the adapter can read
 reliably. Since 0.14.0 Drizzle's `dialect: 'mysql'` also selects MySQL's `contains` form
 (`LIKE … ESCAPE '!'`, the value escaped by `!`) and, for an `offset` with no `limit`,
-`LIMIT 18446744073709551615`. Drizzle detects its dialect from the instance and needs the option
-only when detection fails; either way, an adapter that cannot determine the syntax **refuses by
-name** rather than emitting a guess — a guessed syntax returns wrong rows on the engine it guessed
-wrong about, where a refusal names the option that fixes it.
+`LIMIT 18446744073709551615`. Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES`: mysql2
+escapes `'` in a bound string as `\'`, which that mode does not honour, so a bound value could end
+its literal. Since 0.14.0 it is refused: `connect()` throws `UnsupportedSqlModeError` (`name`
+`'UnsupportedSqlModeError'`, `mode` `'NO_BACKSLASH_ESCAPES'`, no HTTP hint, so a masked `500`) when
+`@@SESSION.sql_mode` includes it, or when the mode cannot be read. On a mysql2 pool the adapter
+strips `NO_BACKSLASH_ESCAPES` from the session mode of each connection the pool opens later, then
+refuses. Each new connection reads its mode, then sets its session `sql_mode` without the flag. The
+strip runs on the server before the statement mysql2 has already formatted for the pool's caller,
+which closing the connection after the read could not stop. After a new connection reported the
+flag, every adapter call throws the same error and one `warn` is logged. Three cases are not
+covered: a session the application switches itself with `SET SESSION` after the check (mysql2
+reports the flag on no `SELECT` result), connections the pool opened before `connect()` beyond the
+one it reads, and mysql-proxy (its callback owns how statements reach the server; the adapter holds
+no connection). Drizzle detects its dialect from the instance and needs the option only when
+detection fails; either way, an adapter that cannot determine the syntax **refuses by name** rather
+than emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about,
+where a refusal names the option that fixes it.
 
 ```typescript
 DatabasePlugin({
@@ -3188,7 +3201,7 @@ bound:
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
-| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                              |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`                                                                                                                                  | classes                              |
 | `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |

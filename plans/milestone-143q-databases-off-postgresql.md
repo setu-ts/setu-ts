@@ -886,20 +886,45 @@ missing sort key.
   drizzle `session.ts` L101/L133), so mysql2 interpolates bound values client-side, and mysql2
   3.24.x escapes `'` as `\'` whatever the server's `sql_mode`. Under `NO_BACKSLASH_ESCAPES` that is
   no escape: a bound string containing `'` leaves its literal, an SQL injection (probed on MySQL
-  8.4: `' OR 1=1 -- ` matched). mysql2 fixes it only in canary (sidorares/node-mysql2#4684).
-- **Decision.** The Drizzle mysql2 arm refuses, with a named error, while the server reports
-  `NO_BACKSLASH_ESCAPES`, checked where the probe (recorded with the implementation) showed the mode
-  can be read reliably and can change: at connect and on every pooled connection. The message names
-  the mode and the ways out: turn the mode off for the application's sessions or user, or use a
-  mysql2 release with #4684 once it is stable. Security entry and BREAKING refusal in the CHANGELOG;
-  an upgrade note.
-- **Comparison.** Knex and TypeORM over mysql2 are exposed the same way; Sequelize and Prisma use
-  server-side prepared statements; PDO, Connector/J and go-sql-driver honour the server's
-  `NO_BACKSLASH_ESCAPES` status flag when escaping.
+  8.4: `' OR 1=1 -- ` matched). mysql2 #4684 (merged to `master` 2026-11-17, `ef0dfa4`) is in no
+  release yet; the latest is v3.24.6.
+- **Decision (maintainer, 2026-11-24, option (a): strip, then refuse).** `connect()` reads
+  `@@SESSION.sql_mode` and refuses with the exported `UnsupportedSqlModeError` while it contains
+  `NO_BACKSLASH_ESCAPES`; a mode it cannot read is refused too. On a pool, each new connection reads
+  its mode and has `NO_BACKSLASH_ESCAPES` stripped from its session mode before the caller's first
+  statement runs, because the probe showed that destroying the connection from the pool's
+  `connection` event is too late (the queued INSERT still ran) and that a statement queued on that
+  connection runs first; once any connection reports the flag, every adapter call refuses and one
+  `warn` is logged. The handshake status flags carry the bit only for the GLOBAL mode, so the
+  session read is the reliable source. Not covered, and documented: the application's own
+  `SET SESSION` after the check, connections the pool opened before `connect()`, and the mysql-proxy
+  driver (the adapter holds no connection there). The message names the mode and the ways out: turn
+  the mode off for the application's sessions, or wait for a stable mysql2 release with #4684 and a
+  Setu release that accepts it. Security entry and BREAKING refusal in the CHANGELOG; an upgrade
+  note.
+- **Comparison.** A framework setting the session mode has precedent: Rails sets
+  `@@SESSION.sql_mode` on every connection by default
+  ([`abstract_mysql_adapter.rb` L1090-1148](https://github.com/rails/rails/blob/24dc03c0f31997b87edd5eb6c6386c6c2dede0a7/activerecord/lib/active_record/connection_adapters/abstract_mysql_adapter.rb#L1090-L1148)).
+  Django only warns (`mysql.W002`,
+  [`validation.py` L12-36](https://github.com/django/django/blob/f14af5a88472ca10e2e94b37d6c17ee48cbdeb4d/django/db/backends/mysql/validation.py#L12-L36)).
+  HikariCP's `connectionInitSql` is a per-connection hook
+  ([`PoolBase.java` L449](https://github.com/brettwooldridge/HikariCP/blob/a4d93f4f85517f90e632b795486d7102e933d7ff/src/main/java/com/zaxxer/hikari/pool/PoolBase.java#L449)).
+  PHP mysqlnd
+  ([`mysqlnd_connection.c` L951-955](https://github.com/php/php-src/blob/8904d87f04c31b6ada6d8fc38884a2c3b9d45bc1/ext/mysqlnd/mysqlnd_connection.c#L951-L955))
+  and go-sql-driver/mysql
+  ([`connection.go` L256](https://github.com/go-sql-driver/mysql/blob/7a784e78adc18694f8889cece361860d2ba8f524/connection.go#L256),
+  [`packets.go` L717](https://github.com/go-sql-driver/mysql/blob/7a784e78adc18694f8889cece361860d2ba8f524/packets.go#L717),
+  [L962](https://github.com/go-sql-driver/mysql/blob/7a784e78adc18694f8889cece361860d2ba8f524/packets.go#L962))
+  re-read the `NO_BACKSLASH_ESCAPES` status bit on every escape, so they follow later changes;
+  mysql2 3.24.6 does not ([#4684](https://github.com/sidorares/node-mysql2/pull/4684) is merged but
+  unreleased). Knex and TypeORM over mysql2 are exposed the same way; Sequelize and Prisma use
+  server-side prepared statements.
 - **Test home.** `test/unit/drizzle-mysql-writes.test.ts` (or the arm's unit file): every refusal
   branch; `test/integration/real-drizzle-mysql.test.ts` on `MYSQL_URL`: under the mode `connect()`
   refuses by name, the injection matches with the guard bypassed (negative control), the default
-  `sql_mode` connects.
+  `sql_mode` connects; an opt-in cell (`MYSQL_GLOBAL_MODE=1`, it sets the global mode and restores
+  it) proves the strip on a new pooled connection with the queued-INSERT control and the refusal
+  plus one `warn` after.
 
 ## 4. Exported surface — every symbol names its consumer
 
