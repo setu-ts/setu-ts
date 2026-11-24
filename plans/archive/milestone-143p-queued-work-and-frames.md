@@ -1279,6 +1279,28 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   logs at `info`, other read failures warn once; attaching to an existing subscription checks
   nothing (rows 32 to 34). Q3 (a): a `fanOut` subscribe on a Redis Streams client without `xread` or
   `xrevrange` is a `TypeError` naming the method (row 26).
+- **PR #616 review decisions (raised by CodeRabbit's first review, 2026-11-24).** **DECIDED by the
+  maintainer, 2026-11-24:**
+  1. SQS consumer preparation retries only the transient reasons (`attributes-unavailable`,
+     `target-unresolvable`) with backoff on later polls; the declared-processor refusal at start
+     stays (awspring and NServiceBus fail at start but keep polling after it; MassTransit restarts
+     through `ReceiveTransportRetryPolicy`).
+  2. On a confirmed SQS size refusal only (the exact error code, probed or cited, never message
+     text), the dead-letter forward is retried once without the `setu-` attributes, with one
+     warning. The SQS limit is 1 MiB and attributes count toward it.
+  3. A claim that lapses during a forward whose copy reached the target stays counted as
+     dead-lettered with a warning: at-least-once (NServiceBus and MassTransit have no "uncertain"
+     outcome).
+  4. §3.14's hold-release rule stays; the Pub/Sub connect warning adds that order is best effort
+     once a message is dead-lettered, as Google's ordering documentation says.
+  5. The `respond` warning is reworded: responders get the broker's queue-less delivery (fan-out on
+     RabbitMQ and memory, the first reply wins, like NATS core); pass `queue` to make them compete.
+  6. Both no-subscription dead-letter warnings read "dead letters are lost unless the topic has a
+     subscription or message retention enabled".
+  7. The Pub/Sub terminal dead-letter forward always has a finite 15 s bound, even with
+     `publishTimeoutMs: 0`, the one documented exception to 0: with 0 a stalled forward would hold
+     the lease and an ordered key indefinitely, and MassTransit and NServiceBus have no unbounded
+     error-queue send. `deadLetterTopic` is new in 0.14.0, so no existing application changes.
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
   once as its own PR, Part B after it on the same branch (§0.3). **Changed by the maintainer,
   2026-11-24: Part A and Part B ship in one PR.**
