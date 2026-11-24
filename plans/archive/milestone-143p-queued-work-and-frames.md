@@ -2,8 +2,8 @@
 
 > **Status:** Complete (Parts A and B). Branch: `feat/m143p-queued-work-and-frames`. `develop` and
 > `main` are protected; all work (implementation and fixes) stays on this one branch until it merges
-> through a single PR into `develop`. D7 is decided (§0.3): Part A ships first as its own PR from
-> this branch; Part B follows on the same branch, carrying its `common` change itself (D1, decided
+> through a single PR into `develop`. D7 is decided (§0.3): Part A and Part B ship in one PR from
+> this branch (maintainer, 2026-11-24), Part B carrying its `common` change itself (D1, decided
 > 2026-11-23). Lane: Messaging, first in its lane; M143m follows on the same packages. Ships in
 > `0.14.0`.
 
@@ -82,9 +82,10 @@ single letter. Proposed order:
    X3-3, V13-107, V13-260, V13-261, V13-266, plus the two `common` changes (§0.2).
 
 **Decided (maintainer, 2026-11-22): two parts.** Part A ships first, as its own PR from this branch.
-Each part has its own CHANGELOG, PUBLIC_API and upgrade entries. The Progress Tracking row, the
-`CLAUDE.md` status line and the plan's archiving change only with Part B; Part A changes none of
-them.
+**Changed (maintainer, 2026-11-24): Part A and Part B ship in one PR.** The two parts were still
+built and reviewed in order. Each part has its own CHANGELOG, PUBLIC_API and upgrade entries. The
+Progress Tracking row, the `CLAUDE.md` status line and the plan's archiving change only with Part B;
+Part A changes none of them.
 
 ### 0.4 Compared with
 
@@ -1279,7 +1280,8 @@ run in a fresh context per `.roo/skills/security-audit/SKILL.md`, on the exact c
   nothing (rows 32 to 34). Q3 (a): a `fanOut` subscribe on a Redis Streams client without `xread` or
   `xrevrange` is a `TypeError` naming the method (row 26).
 - **D7, one PR or two.** **DECIDED by the maintainer, 2026-11-22: two ordered parts**, Part A at
-  once as its own PR, Part B after it on the same branch (§0.3).
+  once as its own PR, Part B after it on the same branch (§0.3). **Changed by the maintainer,
+  2026-11-24: Part A and Part B ship in one PR.**
 - **D8, the Pub/Sub ordering row.** **DECIDED by the maintainer, 2026-11-23: (a)** (Compared with,
   row 22), with the Node client's behaviour confirmed by an emulator probe first (§3.14). (a) Fix in
   the framework (§3.14); (b) correct the README only. **Recommendation: (a)**, because Google's page
