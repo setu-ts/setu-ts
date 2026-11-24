@@ -25,7 +25,7 @@ import {
 
 /**
  * The capability token the returned plugin registers its source under.
- * Written as a literal so the SDK's `common` imports stay type-only; a test
+ * Written as a literal so the SDK's barrel `common` imports stay type-only; a test
  * pins it to `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`.
  *
  * @internal

@@ -161,6 +161,36 @@ omitted. Classifier strings are capped at 512 Unicode code points, aggregate err
 eight direct members, and the complete serialized tree is bounded to 64 nodes. An aggregate that is
 truncated reports `omittedErrorCount`.
 
+## Circuit-breaker window
+
+`createBreakerWindow(policy, now)` is the circuit-breaker trip rule, written once; the SDK client's
+per-origin breaker runs on it. (The resilience plugin still keeps an equivalent count-arm window of
+its own in this release.) `CircuitBreakerPolicy` has two arms:
+
+- **count** — `{ threshold, timeout, resetTimeout }`: trips when `threshold` failures are less than
+  `timeout` ms old. Failures are timestamped exactly.
+- **rate** — `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }`: trips when the window
+  holds at least `minimumCalls` calls and at least `failureRateThreshold` percent of them failed.
+  The window is ten buckets of `timeout / 10` ms aligned on the clock, so a call counts for between
+  `0.9 · timeout` and `timeout`. Only a failure can trip it.
+
+A success never clears recorded failures. `now` is a monotonic millisecond clock. An invalid policy,
+or one mixing both arms, is refused by `breakerPolicyRangeError` (thrown by `createBreakerWindow`).
+The module imports nothing at run time and is also served alone as `@setu-ts/common/breaker-window`.
+
+```typescript
+import { createBreakerWindow } from '@setu-ts/common/breaker-window';
+
+const window = createBreakerWindow(
+  { failureRateThreshold: 50, minimumCalls: 20, timeout: 10_000, resetTimeout: 5_000 },
+  () => performance.now(),
+);
+window.recordSuccess();
+if (window.recordFailure()) {
+  // open the circuit
+}
+```
+
 ## Redaction
 
 Classification and redaction live in `@setu-ts/common` so every egress plugin shares one policy
@@ -247,6 +277,8 @@ package fits the plugin architecture.
 
 ## Exports
 
+### `@setu-ts/common`
+
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
 | `assertPrimaryKeyUnchanged`           | function  |
@@ -255,6 +287,7 @@ package fits the plugin architecture.
 | `attachPoolErrorListener`             | function  |
 | `authorizationFailureInit`            | function  |
 | `brandErrorResponder`                 | function  |
+| `breakerPolicyRangeError`             | function  |
 | `cacheControlDirectives`              | function  |
 | `causeMessage`                        | function  |
 | `checkWritePrecondition`              | function  |
@@ -262,6 +295,7 @@ package fits the plugin architecture.
 | `composeBehaviorChain`                | function  |
 | `contentTypeFor`                      | function  |
 | `contextToTraceparent`                | function  |
+| `createBreakerWindow`                 | function  |
 | `createCachedProbe`                   | function  |
 | `createCapabilityToken`               | function  |
 | `createConnectionErrorReporter`       | function  |
@@ -463,7 +497,8 @@ package fits the plugin architecture.
 | `CacheDiagnosticsSnapshot`            | interface |
 | `CachedProbeOptions`                  | interface |
 | `CapabilityServices`                  | interface |
-| `CircuitBreakerPolicy`                | interface |
+| `CircuitBreakerCountPolicy`           | interface |
+| `CircuitBreakerRatePolicy`            | interface |
 | `ClassProvider`                       | interface |
 | `ConfigDiagnosticsSnapshot`           | interface |
 | `ConfigProvenanceEntry`               | interface |
@@ -523,6 +558,7 @@ package fits the plugin architecture.
 | `IAuthService`                        | interface |
 | `IAuthSessionService`                 | interface |
 | `IAuthStrategy`                       | interface |
+| `IBreakerWindow`                      | interface |
 | `ICacheDiagnosticsSource`             | interface |
 | `ICacheStore`                         | interface |
 | `ICircuitBreaker`                     | interface |
@@ -803,6 +839,7 @@ package fits the plugin architecture.
 | `CapabilityKey`                       | type      |
 | `CapabilityToken`                     | type      |
 | `ChannelSendResult`                   | type      |
+| `CircuitBreakerPolicy`                | type      |
 | `CircuitState`                        | type      |
 | `CliCommandHandler`                   | type      |
 | `Component`                           | type      |
@@ -951,6 +988,14 @@ package fits the plugin architecture.
 | `WebSocketUpgradeRouter`              | type      |
 | `WritePrecondition`                   | type      |
 | `WritePreconditionCheck`              | type      |
+
+### `@setu-ts/common/breaker-window`
+
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `breakerPolicyRangeError` | function  |
+| `createBreakerWindow`     | function  |
+| `IBreakerWindow`          | interface |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

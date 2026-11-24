@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./breaker-window": {
+      "types": "./dist/services/breaker-window.d.ts",
+      "default": "./dist/services/breaker-window.js"
     }
   },
   "scripts": {

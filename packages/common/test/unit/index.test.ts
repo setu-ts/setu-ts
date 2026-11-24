@@ -134,6 +134,13 @@ describe('@setu-ts/common barrel', () => {
     // Compile-time verification that resilience types resolve from the barrel.
     const _backoff: BackoffStrategy = 'exponential';
     const _cb: CircuitBreakerPolicy = { threshold: 5, timeout: 1000, resetTimeout: 5000 };
+    const _rate: CircuitBreakerPolicy = {
+      failureRateThreshold: 50,
+      minimumCalls: 20,
+      timeout: 10_000,
+      resetTimeout: 5000,
+    };
+    expect(_rate.threshold).toBeUndefined();
     const _retry: RetryPolicy = { limit: 3, delay: 100, backoff: 'fixed' };
     const _bulkhead: BulkheadPolicy = { maxConcurrent: 10 };
     const _opts: WrapOptions = { circuitBreaker: true, retry: _retry, timeout: 2000 };
