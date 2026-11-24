@@ -9529,9 +9529,10 @@ Elsewhere — except `GcsProvider.getStream`, described below — a large object
 regardless of how slowly the client reads: `AzureBlobProvider` streams natively but drains its SDK
 stream eagerly with no demand signal (cancelling releases the upstream stream, but cannot undo what
 has already been drained); `GcsProvider` (since 0.14.0) waits for the first chunk before it answers,
-so an absent object is `null` and a refused credential or an outage rejects before a response
-begins, then reads the SDK stream on demand (not measured), while its `get()` buffers the whole
-object into one `Uint8Array`, so use `getStream` for a large GCS download; and `MemoryProvider` and
+so an absent object is `null` and a refused credential or an outage found by that first read rejects
+before a response begins (a failure after the first chunk arrives mid-response and cannot), then
+reads the SDK stream on demand (not measured), while its `get()` buffers the whole object into one
+`Uint8Array`, so use `getStream` for a large GCS download; and `MemoryProvider` and
 `LocalStorageProvider` have no native `getStream` at all and take `StorageService`'s buffered
 fallback. The storage-plugin README carries the per-provider table. Note also that process RSS does
 not measure any of this — a large download raises the allocator high-water mark while retaining
@@ -9563,12 +9564,13 @@ provider; S3/B2 check with a `HEAD` first, since `DeleteObject` cannot tell (an 
 between the two still resolves `true`). A `403` on that `HEAD`, whatever its cause, leaves presence
 unknown, so the delete goes ahead: it resolves `true` when it succeeds and rejects when it fails. S3
 without `s3:ListBucket` answers that `403` for a missing key, so `delete()` resolves `true` there;
-grant `s3:ListBucket` for exact answers. Every other `HEAD` failure rejects. A missing object read
-by `get`/`getStream` throws `StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly
-constructed `GcsProvider` or `AzureBlobProvider` takes `now` as its second argument; without one
-`getSignedUrl` rejects (an Azure client with its own `getSignedUrl` needs none). The GCS and Azure
-readiness probes (`bucket.exists()`, the container's `exists()`) read reachable when the backend
-answers below `500`; the storage indicator caches its probe for 5 s and bounds it at 2 s.
+grant `s3:ListBucket` for exact answers. A `HEAD` that answers `404` is absence, as above (`false`);
+every other `HEAD` failure rejects. A missing object read by `get`/`getStream` throws
+`StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly constructed `GcsProvider` or
+`AzureBlobProvider` takes `now` as its second argument; without one `getSignedUrl` rejects (an Azure
+client with its own `getSignedUrl` needs none). The GCS and Azure readiness probes
+(`bucket.exists()`, the container's `exists()`) read reachable when the backend answers below `500`;
+the storage indicator caches its probe for 5 s and bounds it at 2 s.
 
 S3 `get`/`getStream` `NoSuchBucket`, Azure `ContainerNotFound` and a GCS `ENOENT` (a local file
 error) reject rather than becoming object misses. An S3 `HEAD` and a GCS `404` cannot tell a missing
