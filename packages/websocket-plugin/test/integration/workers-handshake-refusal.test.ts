@@ -7,6 +7,11 @@
  * client 400 or 426. The adapter now applies the check itself first: version
  * 13 only, as workerd speaks only 13.
  *
+ * The check applies to requests from the edge, which workerd marks with `cf`.
+ * A Worker-to-Worker subrequest (a service binding or Durable Object stub)
+ * carries no `cf` and no key — workerd builds that handshake — so it is not
+ * checked and still opens.
+ *
  * Driven through a real kernel app on the Workers platform with a fake
  * `WebSocketPair`. Under Node a 101 response cannot be constructed, so without
  * the check the handshake also fails after `onOpen` and runs `onClose`: both
@@ -66,6 +71,12 @@ const CASES: readonly {
   },
 ];
 
+/** Marks a request as arriving from the edge, as workerd does with `cf`. */
+function fromEdge(request: Request): Request {
+  Object.defineProperty(request, 'cf', { value: { colo: 'TEST' } });
+  return request;
+}
+
 describe('a malformed handshake on Workers runs no route handler (V13-278)', () => {
   const calls: string[] = [];
   let app: IKernelApplication;
@@ -106,9 +117,11 @@ describe('a malformed handshake on Workers runs no route handler (V13-278)', () 
       calls.length = 0;
 
       const response = await app.fetch(
-        new Request('http://worker/ws', {
-          headers: { upgrade: 'websocket', connection: 'Upgrade', ...entry.headers },
-        }),
+        fromEdge(
+          new Request('http://worker/ws', {
+            headers: { upgrade: 'websocket', connection: 'Upgrade', ...entry.headers },
+          }),
+        ),
       );
 
       expect(response.status).toBe(entry.status);
@@ -118,4 +131,15 @@ describe('a malformed handshake on Workers runs no route handler (V13-278)', () 
       expect(calls).toEqual([]);
     });
   }
+
+  it('a Worker-to-Worker subrequest (no cf, no key) is not refused: the route opens', async () => {
+    calls.length = 0;
+
+    // A service binding's `fetch(url, { headers: { Upgrade: 'websocket' } })`.
+    // Under Node the 101 cannot be built after the pair is accepted, so the
+    // handshake then fails; what matters is that onOpen ran, i.e. no refusal.
+    await app.fetch(new Request('http://worker/ws', { headers: { upgrade: 'websocket' } }));
+
+    expect(calls[0]).toBe('open');
+  });
 });

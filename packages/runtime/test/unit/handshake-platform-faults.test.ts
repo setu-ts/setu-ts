@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { upgradeResponse } from '../../../../test/node-helpers.ts';
 import type { IRequest, IResponse, WebSocketEventSink } from '@setu-ts/common';
 import { setUpgradeIntent } from '@setu-ts/common';
 import { createTestContext } from '@setu-ts/testing';
@@ -197,9 +198,12 @@ describe('a handshake the platform cannot complete', () => {
 
 /** A request with only the given handshake headers. */
 function malformed(extra: Record<string, string>): Request {
-  return new Request('http://localhost/ws', {
+  const request = new Request('http://localhost/ws', {
     headers: { upgrade: 'websocket', connection: 'Upgrade', ...extra },
   });
+  // From the edge: workerd sets `cf` on every such request (V13-278).
+  Object.defineProperty(request, 'cf', { value: { colo: 'TEST' } });
+  return request;
 }
 
 /** One client fault an adapter refuses before asking its platform to upgrade. */
@@ -284,4 +288,36 @@ describe('a client fault the adapter refuses itself', () => {
       expect(codes).toEqual([1006]);
     });
   }
+});
+
+describe('a Worker-to-Worker subrequest on Workers', () => {
+  it('is not checked: no cf and no key still reaches createPair and answers 101', async () => {
+    const codes: number[] = [];
+    let asked = 0;
+    const host: CloudflareWebSocketHost = {
+      createPair: () => {
+        asked++;
+        const socket = {
+          readyState: 1,
+          accept() {},
+          send() {},
+          close() {},
+          addEventListener() {},
+        };
+        return { client: socket, server: socket };
+      },
+      createUpgradeResponse: () => upgradeResponse(null, { status: 101 }),
+    };
+    const adapter = new CloudflareWorkersHttpAdapter(host);
+    adapter.setHandler(upgrading(codes));
+
+    // A service binding's `fetch(url, { headers: { Upgrade: 'websocket' } })`.
+    const response = await adapter.fetch(
+      new Request('http://localhost/ws', { headers: { upgrade: 'websocket' } }),
+    );
+
+    expect(response.status).toBe(101);
+    expect(asked).toBe(1);
+    expect(codes).toEqual([]);
+  });
 });

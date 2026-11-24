@@ -5,8 +5,9 @@
  * Runs on a real server on whichever runtime executes it — Node on the Node
  * lane, Deno on the Deno lane — and sends raw handshakes, so the answer is the
  * one a client sees on the wire. The table is the measured behaviour per case.
- * Bun answers its own handshake (it sends 426 for a version mismatch) and
- * workerd its own (the Workers e2e covers a missing key); the adapter-side
+ * Bun answers its own handshake (it sends 426 for a version mismatch); the
+ * Workers adapter's own check is `workers-handshake-refusal.test.ts` and the
+ * Workers e2e (a missing key, before `onOpen`); the adapter-side
  * platform faults are `handshake-platform-faults.test.ts` in the runtime package.
  *
  * @module

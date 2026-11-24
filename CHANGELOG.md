@@ -216,7 +216,8 @@ All notable changes to this project are documented here. The format follows
   the socket pair, so a bad key or version used to join a room and take a `maxConnections` slot
   before the platform refused it. The adapter now checks first: a malformed key gets 400, and a
   version other than 13 gets 426 with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`
-  (V13-278).
+  (V13-278). The check applies to requests from the edge (`request.cf` set); a Worker-to-Worker
+  socket over a service binding or Durable Object stub, which has no `cf` and no key, still opens.
 - **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
   `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
   7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose

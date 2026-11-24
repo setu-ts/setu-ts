@@ -43,7 +43,12 @@ and 8 and answer anything else 400 with `Sec-WebSocket-Version: 13, 8`; Bun and 
 only and answer 426 (Workers with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`; Bun's own
 426 carries no `Upgrade`). On Workers the adapter applies these checks itself, before the platform
 creates the socket pair, because workerd checks the handshake only after the Worker has accepted it.
-Browsers send version 13.
+It checks requests from the edge, which workerd marks with `request.cf`, forwarded ones included; a
+Worker-to-Worker call over a service binding or Durable Object stub has no `cf` and no key (workerd
+builds that handshake), so it is not checked and opens as before. Where an edge request lacks `cf`,
+as in the dashboard preview, a malformed handshake can still reach `onOpen` before the platform
+refuses it. That every production edge request carries `cf` is Cloudflare's documented behaviour,
+not verified by this repository's tests, which run on local workerd. Browsers send version 13.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes

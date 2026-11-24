@@ -40,6 +40,15 @@ import {
 const WORKERS_WS_VERSIONS: readonly number[] = [13];
 
 /**
+ * Whether a request is a Worker-to-Worker subrequest: workerd sets `cf` on
+ * every request that arrives from the edge and leaves it unset on a service
+ * binding's or Durable Object stub's `fetch`.
+ */
+function isInternalSubrequest(request: Request): boolean {
+  return (request as Request & { readonly cf?: unknown }).cf === undefined;
+}
+
+/**
  * Internal handle for a Cloudflare Workers HTTP server.
  *
  * @internal - Not exported from package index
@@ -128,8 +137,13 @@ export class CloudflareWorkersServerHandle {
    */
   #performUpgrade(request: Request, intent: WebSocketUpgradeIntent): Response {
     // workerd checks the handshake only after the Worker accepted the pair,
-    // which would run the route's onOpen for a malformed one (V13-278).
-    const refusal = refuseHandshakeHeaders(request.headers, WORKERS_WS_VERSIONS);
+    // which would run the route's onOpen for a malformed one (V13-278). An
+    // internal subrequest (a service binding or Durable Object stub) carries
+    // no `cf` and no key: workerd builds that handshake itself, so it is not
+    // checked. Every request from the edge carries `cf`, forwarded ones too.
+    const refusal = isInternalSubrequest(request)
+      ? undefined
+      : refuseHandshakeHeaders(request.headers, WORKERS_WS_VERSIONS);
     if (refusal !== undefined) {
       intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: refusal.reason });
       return refusal.header === 'key'

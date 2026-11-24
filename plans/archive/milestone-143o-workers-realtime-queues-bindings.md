@@ -1414,3 +1414,22 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   `WebSocketPair`: no `onOpen` or `onClose` for a bad key or version, and both fire without the
   check; `handshake-platform-faults.test.ts` gains the client faults the Deno and Workers adapters
   refuse themselves.
+- **V13-278 follow-up — Worker-to-Worker sockets.** The code review of the pre-check found it
+  refused the documented Worker-to-Worker pattern:
+  `fetch(url, { headers: { Upgrade: 'websocket' } })` over a service binding or a Durable Object
+  stub carries no key or version, and workerd completes it (101). Measured under wrangler 4.153.0:
+  an edge request carries `request.cf`; a programmatic binding call has no `cf`, no key and no
+  version; a client request forwarded through a gateway keeps `cf` and the client's (regenerated)
+  key. The maintainer chose (a): skip the pre-check when `request.cf` is undefined and keep it for
+  every request that carries `cf`, forwarded ones included. Comparison: Hono's Workers adapter
+  checks only `Upgrade`; Cloudflare's docs say `cf` is absent in the dashboard preview
+  (`workers/examples/accessing-the-cloudflare-object`); local Durable Object stub fetches lack `cf`
+  (`prisma/reproduction-cf-do-fetch-broken`, the Wrangler 3.46 thread). Two limits are documented:
+  the phantom join remains possible only where an edge request lacks `cf`, such as the dashboard
+  preview; and `cf` on every production edge request is Cloudflare's documented behaviour,
+  unverified here (no account). Tests: an edge request with a bad key or version is refused with no
+  `onOpen` (app-level, `cf` set); a no-`cf` keyless call reaches `createPair` and answers 101
+  (adapter table) and opens on real workerd over a binding (e2e, `/worker-to-worker`); a client
+  request forwarded through the front Worker is still checked (e2e, no-key 400 with the open count
+  unchanged); Setu's own Durable Object links (`connection-link.ts`, `reply-inbox.ts`) open sockets
+  to the hub objects, which accept them directly, and the room e2e cases exercise them.

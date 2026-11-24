@@ -292,10 +292,13 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
-    "refuses a client's handshake with no Sec-WebSocket-Key with 400, at the platform",
+    "refuses a client's handshake with no Sec-WebSocket-Key with 400, before onOpen runs",
     async () => {
-      // The client-fault arm on Workers (V13-276): workerd answers it itself,
-      // so the adapter's handshake catch, which answers 500, is never reached.
+      // The client-fault arm on Workers (V13-278): workerd checks the handshake
+      // only after the Worker accepted the pair, so without the adapter's own
+      // check onOpen ran first and the client still got 400. The open count is
+      // what tells the two apart.
+      const before = (await text('/a/opens')).body;
       const head = await new Promise<string>((resolve, reject) => {
         const socket = connect(port, '127.0.0.1', () => {
           socket.write(
@@ -315,6 +318,21 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       });
 
       expect(head).toBe('HTTP/1.1 400 Bad Request');
+      expect((await text('/a/opens')).body).toBe(before);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    'opens a Worker-to-Worker socket over a service binding: no cf and no key, still 101 and onOpen',
+    async () => {
+      // workerd builds that handshake itself; the adapter's check is for
+      // requests from the edge, which carry `cf` (V13-278 exemption).
+      const before = Number((await text('/a/opens')).body);
+      const answered = await text('/worker-to-worker');
+
+      expect(answered.body).toBe('101');
+      expect(Number((await text('/a/opens')).body)).toBe(before + 1);
     },
     CASE_TIMEOUT_MS,
   );

@@ -8,6 +8,7 @@
  *   each message is broadcast to that room except its sender.
  * - `POST /broadcast`: broadcasts the body to `lobby` from a route.
  * - `GET /size`: this isolate's `lobby` size.
+ * - `GET /opens`: how many `/chat` connections this isolate has opened.
  * - `GET /rooms-without-arm`: `ws.room()` on an app with no Durable Object arm.
  *
  * @module
@@ -53,6 +54,7 @@ function build(withArm: boolean): Promise<IKernelApplication> {
     }
     ws().route('/chat', {
       onOpen: (conn, context) => {
+        opens++;
         const room = context.query['room'] ?? 'lobby';
         conn.data.set('room', room);
         ws().room(room).add(conn);
@@ -71,6 +73,11 @@ function build(withArm: boolean): Promise<IKernelApplication> {
         return ctx.response.status(204).send();
       },
     });
+    app.router.get('/opens', {
+      handler: (ctx) => {
+        return ctx.response.text(String(opens));
+      },
+    });
     app.router.get('/size', {
       handler: (ctx) => {
         return ctx.response.text(String(ws().room('lobby').size));
@@ -79,6 +86,9 @@ function build(withArm: boolean): Promise<IKernelApplication> {
     return app;
   });
 }
+
+/** `/chat` connections this isolate has opened, for the handshake e2e. */
+let opens = 0;
 
 export default {
   async fetch(request: Request): Promise<Response> {
