@@ -17,6 +17,10 @@ import { SmtpProvider } from '../../src/providers/smtp-provider.ts';
 let server: Server;
 let port = 0;
 let messages = 0;
+/** The split-terminator test's client, destroyed in `afterAll` if it hangs. */
+let client: Socket | undefined;
+/** Called with each DATA chunk the server reads; the split test waits on it. */
+let onBodyChunk: ((text: string) => void) | undefined;
 
 function speakSmtp(socket: Socket): void {
   socket.write('220 failover.test ESMTP\r\n');
@@ -28,6 +32,7 @@ function speakSmtp(socket: Socket): void {
     const text = chunk.toString();
     if (inData) {
       body += text;
+      onBodyChunk?.(text);
       if (body.endsWith('\r\n.\r\n')) {
         inData = false;
         body = '';
@@ -64,6 +69,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  client?.destroy();
   if (available) await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -96,6 +102,7 @@ describe('SMTP failover with the real nodemailer', () => {
     if (!available) context.skip();
     const before = messages;
     const socket = connect(port, '127.0.0.2');
+    client = socket;
     let received = '';
     const waitFor = (text: string): Promise<void> =>
       new Promise((resolve) => {
@@ -115,9 +122,16 @@ describe('SMTP failover with the real nodemailer', () => {
     await waitFor('220 ');
     socket.write('DATA\r\n');
     await waitFor('354 ');
-    // The body's `CRLF.` and the final `CRLF` go out as separate writes.
+    // The final `CRLF` is written only after the server has read the body up
+    // to `CRLF.`, so the terminator reaches it in two reads, not one.
+    const firstPart = new Promise<void>((resolve) => {
+      onBodyChunk = (text) => {
+        if (text.endsWith('\r\n.')) resolve();
+      };
+    });
     socket.write('Subject: s\r\n\r\nbody\r\n.');
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await firstPart;
+    onBodyChunk = undefined;
     socket.write('\r\n');
     await waitFor('250 queued');
     expect(messages).toBe(before + 1);
