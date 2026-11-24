@@ -64,9 +64,11 @@ import {
 import {
   guardMysql2Pool,
   hasNoBackslashEscapes,
-  isMysql2Database,
+  mysql2Targets,
+  type Mysql2Target,
   READ_SESSION_MODE,
-  sessionModeOf,
+  READ_SESSION_MODE_TIMEOUT_MS,
+  readSessionModeWithin,
 } from './mysql2-escape-guard.ts';
 import {
   normalizePageQuery,
@@ -270,8 +272,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * mode, but the deployment still sets it.
    */
   #sqlModeRefused = false;
-  /** Removes the pool `'connection'` guard; set while a mysql2 pool is guarded. */
-  #unguardPool: (() => void) | undefined;
+  /** Removes each guarded pool's `'connection'` listener (primary and replicas). */
+  readonly #unguardPools: (() => void)[] = [];
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -334,7 +336,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._configuredDatabase = configured.configured;
     this._transactionBridge = configured.transaction;
     this._supportsIsolation = configured.supportsIsolation;
-    let mysql2: boolean;
+    let entityKind: unknown;
 
     try {
       const orm = await import('drizzle-orm');
@@ -350,7 +352,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
           (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)?.dialect
             ?.constructor?.name,
         );
-      mysql2 = isMysql2Database(this._db, ns.entityKind);
+      entityKind = ns.entityKind;
       const operators: DrizzleOperators = {
         mysqlProxy: orm.is(this._db, MySqlRemoteDatabase),
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
@@ -437,7 +439,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       }
     }
 
-    if (mysql2) await this.#refuseNoBackslashEscapes();
+    const mysql2 = mysql2Targets(this._db, entityKind);
+    if (mysql2.length > 0) await this.#refuseNoBackslashEscapes(mysql2);
 
     // M95b §3.5: the probe exists only when the instance can execute raw
     // SQL. A SQLite-Proxy/libsql instance has no execute() and the adapter
@@ -451,40 +454,46 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   }
 
   /**
-   * Refuses Drizzle over mysql2 while the session reports
+   * Refuses Drizzle over mysql2 while a session reports
    * `NO_BACKSLASH_ESCAPES`, and guards every connection a pool opens later.
+   * A `withReplicas()` instance is read and guarded on its primary and on
+   * every replica. Each read is bounded at the readiness probe's 2000 ms.
    * The guard is attached first, so a connection this read opens is guarded
    * too. A Drizzle mysql-proxy instance is not checked: its callback owns how
    * a statement reaches the server, and the adapter holds no connection.
    *
    * @throws {UnsupportedSqlModeError} When the session reports the mode
    */
-  async #refuseNoBackslashEscapes(): Promise<void> {
-    this.#unguardPool?.();
-    this.#unguardPool = guardMysql2Pool((this._db as { $client?: unknown }).$client, () => {
+  async #refuseNoBackslashEscapes(targets: readonly Mysql2Target[]): Promise<void> {
+    this.#unguard();
+    const onRefused = (): void => {
       if (this.#sqlModeRefused) return;
       this.#sqlModeRefused = true;
       this._warn?.(
         'A new mysql2 pool connection reported sql_mode NO_BACKSLASH_ESCAPES; the Drizzle adapter now refuses every call with UnsupportedSqlModeError.',
       );
-    });
+    };
+    for (const client of new Set(targets.map((target) => target.$client))) {
+      const unguard = guardMysql2Pool(client, onRefused);
+      if (unguard !== undefined) this.#unguardPools.push(unguard);
+    }
     try {
-      // `connect()` refuses an operator set without `sql.raw`, and a
-      // MySql2Database always has `execute()`.
-      const tag = this._operators!.sql!;
-      const mode = sessionModeOf(await this._db!.execute!(tag.raw(READ_SESSION_MODE)));
-      if (mode === undefined) {
-        throw new Error(
-          'DrizzleAdapter could not read @@SESSION.sql_mode from mysql2, so it cannot rule out NO_BACKSLASH_ESCAPES.',
-        );
+      // `connect()` refuses an operator set without `sql.raw`.
+      const statement = this._operators!.sql!.raw(READ_SESSION_MODE);
+      for (const target of targets) {
+        const mode = await readSessionModeWithin(target, statement, READ_SESSION_MODE_TIMEOUT_MS);
+        if (hasNoBackslashEscapes(mode)) this.#sqlModeRefused = true;
       }
-      if (hasNoBackslashEscapes(mode)) this.#sqlModeRefused = true;
       this.#assertSqlModeAccepted();
     } catch (error) {
-      this.#unguardPool?.();
-      this.#unguardPool = undefined;
+      this.#unguard();
       throw error;
     }
+  }
+
+  /** Removes every pool guard this adapter attached. */
+  #unguard(): void {
+    for (const unguard of this.#unguardPools.splice(0)) unguard();
   }
 
   /** @throws {UnsupportedSqlModeError} Once a mysql2 session reported `NO_BACKSLASH_ESCAPES` */
@@ -494,8 +503,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
   /** @inheritdoc */
   disconnect(): Promise<void> {
-    this.#unguardPool?.();
-    this.#unguardPool = undefined;
+    this.#unguard();
     this._connected = false;
     this._db = null;
     this._configuredDatabase = null;

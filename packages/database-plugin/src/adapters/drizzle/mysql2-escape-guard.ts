@@ -94,7 +94,10 @@ export function mysql2Targets(database: unknown, entityKind: unknown): readonly 
   if (wrapper.$primary === undefined && wrapper.$replicas === undefined) {
     return [database as Mysql2Target];
   }
-  const members = [wrapper.$primary, ...(Array.isArray(wrapper.$replicas) ? wrapper.$replicas : [])];
+  const members = [
+    wrapper.$primary,
+    ...(Array.isArray(wrapper.$replicas) ? wrapper.$replicas : []),
+  ];
   if (
     !Array.isArray(wrapper.$replicas) ||
     members.some(
@@ -126,10 +129,7 @@ export async function readSessionModeWithin(
 ): Promise<string> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`no answer within ${timeoutMs} ms`)),
-      timeoutMs,
-    );
+    timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs);
   });
   let result: unknown;
   try {

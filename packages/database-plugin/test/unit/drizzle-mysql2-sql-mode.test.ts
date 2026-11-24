@@ -6,14 +6,18 @@
  */
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { entityKind } from 'drizzle-orm';
+import { DrizzleQueryError, entityKind } from 'drizzle-orm';
+import { withReplicas } from 'drizzle-orm/mysql-core';
 import { drizzle } from 'drizzle-orm/mysql2';
 import { createDrizzleDatabase, DrizzleAdapter, UnsupportedSqlModeError } from '../../src/index.ts';
 import {
   guardMysql2Pool,
   hasNoBackslashEscapes,
   isMysql2Database,
+  mysql2Targets,
   READ_SESSION_MODE,
+  READ_SESSION_MODE_TIMEOUT_MS,
+  readSessionModeWithin,
   sessionModeOf,
   STRIP_SESSION_MODE,
 } from '../../src/adapters/drizzle/mysql2-escape-guard.ts';
@@ -105,13 +109,22 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
   it('refuses at connect when the mode cannot be read, and propagates a failed read', async () => {
     const unreadable = new FakePool();
     unreadable.mode = undefined;
-    await expect(adapterOver(unreadable).connect()).rejects.toThrow(
-      /could not read @@SESSION\.sql_mode/,
+    const unread = await adapterOver(unreadable)
+      .connect()
+      .catch((error: unknown) => error);
+    expect(unread).toBeInstanceOf(UnsupportedSqlModeError);
+    expect((unread as Error).message).toMatch(
+      /could not read @@SESSION\.sql_mode \(the result held no sql_mode\)/,
     );
     expect(unreadable.listenerCount('connection')).toBe(0);
     const down = new FakePool();
     down.failure = new Error('connect ECONNREFUSED');
-    await expect(adapterOver(down).connect()).rejects.toMatchObject({ cause: down.failure });
+    const failed = await adapterOver(down)
+      .connect()
+      .catch((error: unknown) => error);
+    expect(failed).toBeInstanceOf(UnsupportedSqlModeError);
+    expect((failed as Error).cause).toBeInstanceOf(DrizzleQueryError);
+    expect(((failed as Error).cause as Error).cause).toBe(down.failure);
     expect(down.listenerCount('connection')).toBe(0);
   });
 
@@ -166,6 +179,44 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
     await adapter.disconnect();
   });
 
+  it('reads and guards the primary and every replica of a withReplicas() instance', async () => {
+    const primary = new FakePool();
+    const replica = new FakePool();
+    const db = withReplicas(drizzle(primary as never), [
+      drizzle(replica as never),
+      drizzle(primary as never),
+    ]);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(db, (d, work) => d.transaction(work)),
+      drizzleTables: mysqlTables,
+      dialect: 'mysql',
+    });
+    await adapter.connect();
+    expect(primary.statements).toEqual([READ_SESSION_MODE, READ_SESSION_MODE]);
+    expect(replica.statements).toEqual([READ_SESSION_MODE]);
+    expect([primary.listenerCount('connection'), replica.listenerCount('connection')]).toEqual([
+      1, 1,
+    ]);
+    await adapter.disconnect();
+    expect(replica.listenerCount('connection')).toBe(0);
+
+    replica.mode = REFUSED_MODE;
+    await expect(adapter.connect()).rejects.toBeInstanceOf(UnsupportedSqlModeError);
+    expect([primary.listenerCount('connection'), replica.listenerCount('connection')]).toEqual([
+      0, 0,
+    ]);
+    replica.mode = DEFAULT_MODE;
+    const later = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(db, (d, work) => d.transaction(work)),
+      drizzleTables: mysqlTables,
+      dialect: 'mysql',
+    });
+    await later.connect();
+    replica.emit('connection', newConnection({ mode: REFUSED_MODE }));
+    expect(() => later.createDataSource('Row')).toThrow(UnsupportedSqlModeError);
+    await later.disconnect();
+  });
+
   it('keeps serving after a later connection under the default mode, a failed read, or a refused strip', async () => {
     const pool = new FakePool();
     const adapter = adapterOver(pool);
@@ -182,17 +233,47 @@ describe('Drizzle over mysql2 and NO_BACKSLASH_ESCAPES', () => {
 });
 
 describe('mysql2 escape-guard helpers', () => {
-  it('detects only a MySql2Database by its entityKind brand', () => {
-    class MySql2Database {
-      static readonly [entityKind] = 'MySql2Database';
-    }
-    class PgDatabase {
-      static readonly [entityKind] = 'PgDatabase';
-    }
-    expect(isMysql2Database(new MySql2Database(), entityKind)).toBe(true);
-    expect(isMysql2Database(new PgDatabase(), entityKind)).toBe(false);
-    expect(isMysql2Database(new MySql2Database(), undefined)).toBe(false);
+  it('detects mysql2 by the session brand, which a withReplicas() wrapper carries', () => {
+    const pool = new FakePool();
+    const db = drizzle(pool as never);
+    expect(isMysql2Database(db, entityKind)).toBe(true);
+    expect(isMysql2Database(withReplicas(db, [db]), entityKind)).toBe(true);
+    expect(isMysql2Database({ session: {} }, entityKind)).toBe(false);
+    expect(isMysql2Database(db, undefined)).toBe(false);
     expect(isMysql2Database(null, entityKind)).toBe(false);
+    expect(mysql2Targets({ session: {} }, entityKind)).toEqual([]);
+    expect(mysql2Targets(db, entityKind)).toEqual([db]);
+    // A replica on another driver is not read.
+    const other = { execute: () => Promise.resolve([]) };
+    expect(mysql2Targets({ ...db, $primary: db, $replicas: [other] }, entityKind)).toEqual([db]);
+  });
+
+  it('refuses a mysql2 replicas wrapper whose members cannot all be read', () => {
+    const db = drizzle(new FakePool() as never);
+    for (const wrapper of [
+      { ...db, $primary: db },
+      { ...db, $replicas: [db] },
+      { ...db, $primary: db, $replicas: [{}] },
+    ]) {
+      expect(() => mysql2Targets(wrapper, entityKind)).toThrow(UnsupportedSqlModeError);
+    }
+  });
+
+  it('bounds a sql_mode read and names the expiry as the cause', async () => {
+    expect(READ_SESSION_MODE_TIMEOUT_MS).toBe(2000);
+    const stalled = { execute: () => new Promise<unknown>(() => {}) };
+    const expired = await readSessionModeWithin(stalled, 'statement', 5).catch(
+      (error: unknown) => error,
+    );
+    expect(expired).toBeInstanceOf(UnsupportedSqlModeError);
+    expect((expired as Error).cause).toMatchObject({ message: 'no answer within 5 ms' });
+    expect(
+      await readSessionModeWithin(
+        { execute: () => Promise.resolve([[{ mode: DEFAULT_MODE }], []]) },
+        'statement',
+        5,
+      ),
+    ).toBe(DEFAULT_MODE);
   });
 
   it('reads the flag from a sql_mode list, ignoring case and spacing', () => {

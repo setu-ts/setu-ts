@@ -90,6 +90,59 @@ describe('Drizzle real MySQL repository', { skip: !process.env['MYSQL_URL'] }, (
   });
 });
 
+describe('Drizzle real MySQL withReplicas()', { skip: !process.env['MYSQL_URL'] }, () => {
+  it('reads the replica too: a replica session under NO_BACKSLASH_ESCAPES refuses connect by name', async () => {
+    const { drizzle } = await import('drizzle-orm/mysql2');
+    const { withReplicas } = await import('drizzle-orm/mysql-core');
+    const { createDrizzleDatabase, DrizzleAdapter, DatabaseService, UnsupportedSqlModeError } =
+      await import('../../src/index.ts');
+    const { mysqlTables } = await import('../fixtures/mysql-tables.ts');
+    const h = await mysqlHarness('drizzle', 4);
+    const replicaConnection = await h.pool.getConnection();
+    try {
+      const repo = h.database.getRepository<Record<string, unknown>>('Row');
+      for (const id of ['a', 'b']) await repo.create({ id, name: id, version: 1, balance: 1 });
+      const [settings] = await replicaConnection.query<RowDataPacket[]>(
+        'SELECT @@SESSION.sql_mode AS mode',
+      );
+      const original = String(settings[0]!.mode);
+      await replicaConnection.query('SET SESSION sql_mode = ?', [
+        `${original},NO_BACKSLASH_ESCAPES`,
+      ]);
+      try {
+        const primary = drizzle(h.pool);
+        // A replica on its own pinned connection; Drizzle types replicas like the primary.
+        const replica = drizzle(replicaConnection) as unknown as typeof primary;
+        const adapter = new DrizzleAdapter({
+          drizzleInstance: createDrizzleDatabase(withReplicas(primary, [replica]), (db, work) =>
+            db.transaction(work),
+          ),
+          drizzleTables: mysqlTables,
+          dialect: 'mysql',
+        });
+        const refusal = await adapter.connect().then(
+          async () => {
+            // Without the replica read, a select through the replica breaks out of its literal.
+            const db = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'drizzle');
+            const rows = await db.getRepository<Record<string, unknown>>('Row').findAll({
+              filter: { type: 'comparison', field: ['id'], operator: 'eq', value: "' OR 1=1 -- " },
+            });
+            await db.close();
+            return rows;
+          },
+          (error: unknown) => error,
+        );
+        expect(refusal).toBeInstanceOf(UnsupportedSqlModeError);
+      } finally {
+        await replicaConnection.query('SET SESSION sql_mode = ?', [original]);
+      }
+    } finally {
+      replicaConnection.release();
+      await h.dispose();
+    }
+  });
+});
+
 /**
  * Changes @@GLOBAL.sql_mode for every client of the server, so it runs only on
  * an explicit opt-in (MYSQL_GLOBAL_MODE=1) beside MYSQL_URL, and restores it.

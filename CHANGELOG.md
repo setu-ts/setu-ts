@@ -153,8 +153,10 @@ All notable changes to this project are documented here. The format follows
   answers 409; a closed mysql2 connection answers 503. Drizzle on mysql2 refuses a session whose
   `sql_mode` includes `NO_BACKSLASH_ESCAPES`: `connect()` throws `UnsupportedSqlModeError` (new),
   and so does every later call once a connection the pool opened later reports it; such a connection
-  has the flag stripped from its session `sql_mode` first. Turn the mode off for the application's
-  sessions (global `sql_mode`, `init_connect`, the application's own `SET SESSION`).
+  has the flag stripped from its session `sql_mode` first. `connect()` now reads the session mode
+  (primary and every `withReplicas()` replica), so start fails when MySQL is unreachable or stalls
+  past 2 s, where it used to come up. Turn the mode off for the application's sessions (global
+  `sql_mode`, `init_connect`, the application's own `SET SESSION`).
 
 ### Fixed
 

@@ -960,8 +960,11 @@ cannot name it, or a `contains` keeps the backslash form.
 **`NO_BACKSLASH_ESCAPES` is refused on mysql2.** Drizzle on mysql2 does not support it for bound
 values: mysql2 writes each bound string into the query text, escaping `'` as `\'`, and under that
 mode the quote ends the literal, so a value such as `' OR 1=1 -- ` changes the statement. Since
-0.14.0 the adapter refuses it. `connect()` reads `@@SESSION.sql_mode` and throws
-`UnsupportedSqlModeError` when the mode is set, or when it cannot read the mode.
+0.14.0 the adapter refuses it. `connect()` reads `@@SESSION.sql_mode`, on the primary and on every
+replica of a `withReplicas()` instance, and throws `UnsupportedSqlModeError` when any of them
+reports the mode. It also throws `UnsupportedSqlModeError` when a read fails or gets no answer
+within 2000 ms, the readiness probe's bound; the driver error or the expiry is its `cause`. So
+`connect()` now fails when MySQL is unreachable or stalls.
 
 On a mysql2 pool the adapter also strips `NO_BACKSLASH_ESCAPES` from the session mode of every
 connection the pool opens later, then refuses. Each new connection first reads its mode, then sets

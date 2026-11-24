@@ -761,9 +761,12 @@ export class TenantColumnUnresolvedError extends Error {
  * Drizzle over mysql2 refuses a MySQL session whose `sql_mode` includes
  * `NO_BACKSLASH_ESCAPES`: mysql2 writes bound strings into the statement
  * text escaping `'` as `\'`, which that mode does not honour, so a bound
- * value could end its literal and append SQL. Thrown by `connect()` and,
- * once a connection the pool opened later reported the mode, by every later
- * call on the adapter. This configuration fault has no HTTP status hint.
+ * value could end its literal and append SQL. Thrown by `connect()` when a
+ * session (the primary's or a `withReplicas()` replica's) reports the mode,
+ * or when the mode cannot be read within 2000 ms (the driver error or the
+ * expiry is the `cause`), and, once a connection a pool opened later
+ * reported the mode, by every later call on the adapter. This configuration
+ * fault has no HTTP status hint.
  * @since 0.14.0
  */
 export class UnsupportedSqlModeError extends Error {

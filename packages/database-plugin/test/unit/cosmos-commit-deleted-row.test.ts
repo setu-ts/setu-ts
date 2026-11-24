@@ -5,8 +5,8 @@
  * that no longer exists answers 404, because the service checks existence
  * before the ETag (412 is only for a row still present). A conditional write
  * losing its row is the same lost race as a stale ETag, so the commit throws
- * `SerializationConflictError`; a write without a precondition keeps the
- * batch's own 404.
+ * `SerializationConflictError`. A plain update of a deleted row conflicts
+ * too (409); only a plain delete keeps the batch's own 404.
  *
  * @module
  */
