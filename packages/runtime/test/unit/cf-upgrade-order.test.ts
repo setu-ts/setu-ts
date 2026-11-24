@@ -117,6 +117,40 @@ describe('CloudflareWorkersHttpAdapter upgrade order (M70a)', () => {
     expect(result.status).toBe(401);
   });
 
+  it('a handshake that throws a non-Error closes the sink with 1006 and answers 500', async () => {
+    const closes: { code: number; reason: string }[] = [];
+    const host: CloudflareWebSocketHost = {
+      ...fakeWsHost(),
+      createPair: () => {
+        throw 'no pair';
+      },
+    };
+    const adapter = new CloudflareWorkersHttpAdapter(host);
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      (request as unknown as Record<symbol, { sink: WebSocketEventSink }>)[UPGRADE_INTENT] = {
+        sink: {
+          onOpen: () => {},
+          onMessage: () => {},
+          onClose: (event) => {
+            closes.push({ code: event.code, reason: event.reason });
+          },
+          onError: () => {},
+        },
+      };
+      return Promise.resolve({
+        status: 101,
+        headers: new Headers(),
+        body: null,
+        snapshot: () => ({ status: 101, headers: new Headers(), body: null, streaming: false }),
+      } as unknown as IResponse);
+    });
+
+    const result = await adapter.fetch(upgradeRequest());
+
+    expect(result.status).toBe(500);
+    expect(closes).toEqual([{ code: 1006, reason: 'Handshake failed' }]);
+  });
+
   it('router is stored but not consulted in fetch path', async () => {
     const routerConsulted = { value: false };
     const router: WebSocketUpgradeRouter = () => {
