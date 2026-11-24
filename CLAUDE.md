@@ -890,7 +890,7 @@ here.
   refusal; 12 V13 rows plus V13-272) — complete (PR pending).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
-  `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
+  `0.14.0`; M143a, b, c, i, o, p and r can start at once (M143q is complete).
 
 ## Verification (run before declaring any work done)
 
