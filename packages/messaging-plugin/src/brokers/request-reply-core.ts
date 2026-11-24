@@ -234,7 +234,7 @@ export class RequestReplyCore {
       this.#warnedFanOut = true;
       try {
         this.#deps.warn?.(
-          "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (pass queue to make responders compete)",
+          "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (every responder on RabbitMQ and memory, competing on the other brokers); pass queue to choose the group",
         );
       } catch {
         /* Reporting cannot prevent registration. */

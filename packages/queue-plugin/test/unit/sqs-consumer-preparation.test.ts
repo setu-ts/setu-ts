@@ -142,6 +142,34 @@ describe('SQS consumer preparation', () => {
     expect(receive.mock.calls.some(([url]) => url === 'source')).toBe(false);
     await service.disconnect();
   });
+  it('reports again when the transient preparation reason changes', async () => {
+    const getQueueAttributes = vi
+      .fn<() => Promise<Readonly<Record<string, string>>>>()
+      .mockRejectedValueOnce(new Error('AccessDenied'))
+      .mockResolvedValue({
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: 'arn:aws:sqs:us-east-1:210987654321:dead',
+          maxReceiveCount: 4,
+        }),
+      });
+    const getQueueUrl = vi.fn(() => Promise.reject(new Error('AccessDenied')));
+    const { queue, runtime } = await sqsHarness(
+      { deadLetterQueues: {} },
+      { getQueueAttributes, getQueueUrl },
+    );
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    await service.connect();
+    service.process('build', vi.fn());
+    await runtime.advanceMs(10000);
+    const texts = logger.error.mock.calls.map(([, meta]) =>
+      String((meta as { error: string }).error),
+    );
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toContain("the queue's attributes (RedrivePolicy) could not be read");
+    expect(texts[1]).toContain("the RedrivePolicy target's queue URL could not be resolved");
+    await service.disconnect();
+  });
   it('clears a preparation in flight before shutdown and never polls after it completes', async () => {
     const read = Promise.withResolvers<Record<string, string>>();
     const { queue, runtime, transport } = await sqsHarness(

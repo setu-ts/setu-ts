@@ -674,7 +674,10 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
    */
   deadLetterTopic?: string;
 
-  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms, default 15000; 0 disables it, except for the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). A timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';
@@ -719,7 +722,10 @@ export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions
    */
   deadLetterTopic?: string;
 
-  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms, default 15000; 0 disables it, except for the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). A timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';

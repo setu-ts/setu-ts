@@ -367,9 +367,10 @@ export class QueueService implements IQueue {
         this.#preparationRetry.set(name, { failures, nextAttemptAt: now + delay });
       }
     } else this.#preparationRefused.add(name);
-    // Once per name AND kind: a transient failure followed by a definite
-    // refusal (the name then stops being polled) is reported again.
-    const key = (this.#transientPreparation(error) ? 'transient:' : 'refused:') + name;
+    // Once per name AND reason: a changed transient reason, or a transient
+    // failure followed by a definite refusal, is reported again.
+    const reason = error instanceof SqsDeadLetterTargetMissingError ? error.reason : 'other';
+    const key = reason + ':' + name;
     if (!this.#preparationReported.has(key)) {
       this.#preparationReported.add(key);
       this.#report('queue consumer preparation failed', error, { name });
@@ -618,7 +619,6 @@ export class QueueService implements IQueue {
           }
           if (!this.#connected || generation !== this.#generation) return;
           this.#preparationRetry.delete(name);
-          this.#preparationReported.delete('transient:' + name);
         }
         let jobs: readonly StoredJob<unknown>[];
         try {

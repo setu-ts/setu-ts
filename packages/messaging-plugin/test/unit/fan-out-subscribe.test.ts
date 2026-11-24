@@ -91,7 +91,7 @@ describe('fan-out subscription contract', () => {
     expect(subscribe.mock.calls[1]![2]).toBeUndefined();
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
-      "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (pass queue to make responders compete)",
+      "Messaging respond ignores fanOut; responders get the broker's queue-less delivery (every responder on RabbitMQ and memory, competing on the other brokers); pass queue to choose the group",
     );
     await broker.disconnect();
     const throwing = new InMemoryBroker(clock.runtime, new JsonSerializer(), {
