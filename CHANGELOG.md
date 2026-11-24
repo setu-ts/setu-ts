@@ -204,6 +204,18 @@ All notable changes to this project are documented here. The format follows
   half). The README documents service bindings (V13-209), the lock's use from Worker code (V13-206),
   `max_batch_size = 10` for request/reply (V13-205) and that KV is outside the session revocation
   guarantee (V13-135).
+- **`@setu-ts/cloudflare-plugin` (M143o).** The Durable Object hubs' 426 answers carry
+  `Upgrade: websocket` and `Connection: Upgrade`, as RFC 9110 requires, and the reply inbox's 405
+  carries `Allow: GET, POST` (V13-274).
+- **`@setu-ts/runtime` (M143o).** Deno refuses a malformed WebSocket handshake the way Node's `ws`
+  does: a `Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400, and a `Sec-WebSocket-Version`
+  other than 13 or 8 gets 400 with `Sec-WebSocket-Version: 13, 8`. Before, Deno upgraded both
+  (V13-276).
+- **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
+  `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
+  7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose
+  miniflare pins the fixed undici 7.30.1 and sharp 0.35.5 (V13-275). Existing projects can raise
+  both pins the same way.
 - **`@setu-ts/static-plugin` (M143o).** A static asset served with CORS keeps `Vary: Origin`: the
   handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no longer
   replays one origin's `Access-Control-Allow-Origin` to another.

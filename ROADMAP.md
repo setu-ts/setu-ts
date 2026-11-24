@@ -17892,7 +17892,13 @@ Half of a row owned elsewhere: V13-218 (owned by M143h); V13-220 (owned by M143m
 Out-of-lane edits by the maintainer's decision (2026-11-23): V13-200's Core half (optional
 `IRuntimeServices.waitUntil` in `common/src/runtime.ts`, the kernel's cleanup hand-off in `kernel`,
 and `waitUntil` through `runtime/src/plugin`, `src/adapters/shared` and `src/services`) is built in
-this letter rather than as a Core-lane PR; `static-plugin`'s `Vary` fix joins this letter (D10).
+this letter rather than as a Core-lane PR; `static-plugin`'s `Vary` fix joins this letter (D10). On
+2026-11-24 the maintainer added three defects found in review: V13-274 (the Durable Object hubs' 426
+without `Upgrade`), V13-275 (an out-of-lane edit to the CLI lane's generated output: the Workers
+scaffold's wrangler pin, whose miniflare installed High-advisory undici and sharp) and the Workers
+handshake status, which measured a different cause than assumed: Workers keeps its 500, and V13-276
+(Deno's handshake validation, an out-of-lane edit in `runtime`) is fixed here; V13-277 is an
+upstream note.
 
 ### Milestone 143p: Queued Work and Frames That Are Lost or Repeated
 

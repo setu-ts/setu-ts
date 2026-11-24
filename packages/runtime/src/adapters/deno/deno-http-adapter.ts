@@ -27,6 +27,7 @@ import {
 import type { HttpAdapterOptions, Http2TlsOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
+import { refuseHandshakeHeaders } from '../shared/handshake-headers.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
 import { bindDenoSocketToSink } from './deno-ws-upgrader.ts';
 import { DENO_WS_MAX_MESSAGE_BYTES, WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
@@ -322,6 +323,13 @@ export class DenoHttpServerHandle {
     if (upgradeWebSocket === undefined) {
       intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
       return new Response(null, { status: 501 });
+    }
+
+    // Deno checks only that a key is present; refuse what Node's `ws` refuses.
+    const refusal = refuseHandshakeHeaders(request.headers);
+    if (refusal !== undefined) {
+      intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: refusal.reason });
+      return new Response(null, { status: 400, headers: refusal.headers });
     }
 
     this.#ceiling.check(intent.sink);

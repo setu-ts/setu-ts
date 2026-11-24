@@ -1360,3 +1360,41 @@ One branch, `feat/m143o-workers-realtime-queues-bindings`, and one PR. Commits i
 
 The security audit runs once, on the committed tree, and covers room isolation, the credentialed
 cache rule and the kernel's `waitUntil` hand-off. M143j waits for this PR.
+
+## 15. Addendum (2026-11-24): three defects on `develop`, added to this branch
+
+The maintainer asked for three defects the final review listed as pre-existing to be fixed here.
+Each is measured, registered, given a CHANGELOG line and a test that fails on the old code.
+
+- **V13-274 — 426 without `Upgrade`.** The two Durable Object hubs (`RealtimeBackplaneObjectCore`,
+  `ReplyInboxObjectCore`) are the only framework code that answers 426. Both now send
+  `Upgrade: websocket` and `Connection: Upgrade` (RFC 9110 §15.5.22); the reply inbox's 405 also
+  gains `Allow: GET, POST` (§15.5.6), the same expression. Bun's own 426 (version mismatch) is Bun's
+  server, not framework code.
+- **V13-275 — High advisories in generated Workers projects.** Out-of-lane edit to the CLI lane's
+  generated output, approved by the maintainer. A registry check showed a pin bump suffices: every
+  wrangler from 4.153.0 pins a miniflare with undici 7.30.1 and sharp 0.35.5, so generated
+  `overrides` were not needed. The scaffold pins `wrangler ~4.153.0` and
+  `@cloudflare/workers-types ^5.20261023.1` (wrangler's peer floor); this package's devDependency,
+  the realtime-clients example and the range table follow, and the repository's now-redundant
+  `miniflare>undici`/`miniflare>sharp` overrides are removed (they would hold undici below a later
+  miniflare's). `workers-install-e2e.test.ts` gains a lock-only `npm audit` of a generated manifest
+  that fails on High or Critical advisories through wrangler or miniflare (fails at 4.148, passes at
+  4.153).
+- **Workers handshake status — measured; the maintainer chose (a).** The request assumed Workers'
+  500 differed from Deno's 400 for the same failure. Raw-socket probes on all four runtimes show a
+  client fault (missing `Sec-WebSocket-Key`) gets 400 everywhere, workerd answering it itself; the
+  Workers catch (500) fires only when the platform cannot create the socket pair, the cause for
+  which Node's catch also answers 500. Workers keeps its 500. `handshake-platform-faults.test.ts`
+  pins that arm across the four adapters (500 Node and Workers; 501 where the path cannot upgrade),
+  websocket-plugin's `handshake-refusals.test.ts` pins the client-fault arm on a real server on the
+  Node and Deno lanes, and the workerd e2e pins a missing key's 400. `node-http-adapter.ts`'s
+  comment no longer calls the Workers catch client-triggerable.
+- **V13-276 — Deno's handshake validation.** Out-of-lane edit in `runtime`, approved by the
+  maintainer. Deno upgraded a malformed key and a missing or unsupported version that Node's `ws`
+  refuses. `adapters/shared/handshake-headers.ts` holds the `ws` 8.23.0 rules (key
+  `/^[+/0-9A-Za-z]{22}==$/`; version 13 or 8, else 400 with `Sec-WebSocket-Version: 13, 8`) and the
+  Deno adapter applies them before `Deno.upgradeWebSocket`. Version 8 stays accepted, as in `ws`.
+- **V13-277 — upstream note.** Bun's and workerd's own 426 for an unsupported version carries no
+  `Upgrade`, and workerd upgrades a malformed key. Both are the platform's handshake, so the
+  websocket-plugin README names the difference and nothing changes in Setu.

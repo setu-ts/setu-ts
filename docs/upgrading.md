@@ -12,6 +12,13 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Raise the Workers toolchain pins (`@setu-ts/cli`)
+
+A Workers project generated before 0.14.0 pins `"wrangler": "~4.148.0"`, whose miniflare installs
+undici and sharp versions with High advisories. Raise it to `"wrangler": "~4.153.0"` and
+`"@cloudflare/workers-types"` to `"^5.20261023.1"` together, since wrangler declares a peer range on
+the types, then reinstall. New projects get these pins.
+
 ### Pass `waitUntil` to `RuntimePlugin` on Workers (`@setu-ts/runtime`, `@setu-ts/cloudflare-plugin`)
 
 ```typescript

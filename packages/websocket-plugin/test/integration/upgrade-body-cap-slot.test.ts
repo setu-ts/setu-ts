@@ -59,7 +59,12 @@ function upgradeWithBody(bytes: number): Request {
 /** A conformant, bodyless upgrade. */
 function conformantUpgrade(): Request {
   return new Request('http://localhost/ws', {
-    headers: { upgrade: 'websocket', connection: 'Upgrade' },
+    headers: {
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'sec-websocket-version': '13',
+    },
   });
 }
 

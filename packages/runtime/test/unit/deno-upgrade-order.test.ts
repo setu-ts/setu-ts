@@ -22,7 +22,14 @@ import { DenoHttpAdapter, type DenoServeHost } from '../../src/adapters/deno/den
 import type { DenoWebSocketLike } from '../../src/adapters/deno/deno-ws-upgrader.ts';
 
 function upgradeRequest(url = 'http://localhost/ws'): Request {
-  return new Request(url, { headers: { upgrade: 'websocket', connection: 'Upgrade' } });
+  return new Request(url, {
+    headers: {
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'sec-websocket-version': '13',
+    },
+  });
 }
 
 function fakeSocket(): DenoWebSocketLike {
@@ -180,5 +187,85 @@ describe('DenoHttpAdapter upgrade order (M70a)', () => {
     expect(frameworkHandlerCalls).toBe(1);
     expect(upgradeCalls.length).toBe(0);
     expect(result.status).toBe(403);
+  });
+});
+
+describe('DenoHttpAdapter handshake headers (V13-276)', () => {
+  /** An adapter over a host that records whether Deno was asked to upgrade. */
+  function adapterOver(): { adapter: DenoHttpAdapter; upgraded: Request[]; closes: string[] } {
+    const upgraded: Request[] = [];
+    const closes: string[] = [];
+    const host: DenoServeHost = {
+      serve: () => ({ shutdown: () => Promise.resolve() }),
+      upgradeWebSocket: (request: Request) => {
+        upgraded.push(request);
+        return { socket: fakeSocket(), response: upgradeResponse(null, { status: 101 }) };
+      },
+    };
+    const adapter = new DenoHttpAdapter(host);
+    adapter.setHandler((request: IRequest): Promise<IResponse> => {
+      (request as unknown as Record<symbol, { sink: WebSocketEventSink }>)[UPGRADE_INTENT] = {
+        sink: {
+          onOpen: () => {},
+          onMessage: () => {},
+          onClose: (event) => {
+            closes.push(event.reason);
+          },
+          onError: () => {},
+        },
+      };
+      return Promise.resolve({
+        status: 101,
+        headers: new Headers(),
+        body: null,
+        snapshot: () => ({ status: 101, headers: new Headers(), body: null, streaming: false }),
+      } as unknown as IResponse);
+    });
+    return { adapter, upgraded, closes };
+  }
+
+  /** An upgrade request with only the given handshake headers. */
+  function withHeaders(extra: Record<string, string>): Request {
+    return new Request('http://localhost/ws', {
+      headers: { upgrade: 'websocket', connection: 'Upgrade', ...extra },
+    });
+  }
+
+  it('refuses a malformed key with 400 before asking Deno to upgrade', async () => {
+    const { adapter, upgraded, closes } = adapterOver();
+
+    const response = await adapter.fetch(
+      withHeaders({ 'sec-websocket-key': 'short', 'sec-websocket-version': '13' }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(upgraded).toEqual([]);
+    expect(closes).toEqual(['Missing or invalid Sec-WebSocket-Key header']);
+  });
+
+  it('refuses a missing version with 400 naming the versions it speaks', async () => {
+    const { adapter, upgraded } = adapterOver();
+
+    const response = await adapter.fetch(
+      withHeaders({ 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get('sec-websocket-version')).toBe('13, 8');
+    expect(upgraded).toEqual([]);
+  });
+
+  it('accepts version 8, as ws does', async () => {
+    const { adapter, upgraded } = adapterOver();
+
+    const response = await adapter.fetch(
+      withHeaders({
+        'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'sec-websocket-version': '8',
+      }),
+    );
+
+    expect(response.status).toBe(101);
+    expect(upgraded).toHaveLength(1);
   });
 });

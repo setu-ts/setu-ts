@@ -36,6 +36,13 @@ handshake is also reported through `HttpAdapterOptions.reportError` — once per
 never once per upgrade — so a missing `ws` is visible in the log instead of only as a refused
 socket.
 
+A malformed handshake is refused before the connection opens (no `onOpen`). Node (`ws`) and Deno
+(the adapter, from 0.14.0) apply the same rules: a `Sec-WebSocket-Key` that is not 16 bytes of
+base64 gets 400, and a `Sec-WebSocket-Version` other than 13 or 8 gets 400 with
+`Sec-WebSocket-Version: 13, 8`. Bun and Workers answer the handshake themselves and speak version 13
+only: a version-8 or versionless client gets 426 (no `Upgrade` header on either), and workerd
+upgrades a malformed key. Browsers send version 13.
+
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
 require a real listening server (`app.start({ port })`). `app.fetch()` and `app.inject()` serve

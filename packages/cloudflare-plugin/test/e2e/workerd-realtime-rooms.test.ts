@@ -292,6 +292,34 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
+    "refuses a client's handshake with no Sec-WebSocket-Key with 400, at the platform",
+    async () => {
+      // The client-fault arm on Workers (V13-276): workerd answers it itself,
+      // so the adapter's handshake catch, which answers 500, is never reached.
+      const head = await new Promise<string>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () => {
+          socket.write(
+            'GET /a/chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n' +
+              'Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n',
+          );
+        });
+        let reply = '';
+        socket.on('data', (chunk: Buffer) => {
+          reply += chunk.toString('latin1');
+          if (reply.includes('\r\n')) {
+            socket.destroy();
+            resolve(reply.slice(0, reply.indexOf('\r\n')));
+          }
+        });
+        socket.on('error', reject);
+      });
+
+      expect(head).toBe('HTTP/1.1 400 Bad Request');
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
     'control: without the Durable Object arm, ws.room() answers the named error',
     async () => {
       const bare = await text('/a/rooms-without-arm');
