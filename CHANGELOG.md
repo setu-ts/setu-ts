@@ -13,7 +13,10 @@ All notable changes to this project are documented here. The format follows
   running call's worker is terminated and replaced as on timeout. Each cancellation increments
   `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
-  realm now rejects the call with `TypeError` before it is admitted; it used to be ignored.
+  realm now rejects the call with `TypeError` before it is admitted; it used to be ignored. To keep
+  cancelling from such a signal, pass a native `AbortController`'s signal and abort it at once if
+  the other signal is already `aborted`, otherwise from that signal's `abort` event; to run without
+  cancellation, omit `signal`.
 
 - **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
   breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
@@ -68,11 +71,14 @@ All notable changes to this project are documented here. The format follows
   not read it yet).
 - **Provider options (M143r, #614; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
   `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
-  `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault) and the `ses` and `sendgrid`
-  mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the key form) and
-  `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm; `connectionTimeoutMs`,
-  `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime it reads is the
-  exported `SmtpRuntime` type); `exposeCatalogues.keyPrefixes` on the localization catalogue route.
+  `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault; on every storage and secrets arm
+  `requestTimeoutMs: 0` disables the bound, restoring the unbounded calls of before) and the `ses`
+  and `sendgrid` mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the
+  key form) and `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm;
+  `connectionTimeoutMs`, `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime
+  it reads is the exported `SmtpRuntime` type; under `dnsTtlMs` a send whose connection fails before
+  any SMTP command is sent again on the next resolved address, at most four in all);
+  `exposeCatalogues.keyPrefixes` on the localization catalogue route.
 - **Readiness probes (M143r, #614; V13-215, the lane half).** The `gcs` and `azure` storage arms,
   the `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each
   reads reachable when the backend answers: an HTTP status below `500`, or for `gcp` any gRPC code
@@ -90,23 +96,27 @@ All notable changes to this project are documented here. The format follows
   client's own host) and keeps an injected `BlobServiceClient` as given. GCS signed URLs expire in
   epoch milliseconds (they were always in 1970), the GCS arm turns the SDK's own retry off (a
   retried `502`/`503` download ended the process on 7.x and 8.x), and `getStream` waits for the
-  first chunk, so an absent object is `null`. An outage on a storage or secrets arm rejects with a
-  `503`/`504` (`BackendUnavailableError`, `BackendOutcomeUnknownError`,
-  `SecretProviderUnavailableError`); other failures name the provider. An SES or SendGrid send that
-  does not settle in time is a `504`, a refused connection a `503`; `SesSdkModule.GetAccountCommand`
-  is optional (a module without it gets no readiness probe). `exists`/`delete` reject on an outage
-  instead of answering "not there", on every provider, `local` included. `delete()` of an absent key
-  is `false` on every provider; S3 and B2 check with a `HEAD` first (a credential without
-  `s3:ListBucket` gets a 403 there, so the delete goes on and answers `true`). A missing object is
-  `StorageObjectNotFoundError` (`404`). `b2` with no `region`, `endpoint` or injected `client`
-  refuses to start. `createUploadMiddleware` answers a disallowed type `415`. It refuses, when
-  built, options its upload brand cannot describe (a `RangeError` naming the rule). A key with a `.`
-  or `..` path segment is refused with a `400` by every `StorageService` call and by the S3, B2, GCS
-  and Azure providers used directly (on Azure such a key could reach another container). An empty
-  key or one of only `/`, or one that is not a string (a `String` object included), is refused the
-  same way. Local `get` rejects a permission or I/O failure instead of answering `404`. Copied
-  backend error text has its control characters replaced. An SMTP `contentId` attachment is sent
-  inline. Slack posts the subject in bold before the body.
+  first chunk, so an absent object is `null`. The Azure client the storage arm builds makes one
+  attempt per call (the SDK's retry is off, as on GCS), and a storage write or an SES send refused
+  after the SDK retried (`$metadata.attempts` above 1, the AWS default) answers `504`, not `503`: an
+  earlier attempt may have landed. An outage on a storage or secrets arm rejects with a `503`/`504`
+  (`BackendUnavailableError`, `BackendOutcomeUnknownError`, `SecretProviderUnavailableError`); other
+  failures name the provider. An SES or SendGrid send that does not settle in time is a `504`, a
+  refused connection a `503` (a `504` once the SES client has retried, as it does by default: an
+  earlier attempt may have delivered); `SesSdkModule.GetAccountCommand` is optional (a module
+  without it gets no readiness probe). `exists`/`delete` reject on an outage instead of answering
+  "not there", on every provider, `local` included. `delete()` of an absent key is `false` on every
+  provider; S3 and B2 check with a `HEAD` first (a credential without `s3:ListBucket` gets a 403
+  there, so the delete goes on and answers `true`). A missing object is `StorageObjectNotFoundError`
+  (`404`). `b2` with no `region`, `endpoint` or injected `client` refuses to start.
+  `createUploadMiddleware` answers a disallowed type `415`. It refuses, when built, options its
+  upload brand cannot describe (a `RangeError` naming the rule). A key with a `.` or `..` path
+  segment is refused with a `400` by every `StorageService` call and by the S3, B2, GCS and Azure
+  providers used directly (on Azure such a key could reach another container). An empty key or one
+  of only `/`, or one that is not a string (a `String` object included), is refused the same way.
+  Local `get` rejects a permission or I/O failure instead of answering `404`. Copied backend error
+  text has its control characters replaced. An SMTP `contentId` attachment is sent inline. Slack
+  posts the subject in bold before the body.
 
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
@@ -199,16 +209,18 @@ All notable changes to this project are documented here. The format follows
   (504); reads remain 503. S3 `get`/`getStream` `NoSuchBucket`, Azure `ContainerNotFound` and a GCS
   `ENOENT` (a local file error) reject instead of signalling an absent object. Azure rejects
   unsupported body-less downloads and injected cloud calls receive deadline signals. GCS buffered
-  downloads stop at the deadline; failed first reads release iterators. A GCS `endpoint` set beside
-  `STORAGE_EMULATOR_HOST` is refused, as is a directly built `GcsProvider` with `endpoint`, no
-  `client` and no `env` (pass `runtime.env`), and the GCS peer floor is `^7.18.0`; a `put` to an
-  authenticated custom endpoint uploads in one multipart request, which carries the credential the
-  SDK's resumable upload drops. Bun filesystem errors preserve their codes. Vault HTTP 5xx
-  reads/writes use `SecretProviderUnavailableError`. A failed or timed-out LaunchDarkly startup
-  snapshot stays unhealthy until a refill. SMTP DNS refreshes respect failed-attempt TTLs, share
-  lookups, obey the connection timeout and cannot reconnect after disconnect. SES injected probes
-  are bounded. Throwing upload-brand getters are treated as absent, sparse catalogue prefixes are
-  refused and abort getter errors retain their identity.
+  downloads stop at the deadline (an upload cannot be cancelled: past its bound it answers `504`);
+  failed first reads release iterators. A GCS `endpoint` set beside `STORAGE_EMULATOR_HOST` is
+  refused, as is a directly built `GcsProvider` with `endpoint`, no `client` and no `env` (pass
+  `runtime.env`), and the GCS peer floor is `^7.18.0`; a `put` to an authenticated custom endpoint
+  uploads in one multipart request, which carries the credential the SDK's resumable upload drops.
+  Bun filesystem errors preserve their codes. Vault HTTP 5xx reads/writes use
+  `SecretProviderUnavailableError`. A failed, timed-out or invalid LaunchDarkly startup snapshot
+  stays unhealthy until a refill, and a refill from before `stop()` writes nothing into a later
+  start. SMTP DNS refreshes respect failed-attempt TTLs, share lookups, obey the connection timeout
+  and cannot reconnect after disconnect. SES injected probes are bounded. Throwing upload-brand
+  getters are treated as absent, sparse catalogue prefixes are refused and abort getter errors
+  retain their identity.
 
 - **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
   a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with

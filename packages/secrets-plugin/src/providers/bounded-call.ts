@@ -131,7 +131,7 @@ export function isSecretsOutage(error: unknown): boolean {
 export function toSecretsError(error: unknown, provider: string, operation: string): Error {
   if (error instanceof SecretProviderUnavailableError) return error;
   if (isSecretsOutage(error)) return new SecretProviderUnavailableError(provider, error);
-  const message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : textOf(error);
   // Control characters (CR/LF, C1 and the Unicode line separators included) are
   // replaced, so a backend's text
   // cannot forge a log line.
@@ -157,5 +157,20 @@ export async function answered(probe: () => Promise<unknown>): Promise<boolean> 
     return true;
   } catch (error) {
     return answerOf(error) !== undefined && !isSecretsOutage(error);
+  }
+}
+
+/**
+ * Text for a non-`Error` rejection; one with no text form (no prototype) gets
+ * a fixed description, so the original stays the `cause`.
+ *
+ * @param value - The rejection
+ * @returns Its text
+ */
+function textOf(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return 'a value with no text form';
   }
 }

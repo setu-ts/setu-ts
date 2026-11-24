@@ -643,3 +643,21 @@ describe('SendGrid reason cannot forge a log line', () => {
     ).toBe('a b c d e');
   });
 });
+
+describe('a send refused after the SDK retried', () => {
+  const refused = (attempts: number): Error =>
+    Object.assign(new Error('connect ECONNREFUSED'), {
+      code: 'ECONNREFUSED',
+      $metadata: { attempts },
+    });
+  it('is outcome-unknown: an earlier attempt may have delivered', () => {
+    expect(toMailError(refused(3), 'ses')).toBeInstanceOf(BackendOutcomeUnknownError);
+  });
+  it('is unavailable on a single attempt', () => {
+    expect(toMailError(refused(1), 'ses')).toBeInstanceOf(BackendUnavailableError);
+  });
+  it('describes a rejection with no text form instead of throwing', () => {
+    const failure = toMailError(Object.create(null) as unknown, 'ses');
+    expect(failure.message).toBe('a value with no text form');
+  });
+});

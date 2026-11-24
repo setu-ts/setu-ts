@@ -116,6 +116,12 @@ export class LaunchDarklyProvider implements FlagProvider {
   /** Set when `start()` could not reach LaunchDarkly; surfaced by `status()`. */
   #startError: string | undefined;
   #snapshotError: string | undefined;
+  /**
+   * Bumped by `stop()`, so a refill still in flight from an earlier start
+   * writes nothing into a later one (an injected client can be reused, so the
+   * client itself cannot tell the lifecycles apart).
+   */
+  #generation = 0;
 
   /**
    * @param config - The provider configuration
@@ -232,7 +238,7 @@ export class LaunchDarklyProvider implements FlagProvider {
         client.waitForInitialization({ timeout: this.#initTimeoutSeconds }),
       );
     } catch (error) {
-      this.#startError = error instanceof Error ? error.message : String(error);
+      this.#startError = errorText(error);
       this.#logger?.warn(
         'launchdarkly: client did not initialize; serving fallback values until it connects',
         { error: this.#startError },
@@ -268,6 +274,7 @@ export class LaunchDarklyProvider implements FlagProvider {
     this.#refilling.clear();
     this.#started = false;
     this.#snapshotError = undefined;
+    this.#generation += 1;
     return Promise.resolve();
   }
 
@@ -341,11 +348,13 @@ export class LaunchDarklyProvider implements FlagProvider {
     context: FlagContext | undefined,
     bounded = false,
   ): Promise<void> {
+    const generation = this.#generation;
     this.#refilling.add(key);
     try {
       const fetchState = (): Promise<ILaunchDarklyFlagsState> =>
         client.allFlagsState(toLaunchDarklyContext(context));
       const state = await (bounded ? this.#bounded(fetchState) : fetchState());
+      if (generation !== this.#generation) return;
       // An invalid snapshot means the SDK could not evaluate (offline, bad
       // context); caching it would pin every flag to the fallback until the
       // next update event.
@@ -358,15 +367,37 @@ export class LaunchDarklyProvider implements FlagProvider {
           const oldest = this.#snapshots.keys().next().value as string;
           this.#snapshots.delete(oldest);
         }
+      } else if (bounded) {
+        // The startup snapshot is not a snapshot: report it until a valid
+        // refill replaces it, as a failed one is.
+        this.#snapshotError = 'LaunchDarkly returned an invalid flag snapshot';
       }
     } catch (error) {
-      if (bounded) this.#snapshotError = error instanceof Error ? error.message : String(error);
+      if (generation !== this.#generation) return;
+      if (bounded) this.#snapshotError = errorText(error);
       this.#logger?.warn('launchdarkly: snapshot refresh failed', {
         contextKey: key,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorText(error),
       });
     } finally {
-      this.#refilling.delete(key);
+      if (generation === this.#generation) this.#refilling.delete(key);
     }
+  }
+}
+
+/**
+ * The message of a rejection, or its text; one with no text form (an object
+ * with no prototype) gets a fixed description instead of a `TypeError` that
+ * would escape a background refill.
+ *
+ * @param error - The rejection
+ * @returns Its text
+ */
+function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    return 'a value with no text form';
   }
 }

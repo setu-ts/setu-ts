@@ -1,9 +1,11 @@
 import { strict as assert } from 'node:assert';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createBunRuntimeServices } from '../../../runtime/src/adapters/bun/bun-runtime.ts';
 import { LocalStorageProvider } from '../../src/providers/local-provider.ts';
 
-const root = await mkdtemp(new URL('../../../../.tmp/bun-local-', import.meta.url).pathname);
+const root = await mkdtemp(join(tmpdir(), 'bun-local-'));
 try {
   const runtime = createBunRuntimeServices();
   const provider = new LocalStorageProvider(runtime.fs, { rootDir: root }, () =>

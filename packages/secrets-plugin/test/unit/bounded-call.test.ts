@@ -129,3 +129,18 @@ describe('a backend message cannot forge a log line', () => {
     );
   });
 });
+
+describe('a rejection with no text form', () => {
+  it('keeps its value as the cause instead of throwing a TypeError', () => {
+    const value: unknown = Object.create(null);
+    const failure = toSecretsError(value, 'AwsKmsProvider', 'get');
+    expect(failure.message).toBe('AwsKmsProvider get failed: a value with no text form');
+    expect(failure.cause).toBe(value);
+  });
+  it('names an outage whose cause has no text form', () => {
+    const value = Object.assign(Object.create(null) as object, { code: 'ECONNREFUSED' });
+    const failure = toSecretsError(value, 'AwsKmsProvider', 'get');
+    expect(failure).toBeInstanceOf(SecretProviderUnavailableError);
+    expect(failure.message).toBe('AwsKmsProvider is unreachable: a value with no text form');
+  });
+});

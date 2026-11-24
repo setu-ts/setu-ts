@@ -31,10 +31,33 @@ export interface AzureServiceClient {
 /** Shape of the Azure Blob SDK module. */
 export interface AzureSdkModule {
   BlobServiceClient: {
-    new (url: string, credential?: unknown): AzureServiceClient;
-    fromConnectionString(connectionString: string): AzureServiceClient;
+    new (url: string, credential?: unknown, options?: AzurePipelineOptions): AzureServiceClient;
+    fromConnectionString(
+      connectionString: string,
+      options?: AzurePipelineOptions,
+    ): AzureServiceClient;
   };
   StorageSharedKeyCredential: new (accountName: string, accountKey: string) => unknown;
+}
+
+/** The SDK pipeline options the provider sets: one attempt per call. */
+export interface AzurePipelineOptions {
+  retryOptions: { maxTries: number };
+}
+
+/**
+ * The SDK retries a refused or reset connection and a `500`/`503` on its own,
+ * and its final error does not say an earlier attempt was made, so a write
+ * that may have landed would read as one that did not. One attempt keeps the
+ * 503/504 answer honest (as the GCS arm turns its SDK retry off); the caller
+ * retries, under `requestTimeoutMs`, knowing which it got.
+ *
+ * @returns The options for one client
+ */
+export function azurePipelineOptions(): AzurePipelineOptions {
+  // A fresh object each time: the SDK writes into the one it is given (the
+  // connection string's proxy, for one), which must not reach another client.
+  return { retryOptions: { maxTries: 1 } };
 }
 
 /** Options every bounded Azure operation takes. */
@@ -212,12 +235,15 @@ export function buildAzureServiceClient(
   options: AzureBlobProviderOptions,
 ): AzureServiceClient {
   if (options.connectionString) {
-    return mod.BlobServiceClient.fromConnectionString(options.connectionString);
+    return mod.BlobServiceClient.fromConnectionString(
+      options.connectionString,
+      azurePipelineOptions(),
+    );
   }
   if (options.accountName && options.accountKey) {
     const credential = new mod.StorageSharedKeyCredential(options.accountName, options.accountKey);
     const url = options.endpoint ?? `https://${options.accountName}.blob.core.windows.net`;
-    return new mod.BlobServiceClient(url, credential);
+    return new mod.BlobServiceClient(url, credential, azurePipelineOptions());
   }
   throw new Error(
     'AzureBlobProvider requires either options.connectionString or options.accountName + options.accountKey',
@@ -354,7 +380,8 @@ export class AzureBlobProvider implements StorageProvider {
    * @param options - Azure connection/injection options
    * @param now - Wall-clock source (epoch ms) for SAS expiry. Injected by
    *   `createProvider` as `runtime.now()` (the only sanctioned clock outside
-   *   `packages/runtime`). Without one, `getSignedUrl` rejects by name.
+   *   `packages/runtime`). Without one, `getSignedUrl` rejects by name, unless
+   *   the client has its own `getSignedUrl`.
    * @param timing - The runtime timer surface for the bound (ambient timers
    *   when absent)
    * @throws {RangeError} When `requestTimeoutMs` is out of range
@@ -582,7 +609,8 @@ export class AzureBlobProvider implements StorageProvider {
    * @param options - Expiry in seconds
    * @returns The SAS URL
    * @throws {Error} (as a rejection) When the provider is not connected, has no
-   *   clock, or its client holds no account key to sign with
+   *   clock for the SDK signing path (a client with its own `getSignedUrl` needs
+   *   none), or its client holds no account key to sign with
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     // Checked here too: the provider is exported and can be used directly, and
@@ -593,7 +621,9 @@ export class AzureBlobProvider implements StorageProvider {
       return Promise.reject(new Error('AzureBlobProvider is not connected. Call connect() first.'));
     }
     const now = this.#now;
-    if (now === undefined) {
+    // A client with its own signer computes its own expiry, so only the SDK
+    // signing path needs the clock.
+    if (now === undefined && this.#client.getSignedUrl === undefined) {
       return Promise.reject(
         new Error(
           'AzureBlobProvider.getSignedUrl needs a clock: pass now to the constructor, or ' +
@@ -611,7 +641,7 @@ export class AzureBlobProvider implements StorageProvider {
       try {
         return await blob.generateSasUrl({
           permissions: 'r',
-          expiresOn: new Date(now() + options.expiresIn * 1000),
+          expiresOn: new Date(now!() + options.expiresIn * 1000),
         });
       } catch (error) {
         // The SDK refuses with a RangeError naming the shared key when the

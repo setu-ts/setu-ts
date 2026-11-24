@@ -20,7 +20,9 @@ Dashboards and alerts on `worker_pool_tasks_rejected_total` gain a `reason="abor
 these cancellations, including calls aborted after admission. They do not increment completed or
 failed counts. A `signal` that is not an `AbortSignal` of this realm (a polyfill, or one from
 another realm such as jsdom) now rejects the call with `TypeError` before it is admitted; it used to
-be ignored.
+be ignored. To keep cancelling from such a signal, pass a native `AbortController`'s signal and
+abort it at once if the other signal is already `aborted`, otherwise from that signal's `abort`
+event; to run without cancellation, omit `signal`.
 
 ### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
 
@@ -39,7 +41,9 @@ be ignored.
   `<ProviderClass> <get|set> failed:`.
 - **Mail sends.** An SES or SendGrid send that does not settle within `requestTimeoutMs` rejects
   with `BackendOutcomeUnknownError` (`504`): the message may have gone out. A refused connection is
-  `BackendUnavailableError` (`503`).
+  `BackendUnavailableError` (`503`) on a single attempt; the SES client retries one by default and
+  then answers `504`, since an earlier attempt may have delivered. S3 and B2 writes follow the same
+  rule, so a write refused at connection time under the SDK's default retries is a `504`.
 - **Time bounds.** Cloud calls are bounded by `requestTimeoutMs` (storage 30 s, secrets 5 s, SES and
   SendGrid 15 s). Raise it for large storage transfers, or set `0` to keep the old unbounded call.
 - **GCS.** The SDK's own retry is off, so a `5xx` answers at once; retry in the caller. A provider
@@ -50,8 +54,11 @@ be ignored.
   sends JSON requests to the variable and uploads to `endpoint`); set one or the other. A
   `GcsProvider` built directly with `endpoint` and no `client` now needs `runtime.env` as its fourth
   argument, or the constructor throws `RangeError`. Buffered downloads release their streams at the
-  deadline.
-- **Azure storage.** `connectionString` now works as documented; a SAS-URL passed as
+  deadline. A `put` past its bound answers `504` while its upload request may still finish: the SDK
+  offers no way to cancel one.
+- **Azure storage.** The client the arm builds has the SDK's own retry off (one attempt per call; an
+  injected client keeps its own), so a refusal answers at once and a write's `503` means it was not
+  sent; retry in the caller. `connectionString` now works as documented; a SAS-URL passed as
   `connectionString` is no longer accepted (use the SAS connection-string form).
 - **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
 - **Uploads.** A disallowed MIME type answers `415` instead of `400`. `createUploadMiddleware`
@@ -63,13 +70,16 @@ be ignored.
   way.
 - **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
   `timeout`, not `timeoutSeconds`. `initTimeoutSeconds` must be a finite number in `(0, 2147483]`,
-  so `0` is refused. A failed or timed-out startup snapshot leaves `status().healthy` false until a
-  successful refill.
+  so `0` is refused. A failed, timed-out or invalid (`valid: false`) startup snapshot leaves
+  `status().healthy` false until a successful refill.
 - **Slack.** A notification's `subject` is now part of the posted text.
 - **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`. DNS refresh
   failures/empty answers respect the attempt TTL and keep the last transport; with no transport yet,
   a failed or timed-out lookup lets nodemailer resolve the host itself. `connectionTimeoutMs` also
-  bounds DNS refreshes; concurrent sends share one lookup and disconnect wins connect.
+  bounds DNS refreshes; concurrent sends share one lookup and disconnect wins connect. Under
+  `dnsTtlMs` a send whose connection fails before any SMTP command moves to the next resolved
+  address (at most four in all), so a failing send can take about `connectionTimeoutMs` times the
+  addresses tried.
 - **Vault.** HTTP 5xx reads and writes now reject with `SecretProviderUnavailableError` (503); 4xx
   handling is unchanged.
 - **Other refusals.** Azure downloads with no body reject unless marked deleted. Bun filesystem

@@ -81,6 +81,46 @@ export interface SmtpRuntime {
   readonly hrtime: () => number;
   /** Runtime timers for bounding DNS refreshes; ambient timers when absent. */
   readonly timing?: DeadlineOptions['timing'];
+  /**
+   * A number in `[0, 1)` that picks which resolved address a new transport
+   * starts on, so senders spread over a multi-address answer; `Math.random`
+   * when absent.
+   */
+  readonly random?: (() => number) | undefined;
+}
+
+/** Most addresses one send tries: the first and up to three more. */
+export const SMTP_MAX_ADDRESS_TRIES = 4;
+
+/**
+ * `true` for a failure before any SMTP command was sent, read from the shapes
+ * nodemailer 10.6.0 was measured to give: a TCP connect that failed
+ * (`ESOCKET`, `syscall: 'connect'`: refused or unreachable), a connection that
+ * never opened (`ETIMEDOUT`, `timeoutType: 'CONNECT_TIMEOUT'`) and a server
+ * that never greeted (`GREETING_TIMEOUT`; the client sends nothing before the
+ * greeting). Only then may the same message go to another address.
+ *
+ * nodemailer reports a dropped connection as `ECONNECTION`/`CONN` and a stall
+ * as `ETIMEDOUT`/`SOCKET_TIMEOUT` in every phase, after the message body
+ * included, when the server may have accepted it: those are never retried.
+ *
+ * @param error - The send's rejection
+ * @returns Whether no command reached the server
+ */
+export function isPreCommandFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, command, syscall, timeoutType } = error as {
+    code?: unknown;
+    command?: unknown;
+    syscall?: unknown;
+    timeoutType?: unknown;
+  };
+  if (command !== 'CONN') return false;
+  if (code === 'ESOCKET') return syscall === 'connect';
+  if (code === 'ETIMEDOUT') {
+    return timeoutType === 'CONNECT_TIMEOUT' || timeoutType === 'GREETING_TIMEOUT';
+  }
+  return false;
 }
 
 /**
@@ -231,10 +271,19 @@ export class SmtpProvider implements MailProvider {
   #module: NodemailerModule | null = null;
   /** The address the current transport connects to, under `dnsTtlMs`. */
   #address: string | undefined;
+  /** Every address of the last answer, under `dnsTtlMs`: the failover list. */
+  #addresses: readonly string[] = [];
+  /** The address each pinned transport connects to. */
+  readonly #addressOf = new WeakMap<ISmtpTransport, string>();
   /** Last DNS attempt (including failed/empty lookups), monotonic ms. */
   #triedAt = Number.NEGATIVE_INFINITY;
   /** A generation shares one lookup, including with concurrent sends. */
   #refresh: { generation: number; promise: Promise<ISmtpTransport> } | null = null;
+  /**
+   * The resolver call still running, even after its deadline passed: the
+   * deadline only stops waiting for it, so no second lookup starts beside it.
+   */
+  #lookup: Promise<unknown> | null = null;
   readonly #users = new Map<ISmtpTransport, number>();
   readonly #retired = new Set<ISmtpTransport>();
   readonly #closed = new WeakSet<ISmtpTransport>();
@@ -352,17 +401,25 @@ export class SmtpProvider implements MailProvider {
     if (this.#transport !== null && now - this.#triedAt < this.#options.dnsTtlMs!) {
       return this.#transport;
     }
+    // A lookup that outlived its deadline is still running: keep the transport
+    // in use rather than stacking another resolver call on it.
+    if (this.#transport !== null && this.#lookup !== null) return this.#transport;
     this.#triedAt = now;
     const host = this.#options.host!;
-    let address: string | undefined;
+    let addresses: readonly string[];
     try {
-      address = (
-        await withDeadline(() => runtime.dns!.resolveHost(host), {
-          timeoutMs: this.#options.connectionTimeoutMs ?? 120_000,
-          onTimeout: () => new Error(`SmtpProvider: DNS lookup for '${host}' timed out`),
-          ...(runtime.timing === undefined ? {} : { timing: runtime.timing }),
+      const lookup = runtime.dns!.resolveHost(host);
+      this.#lookup = lookup;
+      void lookup
+        .finally(() => {
+          if (this.#lookup === lookup) this.#lookup = null;
         })
-      )[0];
+        .catch(() => {});
+      addresses = await withDeadline(() => lookup, {
+        timeoutMs: this.#options.connectionTimeoutMs ?? 120_000,
+        onTimeout: () => new Error(`SmtpProvider: DNS lookup for '${host}' timed out`),
+        ...(runtime.timing === undefined ? {} : { timing: runtime.timing }),
+      });
     } catch (error) {
       // A failed or timed-out refresh keeps the last good transport; with none
       // yet, nodemailer resolves the name itself (the runtime resolver reads
@@ -374,17 +431,59 @@ export class SmtpProvider implements MailProvider {
       return this.#transport;
     }
     if (generation !== this.#generation) throw notConnected();
-    if (address === undefined) {
+    if (addresses.length === 0) {
       if (this.#transport !== null) return this.#transport;
       throw new Error(`SmtpProvider: '${host}' resolved to no address`);
     }
-    if (this.#transport !== null && address === this.#address) {
+    this.#addresses = addresses;
+    // The address in use stays while the answer still lists it.
+    if (
+      this.#transport !== null &&
+      this.#address !== undefined &&
+      addresses.includes(this.#address)
+    ) {
       return this.#transport;
     }
+    const drawn = (runtime.random ?? Math.random)();
+    // A value outside [0, 1) (or NaN) starts on the first address.
+    const fraction = drawn >= 0 && drawn < 1 ? drawn : 0;
+    return this.#pinAddress(addresses[Math.floor(fraction * addresses.length)]!);
+  }
+
+  /** Replaces the transport with one for `address`, retiring the old one. */
+  #pinAddress(address: string): ISmtpTransport {
     if (this.#transport !== null) this.#retire(this.#transport);
     this.#address = address;
     this.#transport = adaptNodemailerModule(this.#module!, this.#options, address);
+    this.#addressOf.set(this.#transport, address);
     return this.#transport;
+  }
+
+  /**
+   * After a send could not connect on an address, moves it to one this send
+   * has not tried: the transport in use if another send already moved there,
+   * otherwise the next untried address in the answer. `false` when none is
+   * left, or the provider is not on resolved addresses.
+   */
+  #failover(tried: ReadonlySet<string>): boolean {
+    if (this.#transport === null || this.#module === null || this.#addresses.length < 2) {
+      return false;
+    }
+    if (this.#address !== undefined && !tried.has(this.#address)) return true;
+    const from = Math.max(0, this.#addresses.indexOf(this.#address ?? ''));
+    for (let step = 1; step <= this.#addresses.length; step++) {
+      const candidate = this.#addresses[(from + step) % this.#addresses.length]!;
+      if (!tried.has(candidate)) {
+        this.#pinAddress(candidate);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** How many addresses one send may try. */
+  #addressTries(): number {
+    return this.#usesDnsTtl() ? Math.min(this.#addresses.length, SMTP_MAX_ADDRESS_TRIES) : 1;
   }
 
   /** A refresh must not close a transport while an earlier send still uses it. */
@@ -433,6 +532,7 @@ export class SmtpProvider implements MailProvider {
     const transport = this.#transport;
     this.#transport = null;
     this.#address = undefined;
+    this.#addresses = [];
     this.#triedAt = Number.NEGATIVE_INFINITY;
     delete this.isHealthy;
     // A transport the application passed in stays open: it owns that one.
@@ -452,12 +552,35 @@ export class SmtpProvider implements MailProvider {
    * @throws {Error} If the provider is not connected or the transport rejects
    */
   async send(message: OutgoingMail): Promise<void> {
-    await this.#useTransport((transport) => transport.sendMail(toNodemailerMessage(message)));
+    const mail = toNodemailerMessage(message);
+    // Under `dnsTtlMs` a connection that fails before any command is tried on
+    // the next resolved address (RFC 5321 §5.1), each address at most once and
+    // at most `SMTP_MAX_ADDRESS_TRIES` in all; the last failure is the answer.
+    const tried = new Set<string>();
+    for (;;) {
+      let used: ISmtpTransport | undefined;
+      try {
+        await this.#useTransport((transport) => {
+          used = transport;
+          return transport.sendMail(mail);
+        });
+        return;
+      } catch (error) {
+        const address = used === undefined ? undefined : this.#addressOf.get(used);
+        if (address === undefined || !isPreCommandFailure(error)) throw error;
+        tried.add(address);
+        if (tried.size >= this.#addressTries() || !this.#failover(tried)) throw error;
+      }
+    }
   }
 
   /** Pins a transport for a send or probe until that operation settles. */
   async #useTransport(run: (transport: ISmtpTransport) => Promise<unknown>): Promise<void> {
+    const generation = this.#generation;
     const transport = await this.#currentTransport();
+    // A disconnect while the transport was chosen retires it (and closes it,
+    // with no user yet): this send must not run on it.
+    if (generation !== this.#generation) throw notConnected();
     this.#users.set(transport, (this.#users.get(transport) ?? 0) + 1);
     try {
       await run(transport);

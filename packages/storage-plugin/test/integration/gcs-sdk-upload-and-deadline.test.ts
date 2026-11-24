@@ -1,8 +1,20 @@
 import { createServer } from 'node:http';
-import { describe, expect, it } from 'vitest';
-import { BackendUnavailableError } from '@setu-ts/common';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { adaptGcsModule, GcsProvider } from '../../src/providers/gcs-provider.ts';
 import type { GcsSdkModule } from '../../src/providers/gcs-provider.ts';
+
+// The SDK reads STORAGE_EMULATOR_HOST from the process itself: a developer's
+// setting would send these requests elsewhere, so each test runs without it.
+let emulatorHost: string | undefined;
+beforeEach(() => {
+  emulatorHost = process.env['STORAGE_EMULATOR_HOST'];
+  delete process.env['STORAGE_EMULATOR_HOST'];
+});
+afterEach(() => {
+  if (emulatorHost === undefined) delete process.env['STORAGE_EMULATOR_HOST'];
+  else process.env['STORAGE_EMULATOR_HOST'] = emulatorHost;
+});
 
 describe('real GCS SDK upload authentication', () => {
   for (const endpointAuth of [true, false]) {
@@ -122,6 +134,51 @@ describe('real GCS SDK drip download stops at its deadline', () => {
       expect(outcome).toBe('closed');
       expect(mediaRequests).toBe(1);
       expect(closedAt! - started).toBeLessThan(2_000);
+      await provider.disconnect();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('a GCS upload past its deadline answers outcome-unknown', () => {
+  it('rejects with 504 within the bound against a stalled backend', async () => {
+    let uploads = 0;
+    // Takes the upload and never answers it, as a stalled backend would.
+    const server = createServer((req, res) => {
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{}');
+        return;
+      }
+      uploads++;
+      req.resume();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const provider = new GcsProvider(
+        {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+          endpointAuth: false,
+          requestTimeoutMs: 200,
+        },
+        undefined,
+        undefined,
+        {},
+      );
+      await provider.connect();
+      const started = performance.now();
+      await expect(provider.put('k', new Uint8Array(16))).rejects.toBeInstanceOf(
+        BackendOutcomeUnknownError,
+      );
+      expect(performance.now() - started).toBeLessThan(2_000);
+      expect(uploads).toBeGreaterThan(0);
+      // The SDK gives an upload no cancellation, so its request is left to the
+      // backend: measured on 7.22, destroying the write stream does not close
+      // it. The write may still land, which is what the 504 says.
       await provider.disconnect();
     } finally {
       server.closeAllConnections();

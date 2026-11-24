@@ -193,22 +193,23 @@ direct GCS caller that sets `endpoint` without a `client` must pass the runtime 
 fourth constructor argument (without it the constructor throws a `RangeError`), so a set
 `STORAGE_EMULATOR_HOST` beside `endpoint` is refused; the plugin supplies it automatically. A
 provider constructed directly needs `now` as its second argument; without one, `getSignedUrl`
-rejects by name. The Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob
-name and uses the client's own host; a client without an account key (a SAS connection string,
-managed identity) is refused. GCS signs with the credentials the SDK finds
-(`GOOGLE_APPLICATION_CREDENTIALS`).
+rejects by name (except an Azure client with its own `getSignedUrl`, which needs no clock). The
+Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob name and uses the
+client's own host; a client without an account key (a SAS connection string, managed identity) is
+refused. GCS signs with the credentials the SDK finds (`GOOGLE_APPLICATION_CREDENTIALS`).
 
 ## Faults, `exists` and `delete`
 
 An outage is an error, never "not there". On every cloud arm:
 
 - `exists` resolves `false` only when the backend answers that the object is absent; `delete`
-  resolves `false` only when the object was absent. S3 and B2 cannot tell from their delete answer,
-  so they check with a `HEAD` first; an object removed between that check and the delete still
-  resolves `true`. A credential without `s3:ListBucket` gets `403` for an absent key on that check,
-  so presence is unknown and the delete goes ahead and resolves `true`. Any other failure rejects.
-  Every provider gives the same `delete()` answer, except S3/B2 under such a credential. An S3/B2
-  `delete` is two requests, each under its own `requestTimeoutMs`.
+  resolves `false` only when the provider knows no object was there. S3 and B2 cannot tell from
+  their delete answer, so they check with a `HEAD` first; an object removed between that check and
+  the delete still resolves `true`. A credential without `s3:ListBucket` gets `403` for an absent
+  key on that check, so presence is unknown and the delete goes ahead and resolves `true`; grant
+  `s3:ListBucket` for exact answers. Any other failure rejects. Every provider gives the same
+  `delete()` answer, except S3/B2 under such a credential. An S3/B2 `delete` is two requests, each
+  under its own `requestTimeoutMs`.
 - A key with a `.` or `..` path segment is refused with a `400` by every `StorageService` call, and
   by the S3, B2, GCS and Azure providers used directly: on Azure the SDK resolves `..` in the blob
   URL, so such a key could reach another container. An empty key or one of only `/`, or one that is
@@ -218,8 +219,13 @@ An outage is an error, never "not there". On every cloud arm:
 - A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/
   `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
   `delete` with `BackendUnavailableError` when the request was refused before it was sent or
-  answered `503`, and `BackendOutcomeUnknownError` (`504`) when it may have been applied, including
-  HTTP `500`/`502`/`504`.
+  answered `503` on the SDK's only attempt, and `BackendOutcomeUnknownError` (`504`) when it may
+  have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried (the AWS
+  SDK records its attempts), so an S3 or B2 write refused at connection time answers `504` under the
+  SDK's default retries. The Azure client the arm builds makes one attempt per call (the SDK's retry
+  is off, as on GCS), so its `503` still means not sent; an injected client keeps its own retries. A
+  GCS upload past its bound answers `504` while its request may still finish: the SDK offers no way
+  to cancel an upload, so its connection stays open until the backend answers or closes it.
 - Anything else — a refused credential, a missing bucket — rejects with an `Error` whose message
   starts `storage-plugin (<provider>): <call> failed:`, so the masked `500` names the backend in the
   log.
@@ -234,8 +240,8 @@ An outage is an error, never "not there". On every cloud arm:
 | Memory   | `false`                      | `false`                      |
 | Local    | `false`                      | `false`                      |
 
-The Azure SDK retries a refused connection with backoff, so on Azure an outage answers when
-`requestTimeoutMs` fires rather than at once.
+The Azure client the arm builds makes one attempt per call, so a refused connection answers at once
+(an injected `BlobServiceClient` keeps its own retry policy).
 
 A miss reads as `null`/`false` only when the backend names a missing object. S3 `get`/`getStream`
 reject a `NoSuchBucket` answer and every Azure call rejects `ContainerNotFound`; a GCS error with
@@ -245,7 +251,7 @@ reads as `NotFound`, and GCS answers `404` for a missing bucket as for a missing
 `exists` and `delete` answer `false`. Azure downloads without a body reject unless
 `deleted === true`. Injected Azure operations receive `{ abortSignal }`; injected
 `IS3Backend.put(path, data, options?, signal?)`, `delete(path, signal?)` and `head(path, signal?)`
-receive the deadline signal. Buffered GCS downloads destroy their read stream on deadline; a failed
+receive the deadline signal. Buffered GCS downloads destroy their SDK stream on deadline; a failed
 first streaming read releases an iterator without waiting for `return()`. Omit a provider's
 `getStream` for the buffered fallback over `get`; an implemented `getStream` returning `null` makes
 the service throw `StorageObjectNotFoundError` with no fallback.

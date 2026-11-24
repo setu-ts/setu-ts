@@ -3,11 +3,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import type { IGcsClient, IS3Backend, StorageProvider } from '../../src/interfaces/index.ts';
+import type {
+  IAzureBlobClient,
+  IGcsClient,
+  IS3Backend,
+  StorageProvider,
+} from '../../src/interfaces/index.ts';
 import type { AzureOperationOptions, AzureSdkModule } from '../../src/providers/azure-provider.ts';
 import {
   adaptAzureModule,
   AzureBlobProvider,
+  buildAzureServiceClient,
   isAzureNotFound,
 } from '../../src/providers/azure-provider.ts';
 import type { GcsSdkModule } from '../../src/providers/gcs-provider.ts';
@@ -382,6 +388,136 @@ describe('GCS failed first read releases an iterator without awaiting return', (
     await provider.connect();
     await expect(provider.getStream('k')).rejects.toMatchObject({ cause: error });
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('a synchronous iterator teardown throw keeps the first-read answer', () => {
+  it('reads a 404 first read as absent', async () => {
+    const provider = gcs({
+      createReadStream: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(Object.assign(new Error('gone'), { code: 404 })),
+          return: () => {
+            throw new Error('teardown failed');
+          },
+        }),
+      }),
+    });
+    await provider.connect();
+    expect(await provider.getStream('k')).toBeNull();
+  });
+});
+
+describe('a GCS source whose destroy() throws keeps the first-read answer', () => {
+  it('reads a 404 first read as absent', async () => {
+    const provider = gcs({
+      createReadStream: () => ({
+        destroy: () => {
+          throw new Error('destroy failed');
+        },
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(Object.assign(new Error('gone'), { code: 404 })),
+        }),
+      }),
+    });
+    await provider.connect();
+    expect(await provider.getStream('k')).toBeNull();
+  });
+});
+
+describe('the Azure SDK client makes one attempt per call', () => {
+  it('passes maxTries 1 for both connection forms', () => {
+    const seen: unknown[] = [];
+    const client = { getContainerClient: () => ({}) };
+    const mod = {
+      BlobServiceClient: Object.assign(
+        class {
+          constructor(_url: string, _credential: unknown, options: unknown) {
+            seen.push(options);
+            return client;
+          }
+        },
+        {
+          fromConnectionString: (_cs: string, options: unknown) => {
+            seen.push(options);
+            return client;
+          },
+        },
+      ),
+      StorageSharedKeyCredential: class {},
+    } as unknown as AzureSdkModule;
+    buildAzureServiceClient(mod, { containerName: 'c', connectionString: 'cs' });
+    buildAzureServiceClient(mod, { containerName: 'c', accountName: 'a', accountKey: 'k' });
+    expect(seen).toEqual([{ retryOptions: { maxTries: 1 } }, { retryOptions: { maxTries: 1 } }]);
+  });
+});
+
+describe('write outcomes after an SDK retried', () => {
+  const s3Rejecting = (error: unknown): S3Provider =>
+    new S3Provider({
+      bucket: 'b',
+      client: {
+        put: () => Promise.reject(error),
+        get: () => Promise.reject(error),
+        delete: () => Promise.reject(error),
+        head: () => Promise.reject(error),
+        getSignedUrl: () => Promise.reject(error),
+        getStream: () => Promise.reject(error),
+      } as unknown as IS3Backend,
+    });
+  it('a 503 after retries is outcome-unknown for a write, unavailable for a read', async () => {
+    const error = Object.assign(new Error('Slow Down'), {
+      $metadata: { httpStatusCode: 503, attempts: 3 },
+    });
+    const provider = s3Rejecting(error);
+    await provider.connect();
+    await expect(provider.put('k', new Uint8Array([1]))).rejects.toBeInstanceOf(
+      BackendOutcomeUnknownError,
+    );
+    await expect(provider.get('k')).rejects.toBeInstanceOf(BackendUnavailableError);
+  });
+  it('a 503 on a single attempt stays unavailable for a write', async () => {
+    const error = Object.assign(new Error('Slow Down'), {
+      $metadata: { httpStatusCode: 503, attempts: 1 },
+    });
+    const provider = s3Rejecting(error);
+    await provider.connect();
+    await expect(provider.put('k', new Uint8Array([1]))).rejects.toBeInstanceOf(
+      BackendUnavailableError,
+    );
+  });
+  it('a rejection with no text form keeps its value as the cause', async () => {
+    const error: unknown = Object.create(null);
+    const provider = s3Rejecting(error);
+    await provider.connect();
+    const failure = (await provider.get('k').catch((e: unknown) => e)) as Error;
+    expect(failure.message).toMatch(/a value with no text form/);
+    expect(failure.cause).toBe(error);
+  });
+});
+
+describe('an Azure client with its own signer needs no clock', () => {
+  it('signs through the client without now', async () => {
+    const provider = new AzureBlobProvider({
+      containerName: 'c',
+      client: {
+        getContainerClient: () => ({ getBlockBlobClient: () => ({}) }),
+        getSignedUrl: (path: string, expiresIn: number) =>
+          Promise.resolve(`https://signed.test/${path}?e=${expiresIn}`),
+      } as unknown as IAzureBlobClient,
+    });
+    await provider.connect();
+    expect(await provider.getSignedUrl('k', { expiresIn: 60 })).toBe('https://signed.test/k?e=60');
+  });
+  it('still refuses the SDK signing path without now', async () => {
+    const provider = new AzureBlobProvider({
+      containerName: 'c',
+      client: {
+        getContainerClient: () => ({ getBlockBlobClient: () => ({}) }),
+      } as unknown as IAzureBlobClient,
+    });
+    await provider.connect();
+    await expect(provider.getSignedUrl('k', { expiresIn: 60 })).rejects.toThrow(/needs a clock/);
   });
 });
 

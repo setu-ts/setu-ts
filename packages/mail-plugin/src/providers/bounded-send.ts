@@ -5,8 +5,9 @@
  * A send that does not settle within `requestTimeoutMs` rejects with
  * `BackendOutcomeUnknownError` (`504`): the message may already have gone out,
  * so a blind retry risks a duplicate. A refused connection and the other shapes
- * `toBackendFault` recognises answer `503` or `504` by that table. Anything else
- * is rethrown unchanged.
+ * `toBackendFault` recognises answer `503` or `504` by that table, except that
+ * a `503` after the SDK retried (`$metadata.attempts` above 1) is a `504`.
+ * Anything else is rethrown unchanged.
  *
  * Internal: nothing here is exported from the package barrel.
  *
@@ -15,6 +16,7 @@
 import type { DeadlineOptions } from '@setu-ts/common';
 import {
   BackendOutcomeUnknownError,
+  BackendUnavailableError,
   deadlineRangeError,
   toBackendFault,
   withDeadline,
@@ -89,7 +91,40 @@ export function toMailError(error: unknown, provider: string): Error {
   if (error instanceof MailDeadlineError) {
     return new BackendOutcomeUnknownError(label, { cause: error });
   }
-  return (
-    toBackendFault(error, label) ?? (error instanceof Error ? error : new Error(String(error)))
-  );
+  const fault = toBackendFault(error, label);
+  // The SES client retries a reset or refused connection on its own
+  // (`$metadata.attempts` records it): a refusal after a retry may follow an
+  // attempt that delivered, so it is outcome-unknown, not "not sent".
+  if (fault instanceof BackendUnavailableError && sdkAttempts(error) > 1) {
+    return new BackendOutcomeUnknownError(label, { cause: error });
+  }
+  return fault ?? (error instanceof Error ? error : new Error(textOf(error)));
+}
+
+/**
+ * The attempts an SDK made before it rejected (`$metadata.attempts`), `1` when
+ * it records none.
+ *
+ * @param error - The rejection
+ * @returns The attempt count
+ */
+function sdkAttempts(error: unknown): number {
+  if (typeof error !== 'object' || error === null) return 1;
+  const attempts = (error as { $metadata?: { attempts?: unknown } }).$metadata?.attempts;
+  return typeof attempts === 'number' && attempts > 1 ? attempts : 1;
+}
+
+/**
+ * Text for a non-`Error` rejection; one with no text form (no prototype) gets
+ * a fixed description instead of a `TypeError`.
+ *
+ * @param value - The rejection
+ * @returns Its text
+ */
+function textOf(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return 'a value with no text form';
+  }
 }

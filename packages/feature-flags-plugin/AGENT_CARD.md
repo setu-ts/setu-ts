@@ -56,4 +56,5 @@ export function registerCheckoutRoutes(router: IRouterApi): void {
 - `MemoryProvider` supports `setFlag`, `removeFlag` and `replaceFlags`; config flags stay fixed.
 - `statusCode` overrides the guard's refusal status; `fallback` takes precedence.
 - LaunchDarkly accepts `sdkKey` or injected `client`, `fallbackValue`, `initTimeoutSeconds` and
-  `ldOptions` in `options`. A failed startup snapshot stays unhealthy until a successful refill.
+  `ldOptions` in `options`. A failed, timed-out or invalid startup snapshot stays unhealthy until a
+  valid refill.

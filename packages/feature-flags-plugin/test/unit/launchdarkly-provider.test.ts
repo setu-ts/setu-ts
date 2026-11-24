@@ -64,6 +64,54 @@ describe('LaunchDarklyProvider', () => {
     expect(provider.status()).toEqual({ healthy: true });
     await provider.stop();
   });
+  it('reports an invalid startup snapshot as unhealthy until a valid refill', async () => {
+    const client = new FakeLaunchDarklyClient({ invalidSnapshot: true });
+    const provider = new LaunchDarklyProvider({ client });
+    await provider.start();
+    expect(provider.status()).toEqual({
+      healthy: false,
+      detail: 'LaunchDarkly returned an invalid flag snapshot',
+    });
+    const fixed = new FakeLaunchDarklyClient();
+    client.allFlagsState = fixed.allFlagsState.bind(fixed);
+    provider.isEnabled('beta');
+    await flush();
+    expect(provider.status()).toEqual({ healthy: true });
+    await provider.stop();
+  });
+  it('lets no refill from before stop() write into a later start', async () => {
+    const client = new FakeLaunchDarklyClient();
+    const read = client.allFlagsState.bind(client);
+    const provider = new LaunchDarklyProvider({ client, initTimeoutSeconds: 0.025 });
+    await provider.start();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    client.allFlagsState = async (context) => {
+      await held;
+      return read(context);
+    };
+    provider.isEnabled('beta', { userId: 'u1' });
+    await provider.stop();
+    client.allFlagsState = () => new Promise(() => {});
+    await provider.start();
+    expect(provider.status().healthy).toBe(false);
+    release();
+    await flush();
+    // The earlier start's refill answered valid, but it must not clear the
+    // later start's failure or seed its cache.
+    expect(provider.status().healthy).toBe(false);
+    await provider.stop();
+  });
+  it('reports a startup snapshot rejection with no text form', async () => {
+    const client = new FakeLaunchDarklyClient();
+    client.allFlagsState = () => Promise.reject(Object.create(null) as unknown);
+    const provider = new LaunchDarklyProvider({ client });
+    await provider.start();
+    expect(provider.status()).toEqual({ healthy: false, detail: 'a value with no text form' });
+    await provider.stop();
+  });
   it('reports its own provider type', () => {
     const provider = new LaunchDarklyProvider({ client: new FakeLaunchDarklyClient() });
     expect(provider.type).toBe('launchdarkly');

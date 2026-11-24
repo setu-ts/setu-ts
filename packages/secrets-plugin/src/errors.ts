@@ -117,5 +117,11 @@ export class SecretProviderUnavailableError extends Error {
 
 /** Renders a cause for the diagnostic message without trusting its shape. */
 function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+  if (cause instanceof Error) return cause.message;
+  try {
+    return String(cause);
+  } catch {
+    // An object with no prototype has no text form.
+    return 'a value with no text form';
+  }
 }

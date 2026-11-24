@@ -248,6 +248,10 @@ export function adaptGcsModule(
               options: Record<string, unknown>,
               cb: (error: Error | null) => void,
             ) {
+              // No cancellation is passed: the SDK (7.22) gives an upload none,
+              // and destroying its write stream was measured to leave the
+              // request open, so a `put` past its bound answers `504` while
+              // the request may still finish.
               const fileHandle = b.file(name);
               (
                 fileHandle as {
@@ -343,8 +347,10 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
  * Google Cloud Storage provider.
  *
  * Every call runs under `requestTimeoutMs`; buffered downloads destroy their
- * SDK stream when the deadline signal aborts. Every failure other than GCS's not-found
- * answer is classified by `toStorageError`. `getStream` waits for the first
+ * SDK stream when the deadline signal aborts. An upload cannot be cancelled
+ * (the SDK offers no way to): a `put` past its bound rejects with
+ * `BackendOutcomeUnknownError` while its request may still finish. Every
+ * failure other than GCS's not-found answer is classified by `toStorageError`. `getStream` waits for the first
  * chunk before it answers, so an absent object, a refused credential or an
  * outage surfaces before a response is sent; the stream after that is pulled,
  * not drained eagerly.
@@ -706,7 +712,13 @@ export class GcsProvider implements StorageProvider {
     } catch (error) {
       release();
       if (typeof (readable as { destroy?: unknown }).destroy !== 'function') {
-        void Promise.resolve(iterator.return?.()).catch(() => {});
+        // Cleanup never replaces the first-read error, whether `return()`
+        // throws synchronously or rejects.
+        try {
+          void Promise.resolve(iterator.return?.()).catch(() => {});
+        } catch {
+          // Ignored: the first-read error is the one reported.
+        }
       }
       if (isGcsNotFound(error)) return null;
       throw toStorageError(error, 'gcs', 'getStream');
@@ -749,5 +761,11 @@ function toBytes(chunk: unknown): Uint8Array {
 /** Destroys a node stream when it exposes `destroy`; a no-op otherwise. */
 function destroySource(source: unknown): void {
   const destroy = (source as { destroy?: unknown }).destroy;
-  if (typeof destroy === 'function') (destroy as () => void).call(source);
+  if (typeof destroy !== 'function') return;
+  try {
+    (destroy as () => void).call(source);
+  } catch {
+    // A source whose teardown throws must not replace the error (or the
+    // absence) the read itself reported.
+  }
 }

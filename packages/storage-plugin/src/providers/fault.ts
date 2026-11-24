@@ -118,8 +118,9 @@ export function answeredStatus(error: unknown): number | undefined {
  *   (`toBackendFault`'s table), or the backend answered `500`, `502`, `503` or
  *   `504`: a read becomes `BackendUnavailableError` (`503`); a write becomes
  *   `BackendUnavailableError` when the request was refused before it was sent
- *   or answered `503`, and `BackendOutcomeUnknownError` (`504`) when it
- *   may have been applied (an expired bound, a lost connection, `500`, `502`, `504`).
+ *   or answered `503`, on the SDK's only attempt, and `BackendOutcomeUnknownError`
+ *   (`504`) when it may have been applied (an expired bound, a lost connection,
+ *   `500`, `502`, `504`, or any refusal after the SDK retried).
  * - Anything else (a refused credential, a missing bucket) becomes a plain
  *   `Error` whose message names the plugin, the provider and the call, with the
  *   original as `cause`: the response stays a masked `500`, and the log says
@@ -153,19 +154,52 @@ export function toStorageError(
       else if (status === 500 || status === 502 || status === 504) fault = 'outcome-unknown';
     }
   }
+  // An SDK that retried (the AWS SDK records `$metadata.attempts`) may have
+  // applied an earlier attempt whose answer was lost: only a single refusal
+  // proves a write did not land.
+  if (fault === 'unavailable' && write && attemptsOf(error) > 1) fault = 'outcome-unknown';
   if (fault === 'unavailable' || (fault === 'outcome-unknown' && !write)) {
     return new BackendUnavailableError(label, { cause: error });
   }
   if (fault === 'outcome-unknown') {
     return new BackendOutcomeUnknownError(label, { cause: error });
   }
-  const message = error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : describeValue(error);
   // Control characters (CR/LF, C1 and the Unicode line separators included) are
   // replaced, so a backend's text
   // cannot forge a log line.
   // eslint-disable-next-line no-control-regex -- control characters are what it replaces
   const printable = message.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ');
   return new Error(`${label} failed: ${printable.slice(0, MAX_CAUSE_MESSAGE)}`, { cause: error });
+}
+
+/**
+ * The attempts an SDK made before it rejected (`$metadata.attempts`), `1` when
+ * it records none.
+ *
+ * @param error - The rejection
+ * @returns The attempt count
+ */
+function attemptsOf(error: unknown): number {
+  if (typeof error !== 'object' || error === null) return 1;
+  const attempts = (error as { $metadata?: { attempts?: unknown } }).$metadata?.attempts;
+  return typeof attempts === 'number' && attempts > 1 ? attempts : 1;
+}
+
+/**
+ * Text for a rejection that is not an `Error`; a value that cannot be turned
+ * into text (an object with no prototype) gets a fixed description, so the
+ * original stays the `cause` instead of a `TypeError` replacing it.
+ *
+ * @param value - The rejection
+ * @returns Its text
+ */
+function describeValue(value: unknown): string {
+  try {
+    return String(value);
+  } catch {
+    return 'a value with no text form';
+  }
 }
 
 /**
