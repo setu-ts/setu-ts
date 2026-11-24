@@ -233,7 +233,8 @@ published transient, so a RabbitMQ restart emptied every group queue of the mess
 Publishes also go through a **confirm channel**: `publish()` resolves only once RabbitMQ has
 accepted the message, and rejects when it refuses it (or the channel closes first).
 
-Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounded). The bound covers
+Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounded; the Pub/Sub
+terminal dead-letter forward is the one exception, always bounded at 15,000 ms). The bound covers
 every broker round trip the publish makes, so a paused broker — which keeps its socket open and
 answers nothing — rejects the call instead of leaving it pending forever. A rejection is not proof
 the message was dropped: RabbitMQ may still accept it after the bound.
@@ -562,8 +563,9 @@ connection.
 
 Every broker arm — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams and NATS — bounds each transport
 publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC requests/replies and
-outbox relay publishes. A value outside 0–2147483647, `NaN` or Infinity throws `RangeError` at
-plugin and broker construction.
+outbox relay publishes. The Pub/Sub terminal dead-letter forward is always bounded at 15,000 ms,
+even with `0`. A value outside 0–2147483647, `NaN` or Infinity throws `RangeError` at plugin and
+broker construction.
 
 An expired publish rejects with the exported `PublishTimeoutError`, which carries the published
 topic and the configured bound as the readonly fields `topic` and `timeoutMs`:
@@ -729,11 +731,12 @@ Per-broker limits:
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.
 
-`respond()` ignores `fanOut` and warns once: responders get the broker's queue-less delivery
-(fan-out on RabbitMQ and memory, where the first reply wins, as on NATS core). Pass `queue` to make
-responders compete. `onIntegrationEvent` with `inbox` refuses `fanOut` with a `RangeError`, because
-the inbox would drop it. A declarative subscription that asked for `fanOut` and got no marker back
-warns once.
+`respond()` ignores `fanOut` and warns once: responders get the broker's queue-less delivery: on
+RabbitMQ and memory every responder receives each request and the first reply wins; Kafka, NATS,
+Redis Streams, Pub/Sub and Service Bus already share a default group, so responders compete there.
+Pass `queue` to choose the group responders compete in. `onIntegrationEvent` with `inbox` refuses
+`fanOut` with a `RangeError`, because the inbox would drop it. A declarative subscription that asked
+for `fanOut` and got no marker back warns once.
 
 ## Request-reply
 

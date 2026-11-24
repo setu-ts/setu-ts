@@ -7308,7 +7308,10 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
 interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   // version:history
-  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms; default 15000, 0 unbounded, except the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). Timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';
@@ -7356,7 +7359,10 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
 interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   // version:history
-  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms; default 15000, 0 unbounded, except the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). Timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';
@@ -7642,9 +7648,10 @@ respond<TReq, TRes>(
 ```
 
 Pass `options.queue` to `respond` to load-balance requests across competing responders. `respond`
-ignores `fanOut` and warns once: responders get the broker's queue-less delivery (fan-out on
-RabbitMQ and memory, with the first reply winning, as on NATS core); pass `queue` to make them
-compete.
+ignores `fanOut` and warns once: responders get the broker's queue-less delivery: on RabbitMQ and
+memory every responder receives each request and the first reply wins; Kafka, NATS, Redis Streams,
+Pub/Sub and Service Bus already share a default group, so responders compete there. Pass `queue` to
+choose the group responders compete in.
 
 **Fan-out subscriptions (0.14.0).** `SubscribeOptions.fanOut: true` (from `@setu-ts/common`) asks
 for a subscription that receives every message published after it subscribed, independently of every

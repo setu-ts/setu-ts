@@ -115,6 +115,33 @@ describe('SQS consumer preparation', () => {
     await service.disconnect();
     expect(runtime.timerCount).toBe(0);
   });
+  it('reports again when a transient preparation failure turns into a definite refusal', async () => {
+    const getQueueAttributes = vi
+      .fn<() => Promise<Readonly<Record<string, string>>>>()
+      .mockRejectedValueOnce(new Error('AccessDenied'))
+      .mockResolvedValue({});
+    const { queue, runtime, transport } = await sqsHarness(
+      { deadLetterQueues: {} },
+      { getQueueAttributes },
+    );
+    const receive = vi.spyOn(transport, 'receive');
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    await service.connect();
+    service.process('build', vi.fn());
+    await runtime.advanceMs(5000);
+    expect(getQueueAttributes.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const texts = logger.error.mock.calls.map(([, meta]) =>
+      String((meta as { error: string }).error),
+    );
+    expect(texts).toHaveLength(2);
+    expect(texts[0]).toContain("the queue's attributes (RedrivePolicy) could not be read");
+    expect(texts[1]).toContain('no deadLetterQueues entry and the queue has no RedrivePolicy');
+    await runtime.advanceMs(5000);
+    expect(logger.error).toHaveBeenCalledTimes(2);
+    expect(receive.mock.calls.some(([url]) => url === 'source')).toBe(false);
+    await service.disconnect();
+  });
   it('clears a preparation in flight before shutdown and never polls after it completes', async () => {
     const read = Promise.withResolvers<Record<string, string>>();
     const { queue, runtime, transport } = await sqsHarness(

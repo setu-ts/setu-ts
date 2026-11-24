@@ -97,9 +97,9 @@ All notable changes to this project are documented here. The format follows
     job's attempts are lowered to `maxReceiveCount - 1` (at least 1) with one warning per name, so
     `onFailed` runs before SQS takes the message (V13-214).
   - A forwarded dead letter carries `setu-dead-letter-reason`, `setu-attempts` and
-    `setu-source-message-id` message attributes. On size-refusal code `InvalidParameterValue`, the
-    forward is retried once without those attributes, with a warning. A failed forward keeps the
-    source message.
+    `setu-source-message-id` message attributes. On `InvalidParameterValue` (SQS's code for an
+    oversize message, also used for other invalid parameters), the forward is retried once without
+    those attributes, with a warning. A failed forward keeps the source message.
   - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
     deleted, and its warning carries the message id, never the body (V13-213).
   - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
@@ -110,8 +110,8 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/queue-plugin`, every adapter (M143p, #616).** `queue_jobs_total` counts an outcome
   only after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle
   that fails is no longer counted.
-- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
-  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+- **`@setu-ts/messaging-plugin` (M143p, #616).** Pub/Sub terminal dead-letter forwards always time
+  out after 15,000 ms, even with `publishTimeoutMs: 0`; ordinary publishes still honor 0.
 
 - **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p, #616).**
   - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`

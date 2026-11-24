@@ -45,9 +45,6 @@ with a `deadLetterQueues` entry.
 `SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
 `publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
 
-- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
-  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
-
 ### Fan-out, consumer retries and the RabbitMQ outbox (`@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/common`)
 
 - **BREAKING: the backplane's `'messaging'` transport needs fan-out.** It now refuses to start with
@@ -79,6 +76,8 @@ with a `deadLetterQueues` entry.
 - **Not breaking: late frames.** The backplane README no longer claims a frame is never late. To
   drop late frames, set `maxFrameAgeMs` on the `'messaging'` or `'redis'` transport (replicas'
   clocks must agree); the default delivers them as before.
+- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
+  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
 - **`QueueSettlementState`** gains `'discarded'`: an exhaustive `switch` over it needs a new arm.
 
 ### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)

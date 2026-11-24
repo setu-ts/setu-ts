@@ -509,13 +509,14 @@ with three message attributes, then deleted from the source:
 | `setu-source-message-id`  | `String` | The source message's SQS id, as in the warning and the log |
 
 No error text is attached, and attributes the producer set are not carried over. On `SendMessage`
-error code `InvalidParameterValue` (the size refusal), the adapter warns once and retries the
-unchanged body once without the `setu-` attributes, which count toward the size limit. If the send
-fails, the source is kept and the job comes back after its visibility timeout, takes the dead-worker
-path, runs `onFailed` again and is forwarded again. Without a redrive policy on the queue, a send
-that keeps failing (target deleted, `sqs:SendMessage` or KMS denied) repeats that every timeout; a
-redrive policy bounds it, because SQS then takes the message itself. If the delete fails after the
-send, a duplicate-risk error is logged.
+error code `InvalidParameterValue` (SQS's code for a message over the size limit, which it also uses
+for other invalid parameters), the adapter logs a warning for that forward and retries the unchanged
+body once without the `setu-` attributes, which count toward the size limit. If the send fails, the
+source is kept and the job comes back after its visibility timeout, takes the dead-worker path, runs
+`onFailed` again and is forwarded again. Without a redrive policy on the queue, a send that keeps
+failing (target deleted, `sqs:SendMessage` or KMS denied) repeats that every timeout; a redrive
+policy bounds it, because SQS then takes the message itself. If the delete fails after the send, a
+duplicate-risk error is logged.
 
 **When the queue's redrive policy is lower than the job's attempts.** SQS moves a message itself on
 the receive after `maxReceiveCount`, without the framework seeing it. So when a policy exists, a
