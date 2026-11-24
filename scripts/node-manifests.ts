@@ -871,7 +871,14 @@ async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
   for (const entry of entries) {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      // Generated Prisma clients are git-ignored test fixtures (the packages shard writes them
+      // before its tests); their imports are not the member's, so the manifest skips them.
+      if (
+        entry.name === 'node_modules' ||
+        entry.name === 'dist' ||
+        entry.name.startsWith('prisma-client-generated')
+      )
+        continue;
       yield* walkSources(root, path);
     } else if (entry.isFile() && /\.(ts|tsx|mts)$/.test(entry.name)) {
       yield path;

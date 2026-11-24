@@ -92,12 +92,26 @@ jobs:
       # refuses transactions, which the outbox needs.
       OUTBOX_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
       AGENT_RUNS_PG_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
+      # The guarded MySQL cells are required here as in ci.yml.
+      MYSQL_URL: mysql://root:setu@127.0.0.1:3307/setu_test
       MONGODB_RS_URI: mongodb://127.0.0.1:27018/?replicaSet=rs0&directConnection=true
       # M135 §3.15: the vector-store conformance table runs its pgvector and
       # Qdrant arms against these; pgvector shares the postgres service.
       PGVECTOR_URL: postgres://postgres:postgres@127.0.0.1:5433/postgres
       QDRANT_URL: http://127.0.0.1:6333
     services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: setu
+          MYSQL_DATABASE: setu_test
+        ports:
+          - 127.0.0.1:3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psetu"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
       # M107 §6 (C8): PostgreSQL for the outbox real-backend suites, on host port
       # 5433 (see OUTBOX_POSTGRES_URL above).
       # M135 §3.15: pgvector's image is postgres:16 plus the extension.
@@ -468,6 +482,10 @@ jobs:
       - name: Node package tests with coverage (messaging-plugin)
         if: matrix.shard == 'messaging'
         run: pnpm test:coverage --no-tooling messaging-plugin
+
+      - name: Generate the MySQL Prisma fixture
+        if: matrix.shard == 'packages'
+        run: cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm dlx prisma@7.10.1 generate --config prisma.config.ts
 
       - name: Node package tests with coverage (all other members)
         if: matrix.shard == 'packages'
