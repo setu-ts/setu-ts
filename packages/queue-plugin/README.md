@@ -494,7 +494,8 @@ With none of these, the consumer is refused with `SqsDeadLetterTargetMissingErro
 says why (`no-target`, `policy-unreadable`, `attributes-unavailable` or `target-unresolvable`) and
 whose `cause` holds the read error when there was one. A processor declared in
 `QueuePlugin({ processors })` makes `app.start()` fail; an imperative `process()` is reported once
-and that name is not polled until a target is proved, its messages left in SQS. Only
+per refusal reason (a changed transient reason, or a transient failure that turns definite, is
+reported again) and that name is not polled until a target is proved, its messages left in SQS. Only
 `attributes-unavailable` and `target-unresolvable` are retried on later polls, after 1, 2, 5, 10,
 then 30 seconds (repeated); other refusal reasons stay stopped until reconnect. A name the process
 only enqueues to is never checked.

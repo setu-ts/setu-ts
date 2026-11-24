@@ -170,6 +170,21 @@ describe('SQS consumer preparation', () => {
     expect(texts[1]).toContain("the RedrivePolicy target's queue URL could not be resolved");
     await service.disconnect();
   });
+  it('reports an unconfigured SQS name once and never polls it', async () => {
+    const { queue, runtime, transport } = await sqsHarness({ deadLetterQueues: { build: false } });
+    const receive = vi.spyOn(transport, 'receive');
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    await service.connect();
+    service.process('missing', vi.fn());
+    await runtime.advanceMs(5000);
+    expect(logger.error).toHaveBeenCalledOnce();
+    expect(String((logger.error.mock.calls[0]![1] as { error: string }).error)).toContain(
+      'is not configured',
+    );
+    expect(receive).not.toHaveBeenCalled();
+    await service.disconnect();
+  });
   it('clears a preparation in flight before shutdown and never polls after it completes', async () => {
     const read = Promise.withResolvers<Record<string, string>>();
     const { queue, runtime, transport } = await sqsHarness(
