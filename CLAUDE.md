@@ -884,6 +884,10 @@ here.
 - **Milestone 143 Core follow-up** (`common` + `runtime` + `kernel` — DNS resolver with chosen name
   servers and a whole-lookup bound, `resolveHost` failing with every lookup's error, and the drain
   503's `x-setu-unprocessed` marker; Core halves of V13-246 and V13-23) — complete (PR #613).
+- **Milestone 143q** (`database-plugin` — databases off PostgreSQL: MySQL conditional writes on
+  Prisma (Branch B, by connector) and Drizzle, NoSQL call bounds, readiness probes and transactional
+  conditional writes, the Bigtable emulator defaults, the Drizzle mysql2 `NO_BACKSLASH_ESCAPES`
+  refusal; 12 V13 rows plus V13-272) — complete (PR pending).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
