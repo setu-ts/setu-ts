@@ -1,10 +1,15 @@
 /**
  * Internal per-origin circuit breaker for the SDK HTTP client.
  *
- * Rolling-window failure tracking with closed/open/half-open states and an
- * injected `isFailure` predicate that classifies which errors count.
+ * Closed/open/half-open states over the trip rule from
+ * `@setu-ts/common/breaker-window` (count or rate arm), with an injected
+ * classifier that decides how each rejection is recorded.
  *
  * Design notes:
+ * - The trip rule is `createBreakerWindow`'s, from `@setu-ts/common`; its count
+ *   arm is the rule the resilience plugin's own breaker applies. A success never clears recorded failures: the count arm trips
+ *   on `threshold` failures within the rolling `timeout`, however many
+ *   successes fall between them.
  * - The open→half-open cooldown is measured from `openedAt` — the moment the
  *   circuit tripped — NOT from the oldest failure still in the rolling window.
  *   Measuring from the oldest failure conflates the two independent policy
@@ -13,31 +18,26 @@
  *   the half-open probe unreachable.
  * - `timeout` (the rolling window) decides when the circuit TRIPS; `resetTimeout`
  *   decides how long it stays open. They are deliberately independent.
- * - On success the failure window is cleared and the circuit closes. This is a
- *   deliberate reset-on-success: one good response means the dependency is
- *   answering, so callers should not stay throttled by aged failures.
+ * - Only a half-open probe's success closes the circuit and empties the window.
+ *   A call admitted while closed that succeeds after the circuit tripped leaves
+ *   it open.
  * - In half-open, only one probe is in flight at a time (`halfOpenInFlight`), so
  *   a queue of waiting callers cannot stampede a fragile dependency.
  * - A FAILED probe reopens the circuit and RESTARTS the cooldown. Without the
  *   restart, `openedAt` would stay in the past, every subsequent call would
  *   satisfy the cooldown check, and the breaker would probe a dead dependency on
  *   every single request — the opposite of failing fast.
+ * - The open-circuit message reports the failure count taken when the circuit
+ *   opened, which does not age while it stays open.
  *
  * @internal
  */
 
 import type { IClientTiming } from '../http/contracts.ts';
 import type { CircuitBreakerPolicy } from '@setu-ts/common';
+import { createBreakerWindow } from '@setu-ts/common/breaker-window';
 import { ClientCircuitOpenError } from '../errors.ts';
-
-interface State {
-  /** Monotonic timestamps of counted failures, within the rolling window. */
-  failures: number[];
-  /** When the circuit last tripped, or `null` while closed. */
-  openedAt: number | null;
-  /** Whether a half-open probe is currently in flight. */
-  halfOpenInFlight: boolean;
-}
+import type { BreakerOutcome } from './classify.ts';
 
 /**
  * Create a circuit breaker instance backed by monotonic time from `timing`.
@@ -47,56 +47,70 @@ interface State {
 export function createCircuitBreaker(
   policy: CircuitBreakerPolicy,
   timing: IClientTiming,
-  isFailure: (error: unknown) => boolean,
+  classify: (error: unknown) => BreakerOutcome,
 ): { execute: <T>(fn: () => Promise<T>) => Promise<T> } {
-  const state: State = { failures: [], openedAt: null, halfOpenInFlight: false };
+  const window = createBreakerWindow(policy, () => timing.now());
+  /** When the circuit last tripped, or `null` while closed. */
+  let openedAt: number | null = null;
+  /** The window's failure count when the circuit last opened. */
+  let trippedWith = 0;
+  /** Whether a half-open probe is currently in flight. */
+  let halfOpenInFlight = false;
 
   const execute = async <T>(fn: () => Promise<T>): Promise<T> => {
     const now = timing.now();
 
-    // `probing` is captured per call rather than read back off `state` in the
-    // settlement handlers: a concurrent caller may flip `halfOpenInFlight`
+    // `probing` is captured per call rather than read back off shared state in
+    // the settlement handlers: a concurrent caller may flip `halfOpenInFlight`
     // between this gate and `fn()` settling.
     let probing = false;
 
-    if (state.openedAt !== null) {
-      if (now - state.openedAt < policy.resetTimeout) {
+    if (openedAt !== null) {
+      if (now - openedAt < policy.resetTimeout) {
         throw new ClientCircuitOpenError(
-          `Circuit breaker open for origin; ${state.failures.length} failures in window`,
+          `Circuit breaker open for origin; ${trippedWith} failures in window`,
         );
       }
-      if (state.halfOpenInFlight) {
+      if (halfOpenInFlight) {
         throw new ClientCircuitOpenError('Circuit breaker half-open; probe in flight');
       }
-      state.halfOpenInFlight = true;
+      halfOpenInFlight = true;
       probing = true;
     }
 
     try {
       const result = await fn();
-      // Success closes the circuit and clears the window.
-      state.failures = [];
-      state.openedAt = null;
-      if (probing) state.halfOpenInFlight = false;
+      if (probing) {
+        // A successful probe closes the circuit and empties the window.
+        halfOpenInFlight = false;
+        window.reset();
+        openedAt = null;
+      } else {
+        window.recordSuccess();
+      }
       return result;
     } catch (error) {
-      if (probing) state.halfOpenInFlight = false;
+      if (probing) halfOpenInFlight = false;
 
-      if (isFailure(error)) {
+      const outcome = classify(error);
+      if (outcome === 'failure') {
         // Timestamp the failure when it actually happened, not when the call
         // started — a slow request must not have its failure age prematurely.
         const at = timing.now();
         if (probing) {
           // Failed probe: reopen and restart the cooldown.
-          state.openedAt = at;
-          state.failures = [at];
-        } else {
-          state.failures = state.failures.filter((ts) => at - ts < policy.timeout);
-          state.failures.push(at);
-          if (state.failures.length >= policy.threshold) {
-            state.openedAt = at;
-          }
+          window.reset();
+          window.recordFailure();
+          openedAt = at;
+          trippedWith = 1;
+        } else if (window.recordFailure()) {
+          openedAt = at;
+          trippedWith = window.failures;
         }
+      } else if (outcome === 'success' && !probing) {
+        // The origin answered; a non-failure leaves a half-open circuit
+        // probeable rather than closing it.
+        window.recordSuccess();
       }
 
       throw error;

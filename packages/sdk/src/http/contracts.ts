@@ -201,7 +201,12 @@ export interface ClientOptions {
   /** Retry policy. Invalid/non-finite counts, delays, and derived backoffs throw at construction. */
   readonly retry?: ClientRetryPolicy;
 
-  /** Circuit breaker policy. `threshold < 1` throws at construction. */
+  /**
+   * Per-origin circuit breaker policy: the count arm (`threshold` failures
+   * within `timeout`) or the rate arm (`failureRateThreshold` percent of at
+   * least `minimumCalls` calls within `timeout`). An invalid policy, or one
+   * mixing both arms, throws a `RangeError` naming the field at construction.
+   */
   readonly circuitBreaker?: CircuitBreakerPolicy;
 
   /** Rate-limit policy. Non-positive `maxRequests` or `windowMs` throws. */

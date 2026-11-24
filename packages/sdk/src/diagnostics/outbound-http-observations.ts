@@ -8,9 +8,10 @@
  *
  * This is a deliberate local copy of three small pieces that also exist as
  * runtime code in `@setu-ts/common` (alias validation, the saturating counter
- * and the freshness rule): importing them would give the SDK its first
- * runtime import of `common` and end its type-only, browser-portable
- * property. A shared alias test table keeps the two copies in agreement.
+ * and the freshness rule): importing them from the `common` barrel would
+ * load `common`'s runtime graph and end the SDK's browser-portable property,
+ * whose only runtime import of `common` is the dependency-free
+ * `@setu-ts/common/breaker-window`. A shared alias test table keeps the two copies in agreement.
  *
  * @module
  * @internal

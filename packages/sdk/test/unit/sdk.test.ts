@@ -179,13 +179,28 @@ describe('createClient', () => {
     ).toThrow('retry exponential backoff exceeds the maximum timer delay');
   });
 
-  it('throws when circuitBreaker.threshold < 1', () => {
+  it('throws the shared RangeError when circuitBreaker.threshold < 1', () => {
     expect(() =>
       createClient({
         baseUrl: 'https://api.example.com',
         circuitBreaker: { threshold: 0, timeout: 30_000, resetTimeout: 10_000 },
       }),
-    ).toThrow('circuitBreaker.threshold must be >= 1');
+    ).toThrow(
+      new RangeError('circuitBreaker.threshold must be a positive safe integer; received 0'),
+    );
+  });
+
+  it('accepts a rate circuitBreaker policy', () => {
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      circuitBreaker: {
+        failureRateThreshold: 50,
+        minimumCalls: 10,
+        timeout: 30_000,
+        resetTimeout: 10_000,
+      },
+    });
+    expect(typeof client.request).toBe('function');
   });
 
   it('throws when rateLimit.maxRequests < 1', () => {

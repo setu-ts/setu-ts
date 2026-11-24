@@ -16,6 +16,9 @@
       "@setu-ts/*": [
         "../../packages/*/src/index.ts"
       ],
+      "@setu-ts/common/breaker-window": [
+        "../../packages/common/src/services/breaker-window.ts"
+      ],
       "@setu-ts/runtime/worker": [
         "../../packages/runtime/src/worker/define-worker-task.ts"
       ],

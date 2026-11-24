@@ -126,3 +126,19 @@ describe('CircuitBreaker', () => {
     expect(breaker.state).toBe('closed');
   });
 });
+
+describe('CircuitBreaker — the rate arm', () => {
+  it('refuses a rate policy until this plugin supports it', () => {
+    expect(
+      () =>
+        new CircuitBreaker(
+          { failureRateThreshold: 50, minimumCalls: 10, timeout: 1000, resetTimeout: 5000 },
+          () => 0,
+        ),
+    ).toThrow(
+      new RangeError(
+        'circuitBreaker: the rate arm (failureRateThreshold) is not supported by this version of @setu-ts/resilience-plugin',
+      ),
+    );
+  });
+});
