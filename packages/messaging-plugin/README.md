@@ -527,13 +527,14 @@ On a broker with `enableMessageOrdering`, handlers run one at a time per orderin
 attempt, so with a `deadLetterTopic` the later messages of a failing key spend attempts too and can
 be dead-lettered with it. A key resumes on the first redelivery of any tracked held-back message, so
 a later message can run while the failed one still waits for redelivery, before it is dead-lettered.
-Order is best effort; `connect()` warns once about this. The broker retains the 1,000 newest nacked
-IDs per key, evicting the oldest on overflow. It keeps hold-back state for at most 10,000 ordering
-keys per subscription and forgets the least recently used idle key beyond that, so keys whose failed
-message was dead-lettered cannot grow memory without bound. When the forgotten key failed within the
-last 11 minutes, its failed message may still be redelivered (Pub/Sub applies its retry policy best
-effort, so a later redelivery is possible too), and that key's next message can run before it; the
-broker warns once per subscription when it forgets such a key.
+Order is best effort; `connect()` warns once about this. The broker retains up to 1,000 nacked IDs
+per key: the failed message's own ID and the newest held-back ones, evicting the oldest held-back ID
+on overflow. It keeps hold-back state for at most 10,000 ordering keys per subscription and forgets
+the least recently used idle key beyond that, so keys whose failed message was dead-lettered cannot
+grow memory without bound. When the forgotten key failed within the last 11 minutes, its failed
+message may still be redelivered (Pub/Sub applies its retry policy best effort, so a later
+redelivery is possible too), and that key's next message can run before it; the broker warns once
+per subscription when it forgets such a key.
 
 **Stream recovery.** When the client library closes a subscription's stream on a non-retryable
 status (a deleted subscription, for example), the broker re-opens it (re-creating it when absent)

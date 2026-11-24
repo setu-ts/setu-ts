@@ -130,9 +130,10 @@ describe('Cloud consumer lifecycle boundaries', () => {
 
   it.each([
     { id: '1049', runs: true },
+    { id: 'head', runs: true },
     { id: '0', runs: false },
   ])(
-    'retains only the newest thousand nacked identities: redelivery $id runs=$runs',
+    'retains the failed head and the newest followers: redelivery $id runs=$runs',
     async ({ id, runs }) => {
       const gate = new PubSubOrdering(() => 0);
       const nack = vi.fn();

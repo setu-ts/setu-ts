@@ -98,10 +98,14 @@ export class PubSubOrdering {
         state.nacked.clear();
       if (state.nacked.size > 0) {
         if (message.messageId !== undefined) {
-          // Keep recent followers observable if the head and older followers
-          // were dead-lettered and will never return to release this key.
-          if (state.nacked.size === MAX_NACKED_IDS)
-            state.nacked.delete(state.nacked.values().next().value!);
+          // Keep the failed head (the first id recorded) and evict the oldest
+          // follower, so recent followers stay observable if the head and older
+          // followers were dead-lettered, and the head still releases the key.
+          if (state.nacked.size === MAX_NACKED_IDS) {
+            const ids = state.nacked.values();
+            ids.next();
+            state.nacked.delete(ids.next().value!);
+          }
           state.nacked.add(message.messageId);
         }
         message.nack();

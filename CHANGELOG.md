@@ -127,9 +127,10 @@ All notable changes to this project are documented here. The format follows
     `deadLetterTopic` then fails the subscribe with `PubSubDeadLetterTopicMissingError`.
   - A Pub/Sub stream the client library closed is re-opened on a fixed schedule, and the broker
     reports unreachable while it is closed (V13-260). On an ordering subscription, handlers run one
-    at a time per ordering key, and a failure holds the key's later messages until it is redelivered
-    (V13-266); past 10,000 keys held per subscription the least recently used idle key is forgotten,
-    with a warning when its failure is recent enough that order can be lost.
+    at a time per ordering key, and a failure holds the key's later messages until a held-back
+    message of that key is redelivered, so order is best effort (V13-266); past 10,000 keys held per
+    subscription the least recently used idle key is forgotten, with a warning when its failure is
+    recent enough that order can be lost.
   - The outbox relay on RabbitMQ publishes with `mandatory`: an unroutable row is retried and then
     marked `failed`, not `sent`, and the outbox refuses to start on a connection without publisher
     confirms (`OutboxPublisherConfirmsRequiredError`) (V13-107). Plain `publish()` is unchanged.
