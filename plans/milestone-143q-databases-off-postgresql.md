@@ -890,9 +890,12 @@ missing sort key.
   release yet; the latest is v3.24.6.
 - **Decision (maintainer, 2026-11-24, option (a): strip, then refuse).** `connect()` reads
   `@@SESSION.sql_mode` and refuses with the exported `UnsupportedSqlModeError` while it contains
-  `NO_BACKSLASH_ESCAPES`; a mode it cannot read is refused too. On a pool, each new connection reads
-  its mode and has `NO_BACKSLASH_ESCAPES` stripped from its session mode before the caller's first
-  statement runs, because the probe showed that destroying the connection from the pool's
+  `NO_BACKSLASH_ESCAPES`; a mode it cannot read, or a read that takes longer than 2000 ms (the
+  readiness probe's bound), is refused too, with the driver error as `cause`. So `connect()` now
+  does I/O on this arm, and start fails while MySQL is unreachable. A `withReplicas()` instance is
+  detected through its session and every pool it holds is guarded. On a pool, each new connection
+  reads its mode and has `NO_BACKSLASH_ESCAPES` stripped from its session mode before the caller's
+  first statement runs, because the probe showed that destroying the connection from the pool's
   `connection` event is too late (the queued INSERT still ran) and that a statement queued on that
   connection runs first; once any connection reports the flag, every adapter call refuses and one
   `warn` is logged. The handshake status flags carry the bit only for the GLOBAL mode, so the
@@ -919,12 +922,12 @@ missing sort key.
   mysql2 3.24.6 does not ([#4684](https://github.com/sidorares/node-mysql2/pull/4684) is merged but
   unreleased). Knex and TypeORM over mysql2 are exposed the same way; Sequelize and Prisma use
   server-side prepared statements.
-- **Test home.** `test/unit/drizzle-mysql-writes.test.ts` (or the arm's unit file): every refusal
-  branch; `test/integration/real-drizzle-mysql.test.ts` on `MYSQL_URL`: under the mode `connect()`
-  refuses by name, the injection matches with the guard bypassed (negative control), the default
-  `sql_mode` connects; an opt-in cell (`MYSQL_GLOBAL_MODE=1`, it sets the global mode and restores
-  it) proves the strip on a new pooled connection with the queued-INSERT control and the refusal
-  plus one `warn` after.
+- **Test home.** `test/unit/drizzle-mysql2-sql-mode.test.ts`: every refusal branch;
+  `test/integration/real-drizzle-mysql.test.ts` on `MYSQL_URL`: under the mode `connect()` refuses
+  by name, the injection matches with the guard bypassed (negative control), the default `sql_mode`
+  connects; an opt-in cell (`MYSQL_GLOBAL_MODE=1`, it sets the global mode and restores it) proves
+  the strip on a new pooled connection with the queued-INSERT control and the refusal plus one
+  `warn` after.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -942,8 +945,10 @@ as a `BREAKING` CHANGELOG entry for the Bigtable facade.
 | `BigtableAdapterOptions`, `DynamoAdapterOptions`, `CosmosAdapterOptions` (new members, §4.1) | type | the adapters' constructors                                                                               |
 | `DrizzleAdapterOptions.dialect` (JSDoc widened)                                              | type | `drizzle-adapter.ts` `contains` and offset paths                                                         |
 
-No new runtime export, capability token or error class. `affectedRowsOf`, `buildKeyColumnsWhere`,
-the `scope` parameters and the frozen relay are internal.
+One new error class, `UnsupportedSqlModeError` (§3.17), exported from `src/index.ts` with JSDoc and
+a `PUBLIC_API.md` entry; its consumer is an application that catches the Drizzle mysql2 refusal at
+start. No new capability token. `affectedRowsOf`, `buildKeyColumnsWhere`, the `scope` parameters,
+the mysql2 escape guard and the frozen relay are internal.
 
 ### 4.1 Options — every option names its consumer
 
@@ -972,6 +977,7 @@ the `scope` parameters and the frozen relay are internal.
 | `src/agent-runs/database-agent-run-store.ts`                                                                    | §3.14                                                                                                                                                  |
 | `src/plugin/database-plugin.ts`                                                                                 | `carry('requestTimeoutMs')`, `carry('readinessEntity')`, `carry('clientOptions')`; the `BIGTABLE_EMULATOR_HOST` read through `ctx.runtime.env` (§3.11) |
 | `src/query/like-escape.ts`                                                                                      | the `!` escape form for MySQL (§3.3)                                                                                                                   |
+| `src/adapters/drizzle/mysql2-escape-guard.ts`, `src/errors.ts`, `src/index.ts`                                  | §3.17: mysql2 detection, the session-mode read, the pool strip-then-refuse guard; `UnsupportedSqlModeError`                                            |
 | `src/errors.ts`                                                                                                 | unchanged (D-13 decided 500)                                                                                                                           |
 | `package.json`, `deno.json` (imports block, regenerated), `scripts/node-dependency-ranges.ts`, `pnpm-lock.yaml` | devDependencies `mysql2`, `@prisma/adapter-mariadb` (never runtime dependencies), with their `EXTERNAL_RANGES` rows (§1)                               |
 | `README.md`, `AGENT_CARD.md`                                                                                    | §2 deliverables, §3.6 note                                                                                                                             |
@@ -996,6 +1002,8 @@ the `scope` parameters and the frozen relay are internal.
 | `test/unit/agent-run-store.test.ts` (extended)                                                           | `database-agent-run-store.ts`                                                                                                                                                        | §3.14                                                                                                                                                                                                                                                       |
 | `test/unit/plugin-nosql-options.test.ts` (new; DynamoDB, Cosmos and Bigtable rows)                       | `database-plugin.ts`                                                                                                                                                                 | registering through `DatabasePlugin({ type: 'dynamodb' \| 'cosmos' \| 'bigtable', options: { requestTimeoutMs, readinessEntity, clientOptions } })` delivers each value to the adapter; `BIGTABLE_EMULATOR_HOST` in a fake `runtime.env` turns metrics off  |
 | `test/unit/like-escape.test.ts` (extended)                                                               | `like-escape.ts`                                                                                                                                                                     | the `!` form escapes `!`, `%`, `_` and leaves `\`                                                                                                                                                                                                           |
+| `test/unit/drizzle-mysql2-sql-mode.test.ts` (new)                                                        | `mysql2-escape-guard.ts`, `drizzle-adapter.ts`                                                                                                                                       | §3.17: every refusal branch, the strip, the latch and its one `warn`, an unreadable mode                                                                                                                                                                    |
+| `test/unit/cosmos-commit-deleted-row.test.ts` (new)                                                      | `cosmos-data-source.ts`                                                                                                                                                              | a 404 on a buffered conditional or plain Replace/Patch of a deleted row commits as `SerializationConflictError`; a plain delete keeps the batch error                                                                                                       |
 | `test/unit/idempotency/readme-ddl.test.ts` (extended)                                                    | README DDL                                                                                                                                                                           | the MySQL DDL blocks match the fixtures                                                                                                                                                                                                                     |
 | `test/unit/nosql-commit-conflict.test.ts` (new)                                                          | `dynamo-adapter.ts`, `cosmos-data-source.ts`, `bigtable-transaction.ts`                                                                                                              | §3.10 mapping table: Put → `DuplicateKeyError`; Update/Delete/`TransactionConflict` → `SerializationConflictError`; Cosmos 412 → `SerializationConflictError`, other codes unchanged; Bigtable `!matched` → `SerializationConflictError`; same-row refusals |
 | `test/integration/mysql-conditional-race.test.ts` (new, `MYSQL_URL`)                                     | real Prisma and Drizzle on MySQL                                                                                                                                                     | §3.1, §3.2 races, read back                                                                                                                                                                                                                                 |
@@ -1251,6 +1259,10 @@ existing precedent; confirmed as listed):
   - the readiness probe adds one read per uncached health check (a DynamoDB or Bigtable point read,
     a Cosmos `database.read()`), billed by the provider: lengthen the indicator's cache interval, or
     point `readinessEntity` at a small table;
+  - Drizzle on mysql2 refuses `NO_BACKSLASH_ESCAPES` (`UnsupportedSqlModeError`) at `connect()` and
+    strips it from later pooled connections before refusing every call: turn the mode off for the
+    application's sessions; and its `connect()` now reads the session mode, so start fails while
+    MySQL is unreachable or stalls past 2 s;
   - a Prisma `P2010` carrying a duplicate key or a write conflict through `query()` now answers 409
     where it was 500; mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed mysql2 connection answers 503.
 - `packages/database-plugin/README.md`: C1–C7, §3.6, a Drizzle-on-MySQL section (pool and bridge

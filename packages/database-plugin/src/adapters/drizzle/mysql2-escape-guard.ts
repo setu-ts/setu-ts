@@ -16,6 +16,7 @@
  *
  * @module
  */
+import { UnsupportedSqlModeError } from '../../errors.ts';
 
 /** The `sql_mode` flag the guard refuses. */
 export const NO_BACKSLASH_ESCAPES = 'NO_BACKSLASH_ESCAPES';
@@ -49,20 +50,100 @@ interface Mysql2PoolLike {
   ): unknown;
 }
 
+/** How long `connect()` waits for each `sql_mode` read: the readiness probe's bound. */
+export const READ_SESSION_MODE_TIMEOUT_MS = 2000;
+
+/** A Drizzle mysql2 database the guard reads and watches. */
+export interface Mysql2Target {
+  execute(statement: unknown): Promise<unknown>;
+  readonly $client?: unknown;
+}
+
 /**
- * Whether a Drizzle database is the `drizzle-orm/mysql2` driver's.
+ * Whether a Drizzle database runs on the `drizzle-orm/mysql2` driver.
  *
- * Read from Drizzle's `entityKind` brand, so detection needs no import of
- * `drizzle-orm/mysql2`, which loads `mysql2` and fails without it.
+ * Read from the session's `entityKind` brand rather than the database's
+ * class: `withReplicas()` returns a plain object spread from its primary, so
+ * only the session it carries still names the driver. Detection imports
+ * nothing from `drizzle-orm/mysql2`, which loads `mysql2` and fails without it.
  *
  * @param database - The configured Drizzle database
  * @param entityKind - Drizzle's `entityKind` symbol
- * @returns `true` for a `MySql2Database`
+ * @returns `true` when the session is a `MySql2Session`
  */
 export function isMysql2Database(database: unknown, entityKind: unknown): boolean {
-  const constructor = (database as { constructor?: Record<PropertyKey, unknown> } | null)
-    ?.constructor;
-  return typeof entityKind === 'symbol' && constructor?.[entityKind] === 'MySql2Database';
+  const session = (database as { session?: { constructor?: Record<PropertyKey, unknown> } } | null)
+    ?.session;
+  return typeof entityKind === 'symbol' && session?.constructor?.[entityKind] === 'MySql2Session';
+}
+
+/**
+ * The mysql2 databases behind a configured instance: the instance itself, or
+ * a `withReplicas()` wrapper's `$primary` and every `$replicas` entry, each of
+ * which holds its own `$client`. Databases on another driver are skipped.
+ *
+ * @param database - The configured Drizzle database
+ * @param entityKind - Drizzle's `entityKind` symbol
+ * @returns The databases to read and watch; empty off mysql2
+ * @throws {UnsupportedSqlModeError} For a mysql2 replicas wrapper whose
+ * primary or replicas cannot be read
+ */
+export function mysql2Targets(database: unknown, entityKind: unknown): readonly Mysql2Target[] {
+  if (!isMysql2Database(database, entityKind)) return [];
+  const wrapper = database as { $primary?: unknown; $replicas?: unknown };
+  if (wrapper.$primary === undefined && wrapper.$replicas === undefined) {
+    return [database as Mysql2Target];
+  }
+  const members = [wrapper.$primary, ...(Array.isArray(wrapper.$replicas) ? wrapper.$replicas : [])];
+  if (
+    !Array.isArray(wrapper.$replicas) ||
+    members.some(
+      (member) => typeof (member as { execute?: unknown } | null)?.execute !== 'function',
+    )
+  ) {
+    throw new UnsupportedSqlModeError({
+      reason: 'a withReplicas() wrapper whose $primary and $replicas cannot all be read',
+    });
+  }
+  return members.filter((member) => isMysql2Database(member, entityKind)) as Mysql2Target[];
+}
+
+/**
+ * Reads one database's `@@SESSION.sql_mode`, bounded so a stalled server
+ * cannot hang `connect()`.
+ *
+ * @param target - The database to read through its own `execute()`
+ * @param statement - The `READ_SESSION_MODE` statement as Drizzle SQL
+ * @param timeoutMs - The bound
+ * @returns The mode
+ * @throws {UnsupportedSqlModeError} When the read fails, expires or returns no
+ * mode; a driver error or the expiry is its `cause`
+ */
+export async function readSessionModeWithin(
+  target: Mysql2Target,
+  statement: unknown,
+  timeoutMs: number,
+): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`no answer within ${timeoutMs} ms`)),
+      timeoutMs,
+    );
+  });
+  let result: unknown;
+  try {
+    result = await Promise.race([target.execute(statement), expired]);
+  } catch (cause) {
+    throw new UnsupportedSqlModeError({ reason: 'the read failed', cause });
+  } finally {
+    clearTimeout(timer);
+  }
+  const mode = sessionModeOf(result);
+  if (mode === undefined) {
+    throw new UnsupportedSqlModeError({ reason: 'the result held no sql_mode' });
+  }
+  return mode;
 }
 
 /**

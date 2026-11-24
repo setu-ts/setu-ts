@@ -771,10 +771,18 @@ export class UnsupportedSqlModeError extends Error {
   override readonly name = 'UnsupportedSqlModeError';
   /** The refused `sql_mode` flag. */
   readonly mode = 'NO_BACKSLASH_ESCAPES';
-  /** Creates the refusal, naming the mode and the ways out. */
-  constructor() {
+  /**
+   * Creates the refusal, naming the mode and the ways out.
+   * @param unread - Set when the mode could not be read: why, and the driver
+   * error or expiry as `cause`
+   */
+  constructor(unread?: { readonly reason: string; readonly cause?: unknown }) {
     super(
-      "Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES: mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement. Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version).",
+      (unread === undefined
+        ? 'Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES'
+        : `Drizzle over mysql2 could not read @@SESSION.sql_mode (${unread.reason}), so it cannot rule out NO_BACKSLASH_ESCAPES`) +
+        ": mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement. Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version).",
+      unread?.cause === undefined ? undefined : { cause: unread.cause },
     );
   }
 }
