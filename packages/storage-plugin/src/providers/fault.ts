@@ -120,7 +120,8 @@ export function answeredStatus(error: unknown): number | undefined {
  *   `BackendUnavailableError` when the request was refused before it was sent
  *   or answered `503`, on the SDK's only attempt, and `BackendOutcomeUnknownError`
  *   (`504`) when it may have been applied (an expired bound, a lost connection,
- *   `500`, `502`, `504`, or any refusal after the SDK retried).
+ *   `500`, `502`, `504`, or a refusal after the SDK retried, or from a client
+ *   whose attempt count is unknown and which may retry on its own).
  * - Anything else (a refused credential, a missing bucket) becomes a plain
  *   `Error` whose message names the plugin, the provider and the call, with the
  *   original as `cause`: the response stays a masked `500`, and the log says
@@ -129,12 +130,16 @@ export function answeredStatus(error: unknown): number | undefined {
  * @param error - The rejection
  * @param provider - The provider name (`s3`, `b2`, `gcs`, `azure`)
  * @param operation - The call that failed
+ * @param singleAttempt - The provider built its SDK client with the SDK's
+ *   retry off, so a rejection with no recorded attempt count was one attempt
+ *   (an injected client may retry on its own, so it never claims this)
  * @returns The error to throw
  */
 export function toStorageError(
   error: unknown,
   provider: string,
   operation: StorageOperation,
+  singleAttempt = false,
 ): Error {
   if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError) {
     return error;
@@ -157,7 +162,12 @@ export function toStorageError(
   // An SDK that retried (the AWS SDK records `$metadata.attempts`) may have
   // applied an earlier attempt whose answer was lost: only a single refusal
   // proves a write did not land.
-  if (fault === 'unavailable' && write && attemptsOf(error) > 1) fault = 'outcome-unknown';
+  if (fault === 'unavailable' && write) {
+    const attempts = attemptsOf(error);
+    // Unknown history (no count, and a client that may retry on its own) is
+    // treated like a retry: the write may have landed.
+    if (attempts === undefined ? !singleAttempt : attempts > 1) fault = 'outcome-unknown';
+  }
   if (fault === 'unavailable' || (fault === 'outcome-unknown' && !write)) {
     return new BackendUnavailableError(label, { cause: error });
   }
@@ -174,16 +184,16 @@ export function toStorageError(
 }
 
 /**
- * The attempts an SDK made before it rejected (`$metadata.attempts`), `1` when
- * it records none.
+ * The attempts an SDK made before it rejected (`$metadata.attempts`), or
+ * `undefined` when it records none.
  *
  * @param error - The rejection
- * @returns The attempt count
+ * @returns The attempt count, when known
  */
-function attemptsOf(error: unknown): number {
-  if (typeof error !== 'object' || error === null) return 1;
+function attemptsOf(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
   const attempts = (error as { $metadata?: { attempts?: unknown } }).$metadata?.attempts;
-  return typeof attempts === 'number' && attempts > 1 ? attempts : 1;
+  return typeof attempts === 'number' && attempts >= 1 ? attempts : undefined;
 }
 
 /**

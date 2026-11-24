@@ -21,6 +21,7 @@ import { adaptGcsModule, GcsProvider } from '../../src/providers/gcs-provider.ts
 import type { AwsStorageSdkModule } from '../../src/providers/s3-provider.ts';
 import { adaptAwsS3Module, S3Provider } from '../../src/providers/s3-provider.ts';
 import { createProvider } from '../../src/plugin/storage-plugin.ts';
+import { toStorageError } from '../../src/providers/fault.ts';
 
 function azure(blob: object): AzureBlobProvider {
   return new AzureBlobProvider({
@@ -493,6 +494,20 @@ describe('write outcomes after an SDK retried', () => {
     const failure = (await provider.get('k').catch((e: unknown) => e)) as Error;
     expect(failure.message).toMatch(/a value with no text form/);
     expect(failure.cause).toBe(error);
+  });
+});
+
+describe('a write refusal with no recorded attempt count', () => {
+  const refused = (): unknown =>
+    Object.assign(new Error('Service Unavailable'), { statusCode: 503 });
+  it('is outcome-unknown from a client that may retry on its own', () => {
+    expect(toStorageError(refused(), 'azure', 'put')).toBeInstanceOf(BackendOutcomeUnknownError);
+  });
+  it('stays unavailable from a client the provider built with its retry off', () => {
+    expect(toStorageError(refused(), 'azure', 'put', true)).toBeInstanceOf(BackendUnavailableError);
+  });
+  it('is unavailable for a read either way', () => {
+    expect(toStorageError(refused(), 'azure', 'get')).toBeInstanceOf(BackendUnavailableError);
   });
 });
 

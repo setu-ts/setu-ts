@@ -98,8 +98,9 @@ All notable changes to this project are documented here. The format follows
   retried `502`/`503` download ended the process on 7.x and 8.x), and `getStream` waits for the
   first chunk, so an absent object is `null`. The Azure client the storage arm builds makes one
   attempt per call (the SDK's retry is off, as on GCS), and a storage write or an SES send refused
-  after the SDK retried (`$metadata.attempts` above 1, the AWS default) answers `504`, not `503`: an
-  earlier attempt may have landed. An outage on a storage or secrets arm rejects with a `503`/`504`
+  after the SDK retried (`$metadata.attempts` above 1, the AWS default) answers `504`, not `503`, as
+  does a storage write refused by an injected client that records no attempt count: an earlier
+  attempt may have landed. An outage on a storage or secrets arm rejects with a `503`/`504`
   (`BackendUnavailableError`, `BackendOutcomeUnknownError`, `SecretProviderUnavailableError`); other
   failures name the provider. An SES or SendGrid send that does not settle in time is a `504`, a
   refused connection a `503` (a `504` once the SES client has retried, as it does by default: an

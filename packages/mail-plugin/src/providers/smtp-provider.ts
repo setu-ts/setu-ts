@@ -283,7 +283,7 @@ export class SmtpProvider implements MailProvider {
    * The resolver call still running, even after its deadline passed: the
    * deadline only stops waiting for it, so no second lookup starts beside it.
    */
-  #lookup: Promise<unknown> | null = null;
+  #lookup: Promise<readonly string[]> | null = null;
   readonly #users = new Map<ISmtpTransport, number>();
   readonly #retired = new Set<ISmtpTransport>();
   readonly #closed = new WeakSet<ISmtpTransport>();
@@ -408,13 +408,19 @@ export class SmtpProvider implements MailProvider {
     const host = this.#options.host!;
     let addresses: readonly string[];
     try {
-      const lookup = runtime.dns!.resolveHost(host);
-      this.#lookup = lookup;
-      void lookup
-        .finally(() => {
-          if (this.#lookup === lookup) this.#lookup = null;
-        })
-        .catch(() => {});
+      // With no transport (a reconnect), a lookup still running from before is
+      // waited on again rather than joined by another: one resolver call at a
+      // time, however often the provider reconnects.
+      const pending = this.#lookup;
+      const lookup = pending ?? runtime.dns!.resolveHost(host);
+      if (pending === null) {
+        this.#lookup = lookup;
+        void lookup
+          .finally(() => {
+            if (this.#lookup === lookup) this.#lookup = null;
+          })
+          .catch(() => {});
+      }
       addresses = await withDeadline(() => lookup, {
         timeoutMs: this.#options.connectionTimeoutMs ?? 120_000,
         onTimeout: () => new Error(`SmtpProvider: DNS lookup for '${host}' timed out`),
@@ -500,11 +506,11 @@ export class SmtpProvider implements MailProvider {
 
   /** The transport for the next call, refreshed first under `dnsTtlMs`. */
   // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async #currentTransport(): Promise<ISmtpTransport> {
+  async #currentTransport(refresh = true): Promise<ISmtpTransport> {
     if (this.#transport === null) {
       throw notConnected();
     }
-    return this.#usesDnsTtl() ? this.#refreshTransport() : this.#transport;
+    return refresh && this.#usesDnsTtl() ? this.#refreshTransport() : this.#transport;
   }
 
   /**
@@ -557,27 +563,47 @@ export class SmtpProvider implements MailProvider {
     // the next resolved address (RFC 5321 §5.1), each address at most once and
     // at most `SMTP_MAX_ADDRESS_TRIES` in all; the last failure is the answer.
     const tried = new Set<string>();
-    for (;;) {
+    let lastError: unknown;
+    // Each round either sends or moves to an untried address; the bound only
+    // stops a pathological race between sends from looping.
+    for (let round = 0; round < SMTP_MAX_ADDRESS_TRIES * 2; round++) {
       let used: ISmtpTransport | undefined;
+      let stale = false;
       try {
+        // A retry runs on the address `#failover` chose, with no refresh: a
+        // fresh answer (or another send) could otherwise put it back on one
+        // this send already tried.
         await this.#useTransport((transport) => {
           used = transport;
+          const address = this.#addressOf.get(transport);
+          if (address !== undefined && tried.has(address)) {
+            stale = true;
+            return Promise.resolve();
+          }
           return transport.sendMail(mail);
-        });
-        return;
+        }, tried.size === 0);
+        if (!stale) return;
       } catch (error) {
         const address = used === undefined ? undefined : this.#addressOf.get(used);
         if (address === undefined || !isPreCommandFailure(error)) throw error;
         tried.add(address);
-        if (tried.size >= this.#addressTries() || !this.#failover(tried)) throw error;
+        lastError = error;
+        if (tried.size >= this.#addressTries()) throw error;
       }
+      // Moved back to a tried address in between, or failed before any
+      // command: go to an untried one, or answer with the last failure.
+      if (!this.#failover(tried)) throw lastError;
     }
+    throw lastError;
   }
 
   /** Pins a transport for a send or probe until that operation settles. */
-  async #useTransport(run: (transport: ISmtpTransport) => Promise<unknown>): Promise<void> {
+  async #useTransport(
+    run: (transport: ISmtpTransport) => Promise<unknown>,
+    refresh = true,
+  ): Promise<void> {
     const generation = this.#generation;
-    const transport = await this.#currentTransport();
+    const transport = await this.#currentTransport(refresh);
     // A disconnect while the transport was chosen retires it (and closes it,
     // with no user yet): this send must not run on it.
     if (generation !== this.#generation) throw notConnected();

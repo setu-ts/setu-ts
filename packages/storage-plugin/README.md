@@ -205,11 +205,12 @@ An outage is an error, never "not there". On every cloud arm:
 - `exists` resolves `false` only when the backend answers that the object is absent; `delete`
   resolves `false` only when the provider knows no object was there. S3 and B2 cannot tell from
   their delete answer, so they check with a `HEAD` first; an object removed between that check and
-  the delete still resolves `true`. A credential without `s3:ListBucket` gets `403` for an absent
-  key on that check, so presence is unknown and the delete goes ahead and resolves `true`; grant
-  `s3:ListBucket` for exact answers. Any other failure rejects. Every provider gives the same
-  `delete()` answer, except S3/B2 under such a credential. An S3/B2 `delete` is two requests, each
-  under its own `requestTimeoutMs`.
+  the delete still resolves `true`. A `403` on that check, whatever its cause, leaves presence
+  unknown, so the delete goes ahead: `true` when it succeeds, a rejection when it fails. A
+  credential without `s3:ListBucket` gets that `403` for an absent key, so `delete()` resolves
+  `true` there; grant `s3:ListBucket` for exact answers. Any other failure rejects. Every provider
+  gives the same `delete()` answer, except S3/B2 under such a credential. An S3/B2 `delete` is two
+  requests, each under its own `requestTimeoutMs`.
 - A key with a `.` or `..` path segment is refused with a `400` by every `StorageService` call, and
   by the S3, B2, GCS and Azure providers used directly: on Azure the SDK resolves `..` in the blob
   URL, so such a key could reach another container. An empty key or one of only `/`, or one that is
@@ -220,12 +221,13 @@ An outage is an error, never "not there". On every cloud arm:
   `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
   `delete` with `BackendUnavailableError` when the request was refused before it was sent or
   answered `503` on the SDK's only attempt, and `BackendOutcomeUnknownError` (`504`) when it may
-  have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried (the AWS
-  SDK records its attempts), so an S3 or B2 write refused at connection time answers `504` under the
-  SDK's default retries. The Azure client the arm builds makes one attempt per call (the SDK's retry
-  is off, as on GCS), so its `503` still means not sent; an injected client keeps its own retries. A
-  GCS upload past its bound answers `504` while its request may still finish: the SDK offers no way
-  to cancel an upload, so its connection stays open until the backend answers or closes it.
+  have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried, or from
+  an injected client whose attempts are unknown (the AWS SDK records its attempts), so an S3 or B2
+  write refused at connection time answers `504` under the SDK's default retries. The Azure client
+  the arm builds makes one attempt per call (the SDK's retry is off, as on GCS), so its `503` still
+  means not sent; an injected client keeps its own retries. A GCS upload past its bound answers
+  `504` while its request may still finish: the SDK offers no way to cancel an upload, so its
+  connection stays open until the backend answers or closes it.
 - Anything else — a refused credential, a missing bucket — rejects with an `Error` whose message
   starts `storage-plugin (<provider>): <call> failed:`, so the masked `500` names the backend in the
   log.

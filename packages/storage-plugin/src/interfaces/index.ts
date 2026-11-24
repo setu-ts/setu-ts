@@ -440,9 +440,9 @@ export interface StorageProvider {
    *
    * @param path - Object path/key
    * @returns `false` only when the provider knows no object was there; `true`
-   *   otherwise (S3/B2 without `s3:ListBucket` answer their `HEAD` check `403`
-   *   for a missing key, so `delete()` resolves `true` there; grant
-   *   `s3:ListBucket` for exact answers)
+   *   otherwise (S3/B2 go ahead after any `403` on their `HEAD` check; without
+   *   `s3:ListBucket` that `403` comes for a missing key, so `delete()`
+   *   resolves `true` there; grant `s3:ListBucket` for exact answers)
    */
   delete(path: string): Promise<boolean>;
   /**

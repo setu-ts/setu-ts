@@ -498,7 +498,7 @@ export class GcsProvider implements StorageProvider {
       return await runBounded(this.#deadline, 'gcs', operation, run);
     } catch (error) {
       if (notFound !== undefined && isGcsNotFound(error)) return notFound.value;
-      throw toStorageError(error, 'gcs', operation);
+      throw toStorageError(error, 'gcs', operation, this.#options.client === undefined);
     }
   }
 

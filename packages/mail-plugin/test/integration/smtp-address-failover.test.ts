@@ -21,11 +21,16 @@ let messages = 0;
 function speakSmtp(socket: Socket): void {
   socket.write('220 failover.test ESMTP\r\n');
   let inData = false;
+  // The DATA terminator can arrive split across chunks, so the body is kept
+  // until the whole `CRLF.CRLF` has been seen.
+  let body = '';
   socket.on('data', (chunk) => {
     const text = chunk.toString();
     if (inData) {
-      if (text.endsWith('\r\n.\r\n')) {
+      body += text;
+      if (body.endsWith('\r\n.\r\n')) {
         inData = false;
+        body = '';
         messages += 1;
         socket.write('250 queued\r\n');
       }

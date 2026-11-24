@@ -488,13 +488,15 @@ export class S3Provider implements StorageProvider {
    * Deletes an object from S3. S3's `DeleteObject` answers alike whether or
    * not the key existed, so this method checks with `HEAD` first and resolves
    * `false` for an absent key, the answer every provider gives. A `403` on that
-   * check (a credential without `s3:ListBucket`) leaves presence unknown, so
-   * the delete goes ahead and resolves `true`; any other failure rejects.
+   * check, whatever its cause (a credential without `s3:ListBucket` gets one
+   * for a missing key), leaves presence unknown, so the delete goes ahead: it
+   * resolves `true` when it succeeds and rejects when it fails. Any other
+   * `HEAD` failure rejects.
    *
    * @param path - Object key
    * @returns `false` only when the `HEAD` check showed no object was there;
-   *   `true` otherwise, including a missing key under a credential without
-   *   `s3:ListBucket` (grant it for exact answers)
+   *   `true` when the delete succeeded otherwise, including a missing key under
+   *   a credential without `s3:ListBucket` (grant it for exact answers)
    */
   async delete(path: string): Promise<boolean> {
     // Checked here too: the provider is exported and can be used directly.

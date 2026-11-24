@@ -10,7 +10,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { BackendUnavailableError } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import type { StorageProvider } from '../../src/interfaces/index.ts';
 import type { AwsStorageSdkModule } from '../../src/providers/s3-provider.ts';
 import { adaptAwsS3Module, S3Provider } from '../../src/providers/s3-provider.ts';
@@ -20,7 +20,7 @@ import type { AzureSdkModule } from '../../src/providers/azure-provider.ts';
 import { adaptAzureModule, AzureBlobProvider } from '../../src/providers/azure-provider.ts';
 
 type Case = 'present' | 'absent' | 'outage' | 'refused';
-type Expect = boolean | 'unavailable' | 'named';
+type Expect = boolean | 'unavailable' | 'unknown' | 'named';
 
 const outage = (): Error =>
   Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:1'), { code: 'ECONNREFUSED' });
@@ -138,7 +138,9 @@ const CONFORMANCE: readonly (readonly [
     {
       present: [true, true],
       absent: [false, false],
-      outage: ['unavailable', 'unavailable'],
+      // The client is injected (the adapter over a fake SDK), so a refused
+      // delete has no attempt history: it may have landed, a 504.
+      outage: ['unavailable', 'unknown'],
       refused: ['named', 'named'],
     },
   ],
@@ -148,7 +150,9 @@ const CONFORMANCE: readonly (readonly [
     {
       present: [true, true],
       absent: [false, false],
-      outage: ['unavailable', 'unavailable'],
+      // The client is injected (the adapter over a fake SDK), so a refused
+      // delete has no attempt history: it may have landed, a 504.
+      outage: ['unavailable', 'unknown'],
       refused: ['named', 'named'],
     },
   ],
@@ -159,6 +163,7 @@ async function outcome(run: () => Promise<boolean>): Promise<Expect> {
     return await run();
   } catch (error) {
     if (error instanceof BackendUnavailableError) return 'unavailable';
+    if (error instanceof BackendOutcomeUnknownError) return 'unknown';
     if (error instanceof Error && /^storage-plugin \(\w+\): \w+ failed: /.test(error.message)) {
       return 'named';
     }

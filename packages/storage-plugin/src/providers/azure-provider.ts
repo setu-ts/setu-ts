@@ -479,7 +479,7 @@ export class AzureBlobProvider implements StorageProvider {
       return await runBounded(this.#deadline, 'azure', operation, run);
     } catch (error) {
       if (notFound !== undefined && isAzureNotFound(error)) return notFound.value;
-      throw toStorageError(error, 'azure', operation);
+      throw toStorageError(error, 'azure', operation, this.#options.client === undefined);
     }
   }
 

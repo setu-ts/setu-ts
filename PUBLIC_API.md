@@ -9524,17 +9524,18 @@ app.router.get('/files/stream/:key', async (ctx) => {
 **Demand-driven streaming is a property of `S3Provider`, not of `getStream?` in general.** On that
 path, serving a large object to a slow client does not pull the object into memory: the provider
 stays 2-3 MiB ahead of the consumer (measured constant in elapsed time and in bytes delivered), a
-consumer that stops reading stops the wire, and cancelling releases the upstream connection. On
-every other provider a large object becomes memory-resident regardless of how slowly the client
-reads — `AzureBlobProvider` streams natively but drains its SDK stream eagerly with no demand signal
-(cancelling releases the upstream stream, but cannot undo what has already been drained);
-`GcsProvider` (since 0.14.0) waits for the first chunk before it answers, so an absent object is
-`null` and a refused credential or an outage rejects before a response begins, then reads the SDK
-stream on demand (not measured); while `MemoryProvider` and `LocalStorageProvider` have no native
-`getStream` at all and take `StorageService`'s buffered fallback. The storage-plugin README carries
-the per-provider table. Note also that process RSS does not measure any of this — a large download
-raises the allocator high-water mark while retaining nothing, and importing the AWS SDK costs ~29
-MiB by itself.
+consumer that stops reading stops the wire, and cancelling releases the upstream connection.
+Elsewhere — except `GcsProvider.getStream`, described below — a large object becomes memory-resident
+regardless of how slowly the client reads: `AzureBlobProvider` streams natively but drains its SDK
+stream eagerly with no demand signal (cancelling releases the upstream stream, but cannot undo what
+has already been drained); `GcsProvider` (since 0.14.0) waits for the first chunk before it answers,
+so an absent object is `null` and a refused credential or an outage rejects before a response
+begins, then reads the SDK stream on demand (not measured), while its `get()` buffers the whole
+object into one `Uint8Array`, so use `getStream` for a large GCS download; and `MemoryProvider` and
+`LocalStorageProvider` have no native `getStream` at all and take `StorageService`'s buffered
+fallback. The storage-plugin README carries the per-provider table. Note also that process RSS does
+not measure any of this — a large download raises the allocator high-water mark while retaining
+nothing, and importing the AWS SDK costs ~29 MiB by itself.
 
 ### Providers
 
@@ -9554,14 +9555,16 @@ disables; the SDK's own retries included; `getStream` up to the first chunk). A 
 the network, expires, or gets a `500`/`502`/`503`/`504` rejects with `BackendUnavailableError`
 (`503`); a `put` or `delete` rejects with `BackendUnavailableError` when refused before it was sent
 or answered `503` on the SDK's only attempt, and with `BackendOutcomeUnknownError` (`504`) when it
-may have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried. Any
-other failure is an `Error` whose message starts `storage-plugin (<provider>): <call> failed:`.
-`exists` is `false` only when the object was absent, and `delete` is `false` only when the provider
-knows no object was there — on every provider; S3/B2 check with a `HEAD` first, since `DeleteObject`
-cannot tell (an object removed between the two still resolves `true`). S3 without `s3:ListBucket`
-answers that `HEAD` `403` for a missing key, so `delete()` resolves `true` there; grant
-`s3:ListBucket` for exact answers. Every other failure rejects. A missing object read by
-`get`/`getStream` throws `StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly
+may have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried, or
+from an injected client, whose attempts are unknown. Any other failure is an `Error` whose message
+starts `storage-plugin (<provider>): <call> failed:`. `exists` is `false` only when the object was
+absent, and `delete` is `false` only when the provider knows no object was there — on every
+provider; S3/B2 check with a `HEAD` first, since `DeleteObject` cannot tell (an object removed
+between the two still resolves `true`). A `403` on that `HEAD`, whatever its cause, leaves presence
+unknown, so the delete goes ahead: it resolves `true` when it succeeds and rejects when it fails. S3
+without `s3:ListBucket` answers that `403` for a missing key, so `delete()` resolves `true` there;
+grant `s3:ListBucket` for exact answers. Every other `HEAD` failure rejects. A missing object read
+by `get`/`getStream` throws `StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly
 constructed `GcsProvider` or `AzureBlobProvider` takes `now` as its second argument; without one
 `getSignedUrl` rejects (an Azure client with its own `getSignedUrl` needs none). The GCS and Azure
 readiness probes (`bucket.exists()`, the container's `exists()`) read reachable when the backend

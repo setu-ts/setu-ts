@@ -282,11 +282,16 @@ describe('SMTP DNS refresh coordination', () => {
     const rejected = expect(first).rejects.toThrow(/not connected/);
     await tick();
     await provider.disconnect();
-    await provider.connect();
+    // The reconnect waits on the lookup still running instead of starting a
+    // second one; the earlier generation still cannot take the transport.
+    const second = provider.connect();
+    await tick();
     release(['10.0.0.1']);
     await rejected;
+    await second;
     await provider.send(mail);
-    expect(fake.created.map((entry) => entry.host)).toEqual(['10.0.0.2']);
+    expect(calls).toBe(1);
+    expect(fake.created.map((entry) => entry.host)).toEqual(['10.0.0.1']);
     expect(fake.created[0]!.closed).toBe(false);
     await provider.disconnect();
   });
@@ -546,6 +551,48 @@ describe('SMTP failover across resolved addresses', () => {
     await provider.connect();
     await provider.send(mail);
     expect(fake.created.map((entry) => entry.host)).toEqual(['10.0.0.1']);
+    await provider.disconnect();
+  });
+  it('a retry after a changed DNS answer still goes to an untried address', async () => {
+    let answer = 0;
+    const answers = [
+      ['10.0.0.1', '10.0.0.2'],
+      ['10.0.0.1', '10.0.0.3'],
+    ];
+    const calls: string[] = [];
+    fake.sendTo = (host) => {
+      calls.push(String(host));
+      return host === '10.0.0.1'
+        ? Promise.reject(addressFailure(host, FAILURE_PHASES[0]!.error))
+        : Promise.resolve({});
+    };
+    const provider = new SmtpProvider(
+      { host: 'smtp.test', dnsTtlMs: 0 },
+      runtime(
+        () => Promise.resolve(answers[answer++ % 2]!),
+        () => 0,
+        () => 0,
+      ),
+    );
+    await provider.connect();
+    await provider.send(mail);
+    // The send refreshed to [A, C], failed on A and moved to C without a
+    // second refresh that could have put it back on A.
+    expect(calls).toEqual(['10.0.0.1', '10.0.0.3']);
+    await provider.disconnect();
+  });
+  it('a reconnect waits on a lookup still running instead of starting another', async () => {
+    const lookup = vi.fn(() => new Promise<string[]>(() => {}));
+    const provider = new SmtpProvider(
+      { host: 'smtp.test', dnsTtlMs: 1000, connectionTimeoutMs: 25 },
+      runtime(lookup, () => 0),
+    );
+    await provider.connect();
+    await provider.disconnect();
+    await provider.connect();
+    await provider.disconnect();
+    await provider.connect();
+    expect(lookup).toHaveBeenCalledOnce();
     await provider.disconnect();
   });
 });

@@ -74,11 +74,21 @@ describe('toStorageError (V13-217)', () => {
       for (const op of ['get', 'exists', 'getStream', 'getSignedUrl'] as const) {
         check(toStorageError(cause, 'gcs', op), readOutcome, op, cause);
       }
+      // The write column is for a client the provider built with its SDK
+      // retry off, so a rejection with no attempt count was one attempt.
       for (const op of ['put', 'delete'] as const) {
-        check(toStorageError(cause, 'gcs', op), writeOutcome, op, cause);
+        check(toStorageError(cause, 'gcs', op, true), writeOutcome, op, cause);
       }
     });
   }
+
+  it('a write refused by a client that may retry (no attempt count) is outcome-unknown', () => {
+    for (const cause of [refused, awsStatus(503), gcsStatus(503)]) {
+      for (const op of ['put', 'delete'] as const) {
+        check(toStorageError(cause, 'gcs', op), 504, op, cause);
+      }
+    }
+  });
 
   it('returns an already classified fault unchanged', () => {
     const fault = new BackendUnavailableError('x', { cause: refused });
