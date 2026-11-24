@@ -106,7 +106,8 @@ export class RealtimeBackplaneObjectCore {
         new Response(
           'This Durable Object serves the Setu-TS realtime backplane and accepts ' +
             'only WebSocket upgrades and POST /publish.',
-          { status: 426 },
+          // RFC 9110 §15.5.22: a 426 names the protocol to upgrade to.
+          { status: 426, headers: { upgrade: 'websocket', connection: 'Upgrade' } },
         ),
       );
     }

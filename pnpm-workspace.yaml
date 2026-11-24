@@ -68,10 +68,6 @@ ignoreWorkspaceCycles: true
 overrides:
   '@azure/msal-node': ^7.1.0
   '@qdrant/js-client-rest>undici': 7.30.1
-  # cloudflare-plugin's workerd e2e (wrangler devDependency): miniflare's undici and sharp
-  # carry High advisories fixed in these releases.
-  'miniflare>undici': 7.30.1
-  'miniflare>sharp': 0.35.5
 
 # Google SDK install scripts are denied: both are transitive deps of
 # the Google Cloud SDKs the tests reach only through fakes and guarded

@@ -109,6 +109,52 @@ describe('a Workers scaffold resolves its npm dependencies', () => {
     );
   }
 
+  // The scaffold's wrangler pin decides which miniflare, undici and sharp every
+  // generated project installs; the repository's own pnpm overrides never reach
+  // it. 4.148's miniflare pinned undici 7.29.1 and sharp 0.35.4, five High
+  // advisories in every new Workers project. Resolved to a lockfile only (no
+  // download, no scripts) and audited, keeping the advisories that run through
+  // wrangler or miniflare, so an unrelated package's new advisory cannot fail it.
+  it(
+    'installs no High or Critical advisory through wrangler or miniflare',
+    { skip: !hasNpm && !onCi },
+    async () => {
+      const dir = await tempDir({ prefix: 'setu-workers-audit-' });
+      try {
+        const manifest = workersManifest('rest');
+        await nodeFs.writeFile(`${dir}/package.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+        const locked = await runProcess('npm', {
+          args: ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'],
+          cwd: dir,
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+        expect(locked.code, new TextDecoder().decode(locked.stderr)).toBe(0);
+        const audited = await runProcess('npm', {
+          args: ['audit', '--json'],
+          cwd: dir,
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+        const report = JSON.parse(new TextDecoder().decode(audited.stdout)) as {
+          vulnerabilities?: Record<
+            string,
+            { readonly severity: string; readonly effects: readonly string[] }
+          >;
+        };
+        const through = new Set(['wrangler', 'miniflare']);
+        const found = Object.entries(report.vulnerabilities ?? {})
+          .filter(([, entry]) => entry.severity === 'high' || entry.severity === 'critical')
+          .filter(([name, entry]) => through.has(name) || entry.effects.some((e) => through.has(e)))
+          .map(([name, entry]) => `${name} (${entry.severity})`);
+
+        expect(found).toEqual([]);
+      } finally {
+        await nodeFs.rm(dir, { recursive: true });
+      }
+    },
+  );
+
   // V9-9: one `tsconfig.json` type-checks the Worker source AND `vite.config.ts`,
   // which imports `node:fs`. Before the fix the Workers project named neither
   // `@types/node` nor `node` in `types`, so its own `npm run check` failed on a

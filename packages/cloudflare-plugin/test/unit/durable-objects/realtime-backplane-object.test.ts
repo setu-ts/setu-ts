@@ -63,6 +63,8 @@ describe('RealtimeBackplaneObjectCore.fetch', () => {
     const response = await core.fetch(new Request('https://do/connect'));
 
     expect(response.status).toBe(426);
+    expect(response.headers.get('upgrade')).toBe('websocket');
+    expect(response.headers.get('connection')).toBe('Upgrade');
     expect(await response.text()).toContain('realtime backplane');
     expect(pairs).toHaveLength(0);
     expect(state.accepted).toHaveLength(0);
@@ -265,6 +267,7 @@ describe('RealtimeBackplaneObjectCore POST /publish', () => {
       new Request('https://do/other', { method: 'POST', body: 'x' }),
     );
     expect(response.status).toBe(426);
+    expect(response.headers.get('upgrade')).toBe('websocket');
     expect(await response.text()).toContain('POST /publish');
   });
 });

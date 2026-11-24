@@ -707,14 +707,15 @@ describe('the Cloudflare Workers target', () => {
       devDependencies: Record<string, string>;
     };
 
-    // Measured: wrangler 4.148.0 declares peerOptional
-    // `@cloudflare/workers-types@^5.20261006.1`, and the `^4.0.0` wrangler range
+    // Measured: wrangler 4.153.0 declares peerOptional
+    // `@cloudflare/workers-types@^5.20261023.1` (4.148.0 declared
+    // `^5.20261006.1`), and the `^4.0.0` wrangler range
     // beside a `^4.x` types pin made `npm install` fail with ERESOLVE on every
     // new Workers project. A floating `^4` is refused because wrangler moved
     // that peer's MAJOR inside its own 4.x line; the guarded npm install in
     // `workers-install-e2e.test.ts` is what proves the set resolves.
-    expect(pkg.devDependencies['wrangler']).toBe('~4.148.0');
-    expect(pkg.devDependencies['@cloudflare/workers-types']).toBe('^5.20261006.1');
+    expect(pkg.devDependencies['wrangler']).toBe('~4.153.0');
+    expect(pkg.devDependencies['@cloudflare/workers-types']).toBe('^5.20261023.1');
   });
 
   it('emits a tsconfig the generated check script can pass (X9-4)', () => {

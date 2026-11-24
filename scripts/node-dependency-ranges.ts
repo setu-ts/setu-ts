@@ -96,7 +96,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'react-router': '^8',
   // cloudflare-plugin's workerd e2e suites: the `wrangler dev` they run and its
   // config reader; the CLI Workers scaffold's pin (a cloudflare-plugin test ties them).
-  wrangler: '~4.148.0',
+  wrangler: '~4.153.0',
   ws: '^8.18.0',
   zod: '^4.6.6',
 };
