@@ -1,10 +1,11 @@
 # Milestone 143m — Messaging lane (`@setu-ts/messaging-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/realtime-backplane-plugin`)
 
-> **Status:** Planning, decisions open (§12). Branch: `feat/m143m-broker-queue-bounds`, cut from
-> `develop` `7d3b5cf21` (M143p merged, #616). `develop` and `main` are protected; all work
-> (implementation and fixes) stays on this one branch until it merges through a single PR into
-> `develop`. Lane: Messaging, second in its lane after M143p. Ships in `0.14.0`. Codex implements;
-> Claude plans, reviews and verifies.
+> **Status:** Decided (maintainer, 2026-11-25: D1–D11 as recommended, every confirmation item
+> confirmed, both departures from M143p accepted); implementation by Codex. Branch:
+> `feat/m143m-broker-queue-bounds`, cut from `develop` `7d3b5cf21` (M143p merged, #616). `develop`
+> and `main` are protected; all work (implementation and fixes) stays on this one branch until it
+> merges through a single PR into `develop`. Lane: Messaging, second in its lane after M143p. Ships
+> in `0.14.0`. Codex implements; Claude plans, reviews and verifies.
 
 ## 0. Objective & scope
 
@@ -29,9 +30,9 @@ undocumented and nothing warns; and an injected Redis pair can hold the backplan
 - **NOT this milestone:** the SES half of V13-215 and every non-SQS half of V13-216 (M143r, #614);
   the Workers half of V13-220 (`WorkersQueue.retryDelaySeconds`, M143o); the Workers half of V13-117
   (`CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` in `cloudflare-plugin` carry
-  no status: no letter owns it, §11 and §12 L1); an after-commit hook in `database-plugin` that
-  would let the outbox dispatch itself (Data lane, §11); every CLI and template change (CLI lane);
-  documentation-only rows (M143n).
+  no status: assigned to M143o by the maintainer, 2026-11-25, with D1's statuses, §11); an
+  after-commit hook in `database-plugin` that would let the outbox dispatch itself (Data lane, §11);
+  every CLI and template change (CLI lane); documentation-only rows (M143n).
 
 ### 0.1 Rows, their reproduction read, and where each is fixed
 
@@ -744,8 +745,8 @@ agent (§10).
 ## 9. Out of scope
 
 - The SES half of V13-215 and every non-SQS half of V13-216 (M143r); the Workers half of V13-220
-  (M143o); the Workers half of V13-117 (no owner, §12 L1); an outbox after-commit hook (Data lane);
-  CLI and template changes (CLI lane); performance work beyond the relay follow-up.
+  (M143o); the Workers half of V13-117 (M143o, assigned 2026-11-25); an outbox after-commit hook
+  (Data lane); CLI and template changes (CLI lane); performance work beyond the relay follow-up.
 
 ## 10. Design security review
 
@@ -766,9 +767,10 @@ record for the PR body.
 
 ## 11. Hand-overs
 
-- **Coordinator / lanes table (L1):** the Workers half of V13-117 (`CloudflareRequestTimeoutError`,
-  `CloudflareRemoteHandlerError` at `cloudflare-plugin/src/errors.ts:96-135` carry no status) has no
-  letter; M143o's plan says so (§11 line 1166). The same hints as §3.1 would close it.
+- **M143o (L1, decided 2026-11-25):** the Workers half of V13-117 (`CloudflareRequestTimeoutError`,
+  `CloudflareRemoteHandlerError` at `cloudflare-plugin/src/errors.ts:96-135` carry no status) goes
+  to M143o with D1's statuses (504 and 502, fixed details, no remote text in the body); the
+  coordinator tells M143o. This letter does not touch `cloudflare-plugin`.
 - **Data lane:** an after-commit callback on `DatabaseService.transaction` would let the outbox
   dispatch itself (§3.16); proposed, not required for this row.
 - **Core lane, after M143r and this letter merge:** one `common` helper for AWS fault classification
@@ -780,6 +782,10 @@ record for the PR body.
 - **M143n:** re-checks the README text this letter writes.
 
 ## 12. Open decisions for the maintainer
+
+**DECIDED by the maintainer, 2026-11-25:** every decision below as recommended, (a) in each of D1 to
+D11; every "for confirmation" item confirmed; both declared departures from M143p accepted. L1: the
+Workers half of V13-117 goes to M143o with D1's statuses.
 
 - **D1 (§3.1), RPC statuses:** (a) timeout 504, remote failure 502; (b) timeout 504, remote failure
   500 (unmasked title); (c) unchanged. Recommendation (a).
