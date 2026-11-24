@@ -28,12 +28,16 @@ import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import { WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
+import { refuseHandshakeHeaders } from '../shared/handshake-headers.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
 import {
   bindCloudflareSocketToSink,
   createDefaultCloudflareWebSocketHost,
   WORKERS_WS_MAX_MESSAGE_BYTES,
 } from './cf-ws-upgrader.ts';
+
+/** The handshake version workerd speaks; it refuses every other one. */
+const WORKERS_WS_VERSIONS: readonly number[] = [13];
 
 /**
  * Internal handle for a Cloudflare Workers HTTP server.
@@ -122,7 +126,19 @@ export class CloudflareWorkersServerHandle {
   /**
    * Performs the WebSocket handshake using the Cloudflare WebSocketPair.
    */
-  #performUpgrade(_request: Request, intent: WebSocketUpgradeIntent): Response {
+  #performUpgrade(request: Request, intent: WebSocketUpgradeIntent): Response {
+    // workerd checks the handshake only after the Worker accepted the pair,
+    // which would run the route's onOpen for a malformed one (V13-278).
+    const refusal = refuseHandshakeHeaders(request.headers, WORKERS_WS_VERSIONS);
+    if (refusal !== undefined) {
+      intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: refusal.reason });
+      return refusal.header === 'key'
+        ? new Response(null, { status: 400 })
+        : new Response(null, {
+            status: 426,
+            headers: { 'sec-websocket-version': '13', upgrade: 'websocket', connection: 'Upgrade' },
+          });
+    }
     try {
       // Resolved lazily so the Workers-global boundary cast is never evaluated
       // on a runtime that has no WebSocketPair.

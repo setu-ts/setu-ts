@@ -137,11 +137,18 @@ describe('a Workers scaffold resolves its npm dependencies', () => {
           stderr: 'piped',
         });
         const report = JSON.parse(new TextDecoder().decode(audited.stdout)) as {
+          message?: string;
           vulnerabilities?: Record<
             string,
             { readonly severity: string; readonly effects: readonly string[] }
           >;
         };
+        // An unreachable audit endpoint exits 0 with `{ message, error }` and no
+        // report; reading that as "no advisories" would pass on an outage.
+        expect(
+          report.vulnerabilities,
+          report.message ?? 'npm audit returned no report',
+        ).toBeDefined();
         const through = new Set(['wrangler', 'miniflare']);
         const found = Object.entries(report.vulnerabilities ?? {})
           .filter(([, entry]) => entry.severity === 'high' || entry.severity === 'critical')

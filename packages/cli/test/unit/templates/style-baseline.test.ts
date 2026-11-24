@@ -21,8 +21,10 @@ import * as nodeFs from 'node:fs/promises';
  * `deno.json`, `.env`, `main.ts`, `Dockerfile` and the new `instrumentation.mjs`; and
  * M131d's README link to the site instead of GitHub (X93-7), which changes only `README.md`;
  * M137b's `OpenApiPlugin({ errorSchema: 'rfc9457' })`, which changes only `setu.config.ts` (reversing
- * it reproduces every previous hash); and M140a's body bounds, local ignore rules and Deno
- * cooldown/check pin:
+ * it reproduces every previous hash); M140a's body bounds, local ignore rules and Deno
+ * cooldown/check pin; and M143o's Workers toolchain pins (`wrangler ~4.153.0`,
+ * `@cloudflare/workers-types ^5.20261023.1`), which change only the three Workers `package.json`
+ * hashes:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

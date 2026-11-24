@@ -211,6 +211,12 @@ All notable changes to this project are documented here. The format follows
   does: a `Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400, and a `Sec-WebSocket-Version`
   other than 13 or 8 gets 400 with `Sec-WebSocket-Version: 13, 8`. Before, Deno upgraded both
   (V13-276).
+- **`@setu-ts/runtime` (M143o).** On Workers, a malformed WebSocket handshake no longer runs the
+  route's `onOpen` and `onClose`. workerd checks the handshake only after the Worker has accepted
+  the socket pair, so a bad key or version used to join a room and take a `maxConnections` slot
+  before the platform refused it. The adapter now checks first: a malformed key gets 400, and a
+  version other than 13 gets 426 with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`
+  (V13-278).
 - **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
   `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
   7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose

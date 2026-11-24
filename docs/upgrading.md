@@ -12,6 +12,15 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Malformed WebSocket handshakes are refused on Deno and Workers (`@setu-ts/runtime`)
+
+Deno and Workers now refuse a handshake that Node's `ws` refuses, before the connection opens. A
+`Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400. Deno answers a `Sec-WebSocket-Version`
+other than 13 or 8 with 400, and Workers answers one other than 13 with 426. Before, Deno upgraded
+both, and on Workers the route's `onOpen` and `onClose` ran before the platform refused them. A
+client that sends a real handshake, as every browser does, sees no change; a hand-written test or
+script that sends `Upgrade: websocket` without a valid key and version now gets the refusal.
+
 ### Raise the Workers toolchain pins (`@setu-ts/cli`)
 
 A Workers project generated before 0.14.0 pins `"wrangler": "~4.148.0"`, whose miniflare installs

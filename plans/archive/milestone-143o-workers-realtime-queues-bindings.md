@@ -1398,3 +1398,19 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
 - **V13-277 — upstream note.** Bun's and workerd's own 426 for an unsupported version carries no
   `Upgrade`, and workerd upgrades a malformed key. Both are the platform's handshake, so the
   websocket-plugin README names the difference and nothing changes in Setu.
+- **V13-278 — a malformed handshake ran a Workers route's `onOpen`.** Found by the code review of
+  the addendum and reproduced under wrangler 4.153.0: workerd invokes the Worker before it checks
+  the handshake, so the adapter created and accepted the pair, `onOpen` ran (a room join, a
+  broadcast, a `maxConnections` slot), and only then did workerd answer 400 or 426 and close
+  with 1006. Comparison: Node (`ws`) and Deno (now) refuse before `onOpen`; Bun's `server.upgrade()`
+  returns false, so `open` never fires; Hono's Workers adapter (`hono@4.13.18`,
+  `adapter/cloudflare-workers/websocket.js`) checks only the `Upgrade` header and then creates the
+  pair — it has no `onOpen` hook, but its `onClose` would fire. The maintainer chose (a): the
+  Workers adapter applies the same check before `createPair`, version 13 only (workerd speaks only
+  13): a malformed key gets 400, any other version 426 with `Sec-WebSocket-Version: 13` and
+  `Upgrade: websocket`. `refuseHandshakeHeaders` takes the supported versions and names the header
+  at fault; each adapter builds its own response. The platform-fault 500 catch is unchanged.
+  `workers-handshake-refusal.test.ts` drives a kernel app on the Workers platform with a fake
+  `WebSocketPair`: no `onOpen` or `onClose` for a bad key or version, and both fire without the
+  check; `handshake-platform-faults.test.ts` gains the client faults the Deno and Workers adapters
+  refuse themselves.

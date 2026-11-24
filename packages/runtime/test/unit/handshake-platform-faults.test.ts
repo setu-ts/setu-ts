@@ -194,3 +194,94 @@ describe('a handshake the platform cannot complete', () => {
     });
   }
 });
+
+/** A request with only the given handshake headers. */
+function malformed(extra: Record<string, string>): Request {
+  return new Request('http://localhost/ws', {
+    headers: { upgrade: 'websocket', connection: 'Upgrade', ...extra },
+  });
+}
+
+/** One client fault an adapter refuses before asking its platform to upgrade. */
+interface ClientRow {
+  readonly runtime: 'deno' | 'workers';
+  readonly cause: string;
+  readonly headers: Record<string, string>;
+  readonly status: number;
+  readonly version: string | null;
+}
+
+/**
+ * The client-fault arm where the adapter, not the platform, must refuse: Deno
+ * (whose upgrade checks only that a key exists) and Workers (whose platform
+ * checks after the Worker accepted the pair). Node's `ws` and Bun refuse these
+ * themselves; the real-server table is websocket-plugin's `handshake-refusals`.
+ */
+const CLIENT_ROWS: readonly ClientRow[] = [
+  {
+    runtime: 'deno',
+    cause: 'a malformed key',
+    headers: { 'sec-websocket-key': 'short', 'sec-websocket-version': '13' },
+    status: 400,
+    version: null,
+  },
+  {
+    runtime: 'deno',
+    cause: 'version 7',
+    headers: { 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '7' },
+    status: 400,
+    version: '13, 8',
+  },
+  {
+    runtime: 'workers',
+    cause: 'a malformed key',
+    headers: { 'sec-websocket-key': 'short', 'sec-websocket-version': '13' },
+    status: 400,
+    version: null,
+  },
+  {
+    runtime: 'workers',
+    cause: 'version 8',
+    headers: { 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '8' },
+    status: 426,
+    version: '13',
+  },
+];
+
+describe('a client fault the adapter refuses itself', () => {
+  for (const row of CLIENT_ROWS) {
+    it(`${row.runtime}: ${row.cause} answers ${String(row.status)} without asking the platform to upgrade`, async () => {
+      const codes: number[] = [];
+      let asked = 0;
+      let response: Response;
+      if (row.runtime === 'deno') {
+        const host: DenoServeHost = {
+          serve: () => ({ shutdown: () => Promise.resolve() }),
+          upgradeWebSocket: () => {
+            asked++;
+            throw new Error('not reached');
+          },
+        };
+        const adapter = new DenoHttpAdapter(host);
+        adapter.setHandler(upgrading(codes));
+        response = await adapter.fetch(malformed(row.headers));
+      } else {
+        const host: CloudflareWebSocketHost = {
+          createPair: () => {
+            asked++;
+            throw new Error('not reached');
+          },
+          createUpgradeResponse: () => new Response(null),
+        };
+        const adapter = new CloudflareWorkersHttpAdapter(host);
+        adapter.setHandler(upgrading(codes));
+        response = await adapter.fetch(malformed(row.headers));
+      }
+
+      expect(response.status).toBe(row.status);
+      expect(response.headers.get('sec-websocket-version')).toBe(row.version);
+      expect(asked).toBe(0);
+      expect(codes).toEqual([1006]);
+    });
+  }
+});
