@@ -186,8 +186,24 @@ full below, with their files and tests. Neither is written into `src/` until bot
 §3.1.3 are in. **The branch that is built is recorded in this section (by editing the line below in
 the plan, in the same PR) and in the PR description, with the M-2 result table and raw log path.**
 
-- **Branch built:** to be filled from M-2's result: "every connector" (§3.1.2) if the threshold of
-  §3.1.3 holds, else "selected by connector" (§3.1.4).
+- **Branch built:** "selected by connector" (§3.1.4, Branch B). M-2 (2026-11-24, tarballs of
+  `b5c2551a9`, 15 paired passes, `WARMUP=15s`, `DURATION=20s`, bombardier `-c 64 -m POST`, servers
+  on cores 8-15, load on 16-23, PostgreSQL 16 on 24-31; raw log
+  `~/setu-benchmarks/2026-11-24-db-m143q/results/m2.log`, report `results/REPORT-m2.md`):
+
+  | Route                     | count / single median throughput | passes won by count | median p99 ratio | spread (single / count) |
+  | ------------------------- | -------------------------------- | ------------------- | ---------------- | ----------------------- |
+  | `POST /items/:id/touch`   | 33.3% (30.6-34.0%)               | 0 / 15              | 272.3%           | 4.9% / 12.2%            |
+  | `POST /items/:id/version` | 48.6% (46.5-50.9%)               | 0 / 15              | 196.8%           | 8.3% / 7.5%             |
+
+  Both runs are unimodal and under the harness's 15% spread bar, so quotable; the 95% / 110% bar
+  fails on both routes by a wide margin. Cross-check with durable commits (a 3-second smoke, one
+  pass): touch 63.4% of single. **Deviation (maintainer-approved, 2026-11-24):** both servers set
+  `synchronous_commit=off` per session. Commit fsync on the throwaway container's storage (overlayfs
+  on btrfs) stalled at about 7.5 ms per flush after about 10 s of sustained writes, which capped
+  every route, raw `pg` included, near 660 rps and hid the path difference. Off, the ratio omits the
+  per-write fsync both paths pay, so it overstates the gap relative to a durable server; the durable
+  smoke above shows the same direction.
 
 #### 3.1.1 The count path (shared by both branches)
 
@@ -849,6 +865,41 @@ missing sort key.
 - **Test home.** `dynamo-client-seam.test.ts` and `cosmos-client-seam.test.ts` (a recording SDK
   module sees every `clientOptions` key, the top-level keys winning, and no `undefined` key); the
   `plugin-nosql-options.test.ts` rows for both arms.
+
+### 3.16 No plaintext-HTTP refusal on the Cosmos lazy arm (maintainer decision, 2026-11-24)
+
+- **Decision.** The implementation had added a refusal of `http://` endpoints on non-loopback hosts
+  to the Cosmos lazy loader, mirroring the DynamoDB arm's existing guard. It is dropped from this
+  letter: the vNext emulator reached from Compose by service name (e.g. `http://cosmos:8081`) must
+  work. The DynamoDB guard, which predates this letter, is unchanged and questioned in a register
+  row (V13-273: AWS's own DynamoDB Local Compose example uses `http://dynamodb-local:8000`).
+- **Comparison.** `@azure/cosmos` 4.10.2 allows `http` with key auth (`RequestHandler.js` L72-75)
+  and refuses plaintext only for an AAD bearer token (`ClientContext.js` L60-68); key auth sends an
+  HMAC signature, never the key (`auth.js` L34-39); the Aspire, Python and Go clients all allow it;
+  the vNext emulator defaults to `http` and checks no auth.
+- **Test home.** `test/unit/cosmos-client-seam.test.ts`: the lazy loader builds a client for
+  `http://cosmos:8081/`, a remote `http://` host, loopback and `https`.
+
+### 3.17 Drizzle over mysql2 refuses `NO_BACKSLASH_ESCAPES` (maintainer decision, 2026-11-24)
+
+- **Defect (pre-existing, V13-272).** Drizzle's mysql2 session sends text queries (`client.query`,
+  drizzle `session.ts` L101/L133), so mysql2 interpolates bound values client-side, and mysql2
+  3.24.x escapes `'` as `\'` whatever the server's `sql_mode`. Under `NO_BACKSLASH_ESCAPES` that is
+  no escape: a bound string containing `'` leaves its literal, an SQL injection (probed on MySQL
+  8.4: `' OR 1=1 -- ` matched). mysql2 fixes it only in canary (sidorares/node-mysql2#4684).
+- **Decision.** The Drizzle mysql2 arm refuses, with a named error, while the server reports
+  `NO_BACKSLASH_ESCAPES`, checked where the probe (recorded with the implementation) showed the mode
+  can be read reliably and can change: at connect and on every pooled connection. The message names
+  the mode and the ways out: turn the mode off for the application's sessions or user, or use a
+  mysql2 release with #4684 once it is stable. Security entry and BREAKING refusal in the CHANGELOG;
+  an upgrade note.
+- **Comparison.** Knex and TypeORM over mysql2 are exposed the same way; Sequelize and Prisma use
+  server-side prepared statements; PDO, Connector/J and go-sql-driver honour the server's
+  `NO_BACKSLASH_ESCAPES` status flag when escaping.
+- **Test home.** `test/unit/drizzle-mysql-writes.test.ts` (or the arm's unit file): every refusal
+  branch; `test/integration/real-drizzle-mysql.test.ts` on `MYSQL_URL`: under the mode `connect()`
+  refuses by name, the injection matches with the guard bypassed (negative control), the default
+  `sql_mode` connects.
 
 ## 4. Exported surface — every symbol names its consumer
 

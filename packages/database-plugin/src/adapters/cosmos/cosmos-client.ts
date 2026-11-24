@@ -16,7 +16,6 @@ import { requestBound } from '../request-bound.ts';
  * @module
  */
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
-import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import type {
   CosmosAccessCondition,
   CosmosBatchDeleteOperation,
@@ -248,18 +247,6 @@ export async function createLazyClientLoader(
   key: string,
   clientOptions?: Readonly<Record<string, unknown>>,
 ): Promise<CosmosClientLoader> {
-  const url = new URL(endpoint);
-  if (
-    url.protocol === 'http:' &&
-    !['localhost', '127.0.0.1', '[::1]', '::1'].includes(url.hostname) &&
-    !url.hostname.endsWith('.localhost')
-  ) {
-    throw new UnsupportedQueryFeatureError(
-      'endpoint',
-      'cosmos',
-      `CosmosAdapter refuses a plaintext HTTP endpoint on remote host '${url.hostname}'; use HTTPS for credentialed requests.`,
-    );
-  }
   let mod: CosmosSdkModule;
   try {
     mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
