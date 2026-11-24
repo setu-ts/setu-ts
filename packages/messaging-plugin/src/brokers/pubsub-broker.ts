@@ -946,7 +946,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     if (this.#enableMessageOrdering && this.#deadLetterTopic !== undefined)
       this.#warnOnce(
         'ordered-dead-letter',
-        'Pub/Sub later messages of a failing ordering key also spend delivery attempts and may be dead-lettered; order is best effort once a message is dead-lettered',
+        'Pub/Sub later messages of a failing ordering key also spend delivery attempts and may be dead-lettered; they are held back until any held-back message of that key is redelivered; a later message can run while the failed one still awaits redelivery; order is best effort, including before dead-lettering',
       );
   }
 
@@ -1107,6 +1107,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     let closing: Promise<void> | undefined;
     let timer: TimerHandle | undefined;
     let failures = 0;
+    let reopening = false;
     const checks = new Map<TimerHandle, () => void>();
     const timing = {
       hrtime: () => this.#runtime.hrtime(),
@@ -1209,7 +1210,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       return false;
     };
     const schedule = (): void => {
-      if (ended || timer !== undefined) return;
+      if (ended || reopening || timer !== undefined) return;
       const delay = [1000, 2000, 5000, 10000, 30000][Math.min(failures++, 4)]!;
       timer = this.#runtime.setTimeout(() => {
         timer = undefined;
@@ -1231,7 +1232,9 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       try {
         await subscription.close();
       } finally {
-        if (independent && subscription.created === true)
+        // Recovery reuses this name. Only failed initial setup owns deletion
+        // here; an established subscription is deleted by its final close.
+        if (independent && !opened && subscription.created === true)
           await transport
             .deleteSubscription(queue)
             .catch((error: unknown) =>
@@ -1272,6 +1275,8 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       return { subscription, closed: () => closedDuringOpen };
     };
     const reopen = async (): Promise<void> => {
+      if (ended || reopening) return;
+      reopening = true;
       try {
         const previous = current;
         current = undefined;
@@ -1292,7 +1297,11 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         this.#write('Pub/Sub subscription stream recovered');
       } catch {
         // The closure was reported once. Repeated failures only advance the schedule.
-        schedule();
+      } finally {
+        reopening = false;
+        // A close during open/disposal leaves the consumer closed. Start the
+        // next backoff only after this attempt has finished disposing its handle.
+        if (state.closed) schedule();
       }
     };
     this.#subscriptions.set(subscriptionId, state);

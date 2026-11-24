@@ -114,7 +114,9 @@ describe('Pub/Sub ordered async handler dispatch', () => {
     });
     await h.start();
     expect(h.warn).toHaveBeenCalledWith(
-      expect.stringContaining('order is best effort once a message is dead-lettered'),
+      expect.stringContaining(
+        'any held-back message of that key is redelivered; a later message can run while the failed one still awaits redelivery; order is best effort',
+      ),
     );
     for (let n = 0; n < 7; n++) h.deliver(n, 'key');
     await flushCloud();

@@ -8580,6 +8580,29 @@ Provides background job queue with Memory and Redis adapters.
   or unreadable message is sent to the target with `setu-dead-letter-reason`, `setu-attempts` and
   `setu-source-message-id` attributes and then deleted; an unreadable message is never logged with
   its body.
+
+  Public consumer members, both `@since 0.14.0`:
+
+  - `prepareConsumer(name: string): Promise<void>` resolves once a dead-letter target (or explicit
+    `false` discard opt-out) is proved. Concurrent target resolution for a name is shared.
+    Successful targets and definite target refusals are cached until disconnect; failures with
+    reason `attributes-unavailable` or `target-unresolvable` are evicted so later calls can retry.
+    It rejects with `SqsDeadLetterTargetMissingError` when no target can be proved, with
+    `SqsQueueNotConfiguredError` for an unmapped name, and with `Error` when disconnected or the
+    connection changes during preparation.
+  - `readonly claimRenewal` exposes `intervalMs = Math.floor(visibilityTimeoutSeconds * 1000 / 3)`
+    and `extend(name: string, id: string, claimToken: string): Promise<boolean>`. `QueueService`
+    drives and clears the renewal interval. `extend` renews a matching, unexpired delivery during
+    processing, dead-letter preparation and forwarding, retaining its token and original receive
+    time. A valid claim fenced for its final delete or visibility change returns `true` without I/O;
+    expiry is checked before that shortcut. It returns `false` for an absent, expired or mismatched
+    claim, while disconnected, on transport rejection, or if the claim is replaced while renewal is
+    pending. When a renewal request is needed, it is capped by the whole seconds remaining in the
+    twelve-hour receive budget, rounded down with one second of request headroom; below one safe
+    whole second it returns `false` without calling SQS. A successful extension refreshes the local
+    claim expiry. This member reports renewal refusal through `false`, not an exception, and never
+    revives an expired claim.
+
 - **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`,
   `visibilityTimeoutSeconds?`, `region?`, `credentials?`, `endpoint?`, `client?`).
   `deadLetterQueues` maps a consumed job name to a target URL, or to `false` to discard that name's

@@ -80,16 +80,16 @@ the logger) but still applies the de-duplication id as nats.js's native `msgID`.
 ordered subscription where the broker has one — not the order handlers **finish** in. Measured
 2026-10-07 against real backends:
 
-| Broker          | On a handler failure                                                                                                                                                                                                                                                                                                                                                                                |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                                                                                                                                                                   |
-| Pub/Sub         | Order kept on an ordering subscription (`enableMessageOrdering`): since 0.14.0 the broker runs one handler at a time per ordering key, and after a failure nacks the key's later messages without running them until the failed one is redelivered (past 10,000 ordering keys held per subscription, see below). The client library alone ran 12 handlers of one key at once (emulator, 2026-11-23) |
-| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07                                                                                                                                      |
-| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                                                                                                                                                              |
-| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                                                                                                                                                       |
-| NATS            | Order lost on retry                                                                                                                                                                                                                                                                                                                                                                                 |
-| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                                                                                                                                                              |
-| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                                                                                                                                                      |
+| Broker          | On a handler failure                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kafka           | Order kept by blocking: the offset stays uncommitted, so one failing message stalls its partition                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Pub/Sub         | Best-effort order on an ordering subscription (`enableMessageOrdering`): since 0.14.0 the broker runs one handler at a time per ordering key. After a failure it nacks later messages without running them until any tracked held-back message of that key is redelivered. A later message can then run while the failed one still awaits redelivery, even before it is dead-lettered (past 10,000 held ordering keys, see below). The client library alone ran 12 handlers of one key at once (emulator, 2026-11-23) |
+| Service Bus     | Order kept by blocking ONLY at `maxConcurrentCalls: 1` (the broker's default): the abandoned message is redelivered before the next is handled. At `maxConcurrentCalls: 2` the later message is handled first, so order is LOST. Measured both ways 2026-10-07                                                                                                                                                                                                                                                        |
+| RabbitMQ        | Order lost on retry: later messages for the key are handled while the failed one waits                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Redis Streams   | Order lost on retry (reclaim)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| NATS            | Order lost on retry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| in-memory       | Dispatch already follows publish order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `WorkersBroker` | Follows `dispatch` batch order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 A consumer that needs order compares the delivered envelope's version and drops or defers a stale
 message.
@@ -525,13 +525,15 @@ no check. A custom `IPubSubTransport` must report `created` from `open` for the 
 On a broker with `enableMessageOrdering`, handlers run one at a time per ordering key (see
 [What `orderingKey` promises](#what-orderingkey-promises)). Pub/Sub counts every nack as a delivery
 attempt, so with a `deadLetterTopic` the later messages of a failing key spend attempts too and can
-be dead-lettered with it; `connect()` warns once about this and that order is best effort once a
-message is dead-lettered. The broker keeps hold-back state for at most 10,000 ordering keys per
-subscription and forgets the least recently used idle key beyond that, so keys whose failed message
-was dead-lettered cannot grow memory without bound. When the forgotten key failed within the last 11
-minutes, its failed message may still be redelivered (Pub/Sub applies its retry policy best effort,
-so a later redelivery is possible too), and that key's next message can run before it; the broker
-warns once per subscription when it forgets such a key.
+be dead-lettered with it. A key resumes on the first redelivery of any tracked held-back message, so
+a later message can run while the failed one still waits for redelivery, before it is dead-lettered.
+Order is best effort; `connect()` warns once about this. The broker retains the 1,000 newest nacked
+IDs per key, evicting the oldest on overflow. It keeps hold-back state for at most 10,000 ordering
+keys per subscription and forgets the least recently used idle key beyond that, so keys whose failed
+message was dead-lettered cannot grow memory without bound. When the forgotten key failed within the
+last 11 minutes, its failed message may still be redelivered (Pub/Sub applies its retry policy best
+effort, so a later redelivery is possible too), and that key's next message can run before it; the
+broker warns once per subscription when it forgets such a key.
 
 **Stream recovery.** When the client library closes a subscription's stream on a non-retryable
 status (a deleted subscription, for example), the broker re-opens it (re-creating it when absent)
@@ -1805,10 +1807,12 @@ RabbitMQ, Redis Streams, Service Bus and Pub/Sub (with a `deadLetterTopic`) `con
 `consumerRetry.maxAttempts`, or set `consumerRetry: false`, or the broker dead-letters the delivery
 before it is ever parked. On Service Bus the subscription's platform `maxDeliveryCount` still
 applies even with `consumerRetry: false`: set it above the inbox `maxAttempts`. An existing Pub/Sub
-subscription's dead-letter policy likewise still applies. On a backend that defers writes, a
-concurrent delivery's park can commit while a sibling's successful transaction is still open; the
-sibling then rolls back and acknowledges, and the event ends parked — recoverable through
-`release('retry')`.
+subscription's dead-letter policy likewise still applies. With Pub/Sub ordering and a
+`deadLetterTopic`, a held-back later message can exhaust its broker delivery budget through nacks
+without ever reaching the inbox handler, even with inbox `maxAttempts: 1`. Aligning these budgets
+does not guarantee parking for held-back messages. On a backend that defers writes, a concurrent
+delivery's park can commit while a sibling's successful transaction is still open; the sibling then
+rolls back and acknowledges, and the event ends parked — recoverable through `release('retry')`.
 
 ```typescript
 import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';

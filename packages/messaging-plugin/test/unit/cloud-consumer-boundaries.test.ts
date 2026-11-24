@@ -128,19 +128,26 @@ describe('Cloud consumer lifecycle boundaries', () => {
     expect(second).toHaveBeenCalledOnce();
   });
 
-  it('retains at most one thousand nacked identities per key and still releases an early redelivery', async () => {
-    const gate = new PubSubOrdering(() => 0);
-    const nack = vi.fn();
-    await gate.run({ orderingKey: 'k', messageId: 'head', nack }, () => Promise.resolve(false));
-    for (let i = 0; i < 1050; i++)
-      await gate.run({ orderingKey: 'k', messageId: String(i), nack }, () => Promise.resolve(true));
-    const dispatch = vi.fn(() => Promise.resolve(true));
-    await gate.run({ orderingKey: 'k', messageId: '999', nack }, dispatch);
-    expect(dispatch).not.toHaveBeenCalled();
-    await gate.run({ orderingKey: 'k', messageId: '0', nack }, dispatch);
-    expect(dispatch).toHaveBeenCalledOnce();
-    gate.clear();
-  });
+  it.each([
+    { id: '1049', runs: true },
+    { id: '0', runs: false },
+  ])(
+    'retains only the newest thousand nacked identities: redelivery $id runs=$runs',
+    async ({ id, runs }) => {
+      const gate = new PubSubOrdering(() => 0);
+      const nack = vi.fn();
+      await gate.run({ orderingKey: 'k', messageId: 'head', nack }, () => Promise.resolve(false));
+      for (let i = 0; i < 1050; i++)
+        await gate.run({ orderingKey: 'k', messageId: String(i), nack }, () =>
+          Promise.resolve(true),
+        );
+      const dispatch = vi.fn(() => Promise.resolve(true));
+      // The head and early followers may all be gone; a recent held-back id must still release the key.
+      await gate.run({ orderingKey: 'k', messageId: id, nack }, dispatch);
+      expect(dispatch).toHaveBeenCalledTimes(runs ? 1 : 0);
+      gate.clear();
+    },
+  );
 
   it('retries when a replacement closes between its open and recovery commit', async () => {
     // Sweep the promise-continuation boundary, including the microtask just after open's check.
