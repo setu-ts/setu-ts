@@ -3587,7 +3587,8 @@
       },
       "jsr:@setu-ts/cloudflare-plugin@0.13.0": {
         "dependencies": [
-          "npm:vitest@5.0.3"
+          "npm:vitest@5.0.3",
+          "npm:wrangler@4.148"
         ]
       },
       "jsr:@setu-ts/common@0.13.0": {

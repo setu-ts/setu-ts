@@ -163,26 +163,26 @@ reads its port from `PORT`, as that template does.
 
 ## A learning path
 
-| Step | Example                                          | Concept                                                     | Needs                                   |
-| ---- | ------------------------------------------------ | ----------------------------------------------------------- | --------------------------------------- |
-| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                     | —                                       |
-| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI  | —                                       |
-| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback            | —                                       |
-| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes     | —                                       |
-| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus    | —                                       |
-| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                              | —                                       |
-| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability             | —                                       |
-| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                          | —                                       |
-| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port            | —                                       |
-| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges      | —                                       |
-| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                   | —                                       |
-| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions   | Node 24 and pnpm                        |
-| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                        | Redis                                   |
-| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker     | Redis for the second half               |
-| 15   | [grpc-workspace](../apps/grpc-workspace)         | Call a sibling workspace member over gRPC through discovery | —                                       |
-| 16   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive          | Node, Bun and Wrangler (fetched by npx) |
-| 17   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd      | Wrangler                                |
-| 18   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable    | —                                       |
+| Step | Example                                          | Concept                                                     | Needs                                    |
+| ---- | ------------------------------------------------ | ----------------------------------------------------------- | ---------------------------------------- |
+| 1    | [minimal](../apps/minimal)                       | Compose a kernel, runtime and one route                     | —                                        |
+| 2    | [rest-api](../apps/rest-api)                     | Build an authenticated, validated API described by OpenAPI  | —                                        |
+| 3    | [database](../apps/database)                     | Use repositories and verify transaction rollback            | —                                        |
+| 4    | [di-decorators](../apps/di-decorators)           | Inject decorated services and compare request lifetimes     | —                                        |
+| 5    | [cqrs](../apps/cqrs)                             | Write through a command bus and read through a query bus    | —                                        |
+| 6    | [multi-tenant](../apps/multi-tenant)             | Isolate request data by tenant                              | —                                        |
+| 7    | [plugin-development](../apps/plugin-development) | Register and resolve a custom plugin capability             | —                                        |
+| 8    | [graphql-demo](../apps/graphql-demo)             | Compose a schema-first GraphQL API                          | —                                        |
+| 9    | [grpc](../apps/grpc)                             | Serve descriptor-backed RPC and HTTP on one port            | —                                        |
+| 10   | [static-site](../apps/static-site)               | Serve static files with caching, ETags and byte ranges      | —                                        |
+| 11   | [worker-pool](../apps/worker-pool)               | Offload CPU work and share worker buffers                   | —                                        |
+| 12   | [full-stack](../apps/full-stack)                 | Pass framework services into SSR loaders and form actions   | Node 24 and pnpm                         |
+| 13   | [realtime](../apps/realtime)                     | Deliver SSE messages across replicas                        | Redis                                    |
+| 14   | [microservices](../apps/microservices)           | Discover an HTTP service, then call it through a broker     | Redis for the second half                |
+| 15   | [grpc-workspace](../apps/grpc-workspace)         | Call a sibling workspace member over gRPC through discovery | —                                        |
+| 16   | [realtime-clients](../apps/realtime-clients)     | Resume authenticated SSE and keep WebSockets alive          | Node, Bun and Wrangler (a devDependency) |
+| 17   | [cloudflare](../apps/cloudflare)                 | Wire KV, scheduled work and queue messaging on workerd      | Wrangler                                 |
+| 18   | [compiled-binary](../apps/compiled-binary)       | Package a health application as a Node single executable    | —                                        |
 
 ## Example deep dives
 
@@ -706,10 +706,10 @@ through keep-alive traffic.
 A server with SSE and WebSocket routes, driven by the `@setu-ts/sdk` realtime clients from Node
 (with and without type stripping), Bun and workerd: SSE reconnection resumes from the last event id,
 authenticated streams send their credentials, and a WebSocket stays alive across the server's
-keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx` (downloaded on first
-use); a missing one fails the check rather than skipping it. It builds `@setu-ts/common` first: the
-SDK's circuit breaker imports `@setu-ts/common/breaker-window`, which resolves to common's compiled
-output under plain Node, Bun and workerd.
+keep-alive. Its smoke check needs Bun installed and runs Wrangler through `npx`, from the example's
+own pinned devDependency; a missing one fails the check rather than skipping it. It builds
+`@setu-ts/common` first: the SDK's circuit breaker imports `@setu-ts/common/breaker-window`, which
+resolves to common's compiled output under plain Node, Bun and workerd.
 
 ```bash
 pnpm --dir apps/realtime-clients run start 3400
