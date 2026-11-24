@@ -5274,9 +5274,9 @@ app.register(
 | `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's public origin, allowed to open a WebSocket. Each entry an exact `http:`/`https:` origin (`new URL(o).origin === o`), no `*` wildcard; an invalid entry throws at construction, naming its index. Ships in 0.12.0                                                                                                                                                               |
 | `checkOrigin`      | `boolean`                                                            | `true`      | Whether every handshake's `Origin` is checked: one that is neither the public origin (`requestOriginOf`, honouring a trusted proxy) nor listed is refused `403` before route guards and before a connection slot; a missing `Origin` (non-browser client) is admitted. `false` admits any origin. Ships in 0.12.0                                                                                                 |
 | `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                                                                                                                           |
-| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                                                                                                                         |
+| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval, from `0` to 2147483647; `0` disables it and creates no timer. Anything else throws.                                                                                                                                                                                                                                                                                                           |
 | `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                                                                                                                  |
-| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                                                                                                                       |
+| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a connection is closed with `1001`; `0` disables. A negative, infinite or `NaN` value throws. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                                                                           |
 | `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                                                                                                                                                                                                                                                            |
 | `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.                                                                                                                                                                                                                           |
 | `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path `route()` registrations. An entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a `RegistryFactory` resolved at `onInit`.                                                                                                                                                                                                                                            |
@@ -14042,8 +14042,6 @@ export; callers cannot mutate the classification vocabulary.
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
-<!-- version:history -->
-
 ### Per-connection realtime links (0.14.0)
 
 `IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
@@ -14060,6 +14058,8 @@ link, the caller's own included).
 functions. The backplane is still registered under `CAPABILITIES.REALTIME_BACKPLANE`;
 `websocket-plugin` narrows it with the guard on Cloudflare Workers, where a socket belongs to the
 request that accepted it.
+
+<!-- version:history -->
 
 ### Realtime subscriber dispatch (0.11.0)
 
@@ -17143,10 +17143,12 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   retries, and the redelivery forwards again without a second `onFailed`, its `error` then the fixed
   reason `attempt budget exhausted` (or, past `maxRetries`, no error text at all); if that send
   fails too, the job leaves the adapter (the platform's `dead_letter_queue`, or deleted) and that is
-  logged. On a queue with no dead-letter target (producer-only), an unroutable message on its last
-  attempt is retried for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the
-  queue's own binding, or a `deadLetter` that is its own producer, is refused, since each exhausted
-  job would loop. `retryDelaySeconds` (a number, or a function of the failed attempt) passes
+  logged. An unroutable message is forwarded the same way, its copy's `error` naming its own reason
+  (`body is not a job envelope` or `no processor registered`, none past `maxRetries`). On a queue
+  with no dead-letter target (producer-only), an unroutable message on its last attempt is retried
+  for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or
+  a `deadLetter` that is its own producer, is refused, since each exhausted job would loop.
+  `retryDelaySeconds` (a number, or a function of the failed attempt) passes
   `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in

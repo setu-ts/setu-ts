@@ -93,15 +93,21 @@ interface ResolvedOptions {
 const MAX_MESSAGE_BYTES_LIMIT = 2 ** 31 - 1;
 
 /**
+ * The largest delay `setInterval` honours: a larger one overflows the timer's
+ * signed 32-bit delay and fires almost at once.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
  * Applies defaults and rejects a configuration that cannot work.
  *
  * @param options - The caller's options
  * @returns The resolved options
  * @throws {Error} If `heartbeatMs` or `idleTimeoutMs` is not a finite number
- *   from 0, an idle timeout is set with no heartbeat to sweep on, an
- *   `allowedOrigins` entry is not an absolute http(s) origin, `checkOrigin`
- *   is not a boolean, or `maxMessageBytes` is not a whole number from 0 to
- *   2^31 - 1
+ *   from 0, `heartbeatMs` is above 2^31 - 1, an idle timeout is set with no
+ *   heartbeat to sweep on, an `allowedOrigins` entry is not an absolute
+ *   http(s) origin, `checkOrigin` is not a boolean, or `maxMessageBytes` is
+ *   not a whole number from 0 to 2^31 - 1
  * @since 0.1.0
  */
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
@@ -109,16 +115,16 @@ export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOption
   const idleTimeoutMs = options?.idleTimeoutMs ?? 0;
 
   // Finite and non-negative: `NaN` passes every `<= 0` check below, and a
-  // heartbeat interval of `NaN` fires with no delay — once per connection on
-  // Workers, where each connection runs its own.
-  for (const [name, value] of [
-    ['heartbeatMs', heartbeatMs],
-    ['idleTimeoutMs', idleTimeoutMs],
+  // heartbeat interval of `NaN` fires almost at once, over and over — once per
+  // connection on Workers, where each connection runs its own. The heartbeat is
+  // also capped at `MAX_TIMER_MS`, above which the delay overflows the same way.
+  for (const [name, value, max] of [
+    ['heartbeatMs', heartbeatMs, MAX_TIMER_MS],
+    ['idleTimeoutMs', idleTimeoutMs, Infinity],
   ] as const) {
-    if (!Number.isFinite(value) || value < 0) {
-      throw new Error(
-        `WebSocketPlugin: ${name} must be a finite number of milliseconds from 0 (off).`,
-      );
+    if (!Number.isFinite(value) || value < 0 || value > max) {
+      const range = max === Infinity ? 'from 0 (off)' : `from 0 (off) to ${String(max)}`;
+      throw new Error(`WebSocketPlugin: ${name} must be a finite number of milliseconds ${range}.`);
     }
   }
 

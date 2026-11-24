@@ -54,7 +54,8 @@ export interface WebSocketPluginOptions {
   /**
    * Interval in milliseconds at which {@linkcode WebSocketPluginOptions.heartbeatPayload}
    * is sent to every open connection. `0` (the default) disables the heartbeat
-   * entirely and creates no timer.
+   * entirely and creates no timer. A negative, infinite or `NaN` value, or one
+   * above 2147483647 (the largest timer delay), throws at registration.
    *
    * The heartbeat is an application-level message, not an RFC 6455 ping frame:
    * the web `WebSocket` API exposed by Deno and Cloudflare Workers has no
@@ -69,7 +70,8 @@ export interface WebSocketPluginOptions {
   readonly heartbeatPayload?: string;
   /**
    * Milliseconds of inbound silence after which a connection is closed with
-   * code `1001`. `0` (the default) disables idle closing.
+   * code `1001`. `0` (the default) disables idle closing. A negative, infinite
+   * or `NaN` value throws at registration.
    *
    * Requires {@linkcode WebSocketPluginOptions.heartbeatMs} above `0`, since the
    * heartbeat tick is what performs the sweep. Configuring an idle timeout

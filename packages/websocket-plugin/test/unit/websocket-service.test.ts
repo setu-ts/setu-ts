@@ -63,6 +63,16 @@ describe('resolveOptions', () => {
     );
   });
 
+  it('refuses a heartbeat setInterval would fire after 1 ms, and accepts 2^31 - 1', () => {
+    expect(() => resolveOptions({ heartbeatMs: 2 ** 31 })).toThrow(
+      'heartbeatMs must be a finite number of milliseconds from 0 (off) to 2147483647',
+    );
+    expect(resolveOptions({ heartbeatMs: 2 ** 31 - 1 }).heartbeatMs).toBe(2 ** 31 - 1);
+    expect(resolveOptions({ heartbeatMs: 1000, idleTimeoutMs: 2 ** 31 }).idleTimeoutMs).toBe(
+      2 ** 31,
+    );
+  });
+
   it('accepts the largest representable frame limit', () => {
     expect(resolveOptions({ maxMessageBytes: 2 ** 31 - 1 }).maxMessageBytes).toBe(2 ** 31 - 1);
   });

@@ -67,6 +67,10 @@ On Cloudflare Workers, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavaila
 `CloudflarePlugin({ durableObject: { binding } })` is registered with its exported hub class (see
 the cloudflare-plugin README). Before, rooms on Workers silently reached only one member per Worker.
 
+`WebSocketPlugin()` now throws for a negative, infinite or `NaN` `heartbeatMs` or `idleTimeoutMs`,
+and for a `heartbeatMs` above 2147483647. Use `0` to disable either; a value read from the
+environment needs a numeric default.
+
 ### Durable Object lock TTL, binding kinds (`@setu-ts/cloudflare-plugin`)
 
 `DurableObjectLock.acquire` throws a `RangeError` for a TTL that is not a whole number of

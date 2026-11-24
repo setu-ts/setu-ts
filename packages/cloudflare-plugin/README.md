@@ -198,8 +198,10 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   the platform writes it to `dead_letter_queue` when one is configured, or deletes it. That is why
   the stanza above sets both.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
-  retried, and on its last attempt forwarded or discarded the same way; a queue with no dead-letter
-  target (one that only produces) keeps retrying it for the platform's own `dead_letter_queue`.
+  retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
+  own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past
+  `maxRetries` carries none. A queue with no dead-letter target (one that only produces) keeps
+  retrying it for the platform's own `dead_letter_queue`.
 - **`deadLetterQueue` must be another queue.** Naming the queue's own binding fails `app.start()`:
   each exhausted job would be re-enqueued and run again without end.
 - **`retryDelaySeconds`** spaces redeliveries: a number of seconds, or a function of the attempt
@@ -567,7 +569,7 @@ app.router.get('/invoices/:id', {
   handler: async (ctx) => {
     const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
     const response = await bindings.service('BILLING').fetch(
-      new Request(`https://billing/invoices/${ctx.request.params['id'] ?? ''}`),
+      new Request(`https://billing/invoices/${ctx.params['id'] ?? ''}`),
     );
     return ctx.response.status(response.status).json(await response.json());
   },

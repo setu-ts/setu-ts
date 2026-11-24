@@ -33,8 +33,8 @@ export type CacheRefusal =
   | 'set-cookie'
   /**
    * `Cache-Control` holds `private` (qualified or not) or `no-store`, or cannot
-   * be read (an unclosed quote): the response belongs to one visitor.
-   * @since 0.14.0
+   * be read (an unclosed quote): the response belongs to one visitor. Added
+   * in 0.14.0.
    */
   | 'private';
 

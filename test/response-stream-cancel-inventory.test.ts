@@ -422,7 +422,8 @@ describe('response stream sources and the cancel contract', () => {
       }
       if (
         row.kind === 'cancel-does-not-await' ||
-        row.kind === 'pass-through' ||
+        // A pass-through whose source was measured to settle needs no owner.
+        (row.kind === 'pass-through' && row.cancelSettles !== 'always') ||
         row.cancelSettles === 'may-hang' ||
         row.cancelSettles === 'unknown'
       ) {

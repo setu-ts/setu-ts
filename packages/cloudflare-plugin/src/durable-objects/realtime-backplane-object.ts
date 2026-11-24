@@ -126,13 +126,16 @@ export class RealtimeBackplaneObjectCore {
    * link included (a POST has no socket to exclude). The body is forwarded
    * verbatim, never parsed; the receiving side validates it.
    * @param request - The POST carrying one serialized frame
-   * @returns 204, or 413 above the platform's received-message ceiling
+   * @returns 204; 413 above the platform's received-message ceiling; 400 for
+   *   a body that is not valid UTF-8 (decoding it would replace every bad
+   *   byte with U+FFFD, up to three times its size on the hub's sockets)
    */
   async #publish(request: Request): Promise<Response> {
     const declared = Number(request.headers.get('content-length') ?? '0');
     if (declared > MAX_FRAME_BYTES) return new Response(null, { status: 413 });
     const body = await readBounded(request, MAX_FRAME_BYTES);
-    if (body === undefined) return new Response(null, { status: 413 });
+    if (body === TOO_LARGE) return new Response(null, { status: 413 });
+    if (body === NOT_UTF8) return new Response(null, { status: 400 });
     for (const socket of this.#state.getWebSockets()) {
       try {
         socket.send(body);
@@ -207,13 +210,24 @@ export class RealtimeBackplaneObjectCore {
   }
 }
 
+/** {@linkcode readBounded}'s answer for a body larger than its limit. */
+const TOO_LARGE: unique symbol = Symbol('too large');
+/** {@linkcode readBounded}'s answer for a body that is not valid UTF-8. */
+const NOT_UTF8: unique symbol = Symbol('not utf-8');
+
 /**
  * Reads a request body as text, stopping as soon as it passes `limit` bytes
- * (a body without `Content-Length` is otherwise read whole first).
+ * (a body without `Content-Length` is otherwise read whole first). The decode
+ * is strict: a lenient one would turn each invalid byte into a three-byte
+ * U+FFFD and send the hub's sockets a frame larger than the limit.
  *
- * @returns The text, or `undefined` once the body is larger than `limit`
+ * @returns The text, {@linkcode TOO_LARGE} once the body is larger than
+ *   `limit`, or {@linkcode NOT_UTF8} when it does not decode
  */
-async function readBounded(request: Request, limit: number): Promise<string | undefined> {
+async function readBounded(
+  request: Request,
+  limit: number,
+): Promise<string | typeof TOO_LARGE | typeof NOT_UTF8> {
   const stream = request.body;
   if (stream === null) return '';
   const reader = stream.getReader();
@@ -229,7 +243,7 @@ async function readBounded(request: Request, limit: number): Promise<string | un
       } catch {
         // The body is refused either way.
       }
-      return undefined;
+      return TOO_LARGE;
     }
     chunks.push(value);
   }
@@ -239,5 +253,9 @@ async function readBounded(request: Request, limit: number): Promise<string | un
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return new TextDecoder().decode(bytes);
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return NOT_UTF8;
+  }
 }

@@ -258,6 +258,13 @@
         "signature": "version():string"
       },
       {
+        "kind": "method",
+        "name": "waitUntil",
+        "readonly": false,
+        "optional": true,
+        "signature": "waitUntil?(promise:Promise<unknown>):void"
+      },
+      {
         "kind": "property",
         "name": "workers",
         "readonly": true,

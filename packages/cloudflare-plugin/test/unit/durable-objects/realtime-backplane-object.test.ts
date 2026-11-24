@@ -234,6 +234,25 @@ describe('RealtimeBackplaneObjectCore POST /publish', () => {
     expect(pulled).toBeLessThan(40);
   });
 
+  it('answers 400 for a body that is not valid UTF-8, and sends nothing', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+
+    // 0xFF is never valid UTF-8; a lenient decode would triple it in size.
+    const response = await core.fetch(
+      new Request('https://do/publish', { method: 'POST', body: new Uint8Array([0x7b, 0xff]) }),
+    );
+    const valid = await core.fetch(
+      new Request('https://do/publish', {
+        method: 'POST',
+        body: new TextEncoder().encode('"é"'),
+      }),
+    );
+
+    expect([response.status, valid.status]).toEqual([400, 204]);
+    expect(pairs[0]?.server.sent).toEqual(['"é"']);
+  });
+
   it('accepts an empty POST body', async () => {
     const { core } = build();
     const response = await core.fetch(new Request('https://do/publish', { method: 'POST' }));

@@ -9,6 +9,9 @@
  * `compatibility_date = "2025-09-01"`, which predates workerd's automatic
  * close reply.
  *
+ * The fixtures' dates are checked against the CLI template's, through
+ * wrangler's own config reader.
+ *
  * Guarded like the CLI's Workers tests: skipped off CI when the `wrangler`
  * binary cannot run, failed on CI.
  *
@@ -20,6 +23,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { createServer, connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -261,6 +265,28 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       expect(xa.got).toEqual([]);
       expect(yb.got).toEqual([]);
       for (const c of [xa, xb, ya, yb]) c.socket.close(1000);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    "runs every fixture at the scaffold's compatibility date, read the way wrangler reads it",
+    async () => {
+      const template = await readFile(
+        join(here, '..', '..', '..', 'cli', 'src', 'templates', 'project-files.ts'),
+        'utf8',
+      );
+      const scaffold = /compatibility_date = "([0-9-]+)"/.exec(template)?.[1];
+      const { unstable_readConfig } = await import('wrangler');
+      const configs = ['front', 'worker-a', 'worker-b']
+        .map((name) => join(fixture, name, 'wrangler.toml'))
+        .concat(join(here, 'fixtures', 'workerd-queue', 'wrangler.toml'));
+      const dates = configs.map(
+        (config) => unstable_readConfig({ config }, { hideWarnings: true }).compatibility_date,
+      );
+
+      expect(scaffold).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(dates).toEqual(configs.map(() => scaffold));
     },
     CASE_TIMEOUT_MS,
   );
