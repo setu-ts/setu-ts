@@ -99,8 +99,8 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/websocket-plugin` (M143o).** A negative, infinite or `NaN` `heartbeatMs` or
   `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when `WebSocketPlugin()` is
   called; use `0` to disable. A negative value used to turn the option off; a `NaN`, infinite or
-  over-range `heartbeatMs` started a timer of about 1 ms (one per connection on Workers), and a
-  `NaN` or infinite `idleTimeoutMs` left the idle sweep off.
+  over-range `heartbeatMs` started a timer of about 1 ms, and a `NaN` or infinite `idleTimeoutMs`
+  left the idle sweep off.
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).

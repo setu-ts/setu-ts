@@ -265,5 +265,6 @@ describe('RealtimeBackplaneObjectCore POST /publish', () => {
       new Request('https://do/other', { method: 'POST', body: 'x' }),
     );
     expect(response.status).toBe(426);
+    expect(await response.text()).toContain('POST /publish');
   });
 });

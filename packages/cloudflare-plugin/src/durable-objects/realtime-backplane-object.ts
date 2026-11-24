@@ -105,7 +105,7 @@ export class RealtimeBackplaneObjectCore {
       return Promise.resolve(
         new Response(
           'This Durable Object serves the Setu-TS realtime backplane and accepts ' +
-            'only WebSocket upgrades.',
+            'only WebSocket upgrades and POST /publish.',
           { status: 426 },
         ),
       );
