@@ -108,17 +108,24 @@ describe('relationMode "prisma" on real MySQL', { skip: !process.env['MYSQL_URL'
           data: Record<string, number>,
         ): Promise<Record<string, unknown> | null>;
       };
-      const trials = 20;
-      let bothWon = 0;
-      for (let trial = 0; trial < trials; trial += 1) {
-        const id = `race-${trial}`;
-        await repo.create({ id, version: 1, balance: 0 });
-        const results = await Promise.all(
-          [1, 2].map((balance) => source.updateWhere(id, { version: 1 }, { version: 2, balance })),
-        );
-        if (results.every((row) => row !== null)) bothWon += 1;
+      // A forced interleaving, not a timing race: a second connection holds an uncommitted
+      // version change on the row. Prisma's plain SELECT still reads version 1 and its UPDATE
+      // by id waits on the row lock; once the change commits, a predicated UPDATE would match
+      // nothing, but Prisma's emulated one overwrites the committed version and reports a win.
+      await repo.create({ id: 'held', version: 1, balance: 0 });
+      const other = await h.pool.getConnection();
+      try {
+        await other.query('START TRANSACTION');
+        await other.query('UPDATE `rows` SET version = 5 WHERE id = ?', ['held']);
+        const call = source.updateWhere('held', { version: 1 }, { version: 2, balance: 1 });
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        await other.query('COMMIT');
+        expect(await call).not.toBeNull();
+      } finally {
+        other.release();
       }
-      expect(bothWon).toBeGreaterThan(0);
+      // The committed version 5 was overwritten by a write whose precondition no longer held.
+      expect(await repo.findById('held')).toMatchObject({ version: 2, balance: 1 });
     } finally {
       await h.dispose();
     }
