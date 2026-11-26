@@ -756,3 +756,117 @@ export class TenantColumnUnresolvedError extends Error {
     );
   }
 }
+
+/** Why `NO_BACKSLASH_ESCAPES` is refused, shared by both refusal messages. */
+const SQL_MODE_HAZARD =
+  ": mysql2 escapes a quote in a bound string as \\', which that mode does not honour, so a value holding ' could end its literal and change the statement.";
+
+/**
+ * Drizzle over mysql2 refuses a MySQL session whose `sql_mode` includes
+ * `NO_BACKSLASH_ESCAPES`: mysql2 writes bound strings into the statement
+ * text escaping `'` as `\'`, which that mode does not honour, so a bound
+ * value could end its literal and append SQL. Thrown by `connect()` when a
+ * session (the primary's or a `withReplicas()` replica's) reports the mode,
+ * or when the mode cannot be read (a fixed 2000 ms bound, the readiness
+ * probe's default; `requestTimeoutMs` does not change it — the driver error or
+ * the expiry is the `cause`), and, once a connection a pool opened later
+ * reported the mode, by every later call on the adapter. The unread case
+ * carries `unreadReason`. This configuration fault has no HTTP status hint.
+ * @since 0.14.0
+ */
+export class UnsupportedSqlModeError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'UnsupportedSqlModeError';
+  /** The refused `sql_mode` flag. */
+  readonly mode = 'NO_BACKSLASH_ESCAPES';
+  /**
+   * Why the mode could not be read, when it could not; absent for a session
+   * that reported the mode. Present means the check did not complete, not
+   * that the mode is set: a failed or expired read (transient; `cause` holds
+   * the driver error or the expiry), a result with no `sql_mode`, or a
+   * `withReplicas()` wrapper whose members cannot all be read (both
+   * configuration faults, with no `cause`; a retry does not help).
+   */
+  declare readonly unreadReason?: string;
+  /**
+   * Creates the refusal, naming the mode and the ways out.
+   * @param unread - Set when the mode could not be read: why, and the driver
+   * error or expiry as `cause`
+   */
+  constructor(unread?: { readonly reason: string; readonly cause?: unknown }) {
+    super(
+      unread === undefined
+        ? 'Drizzle over mysql2 refuses a MySQL session whose sql_mode includes NO_BACKSLASH_ESCAPES' +
+            SQL_MODE_HAZARD +
+            " Turn NO_BACKSLASH_ESCAPES off for the application's sessions (the global sql_mode, init_connect, or the application's own SET SESSION), or keep the mode and wait for a stable mysql2 release containing sidorares/node-mysql2#4684 and a Setu release that accepts it (this refusal does not read the mysql2 version)."
+        : `Drizzle over mysql2 could not read @@SESSION.sql_mode (${unread.reason}), so it cannot rule out NO_BACKSLASH_ESCAPES` +
+            SQL_MODE_HAZARD +
+            (unread.cause === undefined
+              ? ' Check the database instance passed to the adapter: this is not a transient fault, so a retry does not help.'
+              : ' Start the application once MySQL answers, or retry connect(); the cause holds the driver error or the expiry.'),
+      unread?.cause === undefined ? undefined : { cause: unread.cause },
+    );
+    if (unread !== undefined) this.unreadReason = unread.reason;
+  }
+}
+
+/**
+ * A Prisma conditional write refused on a connector that takes the
+ * affected-row count path (every connector except `postgresql` /
+ * `postgres`), because the client's schema sets `relationMode = "prisma"`, or
+ * because its mode could not be read and the options do not assert
+ * `relationMode: 'foreignKeys'`. Prisma's relation emulation
+ * (prisma/orm#30758, fix prisma-engines#5868, both open at the time of
+ * writing) runs `updateMany` as a `SELECT` of the matching ids followed by an
+ * `UPDATE` by id that no longer carries the predicate, and runs the emulated
+ * cascade of `deleteMany` before the parent's predicate is checked: a lost
+ * race reads as success. Thrown by `updateWhere` and `deleteWhere`, so by
+ * `updateVersioned` and `deleteVersioned` too, at the call; the mode is read
+ * at `connect()` from the client's datasource block. This configuration fault
+ * has no HTTP status hint.
+ * @since 0.14.0
+ */
+export class UnsupportedRelationModeError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'UnsupportedRelationModeError';
+  /**
+   * The refused Prisma `relationMode`: `'prisma'` when the schema reads so or
+   * the connector is MongoDB (which allows only that), `undefined` when the
+   * mode could not be read.
+   */
+  readonly relationMode: 'prisma' | undefined;
+  /**
+   * Creates the refusal, naming the mode, the hazard and the ways out.
+   * @param operation - The refused repository call
+   * @param entity - The entity name
+   * @param provider - The resolved connector, or `undefined` when undetermined
+   * @param reason - `'prisma'` for a schema read as `"prisma"`, `'unread'` for
+   *   a mode that could not be read, `'mongodb'` for Prisma on MongoDB, which
+   *   allows only `"prisma"`
+   */
+  constructor(
+    operation: 'updateWhere' | 'deleteWhere',
+    entity: string,
+    provider: string | undefined,
+    reason: 'prisma' | 'unread' | 'mongodb' = 'prisma',
+  ) {
+    super(
+      `Prisma ${operation} on '${entity}' is refused: ` +
+        (reason === 'prisma'
+          ? 'the client\'s schema sets relationMode = "prisma"'
+          : reason === 'mongodb'
+            ? 'Prisma on MongoDB allows only relationMode = "prisma" (emulated relations)'
+            : "the client's relationMode could not be read (client._engineConfig.inlineSchema)") +
+        ` on connector '${provider ?? 'undetermined'}', and under relationMode = "prisma" Prisma's relation emulation drops the write's predicate ` +
+        '(updateMany updates the selected ids without it; the emulated cascade of deleteMany runs before it is checked), ' +
+        'so a lost race would read as success. ' +
+        (reason === 'mongodb'
+          ? "Use Setu's native MongoDB backend instead, DatabasePlugin({ type: 'mongodb', options: { … } }), whose conditional writes are single-statement; no Prisma setting lifts this."
+          : reason === 'prisma'
+            ? 'Set relationMode = "foreignKeys" in the datasource block, or wait for prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.'
+            : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options (or to createPrismaDataSource's options argument); " +
+              'or set relationMode = "foreignKeys" in a schema the adapter can read.'),
+    );
+    this.relationMode = reason === 'unread' ? undefined : 'prisma';
+  }
+}

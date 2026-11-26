@@ -15,6 +15,8 @@ const MAX_TRANSACTION_WRITES = 100;
  * @internal
  */
 export interface IDynamoTransactionBuffer {
+  /** Checks same-row scope before a data source reads committed state. */
+  has(table: string, key: DynamoAttributeMap): boolean;
   /** Adds one write, refusing a duplicate physical item key or a 101st write. */
   add(write: DynamoTransactWriteItem, key: DynamoAttributeMap): void;
 
@@ -36,6 +38,7 @@ export function createDynamoTransactionBuffer(): IDynamoTransactionBuffer {
   const keys = new Set<string>();
 
   return {
+    has: (table, key): boolean => keys.has(`${table}\u0000${JSON.stringify(key)}`),
     add: (write, key): void => {
       const table = write.Put?.TableName ?? write.Update?.TableName ?? write.Delete?.TableName;
       if (table === undefined) {

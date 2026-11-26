@@ -10,7 +10,7 @@ for (const fixture of sources.filter((source) => source.name !== 'prisma')) {
   describe(`${fixture.name} unknown payload fields`, () => {
     it('pins create, update and conditional update behaviour with readbacks', async () => {
       const source = fixture.make();
-      const refused = fixture.name === 'drizzle' || fixture.name === 'd1';
+      const refused = fixture.name.startsWith('drizzle') || fixture.name === 'd1';
       await source.create({ id: '1', name: 'before', role: 'owner' });
       for (const write of [
         () => source.create({ id: '2', extra: 'created' }),

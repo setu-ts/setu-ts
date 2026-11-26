@@ -1920,14 +1920,20 @@ requested isolation level is refused by name, so pass `provider` explicitly. Dri
 `options.drizzleInstance` and `options.drizzleTables`. The instance is a opaque `DrizzleDatabase<T>`
 configuration created by `createDrizzleDatabase(database, transactionBridge)`; the registry's tables
 must carry an `id` column and the adapter translates every repository field to a real Drizzle
-column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
-results are actual driver rows; an unsupported dialect throws a descriptive error. Promise-aware
-SQLite Proxy and libsql-shaped Drizzle instances without `execute()` are accepted for repository,
-transaction, and typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects
-with guidance to use Drizzle's typed query builder. That refusal is permanent rather than pending:
-those drivers do expose `all()`, but on a raw statement the proxy protocol answers with
-**positional** rows, because Drizzle has no field map for a statement it did not build — and
-`query<T>()` promises row objects.
+column. Drizzle `create`, `update`, and `delete` return actual driver rows: through `RETURNING`
+where the builder offers it, and on MySQL (since 0.14.0) a `create` or `update` by the write's
+affected-row count followed by a read-back by key, both in one Drizzle `transaction()` (unwrapped,
+with one `warn`, on mysql-proxy), while a MySQL `delete` decides from its count alone, outside a
+transaction and with no read-back. A `create` whose key the database fills is served through
+`$returningId()` only for one column-level primary key that auto-increments or has a `$defaultFn`,
+and is otherwise refused before sending with `UnsupportedQueryFeatureError('create')`; a result
+carrying no readable `affectedRows` is refused with `UnsupportedQueryFeatureError('write')`. Both
+are configuration refusals (masked `500`). Promise-aware SQLite Proxy and libsql-shaped Drizzle
+instances without `execute()` are accepted for repository, transaction, and typed-builder use.
+Calling `IDatabaseService.query()` on such an instance rejects with guidance to use Drizzle's typed
+query builder. That refusal is permanent rather than pending: those drivers do expose `all()`, but
+on a raw statement the proxy protocol answers with **positional** rows, because Drizzle has no field
+map for a statement it did not build — and `query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -2199,12 +2205,15 @@ probe that exists and did not answer inside the 2-second bound reports `'unknown
 indicator used to read the lifecycle `isReady()`, which reports that `connect()` once succeeded and
 says nothing about the backend now). An adapter that ships NO probe reports `up` with `reachable`
 OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe that was never written is
-evidence of nothing, and mapping a missing probe to `degraded` would fail `/ready` for every healthy
-Cosmos, Bigtable and DynamoDB application on upgrade (`degraded` already answers 503). Shipped
-probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe
-for instances without `execute()`), memory (its own connection state — the process is the backend).
-Cosmos, Bigtable and DynamoDB omit the probe pending one optional member on their own client
-facades; their payload is unchanged. The concrete `DatabaseService` exposes the seam the indicator
+evidence of nothing about the backend, so a missing probe is not mapped to `degraded` (which answers
+503). Shipped probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle
+omits the probe for instances without `execute()`), memory (its own connection state — the process
+is the backend), and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read
+of the absent key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped
+entity; with none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by
+2000 ms, or by `requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's
+bound), and rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access,
+unreachable service) is `false`. The concrete `DatabaseService` exposes the seam the indicator
 reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
 (`Promise<boolean | undefined>` — the bounded probe, `undefined` when no answer was produced), the
 database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
@@ -2380,7 +2389,9 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 require every predicate field to equal its value at the write. `updateWhere` returns the updated row
 or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a predicate miss have
 the same outcome and write nothing. The key and predicate remain separate conjunctions even when the
-predicate names a key field.
+predicate names a key field. The outcome is decided from the write's own result — the rows it
+returned, or its affected-row count where the connector has no `RETURNING` — never from a read taken
+before it (since 0.14.0; on Prisma with MySQL a lost race used to report success).
 
 <!-- version:history -->
 
@@ -2422,7 +2433,7 @@ and that read is reported as not found. Both refuse before any I/O with
 non-negative safe integer or a `data` that sets the version field (an empty `field` option is a
 configuration fault: a `TypeError`, served as a masked `500`), and with `'conditional-write'`
 (`501`) when the repository has no conditional member — which is also what a buffered transaction
-source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle, Prisma and MongoDB
+source answers (memory overlay and D1; Drizzle, Prisma, MongoDB, DynamoDB, Cosmos and Bigtable
 transactions apply it).
 
 | Symbol                                                                                                                                                             | Shape                                                                                                                                                                                                              |
@@ -2452,23 +2463,67 @@ the tenant path.
 | Data source                  | Write mechanism                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------- |
 | Memory, outside transactions | Synchronous key lookup, predicate check and mutation                                              |
-| Prisma                       | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
-| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`                                      |
+| Prisma on PostgreSQL         | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
+| Prisma, any other connector  | `updateMany`/`deleteMany` on key AND predicate, `count: 0` means no match, `findUnique` read-back |
+| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`; on MySQL `affectedRows`, read-back  |
 | MongoDB                      | `$and: [idFilter, whereFilter]`, `findOneAndUpdate` / `deleteOne`                                 |
 | D1                           | Bound `UPDATE` / `DELETE`, `WHERE key AND predicate`, `RETURNING`                                 |
 | DynamoDB                     | Native `ConditionExpression`, key existence AND aliased equality fields                           |
 | Cosmos DB                    | Read and check, then `_etag` IfMatch guarded `replace` / `delete`; retry 412 at most three rounds |
 | Bigtable                     | CheckAndMutateRow with nested per-field conditions, newest cell capped before value comparison    |
 
-Deferred transaction sources (memory overlay, D1 batch, DynamoDB buffer, Cosmos batch and Bigtable)
-omit both members: the result is unknown until commit, so the repository refuses
-`'conditional-write'`. Prisma, Drizzle and MongoDB transaction sources carry them. The tenant and
-inbox bridges use the conditional path when offered and fall back only on absence or that named
-refusal. The outbox requires native conditional writes and refuses unsupported sources at startup.
-Other errors propagate. On that fallback the tenant bridge reads ownership and then writes by key,
-so a delete-and-recreate under a reused caller-supplied key in between can move the write onto
-another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back separately;
-the tenant bridge checks the returned tenant on both paths before returning it.
+The Prisma path is chosen once at `connect()` from the resolved connector: `postgresql` and
+`postgres` keep the single statement; every other connector, and an undetermined one, takes the
+count path. On the root client the count path runs in
+`$transaction(fn, { maxWait: 2000, timeout: transactionTimeout })`; on a unit of work's client it
+runs directly. A `count` above 1 throws an `Error` naming the entity and `keyColumns`, which rolls
+the write back.
+
+Since 0.14.0 the count path refuses a client whose schema sets `relationMode = "prisma"`:
+`updateWhere` and `deleteWhere` (so `updateVersioned` and `deleteVersioned`), on the root client, in
+a unit of work and through `createPrismaDataSource`, throw `UnsupportedRelationModeError` (`name`
+`'UnsupportedRelationModeError'`, `relationMode` `'prisma'` (also on MongoDB, which allows only
+that), or `undefined` for an unread mode, no HTTP hint, so a masked `500`) before any I/O. Prisma's
+emulation drops the predicate there (prisma/orm#30758, fix prisma-engines#5868): `updateMany`
+selects the ids, then updates by id alone, and the emulated cascade of `deleteMany` runs before the
+parent's predicate is checked, so a lost race would read as success. The mode is read at `connect()`
+from the datasource block of the client's `_engineConfig.inlineSchema` (the root, transaction and
+`$extends` clients share it); a block without the setting is Prisma's default, `foreignKeys`. When
+the field is absent or unreadable, `connect()` logs one `warn` and the four writes are refused the
+same way, with or without a `warn` sink, unless `PrismaAdapterOptions.relationMode` is
+`'foreignKeys'` (since 0.14.0; `createPrismaDataSource` takes it as an optional sixth argument,
+`{ relationMode: 'foreignKeys' }`, and `DatabasePlugin` carries it). The assertion lifts only the
+unread refusal: a schema read as `"prisma"` stays refused. On a `mongodb` connector the writes are
+always refused, and the message names Setu's native MongoDB backend
+(`DatabasePlugin({ type: 'mongodb', … })`) as the way out. The message names the mode, the hazard
+and the ways out: `relationMode = "foreignKeys"`, or wait for the upstream fix and a Setu release
+that accepts it; for an unread mode it says to add `relationMode: 'foreignKeys'` once the schema is
+confirmed to use that mode, or to use a `relationMode = "foreignKeys"` schema the adapter can read.
+`postgresql` / `postgres` are not refused: Prisma keeps the predicate there (it reads, runs the
+emulated `onUpdate` actions, then updates with the predicate), but a conditional write that changes
+a field another model references with `onUpdate: Cascade` and loses a race can still have updated
+the child rows. `PrismaAdapter`, `DrizzleAdapter`, `DynamoAdapter` and `BigtableAdapter` take an
+optional `warn` callback as their last constructor parameter; the plugin passes its logger, and an
+adapter built directly without one logs nothing.
+
+The memory overlay and D1 batch transaction sources omit both members: the result is unknown until
+commit, so the repository refuses `'conditional-write'`. Prisma, Drizzle and MongoDB transaction
+sources carry them, and since 0.14.0 so do the DynamoDB, Cosmos DB and Bigtable buffers: the
+predicate is evaluated against the committed row at the call (a miss returns `null` / `false` and
+buffers nothing), and a match buffers the write with its precondition — a `ConditionExpression`, an
+`ifMatch` on the row's `_etag` (the facade's batch operations gain an optional `ifMatch`), or the
+CheckAndMutateRow test. A precondition that fails at commit applies nothing and throws
+`SerializationConflictError` (`409`) with the driver failure as `cause`. A conditional write to a
+row the unit of work has already written, and any write to a row after a conditional write to it, is
+refused before it is buffered, and before any read when the calls run one after another
+(`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, DynamoDB's one-write-per-key
+`UnsupportedQueryFeatureError`); a Bigtable conditional write must be its unit of work's only write.
+The tenant and inbox bridges use the conditional path when offered and fall back only on absence or
+that named refusal. The outbox requires native conditional writes and refuses unsupported sources at
+startup. Other errors propagate. On that fallback the tenant bridge reads ownership and then writes
+by key, so a delete-and-recreate under a reused caller-supplied key in between can move the write
+onto another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back
+separately; the tenant bridge checks the returned tenant on both paths before returning it.
 
 <!-- version:history -->
 
@@ -2670,10 +2725,34 @@ column.
 
 **Prisma requires `provider`** and **Drizzle may require `dialect`** for a path filter, because the
 syntax differs per connector and neither library publishes a discriminant the adapter can read
-reliably. Drizzle detects its dialect from the instance and needs the option only when detection
-fails; either way, an adapter that cannot determine the syntax **refuses by name** rather than
-emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about, where a
-refusal names the option that fixes it.
+reliably. Since 0.14.0 Drizzle's `dialect: 'mysql'` also selects MySQL's `contains` form
+(`LIKE … ESCAPE '!'`, the value escaped by `!`) and, for an `offset` with no `limit`,
+`LIMIT 18446744073709551615`. Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES`: mysql2
+escapes `'` in a bound string as `\'`, which that mode does not honour, so a bound value could end
+its literal. Since 0.14.0 it is refused: `connect()` throws `UnsupportedSqlModeError` (`name`
+`'UnsupportedSqlModeError'`, `mode` `'NO_BACKSLASH_ESCAPES'`, no HTTP hint, so a masked `500`) when
+`@@SESSION.sql_mode` includes it on the primary or on any `withReplicas()` replica, or when a read
+fails or gets no answer within a fixed 2000 ms (the readiness probe's default bound;
+`requestTimeoutMs` does not change it; the driver error or the expiry is the `cause`), so
+`connect()` now fails when MySQL is unreachable or stalls. Every unread case carries `unreadReason`
+(a string naming why; absent when a session reported the mode). A failed or expired read is
+transient, and its message asks to start once MySQL answers or to retry `connect()`; a result with
+no `sql_mode`, or a `withReplicas()` wrapper whose members cannot all be read, is a configuration
+fault with no `cause`, and its message says a retry does not help. A `withReplicas()` wrapper is
+recognised by its `$primary`/`$replicas` shape, nested wrappers are walked, and every mysql2 member
+is checked, even behind a primary on another driver. On each mysql2 pool (primary and replicas) the
+adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each connection the pool opens later,
+then refuses. Each new connection reads its mode, then sets its session `sql_mode` without the flag.
+The strip runs on the server before the statement mysql2 has already formatted for the pool's
+caller, which closing the connection after the read could not stop. After a new connection reported
+the flag, every adapter call throws the same error and one `warn` is logged. Three cases are not
+covered: a session the application switches itself with `SET SESSION` after the check (mysql2
+reports the flag on no `SELECT` result), connections the pool opened before `connect()` beyond the
+one it reads, and mysql-proxy (its callback owns how statements reach the server; the adapter holds
+no connection). Drizzle detects its dialect from the instance and needs the option only when
+detection fails; either way, an adapter that cannot determine the syntax **refuses by name** rather
+than emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about,
+where a refusal names the option that fixes it.
 
 ```typescript
 DatabasePlugin({
@@ -3033,15 +3112,16 @@ neither a client nor a project encodes it. `BigtableAdapterOptionsBase` is the h
 `rowKey` is a `BigtableRowKeyMapping` and whose `valueEncoding` is a `BigtableValueEncoding`; an
 unmapped entity uses its own name as the table, `['id']` as the row-key fields, `'cf'` as the column
 family and tagged values. `BigtableAdapter`'s constructor also takes an optional second parameter, a
-`BigtableClientLoader`, which overrides the inject-or-lazy choice and whose `owned` flag decides
-whether `disconnect()` closes the client it produced.
+`BigtableClientLoader` (and a third, the optional `warn` callback), which overrides the
+inject-or-lazy choice and whose `owned` flag decides whether `disconnect()` closes the client it
+produced.
 
-**The adapter provisions nothing and `connect()` issues no RPC.** Column families,
+**The adapter provisions nothing and `connect()` makes no admin call.** Column families,
 garbage-collection policies and split points belong to the application's provisioning, and a missing
 table or instance is already reported by the service as `5 NOT_FOUND` quoting the full resource path
 — while `instance.getTables()` is a table-ADMIN call a data-plane service account commonly cannot
-make, so probing at connect time would refuse a working configuration. Configuration mistakes are
-refused at construction instead, by name.
+make, so probing at connect time would refuse a working configuration. `connect()` sends no request.
+Configuration mistakes are refused at construction instead, by name.
 
 **The row key is composed from logical fields.** `BigtableRowKeyMapping` is
 `{ fields, separator?, prefix? }`, defaulting to `{ fields: ['id'], separator: '#' }`. A
@@ -3124,6 +3204,33 @@ injection seam, so an application implementing its own facade can name every sig
 `createInjectedBigtableLoader` and `createLazyBigtableLoader` build the two loader arms;
 `BigtableClientConfiguration` is what the lazy one takes.
 
+### NoSQL call bound, readiness and client options (since 0.14.0)
+
+`DynamoAdapterOptionsBase`, `CosmosAdapterOptionsBase` and `BigtableAdapterOptionsBase` gain:
+
+| Member             | Arms                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestTimeoutMs` | DynamoDB, Cosmos, Bigtable | Whole-call bound, retries included; default `15000`, `0` disables it on calls (the readiness probe keeps its 2000 ms bound). DynamoDB: `abortSignal` on every `send`; Cosmos: `abortSignal` in the `CosmosRequestOptions` of every call; Bigtable: `gaxOptions.timeout` on every read and conditional write plus a whole-read deadline. The call also rejects at the deadline when the SDK ignores the signal. Expiry is `DatabaseTimeoutError` (`504`); its `cause` is the driver's error when the driver answers the abort, else the signal's `TimeoutError`. Refused at construction by `deadlineRangeError` (non-finite, negative, above 2147483647); a fraction is accepted. |
+| `clientOptions`    | DynamoDB, Cosmos, Bigtable | Spread first into the SDK constructor the lazy arm builds; the arm's own `region`/`endpoint`/`credentials`, `endpoint`/`key`, or `projectId`/`apiEndpoint` win when set. Unread with an injected `client`. On Bigtable, with an endpoint set (`apiEndpoint`, `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST` read by the plugin through `ctx.runtime.env`), `metricsEnabled: false` is passed unless `clientOptions` sets it; and with `BIGTABLE_EMULATOR_HOST` set, or an endpoint and no `clientOptions.sslCreds`, `universeDomain: 'googleapis.com'` is passed unless `clientOptions.universeDomain` / `universe_domain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` names one. |
+| `readinessEntity`  | DynamoDB, Bigtable         | The entity whose table the readiness probe reads (default: the first entry of `entities` / `tables`); with none, no probe and one `warn` at `connect()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+Each adapter assigns `isHealthy` (see Health status above). The injection facades widen to carry the
+bound:
+
+- `IDynamoClient`: every method takes an optional second argument `{ abortSignal?: AbortSignal }`,
+  which the adapter passes on every call while `requestTimeoutMs` is above `0` (at `0` it passes
+  none); an injected facade that ignores it is still rejected at the deadline, though its own work
+  runs on.
+- `ICosmosClient` family: `CosmosRequestOptions` gains an optional `abortSignal`, every member that
+  does I/O takes an optional `CosmosRequestOptions` (the query iterator through its `query` call),
+  and the four batch operation shapes gain an optional `ifMatch`.
+- **BREAKING for an injected `IBigtableClient`:** `BigtableFilter` gains the variant
+  `{ column: { cellLimit: number } }` (told apart from `{ column: string[] }` by `Array.isArray`),
+  which every data read now sends first in its filter chain, so a facade that switches exhaustively
+  over the union must handle it; `IBigtableTable.readRows` and `IBigtableRow.conditionalMutate` take
+  an optional `{ timeoutMs?: number }` call-options argument, which a facade may ignore: the call is
+  still rejected at `requestTimeoutMs` (504), though the facade's own work runs on.
+
 ### Exports
 
 | Export                                                                                                                                                                                                                                                                                                                  | Kind                                 |
@@ -3133,7 +3240,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
-| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                              |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`, `UnsupportedRelationModeError`                                                                                                  | classes                              |
 | `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |
@@ -3228,9 +3335,11 @@ log, and `errorHandler` reads the hint. It is not `DatabaseUnavailableError`: th
 says the operation did not happen, and a timed-out statement may have run, so a write's outcome is
 unknown and a retry of a write must be idempotent. The bound is the driver's own — node-postgres's
 `query_timeout` and `connectionTimeoutMillis` on the `Pool` the application hands Drizzle; the
-plugin adds no call deadline of its own, for the reasons the README's `Bounding a call` section
-gives. The behaviour of a timed-out statement inside a transaction is measured in this milestone and
-documented there. Ships in 0.10.0.
+plugin adds no JavaScript race to a call (only the bounded `sql_mode` read at `connect()` on Drizzle
+over mysql2), for the reasons the README's `Bounding a call` section gives. The DynamoDB, Cosmos DB
+and Bigtable arms set their driver's own cancelling deadline, `requestTimeoutMs` (since 0.14.0). The
+behaviour of a timed-out statement inside a transaction is measured in this milestone and documented
+there. Ships in 0.10.0.
 
 **A duplicate key answers `409 Conflict`.** A write that would duplicate a primary key or a unique
 index is thrown as `DuplicateKeyError` (exported from `@setu-ts/common`, so a package that may not
@@ -3244,8 +3353,10 @@ conflicting write was rejected, never that it is safe to retry. The class carrie
 `entity` when the failing repository call names one. At `commit()` a duplicate is the one class
 mapped, because the backends that detect it there (D1's atomic batch, a Cosmos transactional batch,
 a DynamoDB `TransactWriteItems` whose cancellation reason sits on a create's `Put`, a buffered
-memory or Bigtable create) apply nothing when they refuse; any other commit rejection is still
-rethrown unchanged.
+memory or Bigtable create) apply nothing when they refuse. Since 0.14.0 a DynamoDB, Cosmos DB or
+Bigtable commit whose precondition failed (a conditional write, or a buffered plain update of a row
+deleted meanwhile), or a `TransactWriteItems` cancelled with a `TransactionConflict` reason, is
+`SerializationConflictError` (`409`). Any other commit rejection is still rethrown unchanged.
 
 <!-- version:history -->
 
@@ -3266,17 +3377,20 @@ class, status and public detail are the same.
 | node-postgres | `Connection terminated unexpectedly`                                                                                                                                                                 | `504`    |
 | Prisma        | `P1001` (server unreachable), `P2028` (transaction could not start in time)                                                                                                                          | `503`    |
 | Prisma        | `P2039` / `P2010` — the driver code under `meta.driverAdapterError.cause.originalCode` is classified (adapter-pg `57P01` → `503`; adapter-mariadb `45028`, `45013`, `1053` → `503`, `45009` → `504`) | per code |
-| mysql2        | `ER_SERVER_SHUTDOWN` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                                                                                     | as shown |
+| mysql2        | `ER_SERVER_SHUTDOWN` and `Can't add new command when connection is in closed state` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                      | as shown |
 | libsql        | `SQLITE_BUSY`                                                                                                                                                                                        | `503`    |
 | MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107` `NotWritablePrimary` (read only under the `mongodb` adapter)                                                                     | `503`    |
 
 The pg message anchors are read only on a cause chain carrying no string code. The mariadb codes are
-read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. MySQL,
-mariadb and libsql rows were measured by probe (CI runs none of them); the PostgreSQL and MongoDB
-rows are pinned by guarded live suites. **Known limitation:** the older connection-fault arms
-(`ECONNRESET`, `EPIPE`, `MongoNetworkError`) still answer `503` even when the connection dropped
-under a write in flight, which the `503` detail's "not applied" does not strictly cover; re-mapping
-them is a separate decision.
+read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. Since
+0.14.0 the driver-adapter cause's `kind` is read on every connector: `UniqueConstraintViolation` is
+`DuplicateKeyError` and `TransactionWriteConflict` is `SerializationConflictError` (both `409`), so
+a MySQL duplicate key or deadlock through `query()` (`P2010`) answers as on PostgreSQL; mysql2's
+`ER_LOCK_DEADLOCK` is `SerializationConflictError` too. MySQL, mariadb and libsql rows were measured
+by probe (CI runs none of them); the PostgreSQL and MongoDB rows are pinned by guarded live suites.
+**Known limitation:** the older connection-fault arms (`ECONNRESET`, `EPIPE`, `MongoNetworkError`)
+still answer `503` even when the connection dropped under a write in flight, which the `503`
+detail's "not applied" does not strictly cover; re-mapping them is a separate decision.
 
 `IDatabaseService.transaction()` no longer classifies an error its `work` throws. Repository calls
 inside the work are classified by the repository wrapper as before, so a database fault there still

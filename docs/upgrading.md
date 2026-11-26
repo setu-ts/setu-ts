@@ -458,6 +458,107 @@ The Swagger UI page, the spec and the self-hosted assets no longer commit a sess
 session is not refreshed by them. The plugin adds `GET <docs endpoint>/csrf-token`, which Swagger
 UI's Try-it-out calls read; an application route at that path now conflicts with it.
 
+### Databases off PostgreSQL (`@setu-ts/database-plugin`)
+
+- **A bound on every DynamoDB, Cosmos DB and Bigtable call.** A call still running after 15 s now
+  rejects with `DatabaseTimeoutError` (`504`, outcome unknown) where it used to wait. A long scan or
+  a large Bigtable read needs more: raise `requestTimeoutMs` on that arm, or set `0` to restore the
+  SDK's own behaviour. The bound holds even where the SDK waits without observing cancellation:
+  under sustained `429`s a throttled Cosmos call used to wait out the SDK's retry-after (up to 30 s)
+  and now ends at the bound. If those waits should run to completion, raise `requestTimeoutMs`.
+- **Bigtable client-side metrics are off whenever an endpoint is set**: `apiEndpoint` (a real
+  private endpoint included), `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST`. To keep
+  them, pass `clientOptions: { metricsEnabled: true }`.
+- **A NoSQL unit of work whose commit loses a precondition answers `409`.** A DynamoDB, Cosmos DB or
+  Bigtable commit that fails a conditional write's precondition, or a buffered plain update of a row
+  deleted meanwhile, now throws `SerializationConflictError` (`409`, rolled back, safe to retry)
+  where it was a masked `500`; so does a DynamoDB `TransactionCanceledException` with a
+  `TransactionConflict` reason, the same rule as a PostgreSQL serialization failure. A retry loop
+  keyed on `409` now retries these; stop it on the conflict if retrying is wrong for the work.
+- **One write per row in a NoSQL unit of work that writes it conditionally.** A conditional write to
+  a row the unit of work has already written, or any write to the row after one, is refused at the
+  call (`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, DynamoDB's existing
+  one-write-per-key refusal), and on Bigtable a conditional write must be the unit of work's only
+  write. Write the row once per unit of work, merging the changes.
+- **`/ready` can now report the three stores down.** The probe reads `readinessEntity` (DynamoDB and
+  Bigtable; default the first mapped entity) or the database (Cosmos DB). An application with no
+  entity mapped gets one `warn` at `connect()` and no probe. Set `readinessEntity` to a table the
+  application's role can read.
+- **The probe costs one read per uncached health check**, billed by the provider: a DynamoDB or
+  Bigtable point read, or a Cosmos `database.read()`. The probe is cached for 5 s, so it costs at
+  most one read per 5 s per connection; poll `/ready` less often to read less.
+- **An injected Bigtable facade must accept the new filter variant and call options.**
+  `BigtableFilter` gains `{ column: { cellLimit: number } }`, and `readRows` and `conditionalMutate`
+  take an optional `{ timeoutMs }` (a facade may ignore it: the call is still rejected at
+  `requestTimeoutMs`, `504`, though its own work runs on). Every data-source read now asks for the
+  latest cell only: handle the variant in a facade that switches over the union.
+- **Bigtable on an emulator gets `universeDomain: 'googleapis.com'`.** When `BIGTABLE_EMULATOR_HOST`
+  is set, or `apiEndpoint` is set without your own `sslCreds`, and no universe domain is configured
+  (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
+  `GOOGLE_CLOUD_UNIVERSE_DOMAIN`), the lazy arm passes it so the first call skips the SDK's
+  credentials lookup. Emulator boot gets faster. A project with no `apiEndpoint` and no emulator
+  variable, or with `sslCreds` beside its `apiEndpoint` and no emulator variable, keeps its universe
+  domain (client-side metrics still turn off whenever an endpoint is set, as the metrics bullet
+  says). A private `apiEndpoint` without `sslCreds` and with no universe configured also gets the
+  `googleapis.com` default; if that endpoint serves another universe, set
+  `clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
+- **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
+  connector except `postgresql` / `postgres` (and when the connector cannot be determined),
+  `updateWhere` and `updateVersioned` run `updateMany` with the key and the predicate, then a
+  `findUnique` read-back; `deleteWhere` and `deleteVersioned` run `deleteMany` and decide from its
+  count. A lost race on MySQL now answers `409` / `404` instead of reporting success. A `keyColumns`
+  that matches several rows throws, rolling back the root client's short transaction (inside a unit
+  of work, the unit of work rolls back when the throw reaches it, so rethrow it if you catch it
+  there): make `keyColumns` name the table's key.
+- **A Prisma entity with `compositeKeyName` and no `keyColumns` stops the application at boot.**
+  Constructing the adapter now throws `UnsupportedQueryFeatureError` (`'composite-key'`) naming the
+  entity and the fix. Before, such an application could look as if it worked, but its key fell back
+  to `['id']`: a conditional delete on MySQL addressed every row sharing that `id` and could delete
+  another tenant's row while answering `true`. Set `entities.<Entity>.keyColumns` to the `@@id`
+  columns in schema declaration order (for example `['tenantId', 'id']`). An empty `keyColumns` is
+  refused the same way, since a conditional write would then match rows by its predicate alone: name
+  the columns, or omit `keyColumns` for an `id` key.
+- **Prisma conditional writes refuse `relationMode = "prisma"` off PostgreSQL.** On every connector
+  except `postgresql` / `postgres`, `updateWhere`, `deleteWhere`, `updateVersioned` and
+  `deleteVersioned` throw `UnsupportedRelationModeError` when the client's schema sets
+  `relationMode = "prisma"`: Prisma's emulation drops the write's predicate (`updateMany` updates
+  the selected ids without it; the emulated cascade of `deleteMany` runs before it is checked), so a
+  lost race reported success. Set `relationMode = "foreignKeys"` (the default) in the datasource
+  block and regenerate the client, or keep the mode and wait for prisma/orm#30758 (fix
+  prisma-engines#5868) and a Setu release that accepts it. If `connect()` logs that it could not
+  read the client's relationMode, the same writes are refused: confirm the schema uses
+  `relationMode = "foreignKeys"`, then add `relationMode: 'foreignKeys'` to the Prisma adapter
+  options (the last argument of `createPrismaDataSource` takes it too). On MongoDB, which allows
+  only `\"prisma\"`, they are always refused: use Setu's native MongoDB backend
+  (`DatabasePlugin({ type: 'mongodb', … })`). No application meets this today, since Prisma 7 has no
+  MongoDB adapter.
+- **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
+  query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
+  conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.
+- **Such a write holds a pool connection.** On the root client it runs in a `$transaction` with the
+  unit of work's own `maxWait` of 2 s, so pool exhaustion answers `503` (`P2028`) as a unit of work
+  already does. Size the pool for the concurrent writes.
+- **Drizzle with MySQL writes through the repository** (it was a masked `500`), and its `contains`
+  filter escapes with `!`. On mysql-proxy a write's read-back runs outside a transaction and the
+  adapter logs one `warn`; use mysql2 when the read-back must be the row this write produced. Pass
+  `dialect: 'mysql'` when the instance's class name does not reveal MySQL.
+- **Drizzle on mysql2 refuses `NO_BACKSLASH_ESCAPES`.** Under that mode a bound string holding `'`
+  could end its literal and change the statement, so `connect()` now throws
+  `UnsupportedSqlModeError` when `@@SESSION.sql_mode` includes it (on the primary or any
+  `withReplicas()` replica), and every later call refuses once a connection the pool opened later
+  reported it (that connection's session first has the flag stripped, so the statement it was opened
+  for runs without it). Remove `NO_BACKSLASH_ESCAPES` from the global `sql_mode`, from
+  `init_connect`, and from any `SET SESSION` the application runs. A mysql2 release containing
+  sidorares/node-mysql2#4684 fixes the escaping once it is stable, but this version still refuses
+  the mode whatever mysql2 is installed.
+- **Drizzle on mysql2 reads the session mode at `connect()`.** Start now fails when MySQL is
+  unreachable or gives no answer within 2 s, where it used to come up and fail on the first query.
+  Start the application after MySQL is up, or retry the start.
+- **Errors through `query()` on MySQL.** A Prisma `P2010` carrying a duplicate key or a write
+  conflict now answers `409` where it was `500`, mysql2 `ER_LOCK_DEADLOCK` answers `409`, and a
+  closed mysql2 connection answers `503`. Code that caught the `500` should catch
+  `DuplicateKeyError`, `SerializationConflictError` or `DatabaseUnavailableError`.
+
 ## 0.13.0
 
 ### `pagePolicies` and `RouteDefinition.middlewareGroups` (0.13.0)

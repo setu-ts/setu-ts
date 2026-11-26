@@ -46,6 +46,7 @@ const BACKEND_VARIABLES = [
   'SERVICEBUS_',
   'POSTGRES',
   'AGENT_RUNS_PG_URL',
+  'MYSQL_URL',
 ] as const;
 
 /** Signals that a suite binds a real socket. */

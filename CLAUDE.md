@@ -895,9 +895,13 @@ here.
     options: every cloud arm bounded by `requestTimeoutMs`, outages as 503/504, one
     `exists`/`delete` answer, GCS/Azure/B2/SES endpoints, the LaunchDarkly boot bound, worker-pool
     calls cancelled by `WorkerRunOptions.signal`) — complete (PR #614).
+- **Milestone 143q** (`database-plugin` — databases off PostgreSQL: MySQL conditional writes on
+  Prisma (Branch B, by connector) and Drizzle, NoSQL call bounds, readiness probes and transactional
+  conditional writes, the Bigtable emulator defaults, the Drizzle mysql2 `NO_BACKSLASH_ESCAPES`
+  refusal; 12 V13 rows plus V13-272) — complete (PR #617).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
-  `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.
+  `0.14.0`; of the first wave (M143a, b, c, i, o, p, q and r), M143c and o are still open.
 
 ## Verification (run before declaring any work done)
 

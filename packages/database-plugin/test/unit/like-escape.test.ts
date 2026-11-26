@@ -11,6 +11,9 @@ import { describe, expect, it } from 'vitest';
 import { escapeLikePattern } from '../../src/query/like-escape.ts';
 
 describe('escapeLikePattern', () => {
+  it('uses the MySQL exclamation escape and preserves literal backslashes', () => {
+    expect(escapeLikePattern('a!b%c_d\\e', '!')).toBe('a!!b!%c!_d\\e');
+  });
   it('escapes a bare % to \\%', () => {
     expect(escapeLikePattern('%')).toBe('\\%');
   });

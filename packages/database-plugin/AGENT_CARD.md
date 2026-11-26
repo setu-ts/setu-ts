@@ -3,7 +3,7 @@
 **Add it:** `setu add database`; register `DatabasePlugin({ type: 'memory' })`, or set a starter's
 `database` option. Provides `CAPABILITIES.DATABASE` (`IDatabaseService`).
 
-## Create and read an entity from routes
+## Create and read an entity
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -47,17 +47,19 @@ await db.transaction(async (uow) => {
 
 ## Behaviour the types do not show
 
-- The default adapter is memory and loses data when the process ends.
+- The default memory adapter loses data on exit.
 - `findById` and `findOne` return `null` when absent.
-- Only unit-of-work repositories share its transaction; failure rolls back and rejects.
-- Unsupported transaction isolation levels reject rather than downgrading.
-- Raw `query` rejects on memory; `migrate` rejects on every current adapter.
+- Only unit-of-work repositories join its transaction; a throw rolls back.
+- Unsupported isolation levels reject.
+- `query` rejects on memory; `migrate` on every adapter.
+- DynamoDB/Cosmos/Bigtable calls end at `requestTimeoutMs` (15000, `0` off): 504.
+- `/ready`: DynamoDB/Bigtable read `readinessEntity`; Cosmos `database.read()`.
 - Give a Drizzle `pg` Pool an `'error'` listener (README).
 
 ## Other options
 
-- `type` also selects `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'`
-  or `'custom'`.
-- `name` selects a named database token; `readiness` configures migration readiness checks.
-- `createDatabaseTenantRegistry()` feeds multi-tenancy's `tenants` from rows.
-- `findAll` supports filtering and ordering; `findPage` supplies cursor pagination where supported.
+- `type` also takes `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'` or
+  `'custom'`.
+- `name` names a database token; `readiness` checks migrations.
+- `createDatabaseTenantRegistry()` feeds multi-tenancy `tenants`.
+- `findAll` filters and orders; `findPage` pages by cursor where supported.
