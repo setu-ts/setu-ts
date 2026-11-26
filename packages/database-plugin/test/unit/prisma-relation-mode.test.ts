@@ -342,7 +342,7 @@ describe('Prisma conditional writes under the default relationMode', () => {
       expect(error.relationMode).toBeUndefined();
       expect(error.message).toContain('relationMode could not be read');
       expect(error.message).toContain(
-        "add relationMode: 'foreignKeys' to the Prisma adapter options",
+        "add relationMode: 'foreignKeys' to the Prisma adapter options (or to createPrismaDataSource's options argument)",
       );
       expect(error.message).toContain(
         'set relationMode = "foreignKeys" in a schema the adapter can read',

@@ -326,16 +326,17 @@ All notable changes to this project are documented here. The format follows
   application's role can read; with no entity mapped the adapter logs one `warn` and has no probe.
   Each uncached health check adds one read billed by the provider (the probe is cached 5 s). An
   injected `IBigtableClient` must accept the new `{ column: { cellLimit } }` filter variant and the
-  optional `{ timeoutMs }` argument; every read asks for the latest cell only. Prisma conditional
-  and versioned writes on a connector other than PostgreSQL run `updateMany` and a `findUnique`
-  read-back, or `deleteMany` decided by its count, in a short transaction holding a pool connection
-  (`maxWait` 2 s, so pool exhaustion answers 503, `P2028`: size the pool for it); a lost race on
-  MySQL answers 409/404 instead of success; a `keyColumns` that matches several rows throws (the
-  root client's short transaction rolls back; a unit of work rolls back when the throw reaches it);
-  a Prisma entity naming `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`,
-  stops the application at boot (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before,
-  it could look as if it worked while its conditional deletes hit another tenant's row sharing the
-  `id`; a client extension or middleware for `update`/`delete` no longer sees them: hook
+  optional `{ timeoutMs }` argument; every data-source read asks for the latest cell only (the
+  commit-time precondition read is a filtered check). Prisma conditional and versioned writes on a
+  connector other than PostgreSQL run `updateMany` and a `findUnique` read-back, or `deleteMany`
+  decided by its count, in a short transaction holding a pool connection (`maxWait` 2 s, so pool
+  exhaustion answers 503, `P2028`: size the pool for it); a lost race on MySQL answers 409/404
+  instead of success; a `keyColumns` that matches several rows throws (the root client's short
+  transaction rolls back; a unit of work rolls back when the throw reaches it); a Prisma entity
+  naming `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`, stops the
+  application at boot (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before, it could
+  look as if it worked while its conditional deletes hit another tenant's row sharing the `id`; a
+  client extension or middleware for `update`/`delete` no longer sees them: hook
   `updateMany`/`deleteMany` too. Drizzle with MySQL writes through the repository (it was a masked
   500); its `contains` escapes with `!`; on mysql-proxy a write's read-back runs outside a
   transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key or a write conflict

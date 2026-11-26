@@ -858,7 +858,7 @@ export class UnsupportedRelationModeError extends Error {
         'so a lost race would read as success. ' +
         (reason === 'prisma'
           ? 'Set relationMode = "foreignKeys" in the datasource block, or wait for prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.'
-          : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options; " +
+          : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options (or to createPrismaDataSource's options argument); " +
             'or set relationMode = "foreignKeys" in a schema the adapter can read.'),
     );
     this.relationMode = reason === 'prisma' ? 'prisma' : undefined;

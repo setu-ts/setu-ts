@@ -284,7 +284,8 @@ export async function editArticle(
 - **The outcome is decided by the write itself.** On PostgreSQL the conditional `UPDATE`/`DELETE`
   reports which row it changed; on MySQL, where there is no `RETURNING`, the adapters read the
   statement's affected-row count. A lost race therefore answers `409` on every SQL cell, MySQL
-  included: on MySQL 8.4 through `@prisma/adapter-mariadb`, 200 of 200 two-writer races (100 of
+  included (except where Prisma's `relationMode = "prisma"`, or an unreadable mode, refuses the
+  write, below): on MySQL 8.4 through `@prisma/adapter-mariadb`, 200 of 200 two-writer races (100 of
   `updateMany`, 100 of `deleteMany`) gave exactly one winner, with the predicate carried by the
   `UPDATE`/`DELETE` whose count Prisma reported.
 - **Prisma uses two statements, chosen once at `connect()` by connector.** On `postgresql` /
@@ -972,7 +973,8 @@ pool's flags, so keep the default.
 than inside a string. A `findAll` with an `offset` and no `limit` carries
 `LIMIT 18446744073709551615`, MySQL's documented "to the end" value, because MySQL has no `OFFSET`
 outside `LIMIT`. The adapter detects MySQL from the instance's class name; pass `dialect` when that
-cannot name it, or a `contains` keeps the backslash form.
+cannot name it, or a `contains` keeps the backslash form and an `offset` with no `limit` sends
+invalid MySQL.
 
 **`NO_BACKSLASH_ESCAPES` is refused on mysql2.** Drizzle on mysql2 does not support it for bound
 values: mysql2 writes each bound string into the query text, escaping `'` as `\'`, and under that

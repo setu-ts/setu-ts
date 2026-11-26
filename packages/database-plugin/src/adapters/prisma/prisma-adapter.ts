@@ -391,7 +391,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
    * also reads the client's `relationMode`: under `"prisma"` every later
    * conditional write throws `UnsupportedRelationModeError`. When the mode
    * cannot be read, they throw it too, unless the options assert
-   * `relationMode: 'foreignKeys'`, and one `warn` is logged either way.
+   * `relationMode: 'foreignKeys'`; an unreadable mode also logs one `warn`.
    */
   async connect(): Promise<void> {
     this._client = await this.resolveClient();

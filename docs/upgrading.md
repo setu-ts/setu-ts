@@ -410,8 +410,8 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
 - **An injected Bigtable facade must accept the new filter variant and call options.**
   `BigtableFilter` gains `{ column: { cellLimit: number } }`, and `readRows` and `conditionalMutate`
   take an optional `{ timeoutMs }` (a facade may ignore it: the call is still rejected at
-  `requestTimeoutMs`, `504`, though its own work runs on). Every read now asks for the latest cell
-  only: handle the variant in a facade that switches over the union.
+  `requestTimeoutMs`, `504`, though its own work runs on). Every data-source read now asks for the
+  latest cell only: handle the variant in a facade that switches over the union.
 - **Bigtable on an emulator gets `universeDomain: 'googleapis.com'`.** When `BIGTABLE_EMULATOR_HOST`
   is set, or `apiEndpoint` is set without your own `sslCreds`, and no universe domain is configured
   (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
