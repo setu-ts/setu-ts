@@ -179,7 +179,6 @@ export type { R2StorageOptions } from './storage/r2-storage.ts';
 // Errors, for `instanceof` narrowing at call sites
 export {
   CloudflareBindingMissingError,
-  CloudflareObjectNotFoundError,
   CloudflareRemoteHandlerError,
   CloudflareRequestTimeoutError,
   CloudflareUnsupportedError,

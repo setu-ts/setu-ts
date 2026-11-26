@@ -1465,3 +1465,19 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   app-level test opens an Upgrade-only internal request; the real-server table gets 404 for the same
   request on the Node and Deno lanes (Bun measured, not in a lane); a negative control without the
   routing change fails the Workers cases.
+- **D11 built (after #614 merged into develop as `eb64aaefe`; merged here).** As §3.24 decided:
+  `R2Storage.get`/`getStream` throw `StorageObjectNotFoundError` (common, 404 hint, fixed detail,
+  key in `message` and `key` only); `CloudflareObjectNotFoundError` leaves `errors.ts` and the
+  barrel, with no alias. Tests: `r2-storage.test.ts` (the class, `key`, the 404 hint, the key absent
+  from the hint), `barrel-exports.test.ts` (the old name is gone), and `kernel-app.test.ts` (a route
+  reading a missing object answers 404 through the kernel with the key absent from the body).
+- **V13-117's Workers half (maintainer decision, from M143m's plan §3.1, D1).**
+  `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` carried no status, so a Workers
+  RPC fault surfaced as a masked 500. Both constructors now set M143m's hints through `common`'s
+  `withHttpStatusHint`, as M143m does for `messaging-plugin`: a timeout `504` (`Gateway Timeout`,
+  "No reply arrived in time; the request may have been handled."), a responder failure `502`
+  (`Bad Gateway`, "The service that handled the request failed."). The topic, budget and remote
+  message stay in `message` only. No fields are added (the classes keep their constructors). Tests
+  in `rpc-round-trip.test.ts`: the hint fields on both classes; a kernel-app route whose responder
+  throws a message carrying a secret answers 502 without it; one whose reply never arrives
+  answers 504.

@@ -17176,7 +17176,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `VectorizeVectorStore`, `VectorizeIndexLike`, `VectorizeVectorLike`, `VectorizeVectorStoreOptions`                                                                                                                                                                                                                                      | class + types |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
 | `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isQueueProducer`, `isDurableObjectNamespace`, `isServiceBinding`                                                                                                                                                                                                                        | guards        |
-| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                         | errors        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                                                          | errors        |
 
 ### `D1Adapter` — D1 as a first-class database
 
@@ -17375,6 +17375,10 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
   `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
+- **A missing R2 object throws `StorageObjectNotFoundError` (0.14.0).** `R2Storage.get` and
+  `getStream` throw common's class, as every `storage-plugin` provider does, so the kernel answers
+  `404` with the fixed detail and the key stays out of the body. `CloudflareObjectNotFoundError` is
+  removed.
 - **`R2Storage.getSignedUrl` rejects.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.
 - **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
@@ -17474,9 +17478,12 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
 - **The RPC errors are this package's own classes.** `CloudflareRequestTimeoutError` and
   `CloudflareRemoteHandlerError` mirror `messaging-plugin`'s `RequestTimeoutError` and
   `RemoteHandlerError` but are distinct identities, because AI_GUIDELINES §2.2 forbids a plugin
-  importing another plugin and `common` carries no error class to promote them into. Which one an
+  importing another plugin and `common` has no RPC error class to promote them into. Which one an
   application catches is never ambiguous: both providers claim `CAPABILITIES.MESSAGING`, so the
-  kernel's duplicate-provider check guarantees exactly one is registered.
+  kernel's duplicate-provider check guarantees exactly one is registered. They answer the same
+  statuses (0.14.0): a timeout `504` ("No reply arrived in time; the request may have been
+  handled."), a responder failure `502` ("The service that handled the request failed."); the topic,
+  budget and remote message stay in `message`, never in the body.
 - **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
   methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
   evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);

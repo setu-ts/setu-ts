@@ -23,6 +23,13 @@ Durable Object stub opens as before. A client that sends a real handshake, as ev
 sees no change; a hand-written test or script that sends `Upgrade: websocket` without a valid key
 and version now gets the refusal.
 
+### A missing R2 object is `StorageObjectNotFoundError` (`@setu-ts/cloudflare-plugin`)
+
+`R2Storage.get` and `getStream` throw `StorageObjectNotFoundError` from `@setu-ts/common` for an
+object that does not exist, and `CloudflareObjectNotFoundError` is removed. Replace
+`instanceof CloudflareObjectNotFoundError` with `instanceof StorageObjectNotFoundError`; its `key`
+names the object. A route that lets the error through now answers 404 rather than a masked 500.
+
 ### Raise the Workers toolchain pins (`@setu-ts/cli`)
 
 A Workers project generated before 0.14.0 pins `"wrangler": "~4.148.0"`, whose miniflare installs

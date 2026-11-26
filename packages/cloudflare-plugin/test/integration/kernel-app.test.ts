@@ -132,6 +132,30 @@ describe('CloudflarePlugin in a kernel application', () => {
     await app.stop();
   });
 
+  it('answers a missing R2 object 404 through the kernel, without the key in the body', async () => {
+    // V13-217's R2 half: R2 throws common's StorageObjectNotFoundError, the
+    // class every storage-plugin provider throws, so the kernel serves its
+    // 404 hint instead of a masked 500.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({ env: { UPLOADS: new FakeR2() }, storage: { binding: 'UPLOADS' } }),
+      ],
+    });
+    app.router.get('/avatar', async (ctx) => {
+      const storage = ctx.services.get<IStorage>(CAPABILITIES.STORAGE);
+      return ctx.response.send(await storage.get('users/42/avatar.png'));
+    });
+
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: '/avatar' });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toContain('The requested object was not found.');
+    expect(response.body).not.toContain('users/42');
+    await app.stop();
+  });
+
   it('passes every configured store option through to the store it builds', async () => {
     // Each option must be READ on a real path, not merely stored: this drives
     // the plugin under a fully non-default configuration and asserts the values

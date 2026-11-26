@@ -708,7 +708,6 @@ MIT
 | `isServiceBinding`                        | function  |
 | `purgeCacheApi`                           | function  |
 | `CloudflareBindingMissingError`           | class     |
-| `CloudflareObjectNotFoundError`           | class     |
 | `CloudflareRemoteHandlerError`            | class     |
 | `CloudflareRequestTimeoutError`           | class     |
 | `CloudflareUnsupportedError`              | class     |

@@ -21,6 +21,9 @@ afterAll(() => {
  */
 
 import { describe, expect, it } from 'vitest';
+import { httpStatusHintOf } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { CloudflareRemoteHandlerError, CloudflareRequestTimeoutError } from '../../src/errors.ts';
 import { WorkersBroker } from '../../src/messaging/workers-broker.ts';
@@ -231,5 +234,60 @@ describe('brokered request-reply over Cloudflare Queues and a Durable Object', (
 
     await expect(pending).rejects.toThrow('disconnected');
     expect(namespace.clients[0]?.closed).toBe(true);
+  });
+});
+
+describe('an RPC failure answers its status through the kernel (V13-117, Workers half)', () => {
+  it('carries the 504 and 502 hints, with fixed details', () => {
+    expect(httpStatusHintOf(new CloudflareRequestTimeoutError('sum', 250))).toEqual({
+      status: 504,
+      title: 'Gateway Timeout',
+      detail: 'No reply arrived in time; the request may have been handled.',
+    });
+    expect(httpStatusHintOf(new CloudflareRemoteHandlerError('boom'))).toEqual({
+      status: 502,
+      title: 'Bad Gateway',
+      detail: 'The service that handled the request failed.',
+    });
+  });
+
+  it('a responder that throws answers 502, and its message never reaches the body', async () => {
+    const { caller, consumer, producer } = twoWorkers();
+    await consumer.respond('sum', () => {
+      throw new Error('db password rejected for user admin');
+    });
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/sum', async (ctx) => {
+      const reply = caller.request('sum', 1);
+      await flush();
+      await deliver(consumer, producer);
+      return ctx.response.json(await reply);
+    });
+
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: '/sum' });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.body).toContain('The service that handled the request failed.');
+    expect(response.body).not.toContain('password');
+    await app.stop();
+  });
+
+  it('a reply that never arrives answers 504', async () => {
+    const { caller, callerRuntime } = twoWorkers();
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.router.get('/sum', async (ctx) => {
+      const reply = caller.request('sum', 1, { timeoutMs: 250 });
+      await flush();
+      callerRuntime.fire(0);
+      return ctx.response.json(await reply);
+    });
+
+    await app.start();
+    const response = await app.inject({ method: 'GET', url: '/sum' });
+
+    expect(response.statusCode).toBe(504);
+    expect(response.body).not.toContain("'sum'");
+    await app.stop();
   });
 });
