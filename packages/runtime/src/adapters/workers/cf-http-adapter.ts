@@ -28,16 +28,13 @@ import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import { WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
-import { refuseHandshakeHeaders } from '../shared/handshake-headers.ts';
+import { refuseHandshakeHeaders, WORKERD_VERSION_RULE } from '../shared/handshake-headers.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
 import {
   bindCloudflareSocketToSink,
   createDefaultCloudflareWebSocketHost,
   WORKERS_WS_MAX_MESSAGE_BYTES,
 } from './cf-ws-upgrader.ts';
-
-/** The handshake version workerd speaks; it refuses every other one. */
-const WORKERS_WS_VERSIONS: readonly number[] = [13];
 
 /**
  * Whether a request is a Worker-to-Worker subrequest: workerd sets `cf` on a
@@ -167,11 +164,13 @@ export class CloudflareWorkersServerHandle {
     // which would run the route's onOpen for a malformed one (V13-278). An
     // internal subrequest (a service binding or Durable Object stub) carries
     // no `cf` and no key: workerd builds that handshake itself, so it is not
-    // checked. Edge requests carry `cf`, forwarded ones too (the dashboard
-    // preview's do not, see isInternalSubrequest).
+    // checked. Edge requests carry `cf`; a gateway that forwards with
+    // `new Request(url, request)` keeps it, one that forwards only the
+    // headers does not (nor does the dashboard preview, see
+    // isInternalSubrequest).
     const refusal = isInternalSubrequest(request)
       ? undefined
-      : refuseHandshakeHeaders(request.headers, WORKERS_WS_VERSIONS);
+      : refuseHandshakeHeaders(request.headers, WORKERD_VERSION_RULE);
     if (refusal !== undefined) {
       intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: refusal.reason });
       return refusal.header === 'key'

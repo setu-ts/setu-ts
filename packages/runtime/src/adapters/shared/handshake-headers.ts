@@ -8,7 +8,7 @@
  * malformed key or a missing version that Node refuses (V13-276). workerd
  * checks the handshake only after the Worker has accepted the socket pair, so a
  * malformed handshake ran a route's `onOpen` there (V13-278). Each adapter
- * passes the versions its platform speaks and builds its own response.
+ * passes its platform's version rule and builds its own response.
  *
  * @module
  * @internal
@@ -25,25 +25,44 @@ export interface HandshakeHeaderRefusal {
   readonly reason: string;
 }
 
+/** Which `Sec-WebSocket-Version` values a platform accepts, from the raw header. */
+export type HandshakeVersionRule = (raw: string | null) => boolean;
+
 /**
- * Checks a WebSocket handshake's key and version the way `ws` does.
+ * Node's `ws` 8.23.0 rule: the header read with unary `+`, so surrounding
+ * whitespace and other numeric spellings of 13 or 8 are accepted. Deno's
+ * adapter uses it, so Deno answers as Node does.
+ */
+export const WS_VERSION_RULE: HandshakeVersionRule = (raw) => {
+  const version = Number(raw ?? undefined);
+  return version === 13 || version === 8;
+};
+
+/**
+ * workerd's rule: the header, trimmed, is exactly `13`. workerd refuses `8`,
+ * `0x0d`, `+13`, `13.0` and `013` (measured on local workerd), so the Workers
+ * adapter must too, or such a handshake would run `onOpen` before the platform
+ * refuses it.
+ */
+export const WORKERD_VERSION_RULE: HandshakeVersionRule = (raw) => raw?.trim() === '13';
+
+/**
+ * Checks a WebSocket handshake's key the way `ws` does, and its version by the
+ * platform's own rule.
  *
  * @param headers - The upgrade request's headers
- * @param versions - The `Sec-WebSocket-Version` values the platform speaks
+ * @param acceptsVersion - The platform's `Sec-WebSocket-Version` rule
  * @returns The refusal, or `undefined` when both headers are acceptable
  */
 export function refuseHandshakeHeaders(
   headers: Headers,
-  versions: readonly number[],
+  acceptsVersion: HandshakeVersionRule,
 ): HandshakeHeaderRefusal | undefined {
   const key = headers.get('sec-websocket-key');
   if (key === null || !KEY_PATTERN.test(key)) {
     return { header: 'key', reason: 'Missing or invalid Sec-WebSocket-Key header' };
   }
-  // `ws` reads the version with unary `+`, so surrounding whitespace is
-  // accepted and anything non-numeric, or absent, is `NaN`.
-  const version = Number(headers.get('sec-websocket-version') ?? undefined);
-  if (!versions.includes(version)) {
+  if (!acceptsVersion(headers.get('sec-websocket-version'))) {
     return { header: 'version', reason: 'Missing or invalid Sec-WebSocket-Version header' };
   }
   return undefined;

@@ -1481,3 +1481,10 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   in `rpc-round-trip.test.ts`: the hint fields on both classes; a kernel-app route whose responder
   throws a message carrying a secret answers 502 without it; one whose reply never arrives
   answers 504.
+- **Second re-audit (at `c64381539`, failed on two findings, both fixed).** Medium: the Workers
+  pre-check read the version with `Number()` (`ws`'s rule), so `0x0d`, `+13`, `1.3e1`, `13.0` and
+  `013` passed the adapter while workerd compares the header to the string `13` and refuses them —
+  the phantom `onOpen` for those spellings. `refuseHandshakeHeaders` now takes the platform's
+  version rule: `WS_VERSION_RULE` (numeric 13 or 8, Deno) and `WORKERD_VERSION_RULE` (the trimmed
+  header is exactly `13`, Workers). Low: a gateway that forwards only the headers drops `cf` (one
+  that forwards the `Request` keeps it); the README and the adapter comment now say so.

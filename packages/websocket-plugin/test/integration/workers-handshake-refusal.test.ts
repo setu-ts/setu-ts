@@ -64,6 +64,13 @@ const CASES: readonly {
     expectHeaders: { 'sec-websocket-version': '13', upgrade: 'websocket' },
   },
   {
+    // workerd compares the header to the string 13; `ws` would read it as 13.
+    name: 'version 0x0d, a numeric spelling workerd refuses',
+    headers: { 'sec-websocket-key': KEY, 'sec-websocket-version': '0x0d' },
+    status: 426,
+    expectHeaders: { 'sec-websocket-version': '13', upgrade: 'websocket' },
+  },
+  {
     name: 'no version',
     headers: { 'sec-websocket-key': KEY },
     status: 426,

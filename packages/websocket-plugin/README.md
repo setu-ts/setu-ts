@@ -49,13 +49,15 @@ handshake), so it is not checked and opens as before — including Cloudflare's 
 `fetch(url, { headers: { Upgrade: 'websocket' } })` with no `Connection: Upgrade`. On Node, Bun and
 Deno a request without `Connection: Upgrade` is not an upgrade (RFC 6455) and gets the route's 404.
 Three limits remain. In local dev (`wrangler dev` puts its own proxy Worker in front) and behind any
-gateway Worker, workerd gives the app a rebuilt handshake (`cf` set, a fresh valid key) whatever the
-client sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before
-the client is refused. Where an edge request lacks `cf`, as in the dashboard preview, it is treated
-as a Worker-to-Worker call: the check is skipped and an Upgrade-only request is routed as an
-upgrade. And whether production Cloudflare hands the Worker the client's own handshake headers,
-which is what the pre-check needs, is not verified by this repository's tests, which run on local
-workerd. Browsers send version 13.
+gateway Worker, workerd gives the app a rebuilt handshake (a fresh valid key) whatever the client
+sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before the
+client is refused. A gateway that forwards with `new Request(url, request)` keeps `cf`; one that
+forwards only the headers (`fetch(url, { headers: request.headers })`) does not, and the request is
+then treated as a Worker-to-Worker call. Where an edge request lacks `cf`, as in the dashboard
+preview, it is treated as a Worker-to-Worker call: the check is skipped and an Upgrade-only request
+is routed as an upgrade. And whether production Cloudflare hands the Worker the client's own
+handshake headers, which is what the pre-check needs, is not verified by this repository's tests,
+which run on local workerd. Browsers send version 13.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
