@@ -1548,7 +1548,7 @@ function oneReturnedRow(
     throw new Error(`Entity '${entity}' not found`);
   }
   throw new Error(
-    `Drizzle ${operation} for entity '${entity}' returned no row; configure a driver that supports RETURNING.`,
+    `Drizzle ${operation} for entity '${entity}' returned no row: RETURNING produced none, or on MySQL the read-back by key found none.`,
   );
 }
 
