@@ -811,15 +811,17 @@ export class UnsupportedSqlModeError extends Error {
 }
 
 /**
- * A Prisma conditional write refused because the client's schema sets
- * `relationMode = "prisma"` on a connector that takes the affected-row count
- * path (every connector except `postgresql` / `postgres`). Prisma's relation
- * emulation (prisma/orm#30758, fix prisma-engines#5868, both open at the time
- * of writing) runs `updateMany` as a `SELECT` of the matching ids followed by
- * an `UPDATE` by id that no longer carries the predicate, and runs the
- * emulated cascade of `deleteMany` before the parent's predicate is checked:
- * a lost race reads as success. Thrown by `updateWhere` and `deleteWhere`, so
- * by `updateVersioned` and `deleteVersioned` too, at the call; the mode is read
+ * A Prisma conditional write refused on a connector that takes the
+ * affected-row count path (every connector except `postgresql` /
+ * `postgres`), because the client's schema sets `relationMode = "prisma"`, or
+ * because its mode could not be read and the options do not assert
+ * `relationMode: 'foreignKeys'`. Prisma's relation emulation
+ * (prisma/orm#30758, fix prisma-engines#5868, both open at the time of
+ * writing) runs `updateMany` as a `SELECT` of the matching ids followed by an
+ * `UPDATE` by id that no longer carries the predicate, and runs the emulated
+ * cascade of `deleteMany` before the parent's predicate is checked: a lost
+ * race reads as success. Thrown by `updateWhere` and `deleteWhere`, so by
+ * `updateVersioned` and `deleteVersioned` too, at the call; the mode is read
  * at `connect()` from the client's datasource block. This configuration fault
  * has no HTTP status hint.
  * @since 0.14.0
@@ -827,25 +829,38 @@ export class UnsupportedSqlModeError extends Error {
 export class UnsupportedRelationModeError extends Error {
   /** Stable error discriminant. */
   override readonly name = 'UnsupportedRelationModeError';
-  /** The refused Prisma `relationMode`. */
-  readonly relationMode = 'prisma';
+  /**
+   * The refused Prisma `relationMode`: `'prisma'` when the schema reads so,
+   * `undefined` when the mode could not be read.
+   */
+  readonly relationMode: 'prisma' | undefined;
   /**
    * Creates the refusal, naming the mode, the hazard and the ways out.
    * @param operation - The refused repository call
    * @param entity - The entity name
    * @param provider - The resolved connector, or `undefined` when undetermined
+   * @param reason - `'prisma'` for a schema read as `"prisma"`, `'unread'` for
+   *   a mode that could not be read
    */
   constructor(
     operation: 'updateWhere' | 'deleteWhere',
     entity: string,
     provider: string | undefined,
+    reason: 'prisma' | 'unread' = 'prisma',
   ) {
     super(
-      `Prisma ${operation} on '${entity}' is refused: the client's schema sets relationMode = "prisma" on connector ` +
-        `'${provider ?? 'undetermined'}', and Prisma's relation emulation drops the write's predicate ` +
+      `Prisma ${operation} on '${entity}' is refused: ` +
+        (reason === 'prisma'
+          ? 'the client\'s schema sets relationMode = "prisma"'
+          : "the client's relationMode could not be read (client._engineConfig.inlineSchema)") +
+        ` on connector '${provider ?? 'undetermined'}', and under relationMode = "prisma" Prisma's relation emulation drops the write's predicate ` +
         '(updateMany updates the selected ids without it; the emulated cascade of deleteMany runs before it is checked), ' +
-        'so a lost race would read as success. Set relationMode = "foreignKeys" in the datasource block, or wait for ' +
-        'prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.',
+        'so a lost race would read as success. ' +
+        (reason === 'prisma'
+          ? 'Set relationMode = "foreignKeys" in the datasource block, or wait for prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.'
+          : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options; " +
+            'or set relationMode = "foreignKeys" in a schema the adapter can read.'),
     );
+    this.relationMode = reason === 'prisma' ? 'prisma' : undefined;
   }
 }

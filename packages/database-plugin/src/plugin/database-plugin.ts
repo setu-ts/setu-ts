@@ -433,6 +433,9 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('logQueries');
   carry('prismaClient');
   carry('provider');
+  // The Prisma arm's relationMode assertion; without it an unreadable schema
+  // keeps the conditional writes refused.
+  carry('relationMode');
   carry('drizzleInstance');
   carry('drizzleTables');
   // The Drizzle arm's explicit SQL dialect. Without this carry the option was

@@ -18,7 +18,12 @@ import { describe, expect, it } from 'vitest';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import type { EntityKey } from '@setu-ts/common';
 import { relationModeOf } from '../../src/adapters/prisma/prisma-adapter.ts';
-import { UnsupportedRelationModeError, updateVersioned } from '../../src/index.ts';
+import {
+  createPrismaDataSource,
+  UnsupportedQueryFeatureError,
+  UnsupportedRelationModeError,
+  updateVersioned,
+} from '../../src/index.ts';
 import { mysqlHarness } from '../fixtures/mysql-harness.ts';
 
 const RELATION_PRISMA = 'prisma-client-generated-mysql-relation-prisma';
@@ -62,6 +67,17 @@ describe(
         });
         expect(relationModeOf(client)).toBe(expected);
         expect(relationModeOf(extended)).toBe(expected);
+        // With no assertion, the default client reaches the write's own input check (an
+        // empty precondition, refused before I/O) and the "prisma" client is refused first.
+        await expect(
+          createPrismaDataSource(
+            client as unknown as Parameters<typeof createPrismaDataSource>[0],
+            'Row',
+            'mysql',
+          ).deleteWhere!('r', {}),
+        ).rejects.toBeInstanceOf(
+          mode === 'prisma' ? UnsupportedRelationModeError : UnsupportedQueryFeatureError,
+        );
         await client.$disconnect();
       });
     }
@@ -100,7 +116,8 @@ describe('relationMode "prisma" on real MySQL', { skip: !process.env['MYSQL_URL'
       expect(await client.$transaction((tx) => Promise.resolve(relationModeOf(tx)))).toBe('prisma');
 
       // Bypass the refusal: the predicate Prisma drops lets both racers report a win.
-      (h.adapter as unknown as { _relationModeRefused: boolean })._relationModeRefused = false;
+      (h.adapter as unknown as { _relationModeRefusal: undefined })._relationModeRefusal =
+        undefined;
       const source = h.adapter.createDataSource('Row') as {
         updateWhere(
           id: string,

@@ -563,7 +563,8 @@ export interface DatabaseAdapterOptions {
    * `deleteVersioned`) refused with `UnsupportedRelationModeError`: Prisma's
    * relation emulation drops the write's predicate there (prisma/orm#30758).
    * Use `relationMode = "foreignKeys"` (the default). When the mode cannot be
-   * read from the client, `connect()` logs one `warn` and does not refuse.
+   * read from the client, `connect()` logs one `warn` and conditional writes
+   * are refused the same way unless `relationMode: 'foreignKeys'` is set.
    *
    * @since 0.2.0
    */
@@ -699,6 +700,24 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly entities?: Readonly<Record<string, PrismaCompositeKeyOptions>>;
+
+  /**
+   * Asserts that the client's schema uses `relationMode = "foreignKeys"`, for
+   * a client whose mode the adapter cannot read.
+   *
+   * On every connector except `postgresql` / `postgres`, conditional writes
+   * (`updateWhere`, `deleteWhere`, so `updateVersioned`, `deleteVersioned`)
+   * are refused with `UnsupportedRelationModeError` unless the mode read from
+   * the client's datasource block at `connect()` is `foreignKeys`: under
+   * `relationMode = "prisma"` Prisma drops the write's predicate
+   * (prisma/orm#30758). When the mode cannot be read, they are refused too, and
+   * one `warn` is logged. Set this option only once you have confirmed the
+   * schema uses `foreignKeys`; it lifts that refusal and nothing else. A schema
+   * read as `"prisma"` stays refused with it.
+   *
+   * @since 0.14.0
+   */
+  readonly relationMode?: 'foreignKeys';
 }
 
 /**

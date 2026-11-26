@@ -355,7 +355,10 @@ All notable changes to this project are documented here. The format follows
   of `deleteMany` deletes children before the parent's predicate is checked, so a lost race read as
   success (on MySQL 8.4, both of two concurrent conditional updates reported a win in 100 of 100
   trials). The mode is read at `connect()` from the datasource block of the generated client; when
-  it cannot be read, `connect()` logs one `warn` and conditional writes run. Way out: set
+  it cannot be read, `connect()` logs one `warn` and the same four writes are refused too, unless
+  the adapter options (or `createPrismaDataSource`'s new last argument) assert
+  `relationMode: 'foreignKeys'` (new option): add it once you have confirmed the schema uses that
+  mode. A schema read as `"prisma"` stays refused with it. Way out: set
   `relationMode = "foreignKeys"` (the default), or wait for prisma/orm#30758 (fix
   prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is not refused: Prisma keeps
   the predicate there, though an emulated `onUpdate: Cascade` can still have run for a write that

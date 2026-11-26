@@ -2482,21 +2482,27 @@ the write back.
 Since 0.14.0 the count path refuses a client whose schema sets `relationMode = "prisma"`:
 `updateWhere` and `deleteWhere` (so `updateVersioned` and `deleteVersioned`), on the root client, in
 a unit of work and through `createPrismaDataSource`, throw `UnsupportedRelationModeError` (`name`
-`'UnsupportedRelationModeError'`, `relationMode` `'prisma'`, no HTTP hint, so a masked `500`) before
-any I/O. Prisma's emulation drops the predicate there (prisma/orm#30758, fix prisma-engines#5868):
-`updateMany` selects the ids, then updates by id alone, and the emulated cascade of `deleteMany`
-runs before the parent's predicate is checked, so a lost race would read as success. The mode is
-read at `connect()` from the datasource block of the client's `_engineConfig.inlineSchema` (the
-root, transaction and `$extends` clients share it); a block without the setting is Prisma's default,
-`foreignKeys`. When the field is absent or unreadable, `connect()` logs one `warn` and nothing is
-refused. The message names the mode, the hazard and the ways out: `relationMode = "foreignKeys"`, or
-wait for the upstream fix and a Setu release that accepts it. `postgresql` / `postgres` are not
-refused: Prisma keeps the predicate there (it reads, runs the emulated `onUpdate` actions, then
-updates with the predicate), but a conditional write that changes a field another model references
-with `onUpdate: Cascade` and loses a race can still have updated the child rows. `PrismaAdapter`,
-`DrizzleAdapter`, `DynamoAdapter` and `BigtableAdapter` take an optional `warn` callback as their
-last constructor parameter; the plugin passes its logger, and an adapter built directly without one
-logs nothing.
+`'UnsupportedRelationModeError'`, `relationMode` `'prisma'`, or `undefined` for an unread mode, no
+HTTP hint, so a masked `500`) before any I/O. Prisma's emulation drops the predicate there
+(prisma/orm#30758, fix prisma-engines#5868): `updateMany` selects the ids, then updates by id alone,
+and the emulated cascade of `deleteMany` runs before the parent's predicate is checked, so a lost
+race would read as success. The mode is read at `connect()` from the datasource block of the
+client's `_engineConfig.inlineSchema` (the root, transaction and `$extends` clients share it); a
+block without the setting is Prisma's default, `foreignKeys`. When the field is absent or
+unreadable, `connect()` logs one `warn` and the four writes are refused the same way, with or
+without a `warn` sink, unless `PrismaAdapterOptions.relationMode` is `'foreignKeys'` (since 0.14.0;
+`createPrismaDataSource` takes it as an optional sixth argument, `{ relationMode: 'foreignKeys' }`,
+and `DatabasePlugin` carries it). The assertion lifts only the unread refusal: a schema read as
+`"prisma"` stays refused. The message names the mode, the hazard and the ways out:
+`relationMode = "foreignKeys"`, or wait for the upstream fix and a Setu release that accepts it; for
+an unread mode it says to add `relationMode: 'foreignKeys'` once the schema is confirmed to use that
+mode, or to use a `relationMode = "foreignKeys"` schema the adapter can read. `postgresql` /
+`postgres` are not refused: Prisma keeps the predicate there (it reads, runs the emulated `onUpdate`
+actions, then updates with the predicate), but a conditional write that changes a field another
+model references with `onUpdate: Cascade` and loses a race can still have updated the child rows.
+`PrismaAdapter`, `DrizzleAdapter`, `DynamoAdapter` and `BigtableAdapter` take an optional `warn`
+callback as their last constructor parameter; the plugin passes its logger, and an adapter built
+directly without one logs nothing.
 
 The memory overlay and D1 batch transaction sources omit both members: the result is unknown until
 commit, so the repository refuses `'conditional-write'`. Prisma, Drizzle and MongoDB transaction

@@ -946,6 +946,14 @@ missing sort key.
   naming the ways out: relationMode `"foreignKeys"`, or Prisma's fix landing and a Setu release that
   accepts it. A client whose field is absent gets one `warn` at connect and no refusal. The
   single-statement PostgreSQL path is unaffected. BREAKING entry, upgrade note and README line.
+- **Unreadable mode fails closed (maintainer decision, 2026-11-27, review of PR #617).** A schema
+  the detector cannot read (the field absent, a key outside Prisma's datasource keys, an unreadable
+  line or header) refuses the four conditional writes like a read `"prisma"`, on the adapter and on
+  the direct `createPrismaDataSource` factory, unless the app asserts `relationMode: 'foreignKeys'`
+  in its options. The assertion covers only the unreadable case: a schema read as `"prisma"` stays
+  refused. The warn-only fallback could pass silently, because the adapter's `warn` callback is
+  optional and the direct factory has none. Sibling precedent: the Drizzle mysql2 guard (§3.17) also
+  refuses a `sql_mode` it cannot read.
 - **Comparison.** Every compared tool keeps a bulk conditional update to one statement: Rails
   `update_all` (no callbacks; `delete_all` ignores `:dependent`), Django `update()` ("applied
   instantly"), TypeORM (`createForeignKeyConstraints: false` documents no emulation). Prisma's

@@ -446,7 +446,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   lost race reported success. Set `relationMode = "foreignKeys"` (the default) in the datasource
   block and regenerate the client, or keep the mode and wait for prisma/orm#30758 (fix
   prisma-engines#5868) and a Setu release that accepts it. If `connect()` logs that it could not
-  read the client's relationMode, nothing is refused: check the schema yourself.
+  read the client's relationMode, the same writes are refused: confirm the schema uses
+  `relationMode = "foreignKeys"`, then add `relationMode: 'foreignKeys'` to the Prisma adapter
+  options (the last argument of `createPrismaDataSource` takes it too).
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.

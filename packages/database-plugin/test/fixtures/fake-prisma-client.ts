@@ -407,7 +407,9 @@ function createDelegate(
 // Forward-declared type to avoid self-referential implicit 'any' on `const client = { ... }`
 type FakePrismaClient = ReturnType<typeof createFakePrismaClient>;
 
-export function createFakePrismaClient(options: { activeProvider?: string } = {}): {
+export function createFakePrismaClient(
+  options: { activeProvider?: string; inlineSchema?: string | null } = {},
+): {
   $connect: () => Promise<void>;
   $disconnect: () => Promise<void>;
   $transaction: <T>(
@@ -426,6 +428,10 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
   // cannot be passed as `undefined` (that is a compile error under
   // `exactOptionalPropertyTypes`) and would fall back to the default anyway.
   _activeProvider: string;
+  // The generated client's schema text, which the adapter reads its relationMode from. Defaults
+  // to a datasource block naming only the provider (Prisma's default relationMode, foreignKeys);
+  // `inlineSchema: null` omits the field, modelling a client whose mode cannot be read.
+  _engineConfig?: { inlineSchema: string };
   // Recorded calls for test assertions
   recordedCalls: RecordedCall[];
   // Model delegates — accessed by lowercase name (e.g. `client.user`)
@@ -451,8 +457,13 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
   // server: an overlapping transaction waits, so a failed one's rollback can
   // never overwrite a later commit to the same key.
   let transactionTail: Promise<void> = Promise.resolve();
+  const inlineSchema =
+    options.inlineSchema === undefined
+      ? `datasource db {\n  provider = "${activeProvider}"\n}\n`
+      : options.inlineSchema;
   const client = {
     _activeProvider: activeProvider,
+    ...(inlineSchema === null ? {} : { _engineConfig: { inlineSchema } }),
     get connected() {
       return connected;
     },
