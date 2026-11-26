@@ -14,9 +14,10 @@ All notable changes to this project are documented here. The format follows
   `worker_pool_tasks_rejected_total{reason="aborted"}` once, without increasing completed or failed
   counts; aborting after settlement does nothing. A `signal` that is not an `AbortSignal` of this
   realm now rejects the call with `TypeError` before it is admitted; it used to be ignored. To keep
-  cancelling from such a signal, pass a native `AbortController`'s signal and abort it at once if
-  the other signal is already `aborted`, otherwise from that signal's `abort` event; to run without
-  cancellation, omit `signal`.
+  cancelling from such a signal, pass a native `AbortController`'s signal and call
+  `controller.abort(otherSignal.reason)` at once if the other signal is already `aborted`, otherwise
+  from that signal's `abort` event, so the worker call rejects with the original reason; to run
+  without cancellation, omit `signal`.
 
 - **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (M143, #613).** Optional
   `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with

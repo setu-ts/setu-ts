@@ -124,9 +124,13 @@ describe('SMTP failover with the real nodemailer', () => {
     await waitFor('354 ');
     // The final `CRLF` is written only after the server has read the body up
     // to `CRLF.`, so the terminator reaches it in two reads, not one.
+    // The check reads everything received so far: TCP may split the body
+    // anywhere, `CRLF` and `.` included.
     const firstPart = new Promise<void>((resolve) => {
+      let seen = '';
       onBodyChunk = (text) => {
-        if (text.endsWith('\r\n.')) resolve();
+        seen += text;
+        if (seen.endsWith('\r\n.')) resolve();
       };
     });
     socket.write('Subject: s\r\n\r\nbody\r\n.');

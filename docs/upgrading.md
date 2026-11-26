@@ -20,9 +20,10 @@ Dashboards and alerts on `worker_pool_tasks_rejected_total` gain a `reason="abor
 these cancellations, including calls aborted after admission. They do not increment completed or
 failed counts. A `signal` that is not an `AbortSignal` of this realm (a polyfill, or one from
 another realm such as jsdom) now rejects the call with `TypeError` before it is admitted; it used to
-be ignored. To keep cancelling from such a signal, pass a native `AbortController`'s signal and
-abort it at once if the other signal is already `aborted`, otherwise from that signal's `abort`
-event; to run without cancellation, omit `signal`.
+be ignored. To keep cancelling from such a signal, pass a native `AbortController`'s signal and call
+`controller.abort(otherSignal.reason)` at once if the other signal is already `aborted`, otherwise
+from that signal's `abort` event, so the worker call rejects with the original reason; to run
+without cancellation, omit `signal`.
 
 ### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
 

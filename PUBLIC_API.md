@@ -9720,8 +9720,9 @@ provider; S3/B2 check with a `HEAD` first, since `DeleteObject` cannot tell (an 
 between the two still resolves `true`). A `403` on that `HEAD`, whatever its cause, leaves presence
 unknown, so the delete goes ahead: it resolves `true` when it succeeds and rejects when it fails. S3
 without `s3:ListBucket` answers that `403` for a missing key, so `delete()` resolves `true` there;
-grant `s3:ListBucket` for exact answers. A `HEAD` that answers `404` is absence, as above (`false`);
-every other `HEAD` failure rejects. A missing object read by `get`/`getStream` throws
+grant `s3:ListBucket` for exact answers. A generic `HEAD` `404` is absence, as above (`false`); a
+named error such as `NoSuchBucket` rejects even with status `404`, and so does every other `HEAD`
+failure but the `403` above. A missing object read by `get`/`getStream` throws
 `StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly constructed `GcsProvider` or
 `AzureBlobProvider` takes `now` as its second argument; without one `getSignedUrl` rejects (an Azure
 client with its own `getSignedUrl` needs none). The GCS and Azure readiness probes
