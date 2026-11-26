@@ -22,6 +22,7 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
+import { errorHandler } from '@setu-ts/exceptions';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
@@ -257,6 +258,9 @@ describe('an RPC failure answers its status through the kernel (V13-117, Workers
       throw new Error('db password rejected for user admin');
     });
     const app = createApplication({ plugins: [RuntimePlugin()] });
+    // A 5xx hint is served by errorHandler, as every scaffold registers it; the
+    // kernel's own fallback serves 4xx hints only.
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0 });
     app.router.get('/sum', async (ctx) => {
       const reply = caller.request('sum', 1);
       await flush();
@@ -276,6 +280,9 @@ describe('an RPC failure answers its status through the kernel (V13-117, Workers
   it('a reply that never arrives answers 504', async () => {
     const { caller, callerRuntime } = twoWorkers();
     const app = createApplication({ plugins: [RuntimePlugin()] });
+    // A 5xx hint is served by errorHandler, as every scaffold registers it; the
+    // kernel's own fallback serves 4xx hints only.
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0 });
     app.router.get('/sum', async (ctx) => {
       const reply = caller.request('sum', 1, { timeoutMs: 250 });
       await flush();

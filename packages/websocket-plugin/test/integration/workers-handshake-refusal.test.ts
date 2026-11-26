@@ -154,4 +154,27 @@ describe('a malformed handshake on Workers runs no route handler (V13-278)', () 
 
     expect(calls[0]).toBe('open');
   });
+
+  it('an Upgrade-only request from the edge (cf set) is routed as sent: 404, no onOpen', async () => {
+    calls.length = 0;
+
+    const response = await app.fetch(
+      fromEdge(new Request('http://worker/ws', { headers: { upgrade: 'websocket' } })),
+    );
+
+    expect(response.status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+
+  it('an internal call whose Connection names another token still routes as an upgrade', async () => {
+    calls.length = 0;
+
+    await app.fetch(
+      new Request('http://worker/ws', {
+        headers: { upgrade: 'websocket', connection: 'keep-alive' },
+      }),
+    );
+
+    expect(calls[0]).toBe('open');
+  });
 });

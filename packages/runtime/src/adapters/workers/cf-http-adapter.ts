@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, isWebSocketUpgradeRequest, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -40,9 +40,11 @@ import {
 const WORKERS_WS_VERSIONS: readonly number[] = [13];
 
 /**
- * Whether a request is a Worker-to-Worker subrequest: workerd sets `cf` on
- * every request that arrives from the edge and leaves it unset on a service
- * binding's or Durable Object stub's `fetch`.
+ * Whether a request is a Worker-to-Worker subrequest: workerd sets `cf` on a
+ * request that arrives from the edge and leaves it unset on a service
+ * binding's or Durable Object stub's `fetch`. The dashboard preview is the
+ * documented exception: its edge requests carry no `cf`, so they are treated as
+ * internal (the websocket-plugin README names it).
  */
 function isInternalSubrequest(request: Request): boolean {
   return (request as Request & { readonly cf?: unknown }).cf === undefined;
@@ -51,22 +53,23 @@ function isInternalSubrequest(request: Request): boolean {
 /**
  * The request the kernel routes on. Cloudflare's documented Worker-to-Worker
  * socket is `fetch(url, { headers: { Upgrade: 'websocket' } })`, with no
- * `Connection: Upgrade`, which RFC 6455 requires and Setu's upgrade detection
+ * `Connection: Upgrade`, which RFC 6455 requires and `isWebSocketUpgradeRequest`
  * reads. For such an internal subrequest only, the routed copy gains
  * `Connection: Upgrade`, so it reaches a WebSocket route; workerd builds that
- * handshake itself. Edge requests are routed as sent, and the shared rule is
- * unchanged on Node, Bun and Deno, where an Upgrade-only request is no upgrade.
+ * handshake itself. A request carrying `cf` is routed as sent, and the shared
+ * rule is unchanged on Node, Bun and Deno, where an Upgrade-only request is no
+ * upgrade. `Upgrade` is read first, so an ordinary request costs one header
+ * lookup.
  */
 function asWorkerToWorkerUpgrade(request: Request): Request {
+  const headers = request.headers;
+  if (headers.get('upgrade') === null || isWebSocketUpgradeRequest(headers)) return request;
   if (!isInternalSubrequest(request)) return request;
-  if (request.headers.get('upgrade')?.trim().toLowerCase() !== 'websocket') return request;
-  const connection = request.headers.get('connection');
-  if (connection?.split(',').some((token) => token.trim().toLowerCase() === 'upgrade')) {
-    return request;
-  }
-  const headers = new Headers(request.headers);
-  headers.set('connection', connection === null ? 'Upgrade' : `${connection}, Upgrade`);
-  return new Request(request, { headers });
+  const routed = new Headers(headers);
+  const connection = headers.get('connection');
+  routed.set('connection', connection === null ? 'Upgrade' : `${connection}, Upgrade`);
+  // The shared rule decides, so an `Upgrade` other than `websocket` stays as sent.
+  return isWebSocketUpgradeRequest(routed) ? new Request(request, { headers: routed }) : request;
 }
 
 /**
@@ -164,7 +167,8 @@ export class CloudflareWorkersServerHandle {
     // which would run the route's onOpen for a malformed one (V13-278). An
     // internal subrequest (a service binding or Durable Object stub) carries
     // no `cf` and no key: workerd builds that handshake itself, so it is not
-    // checked. Every request from the edge carries `cf`, forwarded ones too.
+    // checked. Edge requests carry `cf`, forwarded ones too (the dashboard
+    // preview's do not, see isInternalSubrequest).
     const refusal = isInternalSubrequest(request)
       ? undefined
       : refuseHandshakeHeaders(request.headers, WORKERS_WS_VERSIONS);

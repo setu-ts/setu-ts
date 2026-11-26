@@ -17480,10 +17480,10 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `RemoteHandlerError` but are distinct identities, because AI_GUIDELINES §2.2 forbids a plugin
   importing another plugin and `common` has no RPC error class to promote them into. Which one an
   application catches is never ambiguous: both providers claim `CAPABILITIES.MESSAGING`, so the
-  kernel's duplicate-provider check guarantees exactly one is registered. They answer the same
-  statuses (0.14.0): a timeout `504` ("No reply arrived in time; the request may have been
-  handled."), a responder failure `502` ("The service that handled the request failed."); the topic,
-  budget and remote message stay in `message`, never in the body.
+  kernel's duplicate-provider check guarantees exactly one is registered. They answer (0.14.0) a
+  timeout `504` ("No reply arrived in time; the request may have been handled."), a responder
+  failure `502` ("The service that handled the request failed."); the topic, budget and remote
+  message stay in `message`, never in the body.
 - **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
   methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
   evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);

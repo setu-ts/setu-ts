@@ -161,9 +161,9 @@ All notable changes to this project are documented here. The format follows
   runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the arm, `ws.room()`
   and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the arm.
 - **`@setu-ts/cloudflare-plugin` (M143o; V13-117 Workers half).** A Workers RPC that times out
-  answers 504 and one whose responder threw answers 502, as `messaging-plugin`'s errors do, instead
-  of a masked 500: `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` carry the
-  status hints, and the remote message never reaches the response body.
+  answers 504 and one whose responder threw answers 502, instead of a masked 500:
+  `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` carry the status hints, and the
+  remote message never reaches the response body.
 - **BREAKING — `@setu-ts/cloudflare-plugin` (M143o; V13-217 R2 half).** A missing R2 object throws
   `StorageObjectNotFoundError` from `@setu-ts/common`, the class every `storage-plugin` provider
   throws, so a route that reads it answers 404 instead of a masked 500, with the key kept out of the

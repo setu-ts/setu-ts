@@ -51,8 +51,9 @@ Deno a request without `Connection: Upgrade` is not an upgrade (RFC 6455) and ge
 Three limits remain. In local dev (`wrangler dev` puts its own proxy Worker in front) and behind any
 gateway Worker, workerd gives the app a rebuilt handshake (`cf` set, a fresh valid key) whatever the
 client sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before
-the client is refused. Where an edge request lacks `cf`, as in the dashboard preview, the check is
-skipped. And whether production Cloudflare hands the Worker the client's own handshake headers,
+the client is refused. Where an edge request lacks `cf`, as in the dashboard preview, it is treated
+as a Worker-to-Worker call: the check is skipped and an Upgrade-only request is routed as an
+upgrade. And whether production Cloudflare hands the Worker the client's own handshake headers,
 which is what the pre-check needs, is not verified by this repository's tests, which run on local
 workerd. Browsers send version 13.
 

@@ -87,8 +87,8 @@ export class CloudflareUnsupportedError extends Error {
  * The Cloudflare counterpart of `messaging-plugin`'s `RequestTimeoutError`.
  * They are deliberately distinct classes rather than one shared identity:
  * AI_GUIDELINES §2.2 forbids a plugin importing another plugin, and `common`
- * has no RPC error class to promote one into. Both answer the same status
- * (504) through `common`'s `withHttpStatusHint`. Which class an application catches
+ * has no RPC error class to promote one into. This one answers 504 through
+ * `common`'s `withHttpStatusHint`. Which class an application catches
  * is never ambiguous — `MessagingPlugin` and this package's `messaging` arm
  * both provide `CAPABILITIES.MESSAGING`, so the kernel's duplicate-provider
  * check guarantees exactly one of them is registered.
@@ -112,9 +112,8 @@ export class CloudflareRequestTimeoutError extends Error {
         'consumer sets `max_batch_timeout = 0` — the platform default of 5s alone exhausts ' +
         'the default reply budget.',
     );
-    // 504, as messaging-plugin's RequestTimeoutError answers (V13-117): the
-    // responder may have run, so the outcome is unknown to the caller. The
-    // topic and budget stay in `message`, never in the body.
+    // 504 (V13-117): the responder may have run, so the outcome is unknown to
+    // the caller. The topic and budget stay in `message`, never in the body.
     withHttpStatusHint(this, {
       status: 504,
       title: 'Gateway Timeout',
@@ -142,8 +141,7 @@ export class CloudflareRemoteHandlerError extends Error {
    */
   constructor(message: string) {
     super(`The responder failed: ${message}`);
-    // 502, as messaging-plugin's RemoteHandlerError answers (V13-117): the
-    // fault was upstream. The remote message stays in `message`, never in the
+    // 502 (V13-117): the fault was upstream. The remote message stays in `message`, never in the
     // body, since it can carry the responder's internals.
     withHttpStatusHint(this, {
       status: 502,

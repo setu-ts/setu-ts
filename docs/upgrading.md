@@ -28,7 +28,10 @@ and version now gets the refusal.
 `R2Storage.get` and `getStream` throw `StorageObjectNotFoundError` from `@setu-ts/common` for an
 object that does not exist, and `CloudflareObjectNotFoundError` is removed. Replace
 `instanceof CloudflareObjectNotFoundError` with `instanceof StorageObjectNotFoundError`; its `key`
-names the object. A route that lets the error through now answers 404 rather than a masked 500.
+is the path you passed (without the store's prefix). Code that matched the old `name` or message
+(`R2 object '…' does not exist.`) matches `StorageObjectNotFoundError` and
+`Storage object not found: <path>` now. A route that lets the error through now answers 404 rather
+than a masked 500.
 
 ### Raise the Workers toolchain pins (`@setu-ts/cli`)
 

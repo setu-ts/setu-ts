@@ -42,6 +42,7 @@
   "devDependencies": {
     "@setu-ts/cache-plugin": "workspace:^",
     "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/scheduler-plugin": "workspace:^",
