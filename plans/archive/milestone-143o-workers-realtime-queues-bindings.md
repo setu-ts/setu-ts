@@ -1447,3 +1447,21 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   add a workerd case asserting the rebuilt handshake (`cf` set, a key other than the one sent,
   valid), so a wrangler change shows up. Production behaviour — whether Cloudflare passes the
   client's own handshake headers to the Worker — is unverified (no account), and the README says so.
+- **Upgrade-only Worker-to-Worker sockets (maintainer decision: fix, no register row; out-of-lane
+  edit approved in `common`, narrowed to `runtime`).** `isWebSocketUpgradeRequest` needs
+  `Connection: Upgrade`, so Cloudflare's documented
+  `fetch(url, { headers: { Upgrade: 'websocket' } })` never reached a Setu route (404). Precedent:
+  Hono's Workers `upgradeWebSocket` checks only `Upgrade` (`hono@4.13.18`,
+  `adapter/cloudflare-workers/websocket.js`). Measured on real servers (raw `GET /ws`,
+  `Upgrade: websocket`, no `Connection`): today Node, Bun and Deno answer 404. With the shared check
+  relaxed (patched `common`, rebuilt): Node 501 (Node never emits `upgrade` without `Connection`, so
+  the kernel's intent reaches the fetch path, which cannot upgrade), Bun 101 with a key (Bun
+  upgrades without `Connection: Upgrade`, against RFC 6455) and 400 without, Deno 400. So relaxing
+  the shared rule would make the runtimes diverge and turn a clean 404 into a 501 or an
+  RFC-violating 101; the narrower change keeps `common` as it is and lets the Workers adapter route
+  an internal subrequest (no `cf`) carrying `Upgrade: websocket` as an upgrade by adding
+  `Connection: Upgrade` to the request the kernel routes on. Edge requests are routed as sent.
+  Tests: the workerd e2e opens a `?upgrade-only` socket over a service binding (101, `onOpen`); the
+  app-level test opens an Upgrade-only internal request; the real-server table gets 404 for the same
+  request on the Node and Deno lanes (Bun measured, not in a lane); a negative control without the
+  routing change fails the Workers cases.

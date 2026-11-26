@@ -45,8 +45,9 @@ only and answer 426 (Workers with `Upgrade: websocket` and `Sec-WebSocket-Versio
 creates the socket pair, because workerd checks the handshake only after the Worker has accepted it.
 It checks requests from the edge, which workerd marks with `request.cf`. A Worker-to-Worker call
 over a service binding or Durable Object stub has no `cf` and no key (workerd builds that
-handshake), so it is not checked and opens as before; such a caller sends `Upgrade: websocket` and
-`Connection: Upgrade`, since a request without `Connection: Upgrade` is not an upgrade to Setu.
+handshake), so it is not checked and opens as before — including Cloudflare's documented form,
+`fetch(url, { headers: { Upgrade: 'websocket' } })` with no `Connection: Upgrade`. On Node, Bun and
+Deno a request without `Connection: Upgrade` is not an upgrade (RFC 6455) and gets the route's 404.
 Three limits remain. In local dev (`wrangler dev` puts its own proxy Worker in front) and behind any
 gateway Worker, workerd gives the app a rebuilt handshake (`cf` set, a fresh valid key) whatever the
 client sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before

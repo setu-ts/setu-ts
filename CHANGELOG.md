@@ -220,6 +220,11 @@ All notable changes to this project are documented here. The format follows
   socket over a service binding or Durable Object stub, which has no `cf` and no key, still opens.
   In local dev and behind a gateway Worker the app receives a handshake workerd rebuilt, so the
   check cannot act there; production behaviour is unverified here (no Cloudflare account).
+- **`@setu-ts/runtime` (M143o).** Cloudflare's documented Worker-to-Worker WebSocket call,
+  `fetch(url, { headers: { Upgrade: 'websocket' } })` over a service binding or Durable Object stub,
+  reaches a Setu WebSocket route: the Workers adapter treats such an internal subrequest as an
+  upgrade without `Connection: Upgrade`. It used to answer 404. Node, Bun and Deno are unchanged:
+  without `Connection: Upgrade` a request is not an upgrade (RFC 6455), and gets the route's 404.
 - **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
   `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
   7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose

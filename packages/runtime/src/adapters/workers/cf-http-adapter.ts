@@ -49,6 +49,27 @@ function isInternalSubrequest(request: Request): boolean {
 }
 
 /**
+ * The request the kernel routes on. Cloudflare's documented Worker-to-Worker
+ * socket is `fetch(url, { headers: { Upgrade: 'websocket' } })`, with no
+ * `Connection: Upgrade`, which RFC 6455 requires and Setu's upgrade detection
+ * reads. For such an internal subrequest only, the routed copy gains
+ * `Connection: Upgrade`, so it reaches a WebSocket route; workerd builds that
+ * handshake itself. Edge requests are routed as sent, and the shared rule is
+ * unchanged on Node, Bun and Deno, where an Upgrade-only request is no upgrade.
+ */
+function asWorkerToWorkerUpgrade(request: Request): Request {
+  if (!isInternalSubrequest(request)) return request;
+  if (request.headers.get('upgrade')?.trim().toLowerCase() !== 'websocket') return request;
+  const connection = request.headers.get('connection');
+  if (connection?.split(',').some((token) => token.trim().toLowerCase() === 'upgrade')) {
+    return request;
+  }
+  const headers = new Headers(request.headers);
+  headers.set('connection', connection === null ? 'Upgrade' : `${connection}, Upgrade`);
+  return new Request(request, { headers });
+}
+
+/**
  * Internal handle for a Cloudflare Workers HTTP server.
  *
  * @internal - Not exported from package index
@@ -106,7 +127,10 @@ export class CloudflareWorkersServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        asWorkerToWorkerUpgrade(request),
+        this.#maxBodyBytes,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });

@@ -9,7 +9,8 @@
  *   request — whether `cf` was set, and its `Sec-WebSocket-Key` and version.
  * - `GET /self-socket`: opens a socket to this Worker's own `/ws` over the
  *   `SELF` service binding, the way one Worker calls another — `Upgrade` and
- *   `Connection` only, no key — and answers the status.
+ *   `Connection` only, no key — and answers the status. With `?upgrade-only`
+ *   it sends `Upgrade: websocket` alone, as Cloudflare's own example does.
  *
  * @module
  */
@@ -68,8 +69,11 @@ export default {
     }
     if (path === '/last-handshake') return Response.json(lastHandshake ?? null);
     if (path === '/self-socket') {
+      const upgradeOnly = new URL(request.url).searchParams.has('upgrade-only');
       const response = await env.SELF.fetch('https://self/ws', {
-        headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
+        headers: upgradeOnly
+          ? { Upgrade: 'websocket' }
+          : { Upgrade: 'websocket', Connection: 'Upgrade' },
       });
       const socket = (response as Response & { webSocket?: UpgradedSocket | null }).webSocket;
       if (socket) {

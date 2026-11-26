@@ -144,4 +144,14 @@ describe('a malformed handshake on Workers runs no route handler (V13-278)', () 
 
     expect(calls[0]).toBe('open');
   });
+
+  it("Cloudflare's documented Worker-to-Worker call, Upgrade alone, reaches the route", async () => {
+    calls.length = 0;
+
+    // `fetch(url, { headers: { Upgrade: 'websocket' } })` from another Worker:
+    // no `cf`, no key, no `Connection: Upgrade`.
+    await app.fetch(new Request('http://worker/ws', { headers: { upgrade: 'websocket' } }));
+
+    expect(calls[0]).toBe('open');
+  });
 });

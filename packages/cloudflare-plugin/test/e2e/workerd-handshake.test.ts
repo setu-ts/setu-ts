@@ -158,6 +158,19 @@ describe.skipIf(skip)('the WebSocket handshake on workerd (V13-278)', () => {
   );
 
   it(
+    "opens Cloudflare's documented Worker-to-Worker socket, Upgrade alone with no Connection",
+    async () => {
+      const before = Number(await text('/opens'));
+      const status = await text('/self-socket?upgrade-only');
+      await sleep(200);
+
+      expect(status).toBe('101');
+      expect(Number(await text('/opens'))).toBe(before + 1);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
     'opens a Worker-to-Worker socket over a service binding: no cf and no key, still 101',
     async () => {
       const before = Number(await text('/opens'));

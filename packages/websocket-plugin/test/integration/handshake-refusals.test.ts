@@ -28,10 +28,21 @@ interface Case {
   readonly headers: Readonly<Record<string, string>>;
   readonly status: number;
   readonly version?: string;
+  /** Whether the handshake sends `Connection: Upgrade` (default: it does). */
+  readonly connection?: false;
 }
 
 /** The client-fault arm, the same on Node and Deno. */
 const CASES: readonly Case[] = [
+  // RFC 6455 needs `Connection: Upgrade`; without it this is no upgrade, so the
+  // WebSocket route does not match. Only a Worker-to-Worker call on Workers is
+  // treated otherwise (workers-handshake-refusal.test.ts).
+  {
+    name: 'Upgrade without Connection: not an upgrade',
+    headers: { key: KEY, version: '13' },
+    connection: false,
+    status: 404,
+  },
   { name: 'a valid handshake', headers: { key: KEY, version: '13' }, status: 101 },
   { name: 'version 8, which ws accepts', headers: { key: KEY, version: '8' }, status: 101 },
   { name: 'no key', headers: { version: '13' }, status: 400 },
@@ -66,12 +77,12 @@ function freePort(): Promise<number> {
 }
 
 /** Sends one raw handshake and resolves with the response head. */
-function handshake(port: number, headers: Case['headers']): Promise<string> {
+function handshake(port: number, headers: Case['headers'], connection = true): Promise<string> {
   const lines = [
     'GET /ws HTTP/1.1',
     'Host: 127.0.0.1',
     'Upgrade: websocket',
-    'Connection: Upgrade',
+    ...(connection ? ['Connection: Upgrade'] : []),
     ...(headers['key'] === undefined ? [] : [`Sec-WebSocket-Key: ${headers['key']}`]),
     ...(headers['version'] === undefined ? [] : [`Sec-WebSocket-Version: ${headers['version']}`]),
   ];
@@ -132,7 +143,9 @@ describe('a malformed handshake is refused the same way on every runtime (V13-27
 
   for (const entry of CASES) {
     it(`${entry.name}: ${String(entry.status)}`, async () => {
-      const { status, headers } = parse(await handshake(port, entry.headers));
+      const { status, headers } = parse(
+        await handshake(port, entry.headers, entry.connection !== false),
+      );
 
       expect(status).toBe(entry.status);
       if (entry.version !== undefined) {
