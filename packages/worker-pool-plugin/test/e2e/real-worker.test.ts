@@ -29,6 +29,55 @@ const importThrowsTaskUrl = new URL('../fixtures/import-throws-task.ts', import.
 const lateThrowTaskUrl = new URL('../fixtures/late-throw-task.ts', import.meta.url).href;
 
 describe('WorkerPoolPlugin — e2e on real worker threads', () => {
+  it('aborts a running real task by terminating its worker, then serves the module again', async () => {
+    const base = createRuntimeServices();
+    const exits: Promise<number | null>[] = [];
+    const runtime = {
+      ...base,
+      workers: {
+        ...base.workers!,
+        spawn(specifier: string) {
+          const handle = base.workers!.spawn(specifier);
+          expect(handle.onExit).toBeTypeOf('function');
+          exits.push(new Promise((resolve) => handle.onExit!(resolve)));
+          return handle;
+        },
+      },
+    };
+    const service = new WorkerPoolService({ maxWorkers: 1, taskTimeoutMs: 0 }, runtime);
+    const taskUrl = new URL('../fixtures/wait-task.ts', import.meta.url).href;
+    const flags = new Int32Array(new SharedArrayBuffer(12));
+    const controller = new AbortController();
+    const reason = { message: 'caller withdrew task' };
+    const WAIT_MS = 1_500;
+    try {
+      const result = service.run(
+        taskUrl,
+        { state: flags.buffer as SharedArrayBuffer, waitMs: WAIT_MS },
+        { signal: controller.signal },
+      );
+      const assertion = expect(result).rejects.toBe(reason);
+      const startedAt = runtime.hrtime();
+      while (Atomics.load(flags, 0) === 0 && runtime.hrtime() - startedAt < 5_000) {
+        await new Promise<void>((resolve) => runtime.setTimeout(resolve, 10));
+      }
+      expect(Atomics.load(flags, 0)).toBe(1);
+      controller.abort(reason);
+      await assertion;
+      // A worker left running would finish its wait and set flag 2.
+      expect(exits).toHaveLength(1);
+      await exits[0];
+      expect(Atomics.load(flags, 2)).toBe(0);
+      expect(service.stats()[0]).toMatchObject({ completed: 0, failed: 0, busy: 0 });
+      await expect(
+        service.run(taskUrl, { state: new SharedArrayBuffer(12), waitMs: 0 }, { timeoutMs: 5_000 }),
+      ).resolves.toBe('done');
+      expect(service.stats()[0]).toMatchObject({ completed: 1, failed: 0 });
+    } finally {
+      await service.shutdown();
+    }
+  }, 15_000);
+
   it('completes two modules under one slot and shares SAB writes with the caller', async () => {
     const app = createApplication({
       plugins: [RuntimePlugin(), WorkerPoolPlugin({ maxWorkers: 1 })],

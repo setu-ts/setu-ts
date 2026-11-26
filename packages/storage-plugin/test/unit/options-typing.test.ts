@@ -87,3 +87,28 @@ describe('StoragePluginOptions — discriminated on provider (X8-11)', () => {
     expect(StoragePlugin({}).name).toBe('storage-plugin');
   });
 });
+
+describe('each provider option type is declared twice and the copies agree', () => {
+  it('the barrel copy and the provider copy carry the same option names', () => {
+    // The copies differ only in `?: T` against `?: T | undefined`; the key sets
+    // must match, so a field added to one copy and not the other fails here.
+    type SameKeys<A, B> = [keyof A] extends [keyof B]
+      ? [keyof B] extends [keyof A]
+        ? true
+        : false
+      : false;
+    const s3: SameKeys<
+      import('../../src/interfaces/index.ts').S3ProviderOptions,
+      import('../../src/providers/s3-provider.ts').S3ProviderOptions
+    > = true;
+    const gcs: SameKeys<
+      import('../../src/interfaces/index.ts').GcsProviderOptions,
+      import('../../src/providers/gcs-provider.ts').GcsProviderOptions
+    > = true;
+    const azure: SameKeys<
+      import('../../src/interfaces/index.ts').AzureBlobProviderOptions,
+      import('../../src/providers/azure-provider.ts').AzureBlobProviderOptions
+    > = true;
+    expect([s3, gcs, azure]).toEqual([true, true, true]);
+  });
+});

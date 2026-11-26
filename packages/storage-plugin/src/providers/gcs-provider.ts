@@ -6,22 +6,30 @@
  *
  * @module
  */
-import type { PutObjectOptions } from '@setu-ts/common';
+import type { IRuntimeServices, PutObjectOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
 import {
   createEagerEventStream,
-  createEagerIterableStream,
   looksLikeAsyncIterable,
   looksLikeEventStream,
 } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
+import type { StorageDeadline, StorageOperation } from './fault.ts';
+import {
+  answeredBelow500,
+  destroyOnAbort,
+  resolveRequestTimeout,
+  runBounded,
+  toStorageError,
+} from './fault.ts';
+import { storageKeyRefusal } from '../services/storage-key.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
 
 /** Shape of the GCS SDK module. */
 export interface GcsSdkModule {
-  Storage: new (config: { projectId?: string }) => {
+  Storage: new (config: Record<string, unknown>) => {
     bucket(name: string): GcsBucket;
   };
 }
@@ -29,6 +37,7 @@ export interface GcsSdkModule {
 /** Shape of a GCS bucket handle. */
 export interface GcsBucket {
   file(name: string): GcsFile;
+  exists(): Promise<[boolean]>;
 }
 
 /**
@@ -38,10 +47,19 @@ export interface GcsBucket {
  */
 export interface GcsFacadeFile {
   getMetadata(): Promise<[Record<string, unknown>]>;
-  download(): Promise<{ body: Uint8Array | ArrayLike<number> }>;
+  download(signal?: AbortSignal): Promise<{ body: Uint8Array | ArrayLike<number> }>;
   save(data: Uint8Array, options: Record<string, unknown>, cb: (error: Error | null) => void): void;
   delete(): Promise<boolean>;
   getSignedUrl(config: { action: string; expires: number }): Promise<[string]>;
+  /**
+   * The object's bytes as a stream. Cancelling a `getStream` result destroys
+   * it, then awaits its async iterator's `return()`. A Node `Readable`'s
+   * iterator ends a pending read when the stream is destroyed (unless the
+   * stream never emits `'close'`), so the cancel settles. An async
+   * generator's `return()` queues behind a pending read, so a source built
+   * that way, or one with no `destroy()`, holds the cancel until that read
+   * settles: ending it is the source's job.
+   */
   createReadStream(): NodeJS.ReadableStream;
 }
 
@@ -73,6 +91,15 @@ export interface GcsFile {
   ): void;
   delete(callback: (error: Error | null) => void): void;
   getSignedUrl(config: { action: 'read'; expires: number }): Promise<[string]>;
+  /**
+   * The object's bytes as a stream. Cancelling a `getStream` result destroys
+   * it, then awaits its async iterator's `return()`. A Node `Readable`'s
+   * iterator ends a pending read when the stream is destroyed (unless the
+   * stream never emits `'close'`), so the cancel settles. An async
+   * generator's `return()` queues behind a pending read, so a source built
+   * that way, or one with no `destroy()`, holds the cancel until that read
+   * settles: ending it is the source's job.
+   */
   createReadStream(): NodeJS.ReadableStream;
 }
 
@@ -88,6 +115,36 @@ export interface GcsProviderOptions {
   projectId?: string | undefined;
   /** Bucket name. */
   bucket: string;
+  /**
+   * API endpoint, such as a private endpoint or an emulator
+   * (`http://127.0.0.1:4443`). Passed to the SDK as `apiEndpoint`; the SDK adds
+   * `/storage/v1` itself. Setting it while `STORAGE_EMULATOR_HOST` is set is
+   * refused with `RangeError` (the SDK would send JSON requests to the variable
+   * and uploads here); an injected `client` is not checked. Set
+   * `endpointAuth: false` with an emulator.
+   *
+   * @since 0.14.0
+   */
+  endpoint?: string | undefined;
+  /**
+   * Whether credentials are sent to a custom `endpoint`. The SDK sends none to
+   * a custom endpoint unless told to, so this defaults to `true`; set `false`
+   * only for an emulator that checks no credential.
+   *
+   * @default true
+   * @since 0.14.0
+   */
+  endpointAuth?: boolean | undefined;
+  /**
+   * Bound on each backend call, in milliseconds. A read that does not settle
+   * in time rejects with `BackendUnavailableError` (`503`), a write with
+   * `BackendOutcomeUnknownError` (`504`). `0` disables the bound; anything
+   * outside `0`–`2147483647` throws `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IGcsClient | undefined;
 }
@@ -109,13 +166,14 @@ export function validateGcsClient(client: unknown): boolean {
 
 // ── NotFound detector ─────────────────────────────────────────────────────
 
-/** Reports whether an error indicates a missing GCS object. */
-function isGcsNotFound(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const err = error as { code?: string | number; message?: string };
-  const code = err.code;
-  const msg = err.message ?? '';
-  return code === 'ENOENT' || code === 404 || msg.includes('Not Found');
+/**
+ * Reports whether an error is GCS's not-found answer (`code` 404). A message
+ * test is not used: a 401 or 403 body can quote "Not Found" too.
+ */
+export function isGcsNotFound(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const code = (error as { code?: unknown }).code;
+  return code === 404;
 }
 
 // ── Adapt / Load seams ────────────────────────────────────────────────────
@@ -128,13 +186,25 @@ function isGcsNotFound(error: unknown): boolean {
  * @param options - GCS connection options
  * @returns The facade wrapping a `Storage` client
  */
-export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): IGcsClient {
-  const storageConfig: { projectId?: string } = {};
-  if (options.projectId !== undefined) storageConfig.projectId = options.projectId;
-  const storage = new mod.Storage(storageConfig);
+export function adaptGcsModule(
+  mod: GcsSdkModule,
+  options: GcsProviderOptions,
+  deadline: StorageDeadline = { timeoutMs: resolveRequestTimeout(options.requestTimeoutMs) },
+): IGcsClient {
+  const storage = new mod.Storage(buildGcsConfig(options));
   const bucketName = options.bucket;
 
   return {
+    // Readiness: the bucket answered. A refused credential or a missing bucket
+    // is an answer (status < 500); a network failure, the bound or a 5xx is not.
+    async isHealthy(): Promise<boolean> {
+      try {
+        await runBounded(deadline, 'gcs', 'probe', () => storage.bucket(bucketName).exists());
+        return true;
+      } catch (error) {
+        return answeredBelow500(error);
+      }
+    },
     bucket(_name?: string): unknown {
       const b = storage.bucket(_name ?? bucketName);
       return {
@@ -155,26 +225,33 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
                 });
               });
             },
-            download() {
-              return new Promise<{ body: Uint8Array | NodeJS.ReadableStream }>(
-                (resolve, reject) => {
-                  const fileHandle = b.file(name);
-                  (
-                    fileHandle as {
-                      download: (cb: (err: Error | null, data: Uint8Array) => void) => void;
-                    }
-                  ).download((err: Error | null, data: Uint8Array) => {
-                    if (err) reject(err);
-                    else resolve({ body: data });
-                  });
-                },
-              );
+            async download(signal?: AbortSignal) {
+              const readable = b.file(name).createReadStream();
+              if (signal !== undefined) destroyOnAbort(readable, signal);
+              const chunks: Uint8Array[] = [];
+              let size = 0;
+              for await (const chunk of readable as AsyncIterable<unknown>) {
+                const bytes = toBytes(chunk);
+                chunks.push(bytes);
+                size += bytes.length;
+              }
+              const body = new Uint8Array(size);
+              let offset = 0;
+              for (const chunk of chunks) {
+                body.set(chunk, offset);
+                offset += chunk.length;
+              }
+              return { body };
             },
             save(
               data: Uint8Array,
               options: Record<string, unknown>,
               cb: (error: Error | null) => void,
             ) {
+              // No cancellation is passed: the SDK (7.22) gives an upload none,
+              // and destroying its write stream was measured to leave the
+              // request open, so a `put` past its bound answers `504` while
+              // the request may still finish.
               const fileHandle = b.file(name);
               (
                 fileHandle as {
@@ -226,6 +303,30 @@ export function adaptGcsModule(mod: GcsSdkModule, options: GcsProviderOptions): 
 }
 
 /**
+ * Builds the `Storage` constructor config.
+ *
+ * `retryOptions.autoRetry` is always `false`: on `@google-cloud/storage` 7.x
+ * and 8.x a download whose retried request gets a `502` or `503` ends the
+ * process with an unhandled `ERR_STREAM_UNABLE_TO_PIPE` (measured on Node
+ * 24.22.1 with 7.22.0 and 8.4.0); with the SDK's retry off the same answer
+ * rejects at once. A custom endpoint keeps authentication on unless
+ * `endpointAuth` is `false`, because the SDK otherwise sends no credential to
+ * it.
+ *
+ * @param options - GCS connection options
+ * @returns The config record
+ */
+export function buildGcsConfig(options: GcsProviderOptions): Record<string, unknown> {
+  const config: Record<string, unknown> = { retryOptions: { autoRetry: false } };
+  if (options.projectId !== undefined) config.projectId = options.projectId;
+  if (options.endpoint !== undefined) {
+    config.apiEndpoint = options.endpoint;
+    config.useAuthWithCustomEndpoint = options.endpointAuth ?? true;
+  }
+  return config;
+}
+
+/**
  * Lazily imports the GCS SDK. Only exercised on the lazy path.
  *
  * @returns The SDK module
@@ -245,21 +346,28 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
 /**
  * Google Cloud Storage provider.
  *
- * Supports native streaming via `createReadStream()` drained into a web `ReadableStream` — by
- * async iteration when the stream supports it (every real SDK body does), by
- * `'data'`/`'end'`/`'error'` events otherwise.
+ * Every call runs under `requestTimeoutMs`; buffered downloads destroy their
+ * SDK stream when the deadline signal aborts. An upload cannot be cancelled
+ * (the SDK offers no way to): a `put` past its bound rejects with
+ * `BackendOutcomeUnknownError` while its request may still finish. Every
+ * failure other than GCS's not-found answer is classified by `toStorageError`. `getStream` waits for the first
+ * chunk before it answers, so an absent object, a refused credential or an
+ * outage surfaces before a response is sent; the stream after that is pulled,
+ * not drained eagerly.
  *
  * @since 0.1.0
  */
 export class GcsProvider implements StorageProvider {
   #client: IGcsClient | null = null;
   readonly #options: GcsProviderOptions;
-  readonly #now: () => number;
+  readonly #now: (() => number) | undefined;
+  readonly #deadline: StorageDeadline;
+  readonly #env: IRuntimeServices['env'] | undefined;
   /**
-   * M70c: delegates to the injected client's optional `isHealthy?()` (the real
-   * adapter calls `bucket.exists()`). Assigned in `connect()` only when the
-   * client provides the member; a client that omits it is *unknown*, and the
-   * indicator reads absence (not `false`) as that.
+   * Delegates to the client's optional `isHealthy?()` — the lazily adapted
+   * client's probe calls `bucket.exists()`. Assigned in `connect()` only when
+   * the client provides the member; a client that omits it is *unknown*, and
+   * the indicator reads absence (not `false`) as that.
    *
    * @since 0.1.0
    */
@@ -269,11 +377,28 @@ export class GcsProvider implements StorageProvider {
    * @param options - GCS connection/injection options
    * @param now - Wall-clock source (epoch ms) for signed-URL expiry. Injected by
    *   `createProvider` as `runtime.now()` (the only sanctioned clock outside
-   *   `packages/runtime`). Defaults to `() => 0` for direct construction.
+   *   `packages/runtime`). Without one, `getSignedUrl` rejects by name.
+   * @param timing - The runtime timer surface for the bound (ambient timers
+   *   when absent)
+   * @param env - Runtime environment for checking `STORAGE_EMULATOR_HOST`
+   * @throws {RangeError} When `requestTimeoutMs` is out of range, or an
+   *   `endpoint` is given (and no `client` is injected) either without `env`
+   *   or while `env.STORAGE_EMULATOR_HOST` is set
    */
-  constructor(options?: GcsProviderOptions, now: () => number = () => 0) {
+  constructor(
+    options?: GcsProviderOptions,
+    now?: () => number,
+    timing?: StorageDeadline['timing'],
+    env?: IRuntimeServices['env'],
+  ) {
     this.#options = options ?? { bucket: '' };
     this.#now = now;
+    this.#env = env;
+    this.#checkEndpoint();
+    this.#deadline = {
+      timeoutMs: resolveRequestTimeout(this.#options.requestTimeoutMs),
+      ...(timing !== undefined && { timing }),
+    };
   }
 
   /**
@@ -281,6 +406,7 @@ export class GcsProvider implements StorageProvider {
    */
   async connect(): Promise<void> {
     if (this.#client !== null) return;
+    this.#checkEndpoint();
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateGcsClient(injected)) {
@@ -288,20 +414,47 @@ export class GcsProvider implements StorageProvider {
       }
       this.#client = injected;
     } else {
-      this.#client = adaptGcsModule(await loadGcsModule(), this.#options);
+      this.#client = adaptGcsModule(await loadGcsModule(), this.#options, this.#deadline);
     }
     this.#installProbe();
   }
 
   /**
-   * M70c: installs `isHealthy` when the client exposes the optional member;
-   * leaves it absent (unknown) otherwise.
+   * Refuses `endpoint` beside `STORAGE_EMULATOR_HOST` for the SDK this provider
+   * builds: the SDK sends JSON API calls to the variable's raw value (no
+   * `/storage/v1`, no scheme added) and uploads to `endpoint`, so the two
+   * settings would split one object's reads and writes. An injected client is
+   * the caller's to configure, so it is not checked; without `env` the check
+   * cannot run, so the endpoint is refused.
+   */
+  #checkEndpoint(): void {
+    if (this.#options.client !== undefined || this.#options.endpoint === undefined) return;
+    // Without the environment the SDK reads, the split cannot be ruled out, so
+    // a direct caller that sets `endpoint` must pass it (the plugin always does).
+    if (this.#env === undefined) {
+      throw new RangeError(
+        'GcsProvider: endpoint needs the runtime environment (the fourth constructor argument) ' +
+          'to check STORAGE_EMULATOR_HOST, which the SDK reads itself',
+      );
+    }
+    const emulator = this.#env.STORAGE_EMULATOR_HOST;
+    if (emulator !== undefined && emulator !== '') {
+      throw new RangeError(
+        'GcsProvider: set either endpoint or STORAGE_EMULATOR_HOST, not both: the SDK sends ' +
+          'JSON requests to STORAGE_EMULATOR_HOST and uploads to endpoint',
+      );
+    }
+  }
+
+  /**
+   * Installs `isHealthy` when the client exposes the optional member; leaves it
+   * absent (unknown) otherwise.
    */
   #installProbe(): void {
     const client = this.#client;
     if (client !== null && typeof client.isHealthy === 'function') {
       const probe = client.isHealthy;
-      this.isHealthy = (): Promise<boolean> => probe();
+      this.isHealthy = (): Promise<boolean> => probe.call(client);
     } else {
       delete this.isHealthy;
     }
@@ -331,6 +484,25 @@ export class GcsProvider implements StorageProvider {
   }
 
   /**
+   * Runs one call under the bound and classifies its rejection. `notFound`
+   * names the value a not-found answer stands for; without it, not-found is a
+   * failure like any other.
+   */
+  async #call<T>(
+    operation: StorageOperation,
+    run: (signal: AbortSignal) => Promise<T>,
+    notFound?: { readonly value: T },
+  ): Promise<T> {
+    this.#assertConnected();
+    try {
+      return await runBounded(this.#deadline, 'gcs', operation, run);
+    } catch (error) {
+      if (notFound !== undefined && isGcsNotFound(error)) return notFound.value;
+      throw toStorageError(error, 'gcs', operation, this.#options.client === undefined);
+    }
+  }
+
+  /**
    * Stores an object in GCS, recording any content type and user metadata on
    * the object itself so a signed URL serves it under the right type.
    *
@@ -338,9 +510,11 @@ export class GcsProvider implements StorageProvider {
    * @param data - Object bytes
    * @param options - Object attributes to record with the bytes
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
-    this.#assertConnected();
+  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
     // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
     // always passed (empty when the caller supplied nothing) so this package
     // has ONE call shape rather than two that can drift.
@@ -355,13 +529,25 @@ export class GcsProvider implements StorageProvider {
     const saveOptions: Record<string, unknown> = {
       ...(options?.contentType === undefined ? {} : { contentType: options.contentType }),
       ...(options?.metadata === undefined ? {} : { metadata: { metadata: options.metadata } }),
+      // An authenticated custom endpoint uploads in one multipart request: the
+      // SDK's resumable path (`File#startResumableUpload_`) never passes
+      // `useAuthWithCustomEndpoint`, so it drops the credential for a host
+      // outside Google's domain (measured on 7.22.0). The object is already in
+      // memory, so one request costs nothing.
+      ...(this.#options.endpoint !== undefined && this.#options.endpointAuth !== false
+        ? { resumable: false }
+        : {}),
     };
-    return new Promise<void>((resolve, reject) => {
-      this.#getFile(path).save(data, saveOptions, (err: Error | null) => {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
+    return this.#call(
+      'put',
+      () =>
+        new Promise<void>((resolve, reject) => {
+          this.#getFile(path).save(data, saveOptions, (err: Error | null) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        }),
+    );
   }
 
   /**
@@ -370,49 +556,65 @@ export class GcsProvider implements StorageProvider {
    * @param path - Object key
    * @returns The object bytes, or `null`
    */
-  async get(path: string): Promise<Uint8Array | null> {
-    this.#assertConnected();
-    try {
-      const { body } = await this.#getFile(path).download();
-      // The facade body is normally a Uint8Array, but a Buffer-like ArrayLike
-      // is converted defensively.
-      return body instanceof Uint8Array ? body : new Uint8Array(body);
-    } catch (error) {
-      if (isGcsNotFound(error)) return null;
-      throw error;
-    }
+  get(path: string): Promise<Uint8Array | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
+    return this.#call<Uint8Array | null>(
+      'get',
+      async (signal) => {
+        const { body } = await this.#getFile(path).download(signal);
+        // The facade body is normally a Uint8Array, but a Buffer-like ArrayLike
+        // is converted defensively.
+        return body instanceof Uint8Array ? body : new Uint8Array(body);
+      },
+      { value: null },
+    );
   }
 
   /**
-   * Deletes an object from GCS.
+   * Deletes an object from GCS: `false` when GCS answers not-found; an outage
+   * or a refused credential rejects.
    *
    * @param path - Object key
    * @returns `true` if deleted
    */
-  async delete(path: string): Promise<boolean> {
-    this.#assertConnected();
-    try {
-      await this.#getFile(path).delete();
-      return true;
-    } catch {
-      return false;
-    }
+  delete(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
+    return this.#call(
+      'delete',
+      async () => {
+        await this.#getFile(path).delete();
+        return true;
+      },
+      { value: false },
+    );
   }
 
   /**
-   * Reports whether an object exists in GCS.
+   * Reports whether an object exists in GCS: `false` only when GCS answers
+   * not-found; an outage or a refused credential rejects.
    *
    * @param path - Object key
    * @returns `true` if present
    */
-  async exists(path: string): Promise<boolean> {
-    this.#assertConnected();
-    try {
-      await this.#getFile(path).getMetadata();
-      return true;
-    } catch {
-      return false;
-    }
+  exists(path: string): Promise<boolean> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
+    return this.#call(
+      'exists',
+      async () => {
+        await this.#getFile(path).getMetadata();
+        return true;
+      },
+      { value: false },
+    );
   }
 
   /**
@@ -421,69 +623,149 @@ export class GcsProvider implements StorageProvider {
    * @param path - Object key
    * @param options - Expiry in seconds
    * @returns The signed URL
+   * @throws {Error} (as a rejection) When the provider has no clock — construct
+   *   it with `now`, or register it through `StoragePlugin`
    */
-  async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
-    this.#assertConnected();
-    // GCS `expires` is epoch-seconds (numeric), not milliseconds.
-    const expires = Math.floor(this.#now() / 1000) + options.expiresIn;
-    const [url] = await this.#getFile(path).getSignedUrl({ action: 'read', expires });
-    return url;
+  getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) return Promise.reject(refusal);
+
+    if (this.#client === null) {
+      return Promise.reject(new Error('GcsProvider is not connected. Call connect() first.'));
+    }
+    const now = this.#now;
+    if (now === undefined) {
+      return Promise.reject(
+        new Error(
+          'GcsProvider.getSignedUrl needs a clock: pass now to the constructor, or register ' +
+            'the provider through StoragePlugin',
+        ),
+      );
+    }
+    return this.#call('getSignedUrl', async () => {
+      // The SDK reads a numeric `expires` as epoch MILLISECONDS.
+      const expires = now() + options.expiresIn * 1000;
+      const [url] = await this.#getFile(path).getSignedUrl({ action: 'read', expires });
+      return url;
+    });
   }
 
   /**
-   * Native stream download — adapts GCS `createReadStream()` into a web
-   * `ReadableStream` (no `node:` import needed).
+   * Native stream download.
    *
-   * The adapter is chosen by probing the stream, because `IGcsClient` types it
-   * as `unknown`: a real SDK body is a node Readable and is async-iterated, an
-   * injected client emitting only `'data'`/`'end'`/`'error'` takes the event
-   * path, and a value carrying neither is refused by name. The refusal is a
-   * REJECTION, never a synchronous throw — this method is typed `Promise<…>`,
-   * so a caller using `.catch()` must be able to see it.
-   *
-   * Cancellation-safe on both paths: the `cancel` hook releases the source and
-   * destroys the underlying request, so a consumer cancelling mid-download
-   * neither leaks the connection nor crashes the process (previously the eager
-   * drain kept flowing after a cancel and the next chunk enqueued into the
-   * closed controller as an uncaught TypeError). Still an EAGER drain by
-   * documented contract — see `provider-stream.ts` and the README's
-   * per-provider table.
+   * A real SDK read stream is async-iterable: the provider waits for its first
+   * chunk (or its end, or its error) under the bound before answering, so a
+   * not-found answer is `null` and a refused credential or an outage rejects,
+   * instead of a response that has already begun. The stream it returns pulls
+   * the rest on demand and destroys the source when cancelled. A value that is
+   * only an event emitter (an injected client) is drained eagerly as before; a
+   * value that is neither is refused by name, as a rejection.
    *
    * @param path - Object key
-   * @returns A `ReadableStream`, `null` if absent, or a rejection naming the
-   *          unusable stream shape
+   * @returns A `ReadableStream`, `null` if absent, or a rejection
    */
-  // eslint-disable-next-line require-await -- the not-connected refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the not-connected refusal and the shape refusal must REJECT, not throw synchronously
   async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+    // Checked here too: the provider is exported and can be used directly.
+    const refusal = storageKeyRefusal(path);
+    if (refusal !== undefined) throw refusal;
+
     this.#assertConnected();
+    let readable: unknown;
     try {
-      const readable: unknown = this.#getFile(path).createReadStream();
-      // Shape-checked, never cast: `IGcsClient.bucket()` returns `unknown`, so
-      // an injected client's stream is guaranteed nothing by the type system.
-      // A real SDK read stream is a node Readable and takes the first branch;
-      // the second keeps a hand-rolled fake that only emits 'data'/'end'/
-      // 'error' working exactly as it did before 0.8.0. (`S3Provider` picks its
-      // adapter the same way, and it is what `@smithy/core`'s `sdkStreamMixin`
-      // does: probe, fall back, and only then refuse by name.)
-      if (looksLikeAsyncIterable(readable)) {
-        return Promise.resolve(createEagerIterableStream(readable));
-      }
-      if (looksLikeEventStream(readable)) {
-        return Promise.resolve(createEagerEventStream(readable));
-      }
-      return Promise.reject(
-        new Error(
-          `GcsProvider: createReadStream() for '${path}' returned a value that is neither ` +
-            `async-iterable nor an event emitter, so it cannot be streamed. A real GCS read ` +
-            `stream is a node Readable; an injected client must return one, or a value that ` +
-            `emits 'data', 'end' and 'error'.`,
-        ),
-      );
+      readable = this.#getFile(path).createReadStream();
     } catch (error) {
-      if (isGcsNotFound(error)) return Promise.resolve(null);
-      // Rejected, not thrown: this method is typed `Promise<…>`, and a
-      // synchronous throw is invisible to a caller using `.catch()`.
-      return Promise.reject(error);
+      if (isGcsNotFound(error)) return null;
+      throw toStorageError(error, 'gcs', 'getStream');
     }
+    // Shape-checked, never cast: `IGcsClient.bucket()` returns `unknown`, so an
+    // injected client's stream is guaranteed nothing by the type system.
+    if (looksLikeAsyncIterable(readable)) {
+      return this.#peekedStream(readable);
+    }
+    if (looksLikeEventStream(readable)) {
+      return createEagerEventStream(readable);
+    }
+    throw new Error(
+      `GcsProvider: createReadStream() for '${path}' returned a value that is neither ` +
+        `async-iterable nor an event emitter, so it cannot be streamed. A real GCS read ` +
+        `stream is a node Readable; an injected client must return one, or a value that ` +
+        `emits 'data', 'end' and 'error'.`,
+    );
+  }
+
+  /** Waits for the first chunk, then hands back a pull stream over the rest. */
+  async #peekedStream(
+    readable: AsyncIterable<unknown>,
+  ): Promise<ReadableStream<Uint8Array> | null> {
+    const iterator = readable[Symbol.asyncIterator]();
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      destroySource(readable);
+    };
+    let first: IteratorResult<unknown>;
+    try {
+      first = await runBounded(this.#deadline, 'gcs', 'getStream', () => iterator.next());
+    } catch (error) {
+      release();
+      if (typeof (readable as { destroy?: unknown }).destroy !== 'function') {
+        // Cleanup never replaces the first-read error, whether `return()`
+        // throws synchronously or rejects.
+        try {
+          void Promise.resolve(iterator.return?.()).catch(() => {});
+        } catch {
+          // Ignored: the first-read error is the one reported.
+        }
+      }
+      if (isGcsNotFound(error)) return null;
+      throw toStorageError(error, 'gcs', 'getStream');
+    }
+    return new ReadableStream<Uint8Array>({
+      start(controller): void {
+        if (first.done === true) controller.close();
+        else controller.enqueue(toBytes(first.value));
+      },
+      async pull(controller): Promise<void> {
+        try {
+          const next = await iterator.next();
+          if (next.done === true) controller.close();
+          else controller.enqueue(toBytes(next.value));
+        } catch (error) {
+          release();
+          controller.error(error);
+        }
+      },
+      async cancel(): Promise<void> {
+        release();
+        // Waits for the source, as the kernel's cancel contract asks. The SDK
+        // stream's destroy ends a pending read, so `return()` settles; a
+        // source whose `return()` queues behind a pending read (an async
+        // generator, or a stream with no `destroy()`) holds this cancel until
+        // that read settles, as `createReadStream()` documents.
+        await iterator.return?.();
+      },
+    });
+  }
+}
+
+/** Converts a stream chunk to bytes (a node `Buffer` already is one). */
+function toBytes(chunk: unknown): Uint8Array {
+  if (chunk instanceof Uint8Array) return chunk;
+  if (typeof chunk === 'string') return new TextEncoder().encode(chunk);
+  return new Uint8Array(chunk as ArrayLike<number>);
+}
+
+/** Destroys a node stream when it exposes `destroy`; a no-op otherwise. */
+function destroySource(source: unknown): void {
+  const destroy = (source as { destroy?: unknown }).destroy;
+  if (typeof destroy !== 'function') return;
+  try {
+    (destroy as () => void).call(source);
+  } catch {
+    // A source whose teardown throws must not replace the error (or the
+    // absence) the read itself reported.
   }
 }

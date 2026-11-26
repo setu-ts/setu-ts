@@ -69,9 +69,12 @@ export interface BunHost {
    * remove a listener or count them.
    */
   onFatalError?: (handler: FatalErrorHandler) => () => void;
-  /** Read file as bytes. */
+  /**
+   * Read file as bytes. The default host throws the filesystem's own error; an
+   * injected host may still answer `null` for a missing file.
+   */
   readFile: (path: string) => Uint8Array | null;
-  /** Resolve a path to its canonical absolute form (null when it cannot be resolved). */
+  /** Resolve a canonical path; an injected host may answer `null` for a missing one. */
   realPath: (path: string) => string | null;
   /** Write bytes to a file. */
   writeFile: (path: string, data: Uint8Array) => void;
@@ -84,8 +87,8 @@ export interface BunHost {
   /** Remove a file or directory. */
   rm: (path: string, options?: { recursive?: boolean }) => boolean;
   /**
-   * Create a read stream for a file.
-   * Returns null if the file cannot be opened.
+   * Create a read stream for a file. The default host throws the filesystem's
+   * own error; an injected host may answer `null`.
    */
   createReadStream?: (
     path: string,
@@ -121,66 +124,49 @@ export function createBunRuntimeServices(
   dns: IDnsResolver = createNodeDnsResolver(),
   createDnsResolver: (options: DnsResolverOptions) => IDnsResolver = createNodeServerDnsResolver,
 ): IRuntimeServices {
+  // Every method rejects with the host's own error, so its `code` (`ENOENT`,
+  // `EACCES`) survives; a `null`/`false` from an injected host becomes an
+  // error with a code too. A synchronous throw becomes a rejection.
   const fs: IFileSystem = {
-    readFile: (path: string) => {
-      const data = host.readFile(path);
-      if (data === null) {
-        return Promise.reject(new Error(`ENOENT: no such file or directory, read '${path}'`));
-      }
-      return Promise.resolve(data);
-    },
-    realPath: (path: string) => {
-      const resolved = host.realPath(path);
-      if (resolved === null) {
-        return Promise.reject(new Error(`ENOENT: no such file or directory, realpath '${path}'`));
-      }
-      return Promise.resolve(resolved);
-    },
-    writeFile: (path: string, data: Uint8Array) => {
-      // `BunHost.writeFile` has no `null` channel to report failure, so a
-      // failed write surfaces as a throw. Convert it to a rejection: this
-      // method returns a promise, and a synchronous throw would bypass the
-      // caller's `.catch` / `try { await … }`.
-      try {
-        host.writeFile(path, data);
-      } catch (error) {
-        return Promise.reject(error);
-      }
-      return Promise.resolve();
-    },
-    stat: (path: string) => {
-      const info = host.stat(path);
-      if (info === null) {
-        return Promise.reject(new Error(`ENOENT: no such file or directory, stat '${path}'`));
-      }
-      return Promise.resolve({
-        isFile: info.isFile,
-        isDirectory: info.isDirectory,
-        size: info.size,
-        mtime: info.mtime,
-      });
-    },
-    readdir: (path: string) => {
-      const entries = host.readdir(path);
-      if (entries === null) {
-        return Promise.reject(new Error(`ENOENT: no such file or directory, readdir '${path}'`));
-      }
-      return Promise.resolve(entries);
-    },
-    mkdir: (path: string, options?: { readonly recursive?: boolean }) => {
-      const ok = host.mkdir(path, options);
-      if (!ok) {
-        return Promise.reject(new Error(`mkdir failed for '${path}'`));
-      }
-      return Promise.resolve();
-    },
-    rm: (path: string, options?: { readonly recursive?: boolean }) => {
-      const ok = host.rm(path, options);
-      if (!ok) {
-        return Promise.reject(new Error(`rm failed for '${path}'`));
-      }
-      return Promise.resolve();
-    },
+    readFile: (path: string) =>
+      Promise.resolve().then(() => {
+        const data = host.readFile(path);
+        if (data === null) throw missingPath('read', path);
+        return data;
+      }),
+    realPath: (path: string) =>
+      Promise.resolve().then(() => {
+        const resolved = host.realPath(path);
+        if (resolved === null) throw missingPath('realpath', path);
+        return resolved;
+      }),
+    writeFile: (path: string, data: Uint8Array) =>
+      Promise.resolve().then(() => host.writeFile(path, data)),
+    stat: (path: string) =>
+      Promise.resolve().then(() => {
+        const info = host.stat(path);
+        if (info === null) throw missingPath('stat', path);
+        return {
+          isFile: info.isFile,
+          isDirectory: info.isDirectory,
+          size: info.size,
+          mtime: info.mtime,
+        };
+      }),
+    readdir: (path: string) =>
+      Promise.resolve().then(() => {
+        const entries = host.readdir(path);
+        if (entries === null) throw missingPath('readdir', path);
+        return entries;
+      }),
+    mkdir: (path: string, options?: { readonly recursive?: boolean }) =>
+      Promise.resolve().then(() => {
+        if (!host.mkdir(path, options)) throw new Error(`mkdir failed for '${path}'`);
+      }),
+    rm: (path: string, options?: { readonly recursive?: boolean }) =>
+      Promise.resolve().then(() => {
+        if (!host.rm(path, options)) throw new Error(`rm failed for '${path}'`);
+      }),
     readStream: async (
       path: string,
       options?: { readonly start?: number; readonly end?: number },
@@ -267,10 +253,9 @@ export interface BunModules {
  * Builds the default {@linkcode BunHost} from `node:` built-ins, which Bun
  * implements.
  *
- * Failures are reported through the host's documented channels — `null` for the
- * read/stat/resolve operations, `false` for `mkdir`/`rm` — so
- * {@linkcode createBunRuntimeServices} can turn them into rejected promises
- * with a consistent message.
+ * Filesystem errors propagate unchanged, `code` included, so
+ * {@linkcode createBunRuntimeServices} rejects with the same error and a caller
+ * can tell a missing file (`ENOENT`) from a refused one (`EACCES`).
  *
  * @param mods - Injectable built-ins (defaults to the real `node:` modules)
  * @returns A fully-wired BunHost
@@ -299,67 +284,34 @@ export function buildBunHost(
     exit: (code?: number) => mods.proc.exit(code),
     onSignal: (signal: RuntimeSignal, handler: () => void) => mods.proc.on(signal, handler),
     ...processFatalErrors(mods.proc, createBunFatalErrorObserver),
-    readFile: (path: string) => {
-      try {
-        return mods.fs.readFileSync(path);
-      } catch {
-        return null;
-      }
-    },
-    realPath: (path: string) => {
-      try {
-        return mods.fs.realpathSync(path);
-      } catch {
-        return null;
-      }
-    },
+    readFile: (path: string) => mods.fs.readFileSync(path),
+    realPath: (path: string) => mods.fs.realpathSync(path),
     writeFile: (path: string, data: Uint8Array) => {
       mods.fs.writeFileSync(path, data);
     },
     stat: (path: string) => {
-      try {
-        const st = mods.fs.statSync(path);
-        return {
-          isFile: st.isFile(),
-          isDirectory: st.isDirectory(),
-          size: st.size,
-          mtime: st.mtime,
-        };
-      } catch {
-        return null;
-      }
+      const st = mods.fs.statSync(path);
+      return { isFile: st.isFile(), isDirectory: st.isDirectory(), size: st.size, mtime: st.mtime };
     },
-    readdir: (path: string) => {
-      try {
-        return mods.fs.readdirSync(path);
-      } catch {
-        return null;
-      }
-    },
+    readdir: (path: string) => mods.fs.readdirSync(path),
     mkdir: (path: string, options?: { recursive?: boolean }) => {
-      try {
-        mods.fs.mkdirSync(path, options);
-        return true;
-      } catch {
-        return false;
-      }
+      mods.fs.mkdirSync(path, options);
+      return true;
     },
     rm: (path: string, options?: { recursive?: boolean }) => {
-      try {
-        mods.fs.rmSync(path, options);
-        return true;
-      } catch {
-        return false;
-      }
+      mods.fs.rmSync(path, options);
+      return true;
     },
     // Returned through the host seam rather than imported inside `readStream`,
     // so the adapter's stream branches are unit-testable with a fake host.
-    createReadStream: (path: string, options?: { start?: number; end?: number }) => {
-      try {
-        return mods.fs.createReadStream?.(path, options) ?? null;
-      } catch {
-        return null;
-      }
-    },
+    createReadStream: (path: string, options?: { start?: number; end?: number }) =>
+      mods.fs.createReadStream?.(path, options) ?? null,
   };
+}
+
+/** The error for a `null` from an injected host: a missing path, with `code: 'ENOENT'`. */
+function missingPath(operation: string, path: string): Error {
+  return Object.assign(new Error(`ENOENT: no such file or directory, ${operation} '${path}'`), {
+    code: 'ENOENT',
+  });
 }

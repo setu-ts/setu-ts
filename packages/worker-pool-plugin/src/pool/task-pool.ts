@@ -52,23 +52,43 @@ export interface TaskPoolConfig {
 }
 
 /**
+ * Reads `signal.aborted` and, when aborted, `signal.reason`. An `AbortSignal`
+ * Proxy can throw from either accessor: that counts as aborted with the thrown
+ * value as the reason, so the throw cannot escape a timer or listener callback
+ * and the caller still sees what went wrong.
+ */
+function abortStateOf(signal: AbortSignal): { aborted: boolean; reason: unknown } {
+  try {
+    const aborted = signal.aborted;
+    return { aborted, reason: aborted ? signal.reason : undefined };
+  } catch (error) {
+    return { aborted: true, reason: error };
+  }
+}
+
+/**
  * A task tracked from enqueue to settlement. The same object flows from the
  * pending queue onto a worker slot; its timeout timer is armed at ENQUEUE (so
  * a task that never reaches a worker — e.g. a module that never signals ready
  * — still times out instead of hanging) and carried through dispatch.
  *
- * Single settlement is structural, not flag-guarded: every settle path both
- * removes the task from its pending/slot location AND clears its timer, so no
- * second settle (a duplicate reply, a post-settle timeout, a crash after
- * completion) can reach it.
+ * Every settle path removes the task from its pending/slot location and goes
+ * through `cleanupTask`, which clears its timer, detaches its abort listener
+ * and sets `settled`. Removal keeps a duplicate reply, a post-settle timeout
+ * or a crash after completion from reaching it; `settled` guards the one
+ * callback a host may still hold, the abort listener.
  */
 interface Task {
   readonly input: unknown;
   readonly timeoutMs: number;
   readonly resolve: (result: unknown) => void;
-  readonly reject: (error: Error) => void;
+  readonly reject: (error: unknown) => void;
+  readonly signal: AbortSignal | undefined;
+  readonly onAbort: (() => void) | null;
   /** Correlation id; `0` while still pending, assigned at dispatch. */
   id: number;
+  /** Set by the one settle path; a late abort callback reads it. */
+  settled: boolean;
   /** Timeout handle armed at enqueue; `null` when the timeout is disabled or cleared. */
   timer: TimerHandle | null;
 }
@@ -178,12 +198,19 @@ export class TaskPool {
    * @param timeoutMs - Per-call timeout override; `undefined` uses the pool
    * default, `0` disables. The timeout is measured from ENQUEUE, so it also
    * bounds time spent waiting for a free/ready worker.
+   * @param signal - Withdraws queued work or terminates its running worker;
+   * rejects with the signal's reason without counting a task failure.
    * @returns The task's output
    */
-  run(input: unknown, timeoutMs?: number): Promise<unknown> {
+  run(input: unknown, timeoutMs?: number, signal?: AbortSignal): Promise<unknown> {
     if (this.closed) {
       this.collector?.taskRejected(this.config.label, 'pool_closed');
       return Promise.reject(new WorkerPoolUnavailableError('Worker pool has been shut down'));
+    }
+    const abort = signal === undefined ? undefined : abortStateOf(signal);
+    if (abort?.aborted) {
+      this.collector?.taskRejected(this.config.label, 'aborted');
+      return Promise.reject(abort.reason);
     }
     if (this.pending.length >= this.config.maxQueue) {
       // Counted as a REJECTION, not a failure: no `Task` exists yet, so this
@@ -197,9 +224,15 @@ export class TaskPool {
         timeoutMs: timeoutMs ?? this.config.taskTimeoutMs,
         resolve,
         reject,
+        signal,
+        onAbort:
+          signal === undefined ? null : () => this.onAbort(task, abortStateOf(signal).reason),
         id: 0,
+        settled: false,
         timer: null,
       };
+      // Attached first: should it throw, nothing is queued and no timer runs.
+      if (task.onAbort !== null) signal!.addEventListener('abort', task.onAbort, { once: true });
       if (task.timeoutMs > 0) {
         task.timer = this.runtime.setTimeout(() => this.onTimeout(task), task.timeoutMs);
       }
@@ -272,7 +305,9 @@ export class TaskPool {
       // The loop therefore ends either when the slot becomes busy or when the
       // queue runs dry — the `undefined` shift IS that second exit, not a
       // defensive arm.
-      while (slot.ready && slot.task === null) {
+      // `terminating`: an abort raised while a dispatch copied its input (a
+      // getter on the input) terminates this slot inside the loop.
+      while (slot.ready && slot.task === null && !slot.terminating) {
         const item = this.pending.shift();
         if (item === undefined) {
           break;
@@ -392,6 +427,9 @@ export class TaskPool {
     try {
       slot.handle.postMessage(request);
     } catch (error) {
+      // An input getter can abort the call during the copy and then fail it:
+      // the abort already settled the task (and dropped this slot).
+      if (task.settled) return;
       slot.task = null;
       this.rejectTask(task, error instanceof Error ? error : new Error(String(error)), 'clone');
     }
@@ -518,6 +556,39 @@ export class TaskPool {
     // Reaching here means the timer was never cleared, so the task is unsettled
     // (every settle path clears the timer). No settled-flag guard is needed.
     task.timer = null;
+    this.withdrawTask(task);
+    this.rejectTask(
+      task,
+      new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs),
+      'timeout',
+    );
+    this.pump();
+    this.syncMetrics();
+  }
+
+  /**
+   * The caller's signal aborted. The listener is removed on every settle; the
+   * flag also covers a host that calls a listener it captured before removal.
+   */
+  private onAbort(task: Task, reason: unknown): void {
+    if (task.settled) return;
+    this.withdrawTask(task);
+    this.rejectTask(task, reason, 'aborted');
+    // One signal shared by several calls (a request's) aborts them in turn;
+    // withdraw the queued ones now, so pump() starts no worker for them.
+    for (const queued of [...this.pending]) {
+      if (queued.signal === undefined) continue;
+      const abort = abortStateOf(queued.signal);
+      if (!abort.aborted) continue;
+      this.withdrawTask(queued);
+      this.rejectTask(queued, abort.reason, 'aborted');
+    }
+    this.pump();
+    this.syncMetrics();
+  }
+
+  /** Removes unsettled work and reclaims its worker exactly as a timeout does. */
+  private withdrawTask(task: Task): void {
     const pendingIndex = this.pending.indexOf(task);
     if (pendingIndex !== -1) {
       this.pending.splice(pendingIndex, 1);
@@ -551,13 +622,6 @@ export class TaskPool {
         this.terminateSlot(slot);
       }
     }
-    this.rejectTask(
-      task,
-      new WorkerTaskTimeoutError(this.config.specifier, task.timeoutMs),
-      'timeout',
-    );
-    this.pump();
-    this.syncMetrics();
   }
 
   /**
@@ -570,7 +634,7 @@ export class TaskPool {
    * while the pool counted it as done.
    */
   private resolveTask(task: Task, result: unknown): void {
-    this.clearTaskTimer(task);
+    this.cleanupTask(task);
     this.completedCount++;
     task.resolve(result);
     this.collector?.taskCompleted(this.config.label);
@@ -579,12 +643,16 @@ export class TaskPool {
   /**
    * Settles a task as rejected. Callers remove it from its location first.
    *
-   * `reason` is pushed to the failure counter here, at the one site that also
-   * increments `failedCount`, so the counter summed over `reason` always
-   * equals `stats().failed` for this pool.
+   * Cancellation counts only as a rejection; other reasons increment both
+   * the failure counter and `failedCount`.
    */
-  private rejectTask(task: Task, error: Error, reason: TaskFailureReason): void {
-    this.clearTaskTimer(task);
+  private rejectTask(task: Task, error: unknown, reason: TaskFailureReason | 'aborted'): void {
+    this.cleanupTask(task);
+    if (reason === 'aborted') {
+      task.reject(error);
+      this.collector?.taskRejected(this.config.label, 'aborted');
+      return;
+    }
     this.failedCount++;
     task.reject(error);
     this.collector?.taskFailed(this.config.label, reason);
@@ -595,7 +663,7 @@ export class TaskPool {
    * the two surfaces cannot disagree.
    *
    * Called from `run`, `onMessage`, `onWorkerError`, `onWorkerExit`,
-   * `onTimeout`, `onStartupTimeout`, `shutdown`, budget `resume` and
+   * `onTimeout`, `onAbort`, `onStartupTimeout`, `shutdown`, budget `resume` and
    * `retireIdle`. Every other mutation
    * (`pump`, `dispatch`, `spawnSlot`, `dropSlot`, the settle helpers) is
    * reached only from one of those, so no transition escapes.
@@ -604,7 +672,17 @@ export class TaskPool {
     this.collector?.syncGauges(this.config.label, this.stats());
   }
 
-  private clearTaskTimer(task: Task): void {
+  /** Every admitted task settles through here, releasing timers and listeners. */
+  private cleanupTask(task: Task): void {
+    task.settled = true;
+    if (task.onAbort !== null) {
+      try {
+        task.signal!.removeEventListener('abort', task.onAbort);
+      } catch {
+        // An `AbortSignal` Proxy's throwing accessor must not keep the caller's
+        // promise from settling; `settled` already guards a late listener call.
+      }
+    }
     if (task.timer !== null) {
       this.runtime.clearTimeout(task.timer);
       task.timer = null;

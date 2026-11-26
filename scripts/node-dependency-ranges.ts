@@ -71,7 +71,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@google-cloud/bigtable': '^6',
   '@google-cloud/pubsub': '^6',
   '@google-cloud/secret-manager': '^5',
-  '@google-cloud/storage': '^7',
+  '@google-cloud/storage': '^7.18.0',
   '@launchdarkly/node-server-sdk': '^9',
   '@node-saml/node-saml': '^5',
   '@types/ws': '^8.18.2',

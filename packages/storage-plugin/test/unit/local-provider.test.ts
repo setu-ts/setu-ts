@@ -18,7 +18,8 @@ describe('LocalStorageProvider', () => {
       fs: {
         readFile(path: string) {
           const data = store.get(path);
-          if (data === undefined) throw new Error(`ENOENT: ${path}`);
+          if (data === undefined)
+            throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
           return Promise.resolve(data);
         },
         writeFile(path: string, data: Uint8Array) {
@@ -41,13 +42,15 @@ describe('LocalStorageProvider', () => {
           if (dirs.has(path)) {
             return { size: 0 } as unknown as import('@setu-ts/common').StatResult;
           }
-          if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+          if (!store.has(path))
+            throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
           return {
             size: store.get(path)!.length,
           } as unknown as import('@setu-ts/common').StatResult;
         },
         rm(path: string) {
-          if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+          if (!store.has(path))
+            throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
           store.delete(path);
           return Promise.resolve();
         },
@@ -209,7 +212,8 @@ describe('LocalStorageProvider', () => {
     const fakeFs = {
       readFile(path: string) {
         const data = store.get(path);
-        if (data === undefined) throw new Error(`ENOENT: ${path}`);
+        if (data === undefined)
+          throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
         return Promise.resolve(data);
       },
       writeFile(path: string, data: Uint8Array) {
@@ -217,13 +221,13 @@ describe('LocalStorageProvider', () => {
         return Promise.resolve();
       },
       stat(path: string) {
-        if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+        if (!store.has(path)) throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
         return {
           size: store.get(path)!.length,
         } as unknown as import('@setu-ts/common').StatResult;
       },
       rm(path: string) {
-        if (!store.has(path)) throw new Error(`ENOENT: ${path}`);
+        if (!store.has(path)) throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
         store.delete(path);
         return Promise.resolve();
       },
