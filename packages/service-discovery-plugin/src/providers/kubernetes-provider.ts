@@ -263,7 +263,7 @@ export class KubernetesProvider implements DiscoveryProvider {
       http: this.#http,
       runtime: this.#runtime,
       listUrl: (extra) => this.listUrl(serviceName, extra),
-      authHeader: () => this.authHeader(),
+      authHeader: (signal) => this.authHeader(signal),
       map: (body) => this.mapSlices(body, serviceName),
       resourceVersionOf: (body) => (body as SliceList).metadata?.resourceVersion ?? null,
     });

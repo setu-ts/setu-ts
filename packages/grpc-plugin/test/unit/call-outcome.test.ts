@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { findTrailerError } from '@connectrpc/connect/protocol-grpc';
+import { findTrailerError, setTrailerStatus } from '@connectrpc/connect/protocol-grpc';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { codeFromHttpStatus, errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
@@ -376,18 +376,62 @@ for (const [status, body, expected] of [
   });
 }
 
-it('classifies real decoded valid and invalid grpc-status without matching the message', async () => {
-  const runtime = await loadConnectModule();
-  for (const status of ['99', '-1', 'nope', '13x', '13.1', '17', '13']) {
-    const error = findTrailerError(
-      new Headers({ 'grpc-status': status, 'grpc-message': 'same message' }),
-    );
-    expect(error).toBeInstanceOf(ConnectError);
+const decodedStatuses = [
+  ['00', Code.Internal, true],
+  ['013', Code.Internal, false],
+  ['13x', Code.Internal, false],
+  ['13.1', Code.Internal, false],
+  ['16', Code.Unauthenticated, false],
+  ['17', Code.Internal, true],
+  ['-1', Code.Internal, true],
+  [' 1', Code.Canceled, false],
+  ['1 ', Code.Canceled, false],
+  ['', Code.Internal, true],
+  ['99', Code.Internal, true],
+  ['nope', Code.Internal, true],
+  ['13', Code.Internal, false],
+  ['+13', Code.Internal, false],
+] as const;
+
+it.each(decodedStatuses)(
+  'agrees with real Connect decoding grpc-status %j',
+  async (status, code, invalid) => {
+    const runtime = await loadConnectModule();
+    const metadata = new Headers({ 'grpc-status': status, 'grpc-message': 'same message' });
+    const error = findTrailerError(metadata);
+    expect(error?.code).toBe(code);
+    if (error === undefined) throw new Error('Expected a decoded status error');
     expect(runtime.isWireError(error)).toBe(true);
-    expect(callOutcome(error, undefined, runtime.isWireError), status).toBe(
-      status === '13' ? 'success' : 'failure',
-    );
-  }
+    const rejectedByDecoder =
+      error.rawMessage === `invalid grpc-status: ${metadata.get('grpc-status')}`;
+    expect(rejectedByDecoder).toBe(invalid);
+    const decodedOutcome = rejectedByDecoder
+      ? 'failure'
+      : rows.find(([value]) => value === error.code)![1];
+    expect(callOutcome(error, undefined, runtime.isWireError)).toBe(decodedOutcome);
+  },
+);
+
+it('decodes exact grpc-status zero as success without an error', () => {
+  expect(findTrailerError(new Headers({ 'grpc-status': '0' }))).toBeUndefined();
+});
+
+it('prefers real status details over a garbage grpc-status header', async () => {
+  const runtime = await loadConnectModule();
+  const application = new ConnectError('application answer', Code.Internal);
+  application.details.push({ type: 'example.Detail', value: new Uint8Array([8, 1]) });
+  const metadata = setTrailerStatus(new Headers(), application);
+  expect(metadata.has('grpc-status-details-bin')).toBe(true);
+  metadata.set('grpc-status', 'garbage');
+  const decoded = findTrailerError(metadata);
+  expect(decoded).toBeInstanceOf(ConnectError);
+  expect(decoded?.code).toBe(Code.Internal);
+  expect(decoded?.rawMessage).toBe(application.rawMessage);
+  expect(runtime.isWireError(decoded)).toBe(true);
+  expect(callOutcome(decoded, undefined, runtime.isWireError)).toBe('success');
+});
+
+it('retains the HTTP fallback for unknown real Connect JSON error codes', () => {
   // The real JSON decoder erases an unknown code string and retains only the HTTP fallback.
   // With Internal as fallback this is indistinguishable from a valid wire Internal.
   const fallback = () => new ConnectError('HTTP 400', codeFromHttpStatus(400));

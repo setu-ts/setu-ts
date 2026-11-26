@@ -113,7 +113,8 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   discovery: an instance fails when it did not answer, refused the stream, returned `Unavailable`,
   `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
   server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`.
-  Invalid `grpc-status` metadata (such as 99) is a protocol failure; valid status 13 remains an
+  A status Connect itself cannot decode (such as 99) is a protocol failure. Status details
+  (`grpc-status-details-bin`) take precedence over the header; valid status 13 remains an
   application answer. The same codes without a server answer fail. A request that makes a healthy
   handler throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a
   broken dependency, say) is not ejected by call outcomes. Take it out through readiness (health
@@ -139,28 +140,27 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   header list (RFC 7541 §4.1 sizes) is over the peer's advertised HTTP/2
   `SETTINGS_MAX_HEADER_LIST_SIZE` is stopped before the peer processes it. Counting follows Node's
   Latin-1 encoding; Bun sends UTF-8, so values above U+007F are undercounted there (gRPC metadata
-  values are ASCII by spec). If the list is also over
-  8 KiB (8192 octets), it is the caller's fault, with `GrpcHeaderListTooLargeError` as its error's
-  `cause`: no report or resend. At or under 8 KiB it counts as `failure` against that instance;
-  unary calls are resent once to another pick within the remaining deadline, like a refused stream:
-  the peer advertised less than any gRPC default. If the resend meets the same fault, the call fails
-  as `Unavailable`, with a message naming the header size and advertised limit. Calls started before
-  the session holds the peer's SETTINGS (the first on each new session, and after a reconnect or
-  GOAWAY) skip that advertised-limit check. When no header-list limit was known when the call
-  started, a `REFUSED_STREAM` on a sent header list over 64 KiB (65536 octets) instead fails with
-  `GrpcHeaderListTooLargeError` (on Node the client's HTTP/2 library refused to send it; another
-  peer may refuse it itself): no report and no resend. Its `size` is the sent list's RFC size and
-  its `limit` is the client's 65536-octet threshold. At or under 65536, a refusal still reports
-  failure and is resent; an accepted larger list is unaffected. A refusal from a peer shutting down
-  (its session closed or destroyed) stays a refused stream and is resent. Caller cancellation
-  reports nothing. Streaming reports success when response headers arrive; later iteration errors
-  report nothing. A deadline tighter than healthy latency can eject a healthy instance, bounded by
-  discovery's defaults (5 failures in 30 s, 50% cap, never the last instance, 30 s ejection).
-  Passing mass client disconnects through to outbound calls (aborting thousands of in-flight calls
-  at once) can trip the peer's limit on stream resets: a Node server (`streamResetBurst` 1000,
-  `streamResetRate` 33 by default) then closes the session with GOAWAY `INTERNAL_ERROR`, the calls
-  on it fail, and the instance is reported failed. The ejection that follows is bounded the same way
-  (30 s, at most 50%, never the last instance).
+  values are ASCII by spec). If the list is also over 8 KiB (8192 octets), it is the caller's fault,
+  with `GrpcHeaderListTooLargeError` as its error's `cause`: no report or resend. At or under 8 KiB
+  it counts as `failure` against that instance; unary calls are resent once to another pick within
+  the remaining deadline, like a refused stream: the peer advertised less than any gRPC default. If
+  the resend meets the same fault, the call fails as `Unavailable`, with a message naming the header
+  size and advertised limit. Calls started before the session holds the peer's SETTINGS (the first
+  on each new session, and after a reconnect or GOAWAY) skip that advertised-limit check. When no
+  header-list limit was known when the call started, a `REFUSED_STREAM` on a sent header list over
+  64 KiB (65536 octets) instead fails with `GrpcHeaderListTooLargeError` (on Node the client's
+  HTTP/2 library refused to send it; another peer may refuse it itself): no report and no resend.
+  Its `size` is the sent list's RFC size and its `limit` is the client's 65536-octet threshold. At
+  or under 65536, a refusal still reports failure and is resent; an accepted larger list is
+  unaffected. A refusal from a peer shutting down (its session closed or destroyed) stays a refused
+  stream and is resent. Caller cancellation reports nothing. Streaming reports success when response
+  headers arrive; later iteration errors report nothing. A deadline tighter than healthy latency can
+  eject a healthy instance, bounded by discovery's defaults (5 failures in 30 s, 50% cap, never the
+  last instance, 30 s ejection). Passing mass client disconnects through to outbound calls (aborting
+  thousands of in-flight calls at once) can trip the peer's limit on stream resets: a Node server
+  (`streamResetBurst` 1000, `streamResetRate` 33 by default) then closes the session with GOAWAY
+  `INTERNAL_ERROR`, the calls on it fail, and the instance is reported failed. The ejection that
+  follows is bounded the same way (30 s, at most 50%, never the last instance).
 - **Connections.** A Service address that balances connections pins every call to one pod. Discover
   pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
   pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every

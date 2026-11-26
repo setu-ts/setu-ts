@@ -45,6 +45,9 @@ export const GRPC_CODE: Readonly<
   Unauthenticated: 16,
 } as const);
 
+/** The enum members Connect accepts after parsing a decimal integer prefix. */
+const GRPC_STATUS_CODES: ReadonlySet<number> = new Set(Object.values(GRPC_CODE));
+
 const FAILURE_CODES: ReadonlySet<number> = new Set([
   GRPC_CODE.Unavailable,
   GRPC_CODE.Unimplemented,
@@ -85,7 +88,7 @@ const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
  * Reports failure for no server answer, a refused stream, `Unavailable`,
  * `Unimplemented`, `DeadlineExceeded` (wire or not), or the peer's own `Canceled`.
  * Every other server answer reports success, including `Internal`, `Unknown`
- * and `DataLoss`, except Internal decoded from invalid grpc-status metadata:
+ * and `DataLoss`, except Internal for a status Connect itself cannot decode:
  * a request that makes a healthy handler throw must not eject
  * replicas. The same codes without a server answer fail. Caller cancellation
  * and the client faults `isPreSendFault` recognises report nothing, including
@@ -118,12 +121,15 @@ export function callOutcome(
   return 'failure';
 }
 
-/** Invalid peer statuses are protocol failures even though Connect marks them as wire errors. */
+/**
+ * Follow Connect's decoder: details take precedence; exact '0' succeeds,
+ * otherwise parse a decimal integer prefix and require a Code enum member.
+ */
 function hasInvalidGrpcStatus(error: unknown): boolean {
   const metadata = (error as { metadata?: unknown }).metadata;
-  if (!(metadata instanceof Headers)) return false;
+  if (!(metadata instanceof Headers) || metadata.has('grpc-status-details-bin')) return false;
   const status = metadata.get('grpc-status');
-  return status !== null && (!/^[0-9]+$/.test(status) || Number(status) > 16);
+  return status !== null && status !== '0' && !GRPC_STATUS_CODES.has(Number.parseInt(status, 10));
 }
 
 /**

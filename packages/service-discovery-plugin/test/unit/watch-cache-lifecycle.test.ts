@@ -332,22 +332,37 @@ for (const older of ['reject', 'fulfill'] as const) {
     let calls = 0;
     await service.watch('billing', () => {
       calls++;
-      if (calls === 1) return new Promise<void>((resolve, reject) => { fulfillOlder = resolve; rejectOlder = reject; });
+      if (calls === 1)
+        return new Promise<void>((resolve, reject) => {
+          fulfillOlder = resolve;
+          rejectOlder = reject;
+        });
       if (calls === 2) return older === 'reject' ? Promise.resolve() : Promise.reject(current);
-      return new Promise<void>((resolve) => { finishNewest = resolve; });
+      return new Promise<void>((resolve) => {
+        finishNewest = resolve;
+      });
     });
     let otherFails = false;
-    await service.watch('billing', () => { if (otherFails) throw other; });
+    await service.watch('billing', () => {
+      if (otherFails) throw other;
+    });
     provider.emit('billing', [a]);
     provider.emit('billing', [b]);
     await flush();
-    if (older === 'reject') rejectOlder(stale); else fulfillOlder();
+    const settledWarnings = older === 'reject' ? [] : [current];
+    expect(warnings).toEqual(settledWarnings);
+    if (older === 'reject') rejectOlder(stale);
+    else fulfillOlder();
     await flush();
+    expect(warnings).toEqual(settledWarnings);
+    // Keep the next call pending so it cannot clear the state checked by the other listener.
     otherFails = true;
     provider.emit('billing', [a]);
     await flush();
     expect(warnings).toEqual([older === 'reject' ? other : current]);
     expect(service.degraded).toBe(false);
-    finishNewest(); await flush(); service.close();
+    finishNewest();
+    await flush();
+    service.close();
   });
 }

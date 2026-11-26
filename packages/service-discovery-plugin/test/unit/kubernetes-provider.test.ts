@@ -465,3 +465,49 @@ it('does not send a probe after its token read exceeded the deadline', async () 
   for (let n = 0; n < 30; n++) await Promise.resolve();
   expect(http.calls).toEqual([]);
 });
+
+for (const phase of ['list', 'stream'] as const) {
+  it(`does not cache a stopped watch token or start its ${phase} HTTP call`, async () => {
+    const { fs } = tokenFs([]);
+    const pendingRead = phase === 'list' ? 1 : 2;
+    let reads = 0;
+    let finish!: (bytes: Uint8Array) => void;
+    fs.readFile = () => {
+      reads++;
+      return reads === pendingRead
+        ? new Promise<Uint8Array>((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(new TextEncoder().encode(reads === 1 ? 'initial-token' : 'fresh-token'));
+    };
+    const runtime = createFakeRuntime({ fs });
+    const http = createFakeHttp([
+      { text: JSON.stringify({ items: [], metadata: { resourceVersion: '1' } }) },
+    ]);
+    const { provider } = setup({}, http, runtime);
+    let deliveries = 0;
+    const stop = await provider.watch('billing', () => {
+      deliveries++;
+      // Expire the initial memo before the stream's separate token read.
+      if (phase === 'stream') runtime.advance(60000);
+    });
+    for (let n = 0; n < 40; n++) await Promise.resolve();
+    expect(reads).toBe(pendingRead);
+    stop();
+    finish(new TextEncoder().encode('abandoned-token'));
+    for (let n = 0; n < 40; n++) await Promise.resolve();
+    const authorization = await provider.authHeader();
+    expect({
+      calls: http.calls.map((call) => call.streaming),
+      authorization,
+      reads,
+      deliveries,
+    }).toEqual({
+      calls: phase === 'list' ? [] : [false],
+      authorization: 'Bearer fresh-token',
+      reads: pendingRead + 1,
+      deliveries: phase === 'list' ? 0 : 1,
+    });
+    expect(runtime.timeouts.every((timer) => timer.cleared)).toBe(true);
+  });
+}

@@ -702,16 +702,19 @@ because the drain answer is written through the application's error responder wh
 
 - Consul ids use `<serviceName>@<address>:<port>`, escaping `%` and `@` within the two string
   components as `%25` and `%40`; explicit ids win. This replaces the ambiguous hyphen tuple.
-- Connect/connect-node require ^2.2.0. Invalid grpc-status metadata is a protocol failure; valid
-  status 13 remains an application answer. Node header-list accounting uses Latin-1 code units. A
-  resend rechecks its deadline after pick and skips transport/reporting if the budget expired.
+- Connect/connect-node require ^2.2.0. A status Connect itself cannot decode is a protocol failure;
+  status details take precedence over the header, and valid status 13 remains an application answer.
+  Node header-list accounting uses Latin-1 code units. A resend rechecks its deadline after pick and
+  skips transport/reporting if the budget expired.
 - DNS aggregate explicit non-absence codes win; every member must still be absent. Watch ticks
   retain one raw lookup until it settles, even after their caller-facing timeout.
 - Cancelled or older token reads cannot replace a newer Kubernetes token memo or send after abort.
+  Watches pass their controller signal through both LIST and stream token reads, then refuse I/O if
+  cancellation arrived while the token was being read.
 - Queued watch setup skips a closed watch; teardown reapplies the empty-only cap. Async listener
   rejections use the same isolated warning path. Only the latest call to each listener may settle
-  its failure state; older async settlements are ignored. Broadcast skips removed listeners. Only cold
-  reporters are capped at 256; warm reporters survive cold churn. A held empty answer preserves
+  its failure state; older async settlements are ignored. Broadcast skips removed listeners. Only
+  cold reporters are capped at 256; warm reporters survive cold churn. A held empty answer preserves
   served-list age separately from refresh freshness. Comparisons read every ServiceInstance field.
   Superseded read failures open no outage. Watch sequences are released only after reads settle.
 

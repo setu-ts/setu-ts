@@ -14064,7 +14064,6 @@ wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%4
   `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`; no code change fixes the cluster CA from
   inside the process. The `http` option is the escape hatch for a caller-supplied TLS-configured
   client.
-
 - Async watch listener rejections follow the same isolated warning path as synchronous throws. A
   fulfilled listener promise clears its failure without blocking other subscribers. Only the latest
   call to each listener can settle its failure state; older settlements are ignored. Unsubscribing
@@ -17067,7 +17066,7 @@ grpc.addService(AnotherDefinition, anotherImpl);
 An instance fails when it did not answer, refused the stream, returned `Unavailable`,
 `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
 server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`,
-except an `Internal` decoded from invalid `grpc-status` metadata. The same codes without a server
+except an `Internal` for a status Connect itself cannot decode. The same codes without a server
 answer fail. A request that makes a healthy handler throw must not eject replicas. A replica whose
 handlers fail every call with `Internal` (a broken dependency, say) is not ejected by call outcomes.
 Take it out through readiness (health checks) instead. On the default `connect` protocol a
@@ -17123,12 +17122,12 @@ Cancelling a response stream aborts the handler's combined `ctx.signal` before a
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals
 are unchanged.
 
-A wire `Internal` derived from an invalid `grpc-status` is a protocol failure: the metadata's status
-must be decimal 0–16. A valid `grpc-status: 13` remains an application answer. The resend's
-remaining deadline is checked after discovery picks again; an exhausted budget sends nothing and
-records no outcome for that attempt. Header-list size uses Node's Latin-1 encoding, one octet per
-UTF-16 code unit in names and values, plus 32 per field. Bun sends UTF-8, so values above U+007F are
-undercounted there; gRPC metadata values are ASCII by spec.
+A wire `Internal` for a status Connect itself cannot decode is a protocol failure. Status details
+(`grpc-status-details-bin`) take precedence over the header. A valid `grpc-status: 13` remains an
+application answer. The resend's remaining deadline is checked after discovery picks again; an
+exhausted budget sends nothing and records no outcome for that attempt. Header-list size uses Node's
+Latin-1 encoding, one octet per UTF-16 code unit in names and values, plus 32 per field. Bun sends
+UTF-8, so values above U+007F are undercounted there; gRPC metadata values are ASCII by spec.
 
 ### Notes
 

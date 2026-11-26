@@ -150,8 +150,8 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
-  version with `isWireError`. Invalid `grpc-status` metadata fails the instance; valid status 13
-  remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
+  version with `isWireError`. A status Connect itself cannot decode fails the instance; valid status
+  13 remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
   remaining deadline after discovery picks and sends nothing or reports nothing if it is spent.
 - **`@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids escape `%` and `@` within
   serviceName/address as `%25` and `%40`, then join as `<serviceName>@<address>:<port>`; explicit
@@ -188,13 +188,13 @@ All notable changes to this project are documented here. The format follows
   an existing identity; `address` must be the instance's own address, never a shared hostname.
 - **BREAKING — `@setu-ts/grpc-plugin` (M143c, #618).** Instance outcomes now distinguish server
   answers from transport faults. A server's `Internal`, `Unknown` or `DataLoss` answer counts as
-  success, except an `Internal` decoded from invalid `grpc-status` metadata, so a throwing handler
+  success, except an `Internal` for a status Connect itself cannot decode, so a throwing handler
   does not eject replicas. The same codes without a server answer fail. Take a replica whose
   handlers fail every call out through readiness (health checks). No answer, a refused stream,
   `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), and the peer's own `Canceled`
-  still fail. Every other server answer reports success, except an `Internal` decoded from invalid
-  `grpc-status` metadata. Caller aborts and pre-send faults (binary serialization, `writeMaxBytes`,
-  a request header Node refuses) report nothing; a header name or value `Headers` rejects now fails
+  still fail. Every other server answer reports success, except an `Internal` for a status Connect
+  itself cannot decode. Caller aborts and pre-send faults (binary serialization, `writeMaxBytes`, a
+  request header Node refuses) report nothing; a header name or value `Headers` rejects now fails
   the call before any instance is picked. No option restores the old outcome mapping;
   `ejection: false` on discovery disables automatic ejection if the changed classifications are
   unsuitable, without restoring old reports. A response-stream cancel now aborts the handler's

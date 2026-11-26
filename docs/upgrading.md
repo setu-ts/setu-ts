@@ -43,21 +43,21 @@ including IPv6 colons, remain readable. Explicit ids still win. Once after upgra
 `PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot remove those old ids.
 
 Connect and connect-node now require `^2.2.0` or newer, which first supplies `isWireError`; update
-older peer installations. A wire `Internal` decoded from invalid `grpc-status` metadata now fails;
+older peer installations. A wire `Internal` for a status Connect itself cannot decode now fails;
 valid status 13 remains an application answer.
 
 The gRPC client reports instance failure when it did not answer, refused the stream, returned
 `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own.
 Every other server answer reports success, including application codes and `Internal`, `Unknown`,
-`DataLoss`, except an `Internal` decoded from invalid `grpc-status` metadata. The same codes without
-a server answer fail. A request that makes a healthy handler throw must not eject replicas. A
-replica whose handlers fail every call with `Internal` (a broken dependency, say) is not ejected by
-call outcomes. Take it out through readiness (health checks) instead; the same holds for a wrong
-service or proxy answering a well-formed JSON error object on a non-200 that does not map to
-`Unavailable`, `Unimplemented`, `DeadlineExceeded` or `Canceled` (a 400, 401, 403 or 500, say) on
-the default `connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response
-headers, by the server or by this client's own session over its memory cap, is never counted against
-the instance or resent; the call fails as `ResourceExhausted` with `GrpcExcessiveLoadError` as its
+`DataLoss`, except an `Internal` for a status Connect itself cannot decode. The same codes without a
+server answer fail. A request that makes a healthy handler throw must not eject replicas. A replica
+whose handlers fail every call with `Internal` (a broken dependency, say) is not ejected by call
+outcomes. Take it out through readiness (health checks) instead; the same holds for a wrong service
+or proxy answering a well-formed JSON error object on a non-200 that does not map to `Unavailable`,
+`Unimplemented`, `DeadlineExceeded` or `Canceled` (a 400, 401, 403 or 500, say) on the default
+`connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers, by
+the server or by this client's own session over its memory cap, is never counted against the
+instance or resent; the call fails as `ResourceExhausted` with `GrpcExcessiveLoadError` as its
 `cause`; send fewer headers or fewer concurrent streams, or keep fewer large replies in flight on
 one connection. A few client-side faults raised before the request leaves (binary serialization,
 `writeMaxBytes`, a request header Node refuses) report nothing, and a header `Headers` rejects fails

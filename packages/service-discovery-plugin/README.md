@@ -423,9 +423,9 @@ Watch lookup and cache ordering: DNS polling keeps at most one raw resolver look
 watch, even after the caller-facing deadline; later ticks wait for it to settle. Kubernetes token
 reads abandoned by cancellation do not update the token memo or start an HTTP request; an older read
 cannot replace a newer cached token. Stopping the last subscriber also reapplies the empty-only
-cache bound. Async listener rejections are isolated like synchronous throws. Only the latest call to each
-listener can settle its failure state; older settlements are ignored. Removing a subscriber
-or closing discovery during delivery prevents further calls to removed listeners in that broadcast.
+cache bound. Async listener rejections are isolated like synchronous throws. Only the latest call to
+each listener can settle its failure state; older settlements are ignored. Removing a subscriber or
+closing discovery during delivery prevents further calls to removed listeners in that broadcast.
 Superseded reads never open outage or recovery logs. Empty-answer grace refreshes update retry
 freshness without resetting the age used by `staleForMs`: time since the last successful refresh
 that was not a held empty answer. An identical successful list resets that age too.

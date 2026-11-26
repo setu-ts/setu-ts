@@ -417,12 +417,10 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       ) {
         void Promise.resolve(result).then(
           () => {
-            if (current())
-              this.#forgetListener(name, listener);
+            if (current()) this.#forgetListener(name, listener);
           },
           (error: unknown) => {
-            if (current())
-              this.#listenerFailed(name, listener, error);
+            if (current()) this.#listenerFailed(name, listener, error);
           },
         );
       } else if (current()) this.#forgetListener(name, listener);
