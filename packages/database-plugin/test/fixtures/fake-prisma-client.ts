@@ -447,6 +447,10 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
     comment: { records: new Map(), idCounter: 0 },
   };
 
+  // Transactions run one at a time, as row locks would order them on a real
+  // server: an overlapping transaction waits, so a failed one's rollback can
+  // never overwrite a later commit to the same key.
+  let transactionTail: Promise<void> = Promise.resolve();
   const client = {
     _activeProvider: activeProvider,
     get connected() {
@@ -477,6 +481,12 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
       options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
       transactionOptions = options;
+      const previous = transactionTail;
+      let finished!: () => void;
+      transactionTail = new Promise<void>((resolve) => {
+        finished = resolve;
+      });
+      await previous;
       // A failed callback undoes only the rows IT wrote: each write through
       // the transaction client records the touched keys' prior values, so a
       // transaction that committed meanwhile keeps its rows. Restoring whole
@@ -526,6 +536,8 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
           }
         }
         throw error;
+      } finally {
+        finished();
       }
     },
     async $queryRawUnsafe<T>(sql: string, ...params: unknown[]): Promise<T[]> {

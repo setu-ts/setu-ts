@@ -178,25 +178,36 @@ describe("the adapter's own NOT-emitting path evaluates through the fixture", ()
 });
 
 describe('Prisma fixture $transaction rollback', () => {
-  it('undoes only the failed transaction’s writes, keeping an overlapping commit', async () => {
+  it('undoes only the failed transaction’s writes, keeping a commit that waited for it', async () => {
     const client = createFakePrismaClient();
     await client.user.create({ data: { id: 'kept', name: 'before' } });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let wrote!: () => void;
+    const firstWrote = new Promise<void>((resolve) => {
+      wrote = resolve;
+    });
     const failing = client.$transaction(async (tx) => {
       await tx.user.create({ data: { id: 'failed', name: 'x' } });
       await tx.user.update({ where: { id: 'kept' }, data: { name: 'failed-edit' } });
+      wrote();
       await gate;
       throw new Error('rolled back');
     });
-    await client.$transaction(async (tx) => {
+    await firstWrote;
+    // The second transaction writes the SAME key; it waits for the first, as a row lock would.
+    const later = client.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: 'kept' }, data: { name: 'committed-edit' } });
       await tx.user.create({ data: { id: 'committed', name: 'y' } });
     });
+    // Let the second transaction run as far as it can before the first fails.
+    await new Promise((resolve) => setTimeout(resolve, 10));
     release();
     await expect(failing).rejects.toThrow('rolled back');
+    await later;
     expect([...client.stores.user!.records.keys()].sort()).toEqual(['committed', 'kept']);
-    expect(client.stores.user!.records.get('kept')).toEqual({ id: 'kept', name: 'before' });
+    expect(client.stores.user!.records.get('kept')).toMatchObject({ name: 'committed-edit' });
   });
 });
