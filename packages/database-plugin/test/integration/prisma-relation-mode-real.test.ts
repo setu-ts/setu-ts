@@ -135,7 +135,19 @@ describe('relationMode "prisma" on real MySQL', { skip: !process.env['MYSQL_URL'
         await other.query('START TRANSACTION');
         await other.query('UPDATE `rows` SET version = 5 WHERE id = ?', ['held']);
         const call = source.updateWhere('held', { version: 1 }, { version: 2, balance: 1 });
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        // Commit only once Prisma's UPDATE is the statement blocked on the held row: by then its
+        // SELECT has read version 1, so the order no longer depends on runner speed.
+        const deadline = performance.now() + 10_000;
+        for (;;) {
+          const [blocked] = await h.pool.query(
+            "SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE DB = DATABASE() AND INFO LIKE 'UPDATE `rows`%'",
+          );
+          if (Number((blocked as { n: number | string }[])[0]?.n ?? 0) > 0) break;
+          if (performance.now() > deadline) {
+            throw new Error("Prisma's UPDATE never blocked on the held row within 10 s");
+          }
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
         await other.query('COMMIT');
         expect(await call).not.toBeNull();
       } finally {
