@@ -804,6 +804,15 @@ record for the PR body.
 
 ## 12. Open decisions for the maintainer
 
+**Code-review items, DECIDED by the maintainer, 2026-11-26** (from `m143m-review-decisions-2.md`,
+each as recommended): R1 the Service Bus outage predicate checks a refusal code set first
+(`UnauthorizedAccess`, `MessagingEntityNotFound`, `MessagingEntityDisabled`, `MessageSizeExceeded`,
+`QuotaExceeded`, before `retryable`), classifies an `AggregateError` by its last inner error, and
+its tests build errors with the SDK's `translateServiceBusError`; R2 the backplane never disconnects
+an injected Redis client, on close or on a failed start: `close()` stops waiting, removes its
+listeners and unsubscribes when subscribed (Socket.IO's adapters treat such a client as borrowed);
+R3 the SQS probe's per-call bound is `min(1500, floor(0.75 × probeTimeoutMs))`.
+
 **Implementation review items, DECIDED by the maintainer, 2026-11-26** (from
 `m143m-review-decisions-1.md` in the shared notes): C2 (a) this session may pause or stop and then
 restart the `he-sb` Service Bus emulator, only for the §3.3 paused-publish and §3.6 consume-only
