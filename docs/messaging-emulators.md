@@ -149,6 +149,19 @@ SQS_ENDPOINT_URL=http://localhost:9324 pnpm run test packages/queue-plugin
 docker rm -f he-elasticmq
 ```
 
+### SNS to SQS
+
+`packages/queue-plugin/test/e2e/sns-sqs-localstack.test.ts` runs `SnsPublisher.publishJob` into
+`SqsQueue` through a raw and a wrapped subscription. ElasticMQ has no SNS, so it needs LocalStack,
+and it is **not** wired into CI. It creates its topic and queues under a random name and deletes
+them afterwards.
+
+```bash
+docker run -d --name he-localstack -p 4566:4566 localstack/localstack:3
+AWS_LOCALSTACK_ENDPOINT_URL=http://127.0.0.1:4566 pnpm run test packages/queue-plugin
+docker rm -f he-localstack
+```
+
 ## Why not CI
 
 ElasticMQ is one container with no credentials and no licence, so it earns its place in the

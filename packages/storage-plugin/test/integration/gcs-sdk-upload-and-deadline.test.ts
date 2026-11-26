@@ -1,0 +1,188 @@
+import { createServer } from 'node:http';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
+import { adaptGcsModule, GcsProvider } from '../../src/providers/gcs-provider.ts';
+import type { GcsSdkModule } from '../../src/providers/gcs-provider.ts';
+
+// The SDK reads STORAGE_EMULATOR_HOST from the process itself: a developer's
+// setting would send these requests elsewhere, so each test runs without it.
+let emulatorHost: string | undefined;
+beforeEach(() => {
+  emulatorHost = process.env['STORAGE_EMULATOR_HOST'];
+  delete process.env['STORAGE_EMULATOR_HOST'];
+});
+afterEach(() => {
+  if (emulatorHost === undefined) delete process.env['STORAGE_EMULATOR_HOST'];
+  else process.env['STORAGE_EMULATOR_HOST'] = emulatorHost;
+});
+
+describe('real GCS SDK upload authentication', () => {
+  for (const endpointAuth of [true, false]) {
+    it(`Authorization on POST /upload with endpointAuth=${endpointAuth}`, async () => {
+      const { Storage, CRC32C } = await import('@google-cloud/storage');
+      const checksum = new CRC32C();
+      checksum.update(Buffer.from([1]));
+      const auth = new Storage().authClient.fromJSON({
+        type: 'authorized_user',
+        client_id: 'capture',
+        client_secret: 'capture',
+        refresh_token: 'capture',
+      });
+      auth.setCredentials({ access_token: 'capture-token', expiry_date: 4_000_000_000_000 });
+      const requests: { method: string; url: string; authorization: string | undefined }[] = [];
+      const server = createServer((req, res) => {
+        requests.push({
+          method: req.method ?? '',
+          url: req.url ?? '',
+          authorization: req.headers.authorization,
+        });
+        req.resume();
+        req.on('end', () => {
+          if (req.method === 'POST' && req.url?.includes('uploadType=resumable') === true) {
+            res.writeHead(200, {
+              location: `http://127.0.0.1:${(server.address() as { port: number }).port}/session`,
+              'content-type': 'application/json',
+            });
+            res.end('{}');
+          } else {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(
+              JSON.stringify({ name: 'k', bucket: 'b', size: '1', crc32c: checksum.toString() }),
+            );
+          }
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      try {
+        const options = {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+          endpointAuth,
+        };
+        const mod = {
+          Storage: class {
+            constructor(config: Record<string, unknown>) {
+              return new Storage({ ...config, authClient: auth });
+            }
+          },
+        } as unknown as GcsSdkModule;
+        const provider = new GcsProvider({ ...options, client: adaptGcsModule(mod, options) });
+        await provider.connect();
+        await provider.put('k', new Uint8Array([1]));
+        const post = requests.find(
+          (req) => req.method === 'POST' && req.url.startsWith('/upload/'),
+        );
+        expect(post).toBeDefined();
+        expect(post?.authorization).toBe(endpointAuth ? 'Bearer capture-token' : undefined);
+        await provider.disconnect();
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+  }
+});
+
+describe('real GCS SDK drip download stops at its deadline', () => {
+  it('closes the server socket while it is still dripping bytes', async () => {
+    let mediaRequests = 0;
+    let closedAt: number | undefined;
+    let markClosed: () => void = () => {};
+    const closed = new Promise<void>((resolve) => {
+      markClosed = resolve;
+    });
+    const server = createServer((req, res) => {
+      if (req.url?.includes('alt=media')) {
+        mediaRequests++;
+        res.writeHead(200, { 'content-type': 'application/octet-stream' });
+        res.write(new Uint8Array(10));
+        const drip = setInterval(() => res.write(new Uint8Array(10)), 25);
+        res.once('close', () => {
+          clearInterval(drip);
+          closedAt = performance.now();
+          markClosed();
+        });
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ name: 'k', bucket: 'b', size: '1000', generation: '1' }));
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const provider = new GcsProvider(
+        {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+          endpointAuth: false,
+          requestTimeoutMs: 200,
+        },
+        undefined,
+        undefined,
+        {},
+      );
+      await provider.connect();
+      const started = performance.now();
+      await expect(provider.get('k')).rejects.toBeInstanceOf(BackendUnavailableError);
+      // The server sees the socket close: the SDK request was destroyed. The
+      // drip never ends on its own, so a request left running fails here.
+      const outcome = await Promise.race([
+        closed.then(() => 'closed'),
+        new Promise<string>((resolve) => setTimeout(() => resolve('still dripping'), 2_000)),
+      ]);
+      expect(outcome).toBe('closed');
+      expect(mediaRequests).toBe(1);
+      expect(closedAt! - started).toBeLessThan(2_000);
+      await provider.disconnect();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('a GCS upload past its deadline answers outcome-unknown', () => {
+  it('rejects with 504 within the bound against a stalled backend', async () => {
+    let uploads = 0;
+    // Takes the upload and never answers it, as a stalled backend would.
+    const server = createServer((req, res) => {
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{}');
+        return;
+      }
+      uploads++;
+      req.resume();
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const provider = new GcsProvider(
+        {
+          bucket: 'b',
+          projectId: 'p',
+          endpoint: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+          endpointAuth: false,
+          requestTimeoutMs: 200,
+        },
+        undefined,
+        undefined,
+        {},
+      );
+      await provider.connect();
+      const started = performance.now();
+      await expect(provider.put('k', new Uint8Array(16))).rejects.toBeInstanceOf(
+        BackendOutcomeUnknownError,
+      );
+      expect(performance.now() - started).toBeLessThan(2_000);
+      expect(uploads).toBeGreaterThan(0);
+      // The SDK gives an upload no cancellation, so its request is left to the
+      // backend: measured on 7.22, destroying the write stream does not close
+      // it. The write may still land, which is what the 504 says.
+      await provider.disconnect();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});

@@ -64,7 +64,9 @@ describe('validateAzureClient / isAzureNotFound', () => {
 describe('adaptAzureModule', () => {
   it('reads and writes via the SDK client', async () => {
     const store = new Map<string, string>([['db-password', 'v']]);
-    const facade = adaptAzureModule(fakeAzureModule(store), 'https://x.vault.azure.net');
+    const facade = adaptAzureModule(fakeAzureModule(store), {
+      vaultUrl: 'https://x.vault.azure.net',
+    });
     expect(await facade.getSecret('db-password')).toBe('v');
     expect(await facade.getSecret('absent')).toBeNull();
 
@@ -73,15 +75,19 @@ describe('adaptAzureModule', () => {
   });
 
   it('returns null on 404 and rethrows other errors', async () => {
-    const nf = adaptAzureModule(fakeAzureModule(new Map(), { statusCode: 404 }), 'https://x');
+    const nf = adaptAzureModule(fakeAzureModule(new Map(), { statusCode: 404 }), {
+      vaultUrl: 'https://x',
+    });
     expect(await nf.getSecret('x')).toBeNull();
 
-    const boom = adaptAzureModule(fakeAzureModule(new Map(), new Error('boom')), 'https://x');
+    const boom = adaptAzureModule(fakeAzureModule(new Map(), new Error('boom')), {
+      vaultUrl: 'https://x',
+    });
     await expect(boom.getSecret('x')).rejects.toThrow('boom');
   });
 
   it('requires a vaultUrl', () => {
-    expect(() => adaptAzureModule(fakeAzureModule(new Map()), undefined)).toThrow(
+    expect(() => adaptAzureModule(fakeAzureModule(new Map()), {})).toThrow(
       'requires options.vaultUrl',
     );
   });

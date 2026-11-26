@@ -477,7 +477,8 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
    * @param clock - The runtime services (monotonic clock and timers)
    * @param confirmsSettlement - Whether the adapter's settlement calls
    * resolve only after the backend applied them; when `false`, a completed
-   * call is recorded as `unknown`, never as settlement proof
+   * call is recorded as `unknown`, never as settlement proof. `failed` and
+   * intentional `discarded` decisions pass through without backend confirmation
    */
   constructor(
     policy: CompiledQueueDiagnosticsPolicy,
@@ -547,7 +548,11 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
           attempt,
           durationMs: settledAtMs - startedAtMs,
           outcome,
-          settlement: this.#confirmsSettlement || settlement === 'failed' ? settlement : 'unknown',
+          // A discard records the adapter's configured decision, not backend proof.
+          settlement:
+            this.#confirmsSettlement || settlement === 'failed' || settlement === 'discarded'
+              ? settlement
+              : 'unknown',
           settledAtMs,
         });
         if (this.#attempts.length > MAX_RETAINED_ATTEMPTS) {

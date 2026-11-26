@@ -5429,20 +5429,21 @@ frame kind and name metadata but no frame data. The latest 100 failures are reta
 `IRealtimeHandlerErrorReporter`; omitted, they retain history only. Custom transports are used as
 supplied and own their reporting.
 
-| Option                    | Applies to         | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `transport`               | all                | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `topic`                   | all but `memory`   | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `origin`                  | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `bus`                     | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `url`                     | `'redis'`          | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
-| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
-| `instance`                | `'custom'`         | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `localNotice`             | `'memory'`         | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                                                                                                                                                                            |
-| `diagnostics`             | all but `'custom'` | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source                                                                                                                                                             |
+| Option                    | Applies to               | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------- | ------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`               | all                      | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `topic`                   | all but `memory`         | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `url`                     | `'redis'`                | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
+| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | 0.14.0 opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this by its own clock; `0` delivers every frame. Assumes the replicas' clocks agree. Outside `0`–`2147483647` throws `RangeError` at construction                                                                                                                                                                                                                                         |
+| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
+| `instance`                | `'custom'`               | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                                                                                                                                                                            |
+| `diagnostics`             | all but `'custom'`       | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source                                                                                                                                                             |
 
 Registering the plugin **bare** is not a scaling fix: the default `'memory'` transport is a real bus
 but a single-process one, and before the `localNotice` existed a bare registration also silenced the
@@ -5457,7 +5458,7 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
 | ------------- | ----------------- | ------------------------------ | -------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default, and a real single-process bus rather than a no-op |
-| `'messaging'` | Yes               | A plugin providing `messaging` | Reuses any registered messaging broker; adds no dependency     |
+| `'messaging'` | Yes               | A plugin providing `messaging` | Any registered broker that confirms `fanOut` (since 0.14.0)    |
 | `'redis'`     | Yes               | `ioredis` (lazy)               | Redis pub/sub, over two connections                            |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane`                                       |
 
@@ -5474,6 +5475,8 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
 | `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                                                                                     |
 | `loadRedisModule`                                                                                                                  | function          | Real lazy `import('ioredis')`                                                                                                                     |
 | `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                                                                              |
+| `BackplaneFanOutUnsupportedError`                                                                                                  | class             | 0.14.0: thrown from `register()` (so `start()` fails) when the `'messaging'` transport's broker returns a subscription without `fanOut: true`     |
+| `BackplaneReporter`                                                                                                                | type              | 0.14.0: the handler-error reporter the transports take, with an optional `warn` sink for frame-age and uncertain-publish warnings                 |
 | `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                                                                              |
 | `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                                                                           |
 | `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client; optional `connect?()` (M117) is called at start for an injected client whose `status` is `'wait'` |
@@ -5501,13 +5504,26 @@ The memory, messaging, and Redis transports retain the most recent 100 subscribe
   rather than failing at the first publish; the lazy path builds both from `url`.
 - **`transport: 'messaging'` with no messaging capability throws during `register()`**, rather than
   failing silently per request.
+- **`transport: 'messaging'` needs fan-out (0.14.0).** The transport subscribes with
+  `{ fanOut: true }` and, when the returned subscription lacks `fanOut: true`, unsubscribes and
+  throws `BackplaneFanOutUnsupportedError` from `register()`. Every built-in broker of the messaging
+  plugin confirms it; Cloudflare's `WorkersBroker` does not (use the Durable Object backplane
+  there), and a `custom` broker must set the marker itself. Before 0.14.0 a shared consumer group
+  handed each frame to one replica on Kafka, NATS, Redis Streams, Pub/Sub and Service Bus.
+- **Frames carry `sentAtMs` (0.14.0).** `createBackplane`, `MessagingBackplane` and `RedisBackplane`
+  take an optional `now?: () => number` clock (the plugin passes `runtime.now`); with it, every
+  published frame carries the sender's wall-clock `sentAtMs`, removed before a handler sees the
+  frame. A 0.13.0 receiver ignores the member. Without a clock no stamp is written, and
+  `maxFrameAgeMs` above `0` warns once.
 - **A remote frame never creates a room or channel.** It is delivered only to one that already
   exists locally, so a cluster-wide namespace cannot grow a replica's maps without bound.
 - **Binary WebSocket frames are base64-encoded** for the wire (`encodeFrameData` /
   `decodeFrameData`, in `@setu-ts/common` because three packages need the identical shape). An
   `SseMessage` is already JSON-serializable and travels as its JSON encoding.
 - **Delivery is at-most-once** and inherits the transport's guarantees. Frames are not persisted or
-  replayed. On `'redis'` a frame published while a connection is down is lost, never delivered late:
+  replayed. A frame can arrive late: a publish already written to a server that then pauses runs
+  when it resumes (measured up to 20 s late on Redis and RabbitMQ); `maxFrameAgeMs` lets a receiver
+  drop such frames. On `'redis'` a frame published while a connection is down is lost, not queued:
   since 0.13.0 the publisher connection the plugin builds has no offline queue
   (`enableOfflineQueue: false`, passed through `IRedisModule.create`'s options), so a publish while
   it reconnects is refused at once (a `503`-class fault, one `warn` per frame in each consumer). A
@@ -6157,7 +6173,15 @@ app.router.post('/thumbnail', async (ctx) => {
 - `TaskPoolOptions` / `WorkerPoolPluginOptions` — the per-module overrides and plugin options in the
   table above.
 - `IWorkerPool.run<TInput, TOutput>(taskModule, input, options?): Promise<TOutput>` — run a task,
-  creating the pool for `taskModule` lazily on first use.
+  creating the pool for `taskModule` lazily on first use. `WorkerRunOptions` accepts
+  `timeoutMs?: number` and `signal?: AbortSignal`. A pre-aborted signal rejects with `signal.reason`
+  unchanged without queuing work; queued work is withdrawn; running work's worker is terminated and
+  replaced as on timeout, rejecting with the same reason. Cancellation counts once as `aborted` in
+  `worker_pool_tasks_rejected_total`, without increasing completed or failed counts. Later aborts do
+  nothing; shutdown/abort races keep the first result. Timeout validation, a shut-down service and
+  an unavailable host retain precedence over abort; within an open pool, pre-aborted work is refused
+  before checking queue capacity. A `signal` that is not an `AbortSignal` of this realm rejects the
+  call with `TypeError` before admission, uncounted in the metrics.
 - `IWorkerPool.stats(): readonly TaskPoolStats[]` — one snapshot per pool
   (`{ taskModule, workers, busy, queued, completed, failed }`).
 - `IWorkerPool.shutdown(): Promise<void>` — terminate every worker, reject pending tasks (called by
@@ -6199,15 +6223,18 @@ runtime timer honours. Anything else throws `RangeError` at construction, or rej
 call before admission: `NaN` and negative values used to disable the timeout silently, and larger
 values overflowed the timer and timed every task out after about 1 ms. Each option is read once and
 the pools use exactly the validated value; only the own enumerable keys of `pools` are read, so an
-entry inherited through a prototype is ignored.
+entry inherited through a prototype is ignored. A per-call `signal` that is not an `AbortSignal`
+instance of this realm (a `null`, a signal-shaped object, or a signal another realm such as jsdom
+built) rejects that `run()` call with `TypeError` before admission, uncounted in the metrics.
 
 **Untimed tasks hold their slot.** With `taskTimeoutMs: 0`, or a per-call `run()` option of
 `timeoutMs: 0`, a task that never settles keeps its worker. Once every slot is held that way, other
 task modules wait (until their own timeouts, or forever if theirs are disabled too) until the
-process restarts. The pool does not reclaim a running task the application allowed to run
-indefinitely; `register()` warns when `taskTimeoutMs` is `0` under a finite `maxWorkers` (a per-call
-`timeoutMs: 0` cannot be seen at registration, so it gets no warning). Keep a timeout on modules
-that share the budget, or opt out of the bound with `maxWorkers: Infinity`.
+process restarts or the caller aborts its signal. Without cancellation the pool does not reclaim a
+running task the application allowed to run indefinitely; `register()` warns when `taskTimeoutMs` is
+`0` under a finite `maxWorkers` (a per-call `timeoutMs: 0` cannot be seen at registration, so it
+gets no warning). Keep a timeout on modules that share the budget, or opt out of the bound with
+`maxWorkers: Infinity`.
 
 **Containers:** CPU limits lower `availableParallelism()` (measured on Deno and Node with
 `--cpus=2`); pods without CPU limits see all node cores. Set an explicit bound for the pod's memory
@@ -6300,11 +6327,12 @@ remain usable.
   `worker_pool_workers`, `worker_pool_busy_workers`, `worker_pool_queued_tasks`, and counters
   `worker_pool_tasks_completed_total`, `worker_pool_tasks_failed_total` (also labelled `reason`:
   `handler`/`timeout`/`crash`/`clone`/`shutdown`) and `worker_pool_tasks_rejected_total` (`reason`:
-  `queue_full`/`pool_closed`/`unavailable`). No plugin option enables them and none disables them —
-  the instruments exist exactly when the metrics capability does. `..._failed_total` summed over
-  `reason` equals the health payload's `failed`; `..._rejected_total` counts refusals that never
-  became tasks, which the health payload cannot see. Gauges are written from the health snapshot on
-  each state change, so the two surfaces cannot disagree, and no interval timer is armed.
+  `queue_full`/`pool_closed`/`unavailable`/`aborted`). No plugin option enables them and none
+  disables them — the instruments exist exactly when the metrics capability does. `..._failed_total`
+  summed over `reason` equals the health payload's `failed`; `..._rejected_total` counts pool-state
+  refusals and caller cancellation (before admission, queued or running), which do not increase that
+  count. Gauges are written from the health snapshot on each state change, so the two surfaces
+  cannot disagree, and no interval timer is armed.
 
 ---
 
@@ -6647,21 +6675,30 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                                                                                                                                                                                                                |
-| ---------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                                                                                                                                             |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                                                                                                                                                    |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                                                                                                                                                   |
-| `options.configFallback`                             | `env`                   | Default `true`: fall back to string values from `CAPABILITIES.CONFIG` for missing environment keys. `false` reads env only. Non-booleans throw at plugin construction naming `options.configFallback`; other providers ignore it. Absent CONFIG is silent. |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                                                                                                                                                        |
-| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                                                                                                                                             |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                                                                                                                                                         |
-| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).                                                                                                                              |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                                                                                                                                             |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                                                                                                                                                  |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                                                                                                                                                  |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                                                                                                                             |
-| `options.requestTimeoutMs`                           | `vault`                 | Bound on one Vault request in ms; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup.                                                                                                                           |
+| Option                                               | Provider                                          | Description                                                                                                                                                                                                                                                |
+| ---------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                                                 | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                                                                                                                                             |
+| `options.cacheTtl`                                   | all                                               | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                                                                                                                                                    |
+| `options.prefix`                                     | `env`                                             | Prefix prepended to the derived env key.                                                                                                                                                                                                                   |
+| `options.configFallback`                             | `env`                                             | Default `true`: fall back to string values from `CAPABILITIES.CONFIG` for missing environment keys. `false` reads env only. Non-booleans throw at plugin construction naming `options.configFallback`; other providers ignore it. Absent CONFIG is silent. |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`                                         | AWS client config (ignored when `client` injected).                                                                                                                                                                                                        |
+| `options.endpoint`                                   | `aws-kms`                                         | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                                                                                                                                             |
+| `options.projectId`                                  | `gcp`                                             | GCP project id for resource paths.                                                                                                                                                                                                                         |
+| `options.endpoint`                                   | `gcp`                                             | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected).                                                                                                                              |
+| `options.vaultUrl`                                   | `azure`                                           | Key Vault URL.                                                                                                                                                                                                                                             |
+| `options.disableChallengeResourceVerification`       | `azure`                                           | Since 0.14.0. Passed to the SDK's `SecretClient`; turns off its check that the authentication challenge names the vault's own domain. For an emulator or a test vault at `localhost` only. Default `false`.                                                |
+| `options.address` / `token` / `mount`                | `vault`                                           | Vault server address, token, KV mount (default `secret`).                                                                                                                                                                                                  |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure`                           | Injected structural client facade (bypasses lazy import).                                                                                                                                                                                                  |
+| `options.http`                                       | `vault`                                           | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                                                                                                                             |
+| `options.requestTimeoutMs`                           | `vault`, and since 0.14.0 `aws-kms`/`gcp`/`azure` | Bound on one backend call in ms, an SDK's own retries included; `0` disables. Default `5000`. A value outside `0`–`2147483647` throws `RangeError` at startup.                                                                                             |
+
+Since 0.14.0 the `aws-kms`, `gcp` and `azure` arms answer an outage — a refused or lost connection,
+an expired `requestTimeoutMs`, a `5xx`, a gRPC `UNAVAILABLE` or `DEADLINE_EXCEEDED` — with
+`SecretProviderUnavailableError` (`503`), as Vault does; any other failure (a refused credential) is
+an `Error` whose message starts `<ProviderClass> <get|set> failed:`. Their lazily adapted clients
+carry a non-mutating readiness probe — `ListSecrets` (`MaxResults: 1`), `listSecrets`
+(`pageSize: 1`), `listPropertiesOfSecrets` (one page of one) — that reads reachable whenever the
+backend answers, a refused credential included.
 
 ### Exports
 
@@ -6674,13 +6711,13 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   a request fails on the network or does not answer inside `options.requestTimeoutMs` — the body
   read included, so headers followed by silence count as no answer; the transport error is kept as
   `cause` for the log and never reaches the response body. A Vault that answers with an HTTP error
-  is reachable and keeps its handling: `404` reads as `null`, any other error status rejects with a
-  plain `Error`. `provider` names the unreachable provider. Since M101a the provider also
-  percent-encodes each `/`-separated segment of a secret name and refuses an empty, `.` or `..`
-  segment, or a name longer than 4096 characters once encoded, before sending anything; a read body
-  over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the same 1 MiB;
-  and a name quoted in any `secrets-plugin` error message has its C0 and C1 control characters, DEL,
-  and U+2028/U+2029 escaped as `\uXXXX`, cut after 256 characters.
+  with a `5xx` rejects with `SecretProviderUnavailableError`; `404` reads as `null` and other 4xx
+  statuses reject with a plain `Error`. `provider` names the unreachable provider. Since M101a the
+  provider also percent-encodes each `/`-separated segment of a secret name and refuses an empty,
+  `.` or `..` segment, or a name longer than 4096 characters once encoded, before sending anything;
+  a read body over 1 MiB is refused with a plain `Error`, with memory held per read bounded by the
+  same 1 MiB; and a name quoted in any `secrets-plugin` error message has its C0 and C1 control
+  characters, DEL, and U+2028/U+2029 escaped as `\uXXXX`, cut after 256 characters.
 - `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
@@ -6715,11 +6752,12 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 Since **M90b** the indicator reports two signals, and no longer conflates them: the provider's
 lifecycle (`isReady()`) and its reachability. Vault is probed with an unauthenticated request to
 `/v1/sys/health` — no secret read, no token; `EnvProvider` reports its lifecycle truth. The AWS,
-GCP, and Azure providers publish real reachability ONLY when the injected facade exposes the
-optional `isHealthy()` member: a cloud SDK facade with no non-mutating probe is reported
-`reachable: 'unknown'` rather than reading a secret as a probe — a read is not a health check and
-would alter the cache and billing profile of the capability. The probe is cached for 5 seconds and
-bounded at 2 seconds through `createCachedProbe`.
+GCP, and Azure providers' lazily adapted clients probe with a non-mutating listing call (since
+0.14.0: `ListSecrets` with `MaxResults: 1`, `listSecrets` with `pageSize: 1`,
+`listPropertiesOfSecrets`). An injected facade publishes reachability only through its optional
+`isHealthy()` member; without one it is reported `reachable: 'unknown'` rather than reading a secret
+as a probe — a read is not a health check and would alter the cache and billing profile of the
+capability. The probe is cached for 5 seconds and bounded at 2 seconds through `createCachedProbe`.
 
 | Status | Meaning                                                                                    |
 | ------ | ------------------------------------------------------------------------------------------ |
@@ -7292,7 +7330,10 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
 interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
   // version:history
-  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms; default 15000, 0 unbounded, except the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). Timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';
@@ -7321,12 +7362,29 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
    * `adaptPubSubModule` when building the transport instead.
    */
   enableMessageOrdering?: never;
+  /**
+   * Pub/Sub retry policy set when the broker creates a subscription: `delaysMs` gives the
+   * minimum and maximum backoff (one or two entries, 0–600000), `maxAttempts` the
+   * dead-letter budget (5–100, with `deadLetterTopic`). `false` restores the immediate nack.
+   * @defaultValue enabled, `[10000, 600000]`, 5 attempts @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
+   * failing message is redelivered without limit. A missing topic makes the subscription
+   * create fail with `PubSubDeadLetterTopicMissingError`. Dead letters are lost unless
+   * the topic has a subscription or message retention enabled. @since 0.14.0
+   */
+  deadLetterTopic?: string;
 }
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
 interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
   // version:history
-  /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
+  /**
+   * Publish bound in ms; default 15000, 0 unbounded, except the terminal dead-letter forward,
+   * which is always bounded at 15000 (0.14.0). Timeout may still deliver. @since 0.10.0
+   */
   publishTimeoutMs?: number;
 
   broker: 'pubsub';
@@ -7346,6 +7404,20 @@ interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
    * @defaultValue false
    */
   enableMessageOrdering?: boolean;
+  /**
+   * Pub/Sub retry policy set when the broker creates a subscription: `delaysMs` gives the
+   * minimum and maximum backoff (one or two entries, 0–600000), `maxAttempts` the
+   * dead-letter budget (5–100, with `deadLetterTopic`). `false` restores the immediate nack.
+   * @defaultValue enabled, `[10000, 600000]`, 5 attempts @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
+  /**
+   * Existing topic for messages past the budget, and for `isRetryable` false. Absent, a
+   * failing message is redelivered without limit. A missing topic makes the subscription
+   * create fail with `PubSubDeadLetterTopicMissingError`. Dead letters are lost unless
+   * the topic has a subscription or message retention enabled. @since 0.14.0
+   */
+  deadLetterTopic?: string;
 }
 
 /** GCP Pub/Sub options — exclusive union of injected and production arms. */
@@ -7362,6 +7434,14 @@ interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
   adminConnectionString?: string;
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * Service Bus retry: the broker holds a failing message for the delay, then abandons it;
+   * the last attempt (or `isRetryable` false) is dead-lettered. Delays below 240000 ms;
+   * `maxAttempts` is lowered to the subscription's `maxDeliveryCount` when smaller.
+   * `false` restores the immediate abandon.
+   * @defaultValue enabled, 5 attempts, `[1000, 5000, 30000, 120000]` @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
 }
 
 // ── Azure Service Bus — production (connectionString required; client must be omitted) ─
@@ -7377,6 +7457,14 @@ interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
   replyTopic?: string;
   /** SDK retry budget for the data client. Optional on this arm only (M90b / X28-6). */
   retryOptions?: ServiceBusRetryOptions;
+  /**
+   * Service Bus retry: the broker holds a failing message for the delay, then abandons it;
+   * the last attempt (or `isRetryable` false) is dead-lettered. Delays below 240000 ms;
+   * `maxAttempts` is lowered to the subscription's `maxDeliveryCount` when smaller.
+   * `false` restores the immediate abandon.
+   * @defaultValue enabled, 5 attempts, `[1000, 5000, 30000, 120000]` @since 0.14.0
+   */
+  consumerRetry?: false | ConsumerRetryOptions;
 }
 
 /** Azure Service Bus SDK retry budget — passed ONLY to `ServiceBusClient`, never to the
@@ -7581,7 +7669,31 @@ respond<TReq, TRes>(
 ): Promise<ISubscription>;
 ```
 
-Pass `options.queue` to `respond` to load-balance requests across competing responders.
+Pass `options.queue` to `respond` to load-balance requests across competing responders. `respond`
+ignores `fanOut` and warns once: responders get the broker's queue-less delivery: on RabbitMQ and
+memory every responder receives each request and the first reply wins; Kafka, NATS, Redis Streams,
+Pub/Sub and Service Bus already share a default group, so responders compete there. Pass `queue` to
+choose the group responders compete in.
+
+**Fan-out subscriptions (0.14.0).** `SubscribeOptions.fanOut: true` (from `@setu-ts/common`) asks
+for a subscription that receives every message published after it subscribed, independently of every
+other subscriber; it is not durable and is removed on `unsubscribe()`. `fanOut` with `queue` throws
+`RangeError`. A broker that honoured it returns `ISubscription.fanOut: true`; a broker that does not
+know the option ignores it, so a caller that needs fan-out checks the marker. Every built-in broker
+honours it (memory, Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub, Service Bus); `custom` passes the
+option to the injected broker; Cloudflare's `WorkersBroker` does not. `onIntegrationEvent` with
+`inbox` refuses `fanOut` with `RangeError`. On Redis Streams a fan-out reader uses `XREAD` without a
+consumer group, needs `IRedisStreamsClient.xread` and `xrevrange` (optional members since 0.14.0; a
+client without them is refused at that `subscribe()` with `TypeError`), and is not retried by
+`consumerRetry`.
+
+Three errors added in 0.14.0:
+
+| Error                                  | Thrown when                                                                                                                                                                       |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UnroutableMessageError`               | A RabbitMQ publish that required a route (the outbox relay's) came back unroutable. Names the topic and routing key, never the payload. The relay retries the row, then fails it. |
+| `OutboxPublisherConfirmsRequiredError` | The outbox is configured on a RabbitMQ connection without `createConfirmChannel` and return listeners; thrown when the outbox is activated, so `start()` fails.                   |
+| `PubSubDeadLetterTopicMissingError`    | The broker created a subscription with a dead-letter policy and `deadLetterTopic` does not exist. The SDK error is the `cause`.                                                   |
 
 `request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
@@ -7712,11 +7824,14 @@ export {
   KafkaTopicUnavailableError,
   MessagingNotSupportedError,
   NatsConsumerNameCollisionError,
+  OutboxPublisherConfirmsRequiredError, // 0.14.0
+  PubSubDeadLetterTopicMissingError, // 0.14.0
   PubSubSubscriptionBoundElsewhereError,
   PublishTimeoutError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
+  UnroutableMessageError, // 0.14.0
 } from '@setu-ts/messaging-plugin';
 
 // Option types
@@ -7746,6 +7861,8 @@ export type {
 export type {
   IPubSubSubscription,
   IPubSubTransport,
+  PubSubCreateOptions, // 0.14.0: open()/createSubscription() creation policy
+  PubSubOpenOptions, // 0.14.0: open()'s onClosed and create options
   PubSubOptions,
 } from '@setu-ts/messaging-plugin';
 export type {
@@ -8020,12 +8137,13 @@ An omitted transport probe means unknown. Unknown still reports up. See the
 
 The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS plugin arms — and their `KafkaOptions`,
 `PubSubOptions`, `RabbitMqOptions`, `RedisStreamsOptions` and `NatsOptions` shapes — accept
-`publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
-`RangeError` at `MessagingPlugin(...)` and at broker construction. Every publish entry point, RPC
-and outbox relay publishes use the bound; the timeout is the exported `PublishTimeoutError`, which
-names the broker, topic and bound and warns that delivery may still occur. It does not cancel the
-transport. On Redis Streams the bound covers the publish's `XADD` only; on NATS it is passed to the
-client as its own publish `timeout` as well.
+`publishTimeoutMs` (default 15000 ms, `0` unbounded). Pub/Sub terminal dead-letter forwards are the
+one exception: they always have a finite 15,000 ms bound, even with `publishTimeoutMs: 0`.
+Out-of-range or non-finite values throw `RangeError` at `MessagingPlugin(...)` and at broker
+construction. Every publish entry point, RPC and outbox relay publishes use the bound; the timeout
+is the exported `PublishTimeoutError`, which names the broker, topic and bound and warns that
+delivery may still occur. It does not cancel the transport. On Redis Streams the bound covers the
+publish's `XADD` only; on NATS it is passed to the client as its own publish `timeout` as well.
 
 Fresh Kafka groups whose every partition offset is `-1` capture high watermarks before `run()`. On
 the first join, members seek assigned, still-uncommitted partitions to the minimum start offset
@@ -8472,14 +8590,69 @@ Provides background job queue with Memory and Redis adapters.
 - **`RabbitMqQueueOptions`** — RabbitMQ adapter configuration (includes `url`, `client`, `prefix?`,
   `persistentMessages?`, `publishTimeoutMs?`, `reportWarning?`)
 - **`SqsQueue`** — AWS SQS queue adapter via `@aws-sdk/client-sqs` (receipt-handle bookkeeping,
-  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, dead-letter ordering)
-- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`, `region?`,
-  `credentials?`, `endpoint?`, `client?`)
-- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`)
-- **`SqsReceivedMessage`** — SQS received message shape (body, receiptHandle,
-  approximateReceiveCount)
-- **`SnsPublisher`** — SNS publisher for fan-out (SNS→SQS pairing)
-- **`SnsPublisherOptions`** — SNS publisher configuration
+  `ApproximateReceiveCount` attempt ladder, visibility-timeout backoff, claim renewal every third of
+  the visibility timeout capped at SQS's 12-hour limit, dead-letter forwarding). Constructor
+  `(runtime, options, logger?, defaults?)`: `logger` is `{ error, warn? }` (warnings go to `error`
+  without `warn`); `defaults.maxAttempts` (default 3) applies to an envelope without `maxAttempts`,
+  and `QueuePlugin` fills it from `defaultMaxAttempts`. Since 0.14.0: a stale `ack`, retry or
+  dead-letter rejects instead of logging and returning; a consumed name is prepared before its first
+  poll and refused with `SqsDeadLetterTargetMissingError` when no dead-letter target can be proved;
+  when the queue has a `RedrivePolicy`, each job's attempts are lowered to
+  `max(1, min(maxAttempts, maxReceiveCount - 1))` with one warning per name; an exhausted, abandoned
+  or unreadable message is sent to the target with `setu-dead-letter-reason`, `setu-attempts` and
+  `setu-source-message-id` attributes and then deleted; an unreadable message is never logged with
+  its body.
+
+  Public consumer members, both `@since 0.14.0`:
+
+  - `prepareConsumer(name: string): Promise<void>` resolves once a dead-letter target (or explicit
+    `false` discard opt-out) is proved. Concurrent target resolution for a name is shared.
+    Successful targets and definite target refusals are cached until disconnect; failures with
+    reason `attributes-unavailable` or `target-unresolvable` are evicted so later calls can retry.
+    It rejects with `SqsDeadLetterTargetMissingError` when no target can be proved, with
+    `SqsQueueNotConfiguredError` for an unmapped name, and with `Error` when disconnected or the
+    connection changes during preparation.
+  - `readonly claimRenewal` exposes `intervalMs = Math.floor(visibilityTimeoutSeconds * 1000 / 3)`
+    and `extend(name: string, id: string, claimToken: string): Promise<boolean>`. `QueueService`
+    drives and clears the renewal interval. `extend` renews a matching, unexpired delivery during
+    processing, dead-letter preparation and forwarding, retaining its token and original receive
+    time. A valid claim fenced for its final delete or visibility change returns `true` without I/O;
+    expiry is checked before that shortcut. It returns `false` for an absent, expired or mismatched
+    claim, while disconnected, on transport rejection, or if the claim is replaced while renewal is
+    pending. When a renewal request is needed, it is capped by the whole seconds remaining in the
+    twelve-hour receive budget, rounded down with one second of request headroom; below one safe
+    whole second it returns `false` without calling SQS. A successful extension refreshes the local
+    claim expiry. This member reports renewal refusal through `false`, not an exception, and never
+    revives an expired claim.
+
+- **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`,
+  `visibilityTimeoutSeconds?`, `region?`, `credentials?`, `endpoint?`, `client?`).
+  `deadLetterQueues` maps a consumed job name to a target URL, or to `false` to discard that name's
+  exhausted jobs (`onFailed` still runs, the message is deleted with a warning and counted
+  `discarded`); a URL wins over the queue's redrive policy. `visibilityTimeoutSeconds` (default 30)
+  must be an integer from 1 to 43,200, else a `RangeError`.
+- **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`). Since
+  0.14.0: `send(queueUrl, body, delaySeconds?, attributes?)` takes optional SQS message attributes,
+  and two optional members are used to find a dead-letter target:
+  `getQueueAttributes?(queueUrl, names)` and `getQueueUrl?(queueName, ownerAccountId)`. A transport
+  without `getQueueAttributes` can consume only names with an explicit `deadLetterQueues` entry.
+- **`SqsReceivedMessage`** — SQS received message shape (`messageId?`, `body`, `receiptHandle`,
+  `approximateReceiveCount`)
+- **`SqsSdkModule`** additions (0.14.0) — `GetQueueAttributesCommand`, `GetQueueUrlCommand`
+- **`SqsDeadLetterTargetMissingError`** — Thrown when a consumed SQS name has no dead-letter target:
+  no `deadLetterQueues` entry and no provable redrive policy. Carries `reason` and, for a failed
+  read, the read error as `cause`; its message names the three ways past it and the AWS rights a
+  consumer needs. A declared processor makes `app.start()` fail.
+- **`SqsDeadLetterTargetMissingReason`** —
+  `'no-target' | 'policy-unreadable' | 'attributes-unavailable' | 'target-unresolvable'`
+- **`SnsPublisher`** — SNS publisher. `publishJob<T>(name, data, options?)` (0.14.0) publishes the
+  job envelope `SqsQueue` reads, through a raw or a wrapped subscription; `options` is
+  `{ id?, maxAttempts?, headers? }`; without `id` it uses `runtime.uuid()` and without `runtime`
+  either it throws a `TypeError`; an absent `maxAttempts` leaves the consuming queue's default.
+  `publish(message)` sends a raw body that `SqsQueue` cannot read.
+- **`SnsPublisherOptions`** — SNS publisher configuration. Since 0.14.0:
+  `runtime?: IRuntimeServices` (job ids for `publishJob`) and `telemetry?: ITelemetryService`
+  (`publishJob` runs in a producer span and writes its `traceparent` into the envelope headers)
 - **`ISnsTransport`** — Structural SNS transport port
 - **`adaptSqsModule`** / **`loadSqsModule`** — SQS SDK adapter and lazy loader
 - **`SqsSdkModule`** — Shape of the SQS SDK module `adaptSqsModule` consumes; exported so a consumer
@@ -8559,7 +8732,9 @@ app.register(
         'send-welcome-email': 'https://sqs.us-east-1.amazonaws.com/123456789012/welcome-emails',
         'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments',
       },
+      // Every consumed name needs a target: a URL here, the queue's redrive policy, or `false`.
       deadLetterQueues: {
+        'send-welcome-email': false,
         'process-payment': 'https://sqs.us-east-1.amazonaws.com/123456789012/payments-dlq',
       },
     },
@@ -8688,20 +8863,23 @@ map; an eviction is counted and gives a later retry a new alias), the attempt nu
 `durationMs`/`ageMs`, the processor `outcome` (`completed` / `retryable-error` / `terminal-error`),
 and the `settlement`: `acknowledged` / `requeued` / `dead-lettered` when the call completed on an
 adapter that confirms it, `failed` when it rejected (the rejection is rethrown exactly as before),
-and `unknown` when it completed on an adapter that cannot confirm it. The queue metrics keep their
-timing — they are recorded before the settlement call — so an outcome is never presented as
-settlement proof. At most 1,024 attempts are retained and 2,048 observed in flight;
-`droppedAttempts` counts an attempt dropped because that bound was reached, because its persisted
-attempt number was not a positive safe integer, or because its runner failed before reporting a
-settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
-limit or thrown value is captured: the observer signatures cannot accept them.
+and `unknown` when it completed on an adapter that cannot confirm it. `discarded` (0.14.0) is
+reported when the adapter deleted an exhausted job because its dead-letter target is explicitly
+disabled (SQS `deadLetterQueues[name]: false`); it records that decision even on an adapter that
+cannot confirm settlements, and is never presented as settlement proof. Since 0.14.0 the queue
+metrics also count an outcome only after its settlement call succeeded. At most 1,024 attempts are
+retained and 2,048 observed in flight; `droppedAttempts` counts an attempt dropped because that
+bound was reached, because its persisted attempt number was not a positive safe integer, or because
+its runner failed before reporting a settlement (which releases the slot). No payload, header, raw
+id, claim token, credential, attempt limit or thrown value is captured: the observer signatures
+cannot accept them.
 
-| Adapter    | Settlement evidence                                                            | Depths                                     |
-| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
-| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable`                              |
-| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged   | `unavailable`                              |
+| Adapter    | Settlement evidence                                                                                                                                             | Depths                                     |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                                                                                                          | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                                                                                                             | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed)                                                                                  | `unavailable`                              |
+| `sqs`      | `unknown` — a delete with a receipt the server already replaced can succeed without deleting; a stale local claim or failed dead-letter send rejects (`failed`) | `unavailable`                              |
 
 `depths` is its own opt-in because counting costs backend work: one cycle at bootstrap and one per
 `intervalMs` (1,000–300,000), never overlapping, at most `concurrency` (1–4) count calls in flight,
@@ -9453,10 +9631,11 @@ app.router.post('/upload', {
 });
 ```
 
-Refusal statuses: a body or file over its limit answers **413**; a malformed body, a disallowed MIME
-type and too many files answer **400**. A body refused by `RuntimePlugin({ maxBodyBytes })` before
-the middleware ever sees it also answers **413**, served from that refusal's own status hint — it is
-not reported as a malformed multipart, which is what a client would otherwise be told to fix.
+Refusal statuses: a body or file over its limit answers **413**; a disallowed MIME type answers
+**415** (since 0.14.0; it was 400); a malformed body and too many files answer **400**. A body
+refused by `RuntimePlugin({ maxBodyBytes })` before the middleware ever sees it also answers
+**413**, served from that refusal's own status hint — it is not reported as a malformed multipart,
+which is what a client would otherwise be told to fix.
 
 `maxBodyBytes` (default 50 MB) caps the body the middleware will PARSE, with the effective bound
 `min(maxSize * 2 + framing, maxBodyBytes)`. It bounds the parse THIS middleware triggers — which,
@@ -9465,6 +9644,17 @@ request's first parse — not the initial read: the body is read lazily by the f
 and `RuntimePlugin({ maxBodyBytes })` (M90a) is the bound that covers every reader, including a CSRF
 middleware that parsed the same form earlier. `IRequest` still exposes no body stream, so no
 middleware can decline to read; capping the read for every reader needs a streaming request body.
+
+Since 0.14.0 the middleware `createUploadMiddleware` returns is branded with the uploads it accepts
+(`withUploadMetadata` from `@setu-ts/common`: the field name, `maxSize` as `maxBytes`, `maxFiles`,
+`allowedMimeTypes` as `mimeTypes`), so a documentation generator can describe the route's multipart
+body (`@setu-ts/openapi-plugin` does not read it yet); the brand itself changes no behaviour.
+Options it cannot describe are refused when the middleware is built (`RangeError` naming the rule: a
+non-empty `fieldname`, whole-number `maxSize` and `maxFiles` of at least 1, `allowedMimeTypes` an
+array of strings). Since 0.14.0 every `StorageService` call refuses a key with a `.` or `..` path
+segment with a `400` hint (fixed detail); the S3, B2, GCS and Azure providers, used directly, refuse
+one too. An empty key or one of only `/`, or one that is not a string (a `String` object included),
+is refused the same way.
 
 Since M94b the middleware parses through the request's `formData` accessor (or the same shared
 `parseFormBody` when the request omits it), and a part carrying NO `filename` under the field name
@@ -9493,28 +9683,69 @@ app.router.get('/files/stream/:key', async (ctx) => {
 **Demand-driven streaming is a property of `S3Provider`, not of `getStream?` in general.** On that
 path, serving a large object to a slow client does not pull the object into memory: the provider
 stays 2-3 MiB ahead of the consumer (measured constant in elapsed time and in bytes delivered), a
-consumer that stops reading stops the wire, and cancelling releases the upstream connection. On
-every other provider a large object becomes memory-resident regardless of how slowly the client
-reads — `GcsProvider` and `AzureBlobProvider` stream natively but drain their SDK stream eagerly
-with no demand signal (cancelling releases the upstream stream, but cannot undo what has already
-been drained), while `MemoryProvider` and `LocalStorageProvider` have no native `getStream` at all
-and take `StorageService`'s buffered fallback. The storage-plugin README carries the per-provider
-table. Note also that process RSS does not measure any of this — a large download raises the
-allocator high-water mark while retaining nothing, and importing the AWS SDK costs ~29 MiB by
-itself.
+consumer that stops reading stops the wire, and cancelling releases the upstream connection.
+Elsewhere — except `GcsProvider.getStream`, described below — a large object becomes memory-resident
+regardless of how slowly the client reads: `AzureBlobProvider` streams natively but drains its SDK
+stream eagerly with no demand signal (cancelling releases the upstream stream, but cannot undo what
+has already been drained); `GcsProvider` (since 0.14.0) waits for the first chunk before it answers,
+so an absent object is `null` and a refused credential or an outage found by that first read rejects
+before a response begins (a failure after the first chunk arrives mid-response and cannot), then
+reads the SDK stream on demand (not measured), while its `get()` buffers the whole object into one
+`Uint8Array`, so use `getStream` for a large GCS download; and `MemoryProvider` and
+`LocalStorageProvider` have no native `getStream` at all and take `StorageService`'s buffered
+fallback. The storage-plugin README carries the per-provider table. Note also that process RSS does
+not measure any of this — a large download raises the allocator high-water mark while retaining
+nothing, and importing the AWS SDK costs ~29 MiB by itself.
 
 ### Providers
 
 The plugin ships five named providers plus a first-class B2 preset that reuses S3 under the hood.
 
-| Provider               | Type       | Key options                                                         | Auth / SDK                            | Notes                                                                          |
-| ---------------------- | ---------- | ------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
-| `MemoryProvider`       | `'memory'` | _(none)_                                                            | N/A (zero-dep)                        | Default. In-process map. Every runtime incl. Cloudflare.                       |
-| `LocalStorageProvider` | `'local'`  | `rootDir?: string`                                                  | N/A (`runtime.fs` seam)               | Node/Deno/Bun only. Throws on connect when `fs` absent.                        |
-| `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`   | Lazy `@aws-sdk/client-s3` + presigner | R2 and MinIO via `endpoint`. Real presigned GET URLs.                          |
-| `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`                                              | Lazy `@google-cloud/storage`          | Real signed URLs via `file.getSignedUrl`.                                      |
-| `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?` | Lazy `@azure/storage-blob`            | SAS requires `accountKey`. No `@azure/identity` needed.                        |
-| B2 preset              | `'b2'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`                | Same as S3 (reuses `S3Provider`)      | Endpoint defaults to `https://s3.<region>.backblazeb2.com`. No separate class. |
+| Provider               | Type       | Key options                                                                                           | Auth / SDK                               | Notes                                                                                                       |
+| ---------------------- | ---------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `MemoryProvider`       | `'memory'` | _(none)_                                                                                              | N/A (zero-dep)                           | Default. In-process map. Every runtime incl. Cloudflare.                                                    |
+| `LocalStorageProvider` | `'local'`  | `rootDir?: string`                                                                                    | N/A (`runtime.fs` seam)                  | Node/Deno/Bun only. Throws on connect when `fs` absent.                                                     |
+| `S3Provider`           | `'s3'`     | `bucket`, `region`, `accessKeyId`, `secretAccessKey`, `endpoint?`, `requestTimeoutMs?`                | Lazy `@aws-sdk/client-s3` + presigner    | R2 and MinIO via `endpoint`. Real presigned GET URLs.                                                       |
+| `GcsProvider`          | `'gcs'`    | `bucket`, `projectId?`, `endpoint?`, `endpointAuth?`, `requestTimeoutMs?`                             | Lazy `@google-cloud/storage` (`^7.18.0`) | Signed URLs via `file.getSignedUrl` (epoch-ms expiry). The SDK's own retry is off.                          |
+| `AzureBlobProvider`    | `'azure'`  | `containerName`, `connectionString?`, `accountName?`, `accountKey?`, `endpoint?`, `requestTimeoutMs?` | Lazy `@azure/storage-blob`               | `connectionString` via `fromConnectionString`. SAS via the SDK's `generateSasUrl`; requires an account key. |
+| B2 preset              | `'b2'`     | `bucket`, `region` or `endpoint`, `accessKeyId`, `secretAccessKey`, `requestTimeoutMs?`               | Same as S3 (reuses `S3Provider`)         | Endpoint `https://s3.<region>.backblazeb2.com`. No `region`, `endpoint` or `client` refuses at startup.     |
+
+Since 0.14.0 every cloud provider bounds each call with `requestTimeoutMs` (default `30000`; `0`
+disables; the SDK's own retries included; `getStream` up to the first chunk). A read that fails on
+the network, expires, or gets a `500`/`502`/`503`/`504` rejects with `BackendUnavailableError`
+(`503`); a `put` or `delete` rejects with `BackendUnavailableError` when refused before it was sent
+or answered `503` on the SDK's only attempt, and with `BackendOutcomeUnknownError` (`504`) when it
+may have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried, or
+from an injected client, whose attempts are unknown. Any other failure is an `Error` whose message
+starts `storage-plugin (<provider>): <call> failed:`. `exists` is `false` only when the object was
+absent, and `delete` is `false` only when the provider knows no object was there — on every
+provider; S3/B2 check with a `HEAD` first, since `DeleteObject` cannot tell (an object removed
+between the two still resolves `true`). A `403` on that `HEAD`, whatever its cause, leaves presence
+unknown, so the delete goes ahead: it resolves `true` when it succeeds and rejects when it fails. S3
+without `s3:ListBucket` answers that `403` for a missing key, so `delete()` resolves `true` there;
+grant `s3:ListBucket` for exact answers. A generic `HEAD` `404` is absence, as above (`false`); a
+named error such as `NoSuchBucket` rejects even with status `404`, and so does every other `HEAD`
+failure but the `403` above. A missing object read by `get`/`getStream` throws
+`StorageObjectNotFoundError` (`404`, `@setu-ts/common`). A directly constructed `GcsProvider` or
+`AzureBlobProvider` takes `now` as its second argument; without one `getSignedUrl` rejects (an Azure
+client with its own `getSignedUrl` needs none). The GCS and Azure readiness probes
+(`bucket.exists()`, the container's `exists()`) read reachable when the backend answers below `500`;
+the storage indicator caches its probe for 5 s and bounds it at 2 s.
+
+S3 `get`/`getStream` `NoSuchBucket`, Azure `ContainerNotFound` and a GCS `ENOENT` (a local file
+error) reject rather than becoming object misses. An S3 `HEAD` and a GCS `404` cannot tell a missing
+bucket from a missing object, so `exists`/`delete` there still answer `false`. Azure downloads
+without a body reject unless `deleted === true`. Injected Azure methods receive `{ abortSignal }`.
+`IS3Backend.put(path, data, options?, signal?)`, `delete(path, signal?)` and `head(path, signal?)`
+accept the provider's deadline signal. Buffered GCS reads destroy the source on deadline; first-read
+errors release iterators without waiting for `return()`. Omit a provider's `getStream` for the
+buffered fallback over `get`; an implemented member returning `null` makes the service throw
+`StorageObjectNotFoundError`, with no fallback. `StoragePlugin` refuses a GCS `endpoint` while
+`runtime.env.STORAGE_EMULATOR_HOST` is set, with `RangeError` (the SDK sends JSON requests to the
+variable and uploads to `endpoint`); an injected `client` is not checked. Direct
+`GcsProvider(options, now?, timing?, env?)` callers pass the runtime environment as the fourth
+argument for this check; it runs at construction and connect. A direct caller that sets `endpoint`
+without a `client` and without `env` is refused with `RangeError` at construction.
 
 All cloud providers support an injectable `client` option that bypasses the lazy import, but the
 three types are NOT alike and the difference decides what you can pass:
@@ -9522,7 +9753,7 @@ three types are NOT alike and the difference decides what you can pass:
 | Option type        | Mirrors its SDK? | What injecting it means                                                               |
 | ------------------ | ---------------- | ------------------------------------------------------------------------------------- |
 | `IGcsClient`       | yes              | A real `@google-cloud/storage` client fits structurally.                              |
-| `IAzureBlobClient` | yes              | A real `@azure/storage-blob` client fits structurally.                                |
+| `IAzureBlobClient` | yes              | A real `@azure/storage-blob` `BlobServiceClient` is kept as given and works as is.    |
 | `IS3Backend`       | **no**           | This package's own backend surface — implementing it, not handing over an `S3Client`. |
 
 `IS3Backend` was named `IAwsS3Client` before the alpha.9 release, which promised something it never
@@ -9672,18 +9903,28 @@ app.router.post('/users', async (ctx) => {
 
 ### Options
 
-| Option                                               | Provider   | Description                                                                                                                                            |
-| ---------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `provider`                                           | —          | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.                                                                                                    |
-| `defaults.from`                                      | all        | Sender applied when a message omits `from`; else `send` throws.                                                                                        |
-| `templates`                                          | all        | Named body templates for `sendTemplate`: `{ html?, text? }` strings, or `{ view, text? }` view components rendered through `CAPABILITIES.VIEW` (M102). |
-| `options.host` / `port` / `secure` / `auth`          | `smtp`     | nodemailer transport config (ignored when `transport` injected).                                                                                       |
-| `options.transport`                                  | `smtp`     | Injected `ISmtpTransport` facade (bypasses the lazy import).                                                                                           |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `ses`      | AWS client config (ignored when `client` injected).                                                                                                    |
-| `options.client`                                     | `ses`      | Injected `ISesClient` facade (bypasses the lazy SDK import).                                                                                           |
-| `options.apiKey` / `endpoint`                        | `sendgrid` | SendGrid API key (Bearer) and endpoint (default v3 send URL).                                                                                          |
-| `options.http`                                       | `sendgrid` | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                         |
-| `options.sink`                                       | `log`      | Called with each sent `OutgoingMail` — a read-back seam.                                                                                               |
+| Option                                                                  | Provider          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                                              | —                 | `'log'` (default), `'smtp'`, `'ses'`, `'sendgrid'`.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `defaults.from`                                                         | all               | Sender applied when a message omits `from`; else `send` throws.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `templates`                                                             | all               | Named body templates for `sendTemplate`: `{ html?, text? }` strings, or `{ view, text? }` view components rendered through `CAPABILITIES.VIEW` (M102).                                                                                                                                                                                                                                                                                                                             |
+| `options.host` / `port` / `secure` / `auth`                             | `smtp`            | nodemailer transport config (ignored when `transport` injected).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `options.transport`                                                     | `smtp`            | Injected `ISmtpTransport` facade (bypasses the lazy import).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `options.connectionTimeoutMs` / `greetingTimeoutMs` / `socketTimeoutMs` | `smtp`            | Since 0.14.0. nodemailer `connectionTimeout` / `greetingTimeout` / `socketTimeout`, passed only when set; a whole number of ms in `1`–`2147483647`, else `RangeError` at construction.                                                                                                                                                                                                                                                                                             |
+| `options.dnsTtlMs`                                                      | `smtp`            | Since 0.14.0. Re-resolve the host through `runtime.dns` at most this often and connect to one of the addresses found (failing over to the next when a connection fails before any command), verifying the host as the TLS server name. Absent: nodemailer's own 5-minute DNS cache. A non-finite or negative value throws `RangeError`; refused (`Error`) without `host`, with an injected `transport` or on a runtime without DNS. An IP-literal `host` is connected to as given. |
+| `options.region` / `accessKeyId` / `secretAccessKey`                    | `ses`             | AWS client config (ignored when `client` injected).                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `options.client`                                                        | `ses`             | Injected `ISesClient` facade (bypasses the lazy SDK import).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `options.endpoint`                                                      | `ses`             | Since 0.14.0. SES v2 endpoint for the lazy client (default AWS).                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `options.apiKey` / `endpoint`                                           | `sendgrid`        | SendGrid API key (Bearer) and endpoint (default v3 send URL).                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `options.requestTimeoutMs`                                              | `ses`, `sendgrid` | Since 0.14.0. Bound on one send and on the readiness probe, in ms; `0` disables; default `15000`. An expired send rejects with `BackendOutcomeUnknownError` (`504`); a refused connection with `BackendUnavailableError` (`503`), or `504` once the SES client has retried (its default).                                                                                                                                                                                          |
+| `options.http`                                                          | `sendgrid`        | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `options.sink`                                                          | `log`             | Called with each sent `OutgoingMail` — a read-back seam.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+SMTP DNS refreshes share one lookup per generation, honour the TTL after failed/empty attempts, and
+keep the last good transport; with no transport yet, a failed or timed-out lookup lets nodemailer
+resolve the host itself. `connectionTimeoutMs` also bounds DNS refreshes (default 120000 ms).
+Disconnect wins an in-flight connect; replaced transports close after active sends. SES injected
+health probes retain boolean results and return false on deadline or rejection.
 
 ### Exports
 
@@ -9691,7 +9932,15 @@ app.router.post('/users', async (ctx) => {
 - `MailService` — the `IMailer` implementation (default-`from` resolution + template dispatch).
 - `TemplateEngine`, `escapeHtml` — the template renderer (both arms; `render` is asynchronous since
   M102) and its HTML escaper.
-- `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes.
+- `LogProvider`, `SmtpProvider`, `SesProvider`, `SendGridProvider` — provider classes. Since 0.14.0
+  an SMTP attachment with a `contentId` goes out `Content-Disposition: inline`; `SmtpProvider` takes
+  an optional second argument, `SmtpRuntime` (`{ dns?, hrtime, timing?, random? }`, exported as a
+  type; `random` picks the starting address, `Math.random` when absent), which `MailPlugin` fills
+  from `ctx.runtime` for `dnsTtlMs`; under `dnsTtlMs` a send whose connection fails before any SMTP
+  command is sent again on the next resolved address, at most four addresses in all; the three SMTP
+  timeouts must be whole milliseconds in `1`–`2147483647`; the lazily adapted SES client probes
+  readiness with `GetAccount` (reachable when SES answers below `500`); a SendGrid refusal's message
+  carries SendGrid's first error text after the status.
 - `adaptNodemailerModule` / `loadNodemailerModule` / `toNodemailerMessage` /
   `validateSmtpTransport`, `adaptSesModule` / `loadSesModule` / `toSesInput` / `validateSesClient`,
   `toSendGridBody` — provider adapter/mapper/validator helpers.
@@ -9840,16 +10089,16 @@ app.router.post('/orders', async (ctx) => {
 
 ### Options
 
-| Option                                      | Provider                 | Description                                                                                                         |
-| ------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`. |
-| `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                 |
-| `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                     |
-| `options.projectId`                         | `fcm`                    | Firebase project id, addressed by the v1 `messages:send` URL; required (construction throws).                       |
-| `options.clientEmail` / `privateKey`        | `fcm`                    | Service-account email and PEM PKCS#8 key that sign the OAuth2 assertion; required unless `tokenSource` is supplied. |
-| `options.tokenSource`                       | `fcm`                    | Overrides token acquisition (e.g. a GCP metadata server); when set the credential fields above are unused.          |
-| `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws).                                                         |
-| `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                  |
+| Option                                      | Provider                 | Description                                                                                                                                                                     |
+| ------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `channels`                                  | —                        | Required map of dispatch name → `ChannelConfig`. Keys are the names a caller passes in `send({ channels: [...] })`.                                                             |
+| `channels.*.provider`                       | —                        | `'mail' \| 'twilio' \| 'fcm' \| 'slack'` — selects the channel class and transport.                                                                                             |
+| `options.accountSid` / `authToken` / `from` | `twilio`                 | Twilio credentials and sender number; all three required (construction throws).                                                                                                 |
+| `options.projectId`                         | `fcm`                    | Firebase project id, addressed by the v1 `messages:send` URL; required (construction throws).                                                                                   |
+| `options.clientEmail` / `privateKey`        | `fcm`                    | Service-account email and PEM PKCS#8 key that sign the OAuth2 assertion; required unless `tokenSource` is supplied.                                                             |
+| `options.tokenSource`                       | `fcm`                    | Overrides token acquisition (e.g. a GCP metadata server); when set the credential fields above are unused.                                                                      |
+| `options.webhookUrl`                        | `slack`                  | Slack incoming-webhook URL; required (construction throws). Since 0.14.0 a non-empty `subject` leads the posted text in bold (`*subject*`, escaped), the body on the next line. |
+| `options.http`                              | `twilio`, `fcm`, `slack` | Injected `INotificationHttp` (defaults to `createDefaultNotificationHttp()`, i.e. global `fetch`).                                                                              |
 
 The `mail` arm takes no `options`: email transport is configured on MailPlugin (M29) and resolved
 through `CAPABILITIES.MAIL`.
@@ -9887,8 +10136,9 @@ through `CAPABILITIES.MAIL`.
 - Each channel reads its own address key out of `to` and throws when it is absent: `to.email`
   (email), `to.phone` (sms), `to.token` (push). Slack's `to.channel` is optional — omitted, the
   webhook's default channel applies. `subject` becomes the mail subject (defaulting to
-  `'(no subject)'`) and the push notification title; SMS and Slack ignore it. Built-in channels do
-  not read `metadata` — it is there for custom `NotificationChannel` implementations.
+  `'(no subject)'`) and the push notification title; Slack leads its text with it in bold; SMS
+  ignores it. Built-in channels do not read `metadata` — it is there for custom
+  `NotificationChannel` implementations.
 - Configuring an `email` channel without a registered `mail` capability throws during `register`, so
   the misconfiguration surfaces at startup rather than at first send.
 - All three HTTP providers are zero-dependency (web-standard `fetch`) and Workers-portable; the
@@ -9961,20 +10211,20 @@ app.router.get('/beta', {
 
 ### Options
 
-| Option                       | Provider(s)            | Required                | Description                                                                                                                                                                       |
-| ---------------------------- | ---------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'`                                                                                               |
-| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                                                                                                                 |
-| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                                                                                                                   |
-| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                                                                                                                 |
-| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`                                                                                                       |
-| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                                                                                                                    |
-| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                                                                                                                          |
-| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                                                                                                                |
-| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws                                                                                                      |
-| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                                                                                                                            |
-| `maxCachedContexts`          | `'launchdarkly'`       | no                      | Wrapper option: LRU snapshot cap, default 10,000; positive integer or RangeError at provider construction. Hits refresh recency; evicted contexts return fallback while refilling |
-| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                                                                                                                 |
+| Option                       | Provider(s)            | Required                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'`                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget in seconds; defaults to `5`. Passed to the SDK as `waitForInitialization({ timeout })` (since 0.14.0; an injected client receives `timeout`, not `timeoutSeconds`) and enforced as a deadline on the wait and, separately, on the startup snapshot, so startup can take up to twice the budget. A timeout degrades, never throws; a failed or timed-out startup snapshot keeps `status().healthy` false with a detail until a successful snapshot refill. Must be in `(0, 2147483]`; otherwise `RangeError` at construction |
+| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `maxCachedContexts`          | `'launchdarkly'`       | no                      | Wrapper option: LRU snapshot cap, default 10,000; positive integer or RangeError at provider construction. Hits refresh recency; evicted contexts return fallback while refilling                                                                                                                                                                                                                                                                                                                                                                     |
+| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ### Exports
 
@@ -14048,25 +14298,27 @@ never mutates errors. Command errors such as WRONGTYPE remain unclassified.
 wraps a node-redis client (`redis` v5/v6) in one ioredis-shaped adapter that every Redis-backed
 plugin's `client` option accepts (`IRedisClient`, `IRedisQueueClient`, `IRedisStreamsClient`,
 `IRedisBackplaneClient`, `IRedisLockClient`, `IRedisIdempotencyClient`, `IRateLimitRedisClient`).
-`NodeRedisClientLike` is structural — `isOpen`, `isReady`, `connect()`, `sendCommand(args)`,
-`close()`, `destroy()`, `on`/`off`, `subscribe(channel, listener)`, `unsubscribe(channel)` — and no
-package imports `redis`. Commands go through `sendCommand` with ioredis's argument rule (`undefined`
-dropped, arrays spread one level, numbers as strings). `NodeRedisAdapterOptions.commandTimeoutMs`
-(default `15000`; `0` disables; a finite number up to `2147483647`, otherwise `RangeError`) bounds
-every command and the lazy connect, rejecting with `Error('Command timed out')`; the node-redis
-command is not cancelled. `onError(error)` receives the client's `'error'` events through a listener
-the adapter always attaches. RESP3 map replies become RESP2 shapes (`XREADGROUP`/`XREAD` →
-`[key, value]` pairs; other maps → flat arrays). `connect()` resolves at once for an open client and
-connects once otherwise; `quit()` is idempotent, closes with `close()` and falls back to `destroy()`
-past the bound; `disconnect()` destroys; `status` is `'wait'`, `'connecting'`, `'ready'` or `'end'`.
-Pub/sub: `subscribe(channel)` delivers `(channel, message)` to `on('message', …)` listeners. Cluster
-and sentinel clients are not supported. `NodeRedisClientFactory`
-(`() => NodeRedisClientLike | Promise<NodeRedisClientLike>`) may be passed instead of a client: it
-is called once, on the first connect (a rejection is retried on the next), and listeners registered
-with `on`/`off` before then are attached when the client exists. A factory that imports `redis`
-inside it is how a client built at module load is traced: OpenTelemetry patches `@redis/client` as
-Node loads it, after `TelemetryPlugin` has registered. A `quit()` before or during the first connect
-opens no socket, and one issued while a connect is in flight closes the socket that connect opens.
+Since 0.14.0 the adapter also has `xread` and `xrevrange`, which a Redis Streams fan-out
+subscription needs. `NodeRedisClientLike` is structural — `isOpen`, `isReady`, `connect()`,
+`sendCommand(args)`, `close()`, `destroy()`, `on`/`off`, `subscribe(channel, listener)`,
+`unsubscribe(channel)` — and no package imports `redis`. Commands go through `sendCommand` with
+ioredis's argument rule (`undefined` dropped, arrays spread one level, numbers as strings).
+`NodeRedisAdapterOptions.commandTimeoutMs` (default `15000`; `0` disables; a finite number up to
+`2147483647`, otherwise `RangeError`) bounds every command and the lazy connect, rejecting with
+`Error('Command timed out')`; the node-redis command is not cancelled. `onError(error)` receives the
+client's `'error'` events through a listener the adapter always attaches. RESP3 map replies become
+RESP2 shapes (`XREADGROUP`/`XREAD` → `[key, value]` pairs; other maps → flat arrays). `connect()`
+resolves at once for an open client and connects once otherwise; `quit()` is idempotent, closes with
+`close()` and falls back to `destroy()` past the bound; `disconnect()` destroys; `status` is
+`'wait'`, `'connecting'`, `'ready'` or `'end'`. Pub/sub: `subscribe(channel)` delivers
+`(channel, message)` to `on('message', …)` listeners. Cluster and sentinel clients are not
+supported. `NodeRedisClientFactory` (`() => NodeRedisClientLike | Promise<NodeRedisClientLike>`) may
+be passed instead of a client: it is called once, on the first connect (a rejection is retried on
+the next), and listeners registered with `on`/`off` before then are attached when the client exists.
+A factory that imports `redis` inside it is how a client built at module load is traced:
+OpenTelemetry patches `@redis/client` as Node loads it, after `TelemetryPlugin` has registered. A
+`quit()` before or during the first connect opens no socket, and one issued while a connect is in
+flight closes the socket that connect opens.
 
 `isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
@@ -14413,9 +14665,13 @@ Contract notes:
   the Node adapter sends HTTP/2 `GOAWAY` to every session (and to any that opens later) and closes
   idle HTTP/1.1 connections. Deno omits it (`Deno.serve` has no session control) and says so once at
   `listen` when HTTP/2 is configured; Bun serves HTTP/2 through the Node adapter.
-- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; `@setu-ts/worker-pool-plugin` does not read it
-  yet, V13-131, M143r) is to cancel a worker-pool call: an aborted signal rejects with
-  `signal.reason`, a queued call is withdrawn, a running call's worker is terminated.
+- `WorkerRunOptions.signal?: AbortSignal` (0.14.0; V13-131, M143r) cancels a worker-pool call in
+  `@setu-ts/worker-pool-plugin`: a pre-aborted signal rejects with `signal.reason` unchanged without
+  queuing work, a queued call is withdrawn, and a running call's worker is terminated and replaced
+  as on timeout. Each cancellation counts as `aborted` in the rejected-tasks metric, without
+  incrementing completed or failed counts. A `signal` that is given and is not an `AbortSignal` of
+  this realm rejects the call with `TypeError`. If the signal's `aborted` or `reason` getter throws,
+  the call rejects with that error.
 - `ILifecycleApi.onStopping(fn)` runs at the very start of `stop()`, **before** the application
   begins refusing new requests with a 503 and before the socket closes — the only hook that fires
   while the application is still serving normally. It exists for "tell the outside world to stop
@@ -14520,6 +14776,14 @@ Contract notes:
   by REFERENCE — a reader transforms it with whatever schema support it has, and identity is what
   the OpenAPI generator's deduplication keys on. A foreign value under the same global symbol reads
   as absent rather than being trusted.
+- `UPLOAD_METADATA = Symbol.for("setu.upload.metadata")`, `UploadMetadata`
+  (`{ fieldname; maxBytes; maxFiles?; mimeTypes? }`),
+  `withUploadMetadata<T extends object>(middleware: T, metadata: UploadMetadata): T` and
+  `uploadMetadataOf(value: unknown): UploadMetadata | undefined` (since 0.14.0; throwing getters
+  return undefined, valid metadata retains identity) describe what an upload middleware accepts;
+  `createUploadMiddleware` brands with it, and malformed values read as absent.
+- `StorageObjectNotFoundError` (since 0.14.0) — thrown for a missing storage object; `key` names it,
+  and its status hint answers `404` with the fixed detail "The requested object was not found."
 - `FORM_FILE_METADATA = Symbol.for("setu.form-file.metadata")`, `FormFileMetadata`
   (`readonly mimeTypes?: readonly string[]; readonly maxBytes?: number`),
   `withFormFileMetadata<T extends object>(schema: T, metadata: FormFileMetadata): T` and
@@ -15123,6 +15387,8 @@ Cloudflare Workers.
 > const result = this.handler(frameworkRequest);
 > return isPromiseLike(result) ? Promise.resolve(result).then(finish) : finish(result);
 > ```
+
+Bun filesystem methods reject with the original error, preserving `ENOENT` and `EACCES` codes.
 
 The injected factory signatures (since 0.14.0 for the creator parameter) are:
 
@@ -17934,21 +18200,21 @@ app.router.get('/', (ctx) => ctx.response.text(localizerFor(ctx).t('greeting', {
 `LocalizationPluginOptions` requires exactly one of `catalogues` and `source` — supplying both or
 neither is a compile error, and a JavaScript caller is refused at construction.
 
-| Option                   | Type                                       | Default         | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------ | ------------------------------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `supportedLocales`       | `readonly string[]`                        | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, longer than 35 characters (no client could select it), or unknown to the runtime's `Intl`.                                                                                                                                                                                                                                                                                                                                                    |
-| `catalogues`             | `Record<string, MessageCatalogue>`         | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `source`                 | `IMessageSource`                           | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `allowPartialCatalogues` | `boolean`                                  | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `onMissing`              | `'key' \| 'throw'`                         | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `timeZone`               | `string`                                   | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `tenantLocale`           | `(tenant: ITenant) => string \| undefined` | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `middleware.enabled`     | `boolean`                                  | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `middleware.priority`    | `number`                                   | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `middleware.query`       | `string \| false`                          | `'locale'`      | The query parameter source; `false` disables it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `middleware.cookie`      | `string \| false`                          | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `middleware.exclude`     | `readonly PathPattern[]`                   | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `exposeCatalogues`       | `{ basePath; cacheControl? }`              | off             | Registers `GET <basePath>/:locale`. `basePath` must be one or more plain path segments (letters, digits, `.`, `_`, `~`, `-`), with no segment of only `.` or `..` (URL parsing removes those, so the route would be unreachable), and not the root, which would claim every unrouted single-segment `GET`; `cacheControl` defaults to `private, max-age=3600` (never shared: a session with `rolling` or `idleTimeoutMs` refreshes its cookie on every response) and is refused at construction when the platform's `Headers` would reject it. |
+| Option                   | Type                                        | Default         | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `supportedLocales`       | `readonly string[]`                         | —               | BCP 47 tags, canonicalized; the first is the default. Refused when empty, malformed, duplicated, longer than 35 characters (no client could select it), or unknown to the runtime's `Intl`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `catalogues`             | `Record<string, MessageCatalogue>`          | —               | Static catalogues keyed by tag, validated at `register()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `source`                 | `IMessageSource`                            | —               | Loaded once at `register()` (a rejection fails startup), validated identically; the health indicator reports `injected[:name]`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `allowPartialCatalogues` | `boolean`                                   | `false`         | Accept a locale missing keys the default defines: one warning per locale at `register()`, the default's message served for the gap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `onMissing`              | `'key' \| 'throw'`                          | `'key'`         | A key no catalogue defines answers the key (warned once per key, at most 256 tracked), or throws `MissingMessageError`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `timeZone`               | `string`                                    | runtime zone    | IANA zone `Date` values are formatted in; refused at construction when `Intl` does not recognize it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `tenantLocale`           | `(tenant: ITenant) => string \| undefined`  | —               | The tenant's default, consulted after `Accept-Language`; matched like any candidate. A throw propagates (application code, not client input).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `middleware.enabled`     | `boolean`                                   | `true`          | `false` registers no global middleware; attach `localeMiddleware(...)` yourself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `middleware.priority`    | `number`                                    | `45`            | After tenant resolution (40), before logging (50). Must be an integer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `middleware.query`       | `string \| false`                           | `'locale'`      | The query parameter source; `false` disables it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `middleware.cookie`      | `string \| false`                           | `'setu_locale'` | The cookie source; `false` disables it and drops `Cookie` from `Vary`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `middleware.exclude`     | `readonly PathPattern[]`                    | six probe paths | Skipped entirely — no resolution, no headers. Default `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`; `[]` disables.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `exposeCatalogues`       | `{ basePath; cacheControl?; keyPrefixes? }` | off             | Registers `GET <basePath>/:locale`. `basePath` must be one or more plain path segments (letters, digits, `.`, `_`, `~`, `-`), with no segment of only `.` or `..` (URL parsing removes those, so the route would be unreachable), and not the root, which would claim every unrouted single-segment `GET`; `cacheControl` defaults to `private, max-age=3600` (never shared: a session with `rolling` or `idleTimeoutMs` refreshes its cookie on every response) and is refused at construction when the platform's `Headers` would reject it. `keyPrefixes` (since 0.14.0) serves only the keys starting with one of the prefixes; it must be a dense, non-empty array of non-empty strings; a validated copy is frozen. |
 
 ### Exports
 

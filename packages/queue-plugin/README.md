@@ -98,10 +98,16 @@ app.register(
     sqs: {
       region: 'us-east-1',
       queues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks' },
+      // Where a job that exhausts its attempts goes. Omit it when the queue has a redrive
+      // policy; set `default: false` to discard exhausted jobs instead.
+      deadLetterQueues: { default: 'https://sqs.us-east-1.amazonaws.com/123456789012/tasks-dead' },
     },
   }),
 );
 ```
+
+A name this process consumes must have a dead-letter target, or the queue refuses to start (see
+[SQS Retry and DLQ](#sqs-retry-and-dlq)). A name it only enqueues to needs none.
 
 ### Named Instances
 
@@ -270,12 +276,12 @@ attempt number, monotonic timing, the processor `outcome` and the `settlement` �
 the adapter's settlement call returned, never inferred from the outcome. No payload, header, raw job
 id, claim token, credential or error text is captured.
 
-| Adapter    | Settlement evidence                                                            | Depths                                     |
-| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
-| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
-| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
-| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed) | `unavailable` (never zero)                 |
-| `sqs`      | `unknown` — a lapsed claim or a failed dead-letter send is absorbed and logged | `unavailable` (never zero)                 |
+| Adapter    | Settlement evidence                                                                      | Depths                                     |
+| ---------- | ---------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                                   | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                                      | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — an AMQP `ack` has no broker confirmation (publishes are confirmed)           | `unavailable` (never zero)                 |
+| `sqs`      | `unknown` — AWS can accept a delete through a superseded receipt handle without deleting | `unavailable` (never zero)                 |
 
 Depth counting runs one non-overlapping cycle at bootstrap and one per `intervalMs`, over approved
 job names this instance has a processor for; a count still pending after `timeoutMs` is reported as
@@ -289,8 +295,10 @@ zero.
 
 ## Seeing a job that failed for the last time
 
-A job that exhausts its attempts is dead-lettered by every adapter, and used to be reachable only by
-opening a Redis client: `IQueue` has no `getJob` and no dead-letter accessor, the health payload was
+A job that exhausts its attempts is dead-lettered by every adapter (on SQS, to the target
+`deadLetterQueues` or the queue's redrive policy names, unless `deadLetterQueues[name]` is `false`;
+see [SQS Retry and DLQ](#sqs-retry-and-dlq)), and used to be reachable only by opening a Redis
+client: `IQueue` has no `getJob` and no dead-letter accessor, the health payload was
 `{"adapter":"RedisQueue"}`, and `/metrics` carried no queue series at all. Three surfaces answer
 different questions about it:
 
@@ -301,8 +309,11 @@ different questions about it:
 | The `queues` field in the health payload | "How many are sitting there right now?" — survives a restart.         |
 
 The counter needs `@setu-ts/metrics-plugin` registered; without it no collector is built and
-behaviour is unchanged. Depths are reported by the memory and Redis adapters and OMITTED (never
-reported as zeros) on RabbitMQ and SQS, whose counts need a management API.
+behaviour is unchanged. `outcome` is `completed`, `retried`, `dead_lettered` or `discarded` (an SQS
+job deleted because `deadLetterQueues[name]` is `false`), and is counted only after the adapter's
+settlement call succeeded: a settle that fails is counted when the job is delivered again. Depths
+are reported by the memory and Redis adapters and OMITTED (never reported as zeros) on RabbitMQ and
+SQS, whose counts need a management API.
 
 `deadLetterTtlMs` bounds how long the retained payload lives. Without it the jobs hash grows for the
 lifetime of the deployment — the retention exists for debugging, so dropping it by default would
@@ -440,24 +451,133 @@ RabbitMQ redelivers it and the move is tried again.
 ### SqsQueue
 
 AWS SQS-backed queue using the AWS SDK `@aws-sdk/client-sqs`. Supports visibility timeouts, delayed
-jobs (up to 15 minutes via `DelaySeconds`), and manual DLQ forwarding. The `maxAttempts` field in
-the job envelope drives the DLQ promotion logic. Requires the `@aws-sdk/client-sqs` package at
-runtime (or an injected transport).
+jobs (up to 15 minutes via `DelaySeconds`), claim renewal and dead-letter forwarding. Attempts are
+SQS's own `ApproximateReceiveCount`. Requires the `@aws-sdk/client-sqs` package at runtime (or an
+injected transport).
+
+| `sqs` option               | Default  | Meaning                                                                                                                         |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `queues`                   | required | Job name to queue URL, for every name this process enqueues to or consumes                                                      |
+| `deadLetterQueues`         | `{}`     | Consumed job name to dead-letter queue URL, or `false` to discard exhausted jobs of that name                                   |
+| `visibilityTimeoutSeconds` | `30`     | Visibility timeout taken at each receive and renewed while the processor runs; an integer from 1 to 43,200, else a `RangeError` |
+| `region`, `credentials`    | —        | Passed to the SDK client                                                                                                        |
+| `endpoint`                 | —        | Custom endpoint (ElasticMQ, LocalStack)                                                                                         |
+| `client`                   | —        | An injected `ISqsTransport`; the SDK is not loaded                                                                              |
+
+#### Long jobs
+
+While a processor runs, the adapter extends the message's visibility every third of
+`visibilityTimeoutSeconds`, reducing timeout-driven redelivery. SQS can still deliver more than
+once, so keep processors idempotent. Renewal also continues through `onFailed` and the dead-letter
+forward, and stops only for the final delete or visibility change. SQS caps a message's visibility
+at 12 hours from the receive; the adapter asks for no more than the time left and stops extending at
+the cap, after which the job is reported as stale (`queue job claim renewal failed`) and SQS
+delivers it again. A settle (`ack`, retry or dead-letter) for a claim the adapter no longer holds
+fails and is reported as `queue job settlement failed`; it is not counted. One exception: once a
+dead letter's copy has reached its target, the source delete is always attempted and the settle
+counts; if the claim lapsed during the forward, a warning says the source may be delivered and
+dead-lettered again (SQS ignores a delete through a superseded receipt handle).
 
 #### SQS Retry and DLQ
 
-When a job reaches `maxAttempts`, `SqsQueue.deadLetter()` forwards the original message body to the
-configured DLQ queue URL (via `sqs.deadLetterQueues`), then deletes the source message. If DLQ send
-fails, the source message is **not** deleted (preventing silent data loss). If the source delete
-fails after a successful DLQ send, a duplicate-risk warning is logged. Note: AWS SQS does not
-support managed DLQ redrive for this adapter — DLQ forwarding is manual via the `deadLetterQueues`
-option.
+Every name this process consumes needs a dead-letter target. Before its first poll the adapter reads
+the queue's `RedrivePolicy` and settles one of three:
 
-#### ElasticMQ E2E
+1. **`deadLetterQueues[name]` is a URL.** That queue is the target.
+2. **No entry, and the queue has a redrive policy.** The policy's `deadLetterTargetArn` is the
+   target, resolved to a URL with `GetQueueUrl`.
+3. **`deadLetterQueues[name]` is `false`.** Exhausted jobs are discarded: `onFailed` still runs
+   once, the message is deleted, a warning names the job (never its payload), and `queue_jobs_total`
+   counts `discarded`. The queue's attributes are not read.
 
-The SQS adapter includes guarded E2E tests against ElasticMQ (`SQS_ENDPOINT_URL` environment
-variable). These tests verify enqueue→reserve→ack round-trips, queue isolation, visibility retry
-progression, and DLQ promotion.
+With none of these, the consumer is refused with `SqsDeadLetterTargetMissingError`, whose `reason`
+says why (`no-target`, `policy-unreadable`, `attributes-unavailable` or `target-unresolvable`) and
+whose `cause` holds the read error when there was one. A processor declared in
+`QueuePlugin({ processors })` makes `app.start()` fail; an imperative `process()` is reported once
+per refusal reason (a changed transient reason, or a transient failure that turns definite, is
+reported again) and that name is not polled until a target is proved, its messages left in SQS. Only
+`attributes-unavailable` and `target-unresolvable` are retried on later polls, after 1, 2, 5, 10,
+then 30 seconds (repeated); other refusal reasons stay stopped until reconnect. A name the process
+only enqueues to is never checked.
+
+A job that exhausts its attempts, or that a dead worker abandoned, is sent unchanged to the target
+with three message attributes, then deleted from the source:
+
+| Attribute                 | Type     | Value                                                      |
+| ------------------------- | -------- | ---------------------------------------------------------- |
+| `setu-dead-letter-reason` | `String` | `attempts-exhausted`, `abandoned` or `unreadable`          |
+| `setu-attempts`           | `Number` | The receive count                                          |
+| `setu-source-message-id`  | `String` | The source message's SQS id, as in the warning and the log |
+
+No error text is attached, and attributes the producer set are not carried over. On `SendMessage`
+error code `InvalidParameterValue` (SQS's code for a message over the size limit, which it also uses
+for other invalid parameters), the adapter logs a warning for that forward and retries the unchanged
+body once without the `setu-` attributes, which count toward the size limit. If the send fails, the
+source is kept and the job comes back after its visibility timeout, takes the dead-worker path, runs
+`onFailed` again and is forwarded again. Without a redrive policy on the queue, a send that keeps
+failing (target deleted, `sqs:SendMessage` or KMS denied) repeats that every timeout; a redrive
+policy bounds it, because SQS then takes the message itself. If the delete fails after the send, a
+duplicate-risk error is logged.
+
+**When the queue's redrive policy is lower than the job's attempts.** SQS moves a message itself on
+the receive after `maxReceiveCount`, without the framework seeing it. So when a policy exists, a
+job's attempts are lowered to `maxReceiveCount - 1` (at least 1), and the adapter warns once for the
+name. That keeps one receive in hand, so `onFailed` runs even when a worker dies on the last
+attempt. Set `maxReceiveCount` to `maxAttempts + 1` to keep every attempt. With `maxReceiveCount` 1
+the warning adds that a worker dying on its only attempt leaves the message to SQS's own redrive,
+without `onFailed`.
+
+**A message the adapter cannot read** (not JSON, not the job envelope, a different job name, or an
+invalid receive count) is sent unchanged to the same target with reason `unreadable` and deleted, or
+deleted when the name is `false`. A warning names the job name, the reason and the SQS message id,
+never the body. It runs no `onFailed` and is not counted. If the forward fails, the message is left
+for its visibility timeout and warned again on the next receive. An SNS `SubscriptionConfirmation`
+delivered to the queue is retired this way: confirm a subscription from the console or the CLI.
+
+**AWS rights a consumer needs:** `sqs:GetQueueAttributes` on the source queue (not for a name set to
+`false`), `sqs:GetQueueUrl` when the redrive policy names the target, `sqs:SendMessage` on the
+target, and `kms:GenerateDataKey` and `kms:Decrypt` when the target uses a customer-managed KMS key.
+With `deadLetterQueues[name]` a URL and the attribute read refused, the adapter warns once and
+continues without lowering attempts.
+
+#### SNS to SQS
+
+`SnsPublisher.publishJob(name, data, options?)` publishes the job envelope `SqsQueue` reads, so one
+publish reaches every SQS queue subscribed to the topic whose processor consumes `name`. Both raw
+and wrapped (non-raw) subscriptions are read: the adapter unwraps an SNS `Notification`.
+
+```typescript
+import { SnsPublisher } from '@setu-ts/queue-plugin';
+import { createRuntimeServices } from '@setu-ts/runtime';
+
+const publisher = new SnsPublisher({
+  topicArn: 'arn:aws:sns:us-east-1:123456789012:reports',
+  // `runtime.uuid()` supplies the job id when `options.id` is absent.
+  runtime: createRuntimeServices(),
+});
+await publisher.connect();
+await publisher.publishJob('report.build', { reportId: 'r-1' });
+```
+
+| `publishJob` option | Default                                    | Meaning                                      |
+| ------------------- | ------------------------------------------ | -------------------------------------------- |
+| `id`                | `runtime.uuid()`                           | The job id; without `runtime` it is required |
+| `maxAttempts`       | the consuming queue's `defaultMaxAttempts` | Omitted from the envelope when not given     |
+| `headers`           | —                                          | Copied into the envelope's job headers       |
+
+With `SnsPublisherOptions.telemetry`, `publishJob` runs in a producer span and writes its
+`traceparent` into the envelope headers, so the consuming processor joins the trace. Nothing is sent
+as SNS message attributes: SNS drops a message with more than 10 attributes bound for a raw SQS
+subscription. `publish(message)` still sends a raw body for subscribers that are not this adapter;
+`SqsQueue` cannot read it. An SNS notification's signature is not verified: the queue's access
+policy decides who can deliver to it, as for any `SendMessage` caller.
+
+#### SQS E2E
+
+The SQS adapter includes guarded E2E tests against ElasticMQ or LocalStack (`SQS_ENDPOINT_URL`).
+They verify enqueue→reserve→ack round-trips, queue isolation, visibility retry progression,
+dead-letter forwarding and a job longer than the visibility timeout. The SNS to SQS round trip runs
+against LocalStack when `AWS_LOCALSTACK_ENDPOINT_URL` is set; CI does not run it.
 
 ## Trace propagation
 
@@ -544,44 +664,46 @@ default; the health plugin's `readiness` option overrides it by name.
 
 ## Exports
 
-| Export                         | Kind      |
-| ------------------------------ | --------- |
-| `adaptSnsModule`               | function  |
-| `adaptSqsModule`               | function  |
-| `loadSnsModule`                | function  |
-| `loadSqsModule`                | function  |
-| `QueuePlugin`                  | function  |
-| `MemoryQueue`                  | class     |
-| `QueueBackendUnavailableError` | class     |
-| `RabbitMqQueue`                | class     |
-| `RedisQueue`                   | class     |
-| `SnsPublisher`                 | class     |
-| `SqsDelayTooLongError`         | class     |
-| `SqsQueue`                     | class     |
-| `SqsQueueNotConfiguredError`   | class     |
-| `AddJobOptions`                | interface |
-| `IJob`                         | interface |
-| `IQueue`                       | interface |
-| `ISnsTransport`                | interface |
-| `ISqsTransport`                | interface |
-| `ProcessOptions`               | interface |
-| `QueueDepthDiagnosticsOptions` | interface |
-| `QueueDepths`                  | interface |
-| `QueueDiagnosticsOptions`      | interface |
-| `QueueLogger`                  | interface |
-| `QueuePluginOptions`           | interface |
-| `QueueProcessorDefinition`     | interface |
-| `RabbitMqQueueOptions`         | interface |
-| `RecurringOptions`             | interface |
-| `RedisQueueOptions`            | interface |
-| `SnsPublisherOptions`          | interface |
-| `SnsSdkModule`                 | interface |
-| `SqsQueueOptions`              | interface |
-| `SqsReceivedMessage`           | interface |
-| `SqsSdkModule`                 | interface |
-| `JobProcessor`                 | type      |
-| `QueueAdapterType`             | type      |
-| `QueueProcessorEntry`          | type      |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `adaptSnsModule`                   | function  |
+| `adaptSqsModule`                   | function  |
+| `loadSnsModule`                    | function  |
+| `loadSqsModule`                    | function  |
+| `QueuePlugin`                      | function  |
+| `MemoryQueue`                      | class     |
+| `QueueBackendUnavailableError`     | class     |
+| `RabbitMqQueue`                    | class     |
+| `RedisQueue`                       | class     |
+| `SnsPublisher`                     | class     |
+| `SqsDeadLetterTargetMissingError`  | class     |
+| `SqsDelayTooLongError`             | class     |
+| `SqsQueue`                         | class     |
+| `SqsQueueNotConfiguredError`       | class     |
+| `AddJobOptions`                    | interface |
+| `IJob`                             | interface |
+| `IQueue`                           | interface |
+| `ISnsTransport`                    | interface |
+| `ISqsTransport`                    | interface |
+| `ProcessOptions`                   | interface |
+| `QueueDepthDiagnosticsOptions`     | interface |
+| `QueueDepths`                      | interface |
+| `QueueDiagnosticsOptions`          | interface |
+| `QueueLogger`                      | interface |
+| `QueuePluginOptions`               | interface |
+| `QueueProcessorDefinition`         | interface |
+| `RabbitMqQueueOptions`             | interface |
+| `RecurringOptions`                 | interface |
+| `RedisQueueOptions`                | interface |
+| `SnsPublisherOptions`              | interface |
+| `SnsSdkModule`                     | interface |
+| `SqsQueueOptions`                  | interface |
+| `SqsReceivedMessage`               | interface |
+| `SqsSdkModule`                     | interface |
+| `JobProcessor`                     | type      |
+| `QueueAdapterType`                 | type      |
+| `QueueProcessorEntry`              | type      |
+| `SqsDeadLetterTargetMissingReason` | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

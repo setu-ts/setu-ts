@@ -1,0 +1,380 @@
+import { describe, expect, it, vi } from 'vitest';
+import { QueueService } from '../../src/services/queue-service.ts';
+import { sqsHarness, envelope } from '../fixtures/sqs-harness.ts';
+
+async function drain(): Promise<void> {
+  for (let tick = 0; tick < 30; tick++) await Promise.resolve();
+}
+
+describe('SQS settlement and renewal ordering', () => {
+  it('awaits an in-flight renewal so the retry backoff is the last visibility change', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    await transport.send('source', envelope());
+    const [job] = await queue.reserve('build', 1, 0);
+    const arrival = Promise.withResolvers<void>();
+    const apply = transport.changeVisibility.bind(transport);
+    const visibility = vi
+      .spyOn(transport, 'changeVisibility')
+      .mockImplementationOnce(async (...args) => {
+        // Hold the request before it reaches SQS; later arrivals apply immediately.
+        await arrival.promise;
+        return apply(...args);
+      });
+    const renewing = queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+    await drain();
+    const requeued = queue.requeue('build', job!.id, 1000, 2, job!.claimToken!);
+    await drain();
+    const sentBeforeRenewalArrived = visibility.mock.calls.map((call) => call[2]);
+    arrival.resolve();
+    const extended = await renewing;
+    await requeued;
+    try {
+      expect(transport.visibilityChanges.map((call) => call.seconds)).toEqual([3, 1]);
+      expect(sentBeforeRenewalArrived).toEqual([3]);
+      expect(extended).toBe(true);
+      await runtime.advanceMs(1000);
+      expect(await queue.reserve('build', 1, runtime.now())).toHaveLength(1);
+    } finally {
+      await queue.disconnect();
+    }
+  });
+
+  it.each(['preparation', 'send'] as const)(
+    'renews throughout dead-letter %s and fences only the source delete',
+    async (phase) => {
+      const { queue, transport, runtime } = await sqsHarness();
+      await transport.send('source', envelope(1));
+      const [job] = await queue.reserve('build', 1, 0);
+      const work = Promise.withResolvers<void>();
+      const deletion = Promise.withResolvers<void>();
+      const originalSend = transport.send.bind(transport);
+      if (phase === 'preparation')
+        vi.spyOn(queue, 'prepareConsumer').mockReturnValueOnce(work.promise);
+      else
+        vi.spyOn(transport, 'send').mockImplementationOnce(async (...args) => {
+          await work.promise;
+          return originalSend(...args);
+        });
+      const originalDelete = transport.delete.bind(transport);
+      const deleted = vi.spyOn(transport, 'delete').mockImplementationOnce(async (...args) => {
+        await deletion.promise;
+        return originalDelete(...args);
+      });
+      const visibility = vi.spyOn(transport, 'changeVisibility');
+      const terminal = queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      const settled = Promise.allSettled([terminal]);
+      try {
+        await drain();
+        await runtime.advanceMs(1000);
+        expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
+        expect(visibility).toHaveBeenCalledExactlyOnceWith('source', 'rh-2', 3);
+        expect(deleted).not.toHaveBeenCalled();
+        work.resolve();
+        await drain();
+        expect(deleted).toHaveBeenCalledTimes(1);
+        expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
+        expect(visibility).toHaveBeenCalledTimes(1);
+        deletion.resolve();
+        await terminal;
+        expect(transport.depth('source')).toBe(0);
+        expect(transport.depth('dead')).toBe(1);
+      } finally {
+        work.resolve();
+        deletion.resolve();
+        await settled;
+        await queue.disconnect();
+      }
+    },
+  );
+
+  it('still deletes the source after a forward that outlived its claim', async () => {
+    const { queue, transport, runtime, logger } = await sqsHarness();
+    await transport.send('source', envelope(1));
+    const [job] = await queue.reserve('build', 1, 0);
+    const work = Promise.withResolvers<void>();
+    const originalSend = transport.send.bind(transport);
+    vi.spyOn(transport, 'send').mockImplementationOnce(async (...args) => {
+      await work.promise;
+      return originalSend(...args);
+    });
+    // Every renewal fails, so the claim lapses while the forward is held.
+    vi.spyOn(transport, 'changeVisibility').mockRejectedValue(new Error('Throttled'));
+    const deleted = vi.spyOn(transport, 'delete');
+    const terminal = queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+    try {
+      await drain();
+      await runtime.advanceMs(1000);
+      expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(false);
+      await runtime.advanceMs(3000);
+      work.resolve();
+      await terminal;
+      expect(deleted).toHaveBeenCalledTimes(1);
+      expect(transport.depth('source')).toBe(0);
+      expect(transport.depth('dead')).toBe(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('lapsed during the forward'),
+      );
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('payload-canary');
+    } finally {
+      work.resolve();
+      await Promise.allSettled([terminal]);
+      await queue.disconnect();
+    }
+  });
+
+  it('keeps a slow terminal forward leased without a second onFailed or duplicate copy', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    const service = new QueueService(queue, runtime, { pollIntervalMs: 100 });
+    const forwarding = Promise.withResolvers<void>();
+    const send = transport.send.bind(transport);
+    vi.spyOn(transport, 'send').mockImplementation(async (...args) => {
+      if (args[0] === 'dead') await forwarding.promise;
+      return send(...args);
+    });
+    const failed = vi.fn();
+    const processor = vi.fn(() => {
+      throw new Error('terminal');
+    });
+    await service.connect();
+    service.process('build', processor, { concurrency: 2, onFailed: failed });
+    await transport.send('source', envelope(1));
+    try {
+      await runtime.advanceMs(10_000);
+      expect(failed).toHaveBeenCalledTimes(1);
+      expect(processor).toHaveBeenCalledTimes(1);
+      expect(transport.visibilityChanges.length).toBeGreaterThanOrEqual(9);
+      expect(transport.depth('source')).toBe(1);
+      expect(transport.depth('dead')).toBe(0);
+      forwarding.resolve();
+      await runtime.advanceMs(500);
+      expect(transport.depth('source')).toBe(0);
+      expect(transport.depth('dead')).toBe(1);
+      expect(failed).toHaveBeenCalledTimes(1);
+      expect(transport.deleted).toHaveLength(1);
+    } finally {
+      forwarding.resolve();
+      await runtime.advanceMs(100);
+      await service.disconnect();
+    }
+  });
+
+  for (const kind of ['ack', 'requeue', 'deadLetter'] as const) {
+    it(`makes no renewal call after the final ${kind} receipt operation begins`, async () => {
+      const { queue, transport } = await sqsHarness();
+      await transport.send('source', envelope());
+      const [job] = await queue.reserve('build', 1, 0);
+      const gate = Promise.withResolvers<void>();
+      const visibility = vi.spyOn(transport, 'changeVisibility');
+      if (kind === 'requeue') visibility.mockReturnValueOnce(gate.promise);
+      else vi.spyOn(transport, 'delete').mockReturnValueOnce(gate.promise);
+      const settling =
+        kind === 'ack'
+          ? queue.ack('build', job!.id, job!.claimToken!)
+          : kind === 'requeue'
+            ? queue.requeue('build', job!.id, 1000, 2, job!.claimToken!)
+            : queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      await drain();
+      const initiallyExtended = await queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+      const callsDuringSettle = visibility.mock.calls.length;
+      gate.resolve();
+      await settling;
+      try {
+        expect(initiallyExtended).toBe(true);
+        expect(callsDuringSettle).toBe(kind === 'requeue' ? 1 : 0);
+      } finally {
+        await queue.disconnect();
+      }
+    });
+
+    it(`reports an expired claim during the final ${kind} receipt operation`, async () => {
+      const { queue, transport, runtime } = await sqsHarness();
+      await transport.send('source', envelope());
+      const [job] = await queue.reserve('build', 1, 0);
+      const gate = Promise.withResolvers<void>();
+      const visibility = vi.spyOn(transport, 'changeVisibility');
+      if (kind === 'requeue') visibility.mockReturnValueOnce(gate.promise);
+      else vi.spyOn(transport, 'delete').mockReturnValueOnce(gate.promise);
+      const settling =
+        kind === 'ack'
+          ? queue.ack('build', job!.id, job!.claimToken!)
+          : kind === 'requeue'
+            ? queue.requeue('build', job!.id, 1000, 2, job!.claimToken!)
+            : queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      await drain();
+      await runtime.advanceMs(3000);
+      const extended = await queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+      const calls = visibility.mock.calls.length;
+      gate.resolve();
+      await settling;
+      try {
+        expect(extended).toBe(false);
+        expect(calls).toBe(kind === 'requeue' ? 1 : 0);
+      } finally {
+        await queue.disconnect();
+      }
+    });
+
+    it(`clears the settling mark after ${kind} rejects`, async () => {
+      const { queue, transport } = await sqsHarness();
+      await transport.send('source', envelope());
+      const [job] = await queue.reserve('build', 1, 0);
+      const settle = () =>
+        kind === 'ack'
+          ? queue.ack('build', job!.id, job!.claimToken!)
+          : kind === 'requeue'
+            ? queue.requeue('build', job!.id, 1000, 2, job!.claimToken!)
+            : queue.deadLetter('build', job!.id, 0, job!.claimToken!);
+      if (kind === 'requeue')
+        vi.spyOn(transport, 'changeVisibility').mockRejectedValueOnce(new Error('settle refused'));
+      else vi.spyOn(transport, 'delete').mockRejectedValueOnce(new Error('settle refused'));
+      await expect(settle()).rejects.toThrow('settle refused');
+      const countBefore = transport.visibilityChanges.length;
+      expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
+      expect(transport.visibilityChanges).toHaveLength(countBefore + 1);
+      await settle();
+      await queue.disconnect();
+    });
+  }
+
+  it.each(['expired', 'redelivered', 'disconnected'] as const)(
+    'revalidates a claim that became %s while awaiting renewal',
+    async (transition) => {
+      const { queue, transport, runtime } = await sqsHarness();
+      await transport.send('source', envelope());
+      const [job] = await queue.reserve('build', 1, 0);
+      const gate = Promise.withResolvers<void>();
+      vi.spyOn(transport, 'changeVisibility').mockReturnValueOnce(gate.promise);
+      const renewing = queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+      await drain();
+      const settling = Promise.allSettled([queue.ack('build', job!.id, job!.claimToken!)]);
+      await drain();
+      if (transition === 'disconnected') await queue.disconnect();
+      else {
+        await runtime.advanceMs(3000);
+        if (transition === 'redelivered') await queue.reserve('build', 1, runtime.now());
+      }
+      gate.resolve();
+      await renewing;
+      const [result] = await settling;
+      try {
+        expect(result!.status).toBe('rejected');
+        if (result!.status === 'rejected') expect(result.reason.name).toBe('StaleClaimError');
+        expect(transport.deleted).toEqual([]);
+      } finally {
+        await queue.disconnect();
+      }
+    },
+  );
+
+  it('settles a still-owned claim after an in-flight renewal rejects', async () => {
+    const { queue, transport } = await sqsHarness();
+    await transport.send('source', envelope());
+    const [job] = await queue.reserve('build', 1, 0);
+    const gate = Promise.withResolvers<void>();
+    vi.spyOn(transport, 'changeVisibility').mockReturnValueOnce(gate.promise);
+    const renewing = queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+    const acked = queue.ack('build', job!.id, job!.claimToken!);
+    await drain();
+    const deletionsBeforeRejection = transport.deleted.length;
+    gate.reject(new Error('renewal refused'));
+    expect(await renewing).toBe(false);
+    await acked;
+    try {
+      expect(deletionsBeforeRejection).toBe(0);
+      expect(transport.depth('source')).toBe(0);
+    } finally {
+      await queue.disconnect();
+    }
+  });
+
+  it('shares an in-flight renewal and refuses overlapping settlements of one claim', async () => {
+    const { queue, transport } = await sqsHarness();
+    await transport.send('source', envelope());
+    const [job] = await queue.reserve('build', 1, 0);
+    const renewalGate = Promise.withResolvers<void>();
+    const visibility = vi
+      .spyOn(transport, 'changeVisibility')
+      .mockReturnValueOnce(renewalGate.promise);
+    const first = queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+    const second = queue.claimRenewal.extend('build', job!.id, job!.claimToken!);
+    await drain();
+    const ackGate = Promise.withResolvers<void>();
+    vi.spyOn(transport, 'delete').mockReturnValueOnce(ackGate.promise);
+    const acked = queue.ack('build', job!.id, job!.claimToken!);
+    const overlapping = Promise.allSettled([
+      queue.requeue('build', job!.id, 1000, 2, job!.claimToken!),
+    ]);
+    renewalGate.resolve();
+    await Promise.all([first, second]);
+    await drain();
+    const [result] = await overlapping;
+    const calls = visibility.mock.calls.length;
+    ackGate.resolve();
+    await acked;
+    try {
+      expect(calls).toBe(1);
+      expect(result!.status).toBe('rejected');
+      if (result!.status === 'rejected') expect(result.reason.name).toBe('StaleClaimError');
+    } finally {
+      await queue.disconnect();
+    }
+  });
+
+  it('reports lease expiry through the service while a source delete is pending', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { pollIntervalMs: 100, logger });
+    const deletion = Promise.withResolvers<void>();
+    const remove = transport.delete.bind(transport);
+    vi.spyOn(transport, 'delete').mockImplementationOnce(async (...args) => {
+      await deletion.promise;
+      return remove(...args);
+    });
+    await service.connect();
+    service.process('build', () => {
+      throw new Error('terminal');
+    });
+    await transport.send('source', envelope(1));
+    try {
+      await runtime.advanceMs(4000);
+      const renewalErrors = logger.error.mock.calls.filter(
+        ([message]) => message === 'queue job claim renewal failed',
+      );
+      expect(renewalErrors).toHaveLength(1);
+      expect(renewalErrors[0]![1]).toMatchObject({ error: 'queue job claim is stale' });
+    } finally {
+      deletion.resolve();
+      await runtime.advanceMs(100);
+      await service.disconnect();
+    }
+  });
+
+  it('does not report a false stale renewal when a processor fails during renewal', async () => {
+    const { queue, transport, runtime } = await sqsHarness();
+    const logger = { error: vi.fn() };
+    const service = new QueueService(queue, runtime, { logger, pollIntervalMs: 100 });
+    const processor = Promise.withResolvers<void>();
+    const arrival = Promise.withResolvers<void>();
+    const apply = transport.changeVisibility.bind(transport);
+    vi.spyOn(transport, 'changeVisibility').mockImplementationOnce(async (...args) => {
+      await arrival.promise;
+      return apply(...args);
+    });
+    await service.connect();
+    service.process('build', () => processor.promise);
+    await transport.send('source', envelope());
+    await runtime.advanceMs(1200);
+    processor.reject(new Error('retry'));
+    await drain();
+    arrival.resolve();
+    await runtime.advanceMs(100);
+    try {
+      expect(
+        logger.error.mock.calls.filter(([message]) => message === 'queue job claim renewal failed'),
+      ).toEqual([]);
+      expect(transport.visibilityChanges.map((call) => call.seconds)).toEqual([3, 2]);
+    } finally {
+      await service.disconnect();
+    }
+  });
+});

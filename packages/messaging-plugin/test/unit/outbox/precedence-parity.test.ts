@@ -1,8 +1,9 @@
+import { PUBLISH_REQUIRE_ROUTE } from '../../../src/brokers/publish-options.ts';
 /**
  * One precedence rule, two entry points (M107 §3.5): under a NON-default
  * caller `deduplicationId`, a non-default selector and caller headers,
  * `publishIntegrationEvent` and `write` + `sweep` hand the broker identical
- * topic, envelope and options.
+ * topic, envelope and caller options; the relay additionally requests a required route through an internal symbol.
  *
  * @module
  */
@@ -58,8 +59,14 @@ describe('precedence parity between publishIntegrationEvent and the outbox', () 
       options: { deduplicationId: 'caller-dedup-7', headers: { 'x-origin': 'svc-a' } },
     });
     expect(direct).toHaveLength(1);
-    expect(outbox).toEqual(direct);
+    expect(outbox).toEqual(
+      direct.map((call) => ({
+        ...call,
+        options: { ...call.options, [PUBLISH_REQUIRE_ROUTE]: true },
+      })),
+    );
     expect(outbox[0]!.options).toEqual({
+      [PUBLISH_REQUIRE_ROUTE]: true,
       orderingKey: 'region-eu',
       deduplicationId: 'caller-dedup-7',
       headers: { 'x-origin': 'svc-a' },
@@ -68,8 +75,14 @@ describe('precedence parity between publishIntegrationEvent and the outbox', () 
 
   it('a caller orderingKey beats the selector; the dedup id defaults to the envelope id', async () => {
     const { direct, outbox } = await bothPaths({ options: { orderingKey: 'caller-key' } });
-    expect(outbox).toEqual(direct);
+    expect(outbox).toEqual(
+      direct.map((call) => ({
+        ...call,
+        options: { ...call.options, [PUBLISH_REQUIRE_ROUTE]: true },
+      })),
+    );
     expect(outbox[0]!.options).toEqual({
+      [PUBLISH_REQUIRE_ROUTE]: true,
       orderingKey: 'caller-key',
       deduplicationId: outbox[0]!.message.id,
       headers: {},

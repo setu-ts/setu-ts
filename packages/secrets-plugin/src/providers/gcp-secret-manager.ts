@@ -6,9 +6,20 @@
  *
  * @module
  */
+import type { DeadlineOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcpSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
+import type { SecretsDeadline } from './bounded-call.ts';
+import {
+  answered,
+  resolveSecretsDeadline,
+  runSecretsCall,
+  toSecretsError,
+} from './bounded-call.ts';
+
+/** Provider name carried on its errors. */
+const PROVIDER_NAME = 'GcpSecretManagerProvider';
 
 /** Methods an injected GCP client facade must expose. */
 const REQUIRED_METHODS = ['accessSecretVersion', 'addSecretVersion'] as const;
@@ -24,8 +35,18 @@ interface GcpAccessResponse {
 /** The subset of the GCP SDK the adapter uses. */
 export interface GcpSdkModule {
   SecretManagerServiceClient: new (options?: Record<string, unknown>) => {
-    accessSecretVersion(request: { name: string }): Promise<[GcpAccessResponse]>;
-    addSecretVersion(request: { parent: string; payload: { data: Uint8Array } }): Promise<unknown>;
+    accessSecretVersion(
+      request: { name: string },
+      options?: { timeout?: number },
+    ): Promise<[GcpAccessResponse]>;
+    addSecretVersion(
+      request: { parent: string; payload: { data: Uint8Array } },
+      options?: { timeout?: number },
+    ): Promise<unknown>;
+    listSecrets(
+      request: { parent: string; pageSize: number },
+      options?: { timeout?: number; autoPaginate?: boolean },
+    ): Promise<unknown>;
   };
 }
 
@@ -49,6 +70,25 @@ export interface GcpSecretManagerProviderOptions {
    * @since 0.8.0
    */
   endpoint?: string | undefined;
+  /**
+   * Bound on each Secret Manager call, in milliseconds, including gax's own
+   * retries; also passed to gax as the call `timeout`. A call that fails on
+   * the network, is `UNAVAILABLE` or `DEADLINE_EXCEEDED`, or does not answer in
+   * time rejects with `SecretProviderUnavailableError` (`503`). `0` disables
+   * the bound; anything outside `0`–`2147483647` throws `RangeError` at
+   * construction.
+   *
+   * @default 5000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
+  /**
+   * Timer surface the bound runs on. `SecretsPlugin` supplies the runtime's
+   * timers; a directly constructed provider falls back to the ambient ones.
+   *
+   * @since 0.14.0
+   */
+  timing?: DeadlineOptions['timing'];
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IGcpSecretsClient | undefined;
 }
@@ -90,18 +130,27 @@ export function isGcpNotFound(error: unknown): boolean {
 export function adaptGcpModule(
   mod: GcpSdkModule,
   options: GcpSecretManagerProviderOptions,
+  deadline: SecretsDeadline = resolveSecretsDeadline(options.requestTimeoutMs, options.timing),
 ): IGcpSecretsClient {
   const projectId = options.projectId;
   if (projectId === undefined || projectId === '') {
     throw new Error('GcpSecretManagerProvider requires options.projectId');
   }
   const client = new mod.SecretManagerServiceClient(buildGcpClientOptions(options.endpoint));
+  // gax takes no abort signal: it gets the bound as its own call `timeout`
+  // (which cancels the gRPC call), and the deadline races the call as well.
+  const callOptions = deadline.timeoutMs === 0 ? {} : { timeout: deadline.timeoutMs };
+  const bounded = <T>(run: () => Promise<T>): Promise<T> =>
+    runSecretsCall(deadline, PROVIDER_NAME, run);
   return {
     async accessSecretVersion(name: string): Promise<string | null> {
       try {
-        const [res] = await client.accessSecretVersion({
-          name: `projects/${projectId}/secrets/${name}/versions/latest`,
-        });
+        const [res] = await bounded(() =>
+          client.accessSecretVersion(
+            { name: `projects/${projectId}/secrets/${name}/versions/latest` },
+            callOptions,
+          ),
+        );
         const data = res.payload?.data;
         if (data === null || data === undefined) {
           return null;
@@ -115,10 +164,26 @@ export function adaptGcpModule(
       }
     },
     async addSecretVersion(name: string, value: string): Promise<void> {
-      await client.addSecretVersion({
-        parent: `projects/${projectId}/secrets/${name}`,
-        payload: { data: new TextEncoder().encode(value) },
-      });
+      await bounded(() =>
+        client.addSecretVersion(
+          {
+            parent: `projects/${projectId}/secrets/${name}`,
+            payload: { data: new TextEncoder().encode(value) },
+          },
+          callOptions,
+        ),
+      );
+    },
+    // Non-mutating: lists at most one secret's metadata, never a value.
+    isHealthy(): Promise<boolean> {
+      return answered(() =>
+        bounded(() =>
+          client.listSecrets(
+            { parent: `projects/${projectId}`, pageSize: 1 },
+            { ...callOptions, autoPaginate: false },
+          ),
+        ),
+      );
     },
   };
 }
@@ -177,13 +242,16 @@ export async function loadGcpModule(): Promise<GcpSdkModule> {
  */
 export class GcpSecretManagerProvider implements SecretProvider {
   #client: IGcpSecretsClient | null = null;
+  /** `true` when the client was injected: its calls are bounded here, by race. */
+  #injected = false;
   readonly #options: GcpSecretManagerProviderOptions;
+  readonly #deadline: SecretsDeadline;
   /**
-   * Reachability probe, present only when the resolved client supplies one
-   * (M90b). The GCP SDK facade has no non-mutating probe of its own, so the
-   * adapted (lazy) path stays `undefined` and the indicator reports
-   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
-   * publishes real reachability.
+   * Reachability probe. The lazily adapted client lists at most one secret's
+   * metadata (`listSecrets`, non-mutating) and reads reachable when Secret
+   * Manager answers at all; an injected facade publishes its own `isHealthy`
+   * when it has one, and the indicator reports `reachable: 'unknown'` when it
+   * does not.
    *
    * @since 0.5.0
    */
@@ -191,9 +259,11 @@ export class GcpSecretManagerProvider implements SecretProvider {
 
   /**
    * @param options - GCP connection/injection options
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
   constructor(options?: GcpSecretManagerProviderOptions) {
     this.#options = options ?? {};
+    this.#deadline = resolveSecretsDeadline(this.#options.requestTimeoutMs, this.#options.timing);
   }
 
   async connect(): Promise<void> {
@@ -205,10 +275,12 @@ export class GcpSecretManagerProvider implements SecretProvider {
         );
       }
       this.#client = injected;
-      this.#attachProbe(injected);
-      return;
+      this.#injected = true;
+    } else {
+      this.#client = adaptGcpModule(await loadGcpModule(), this.#options, this.#deadline);
+      this.#injected = false;
     }
-    this.#client = adaptGcpModule(await loadGcpModule(), this.#options);
+    this.#attachProbe(this.#client);
   }
 
   disconnect(): Promise<void> {
@@ -221,10 +293,10 @@ export class GcpSecretManagerProvider implements SecretProvider {
   }
 
   /**
-   * Exposes the injected facade's optional probe, called through its OWNER
-   * so a facade reading instance state still resolves.
+   * Exposes the client's optional probe, called through its OWNER so a facade
+   * reading instance state still resolves.
    *
-   * @param client - The validated injected facade
+   * @param client - The resolved client
    */
   #attachProbe(client: IGcpSecretsClient): void {
     // Captured into a local before the guard so the closure keeps the
@@ -235,29 +307,40 @@ export class GcpSecretManagerProvider implements SecretProvider {
     }
   }
 
-  /**
-   * Reads a secret from GCP Secret Manager.
-   *
-   * @param name - The secret short name
-   * @returns The value, or `null` when absent
-   */
-  get(name: string): Promise<string | null> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('GcpSecretManagerProvider is not connected'));
+  /** Runs one client call, bounded here for an injected client, and classifies it. */
+  async #call<T>(operation: string, run: (client: IGcpSecretsClient) => Promise<T>): Promise<T> {
+    const client = this.#client;
+    if (client === null) throw new Error('GcpSecretManagerProvider is not connected');
+    try {
+      return this.#injected
+        ? await runSecretsCall(this.#deadline, PROVIDER_NAME, () => run(client))
+        : await run(client);
+    } catch (error) {
+      throw toSecretsError(error, PROVIDER_NAME, operation);
     }
-    return this.#client.accessSecretVersion(name);
   }
 
   /**
-   * Adds a new secret version.
+   * Reads the latest version of a secret.
    *
-   * @param name - The secret short name
+   * @param name - The secret name
+   * @returns The value, or `null` when absent
+   * @throws {SecretProviderUnavailableError} When Secret Manager cannot be
+   *   reached or does not answer within `requestTimeoutMs`
+   */
+  get(name: string): Promise<string | null> {
+    return this.#call('get', (client) => client.accessSecretVersion(name));
+  }
+
+  /**
+   * Adds a new version to a secret.
+   *
+   * @param name - The secret name
    * @param value - The new value
+   * @throws {SecretProviderUnavailableError} When Secret Manager cannot be
+   *   reached or does not answer within `requestTimeoutMs`
    */
   set(name: string, value: string): Promise<void> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('GcpSecretManagerProvider is not connected'));
-    }
-    return this.#client.addSecretVersion(name, value);
+    return this.#call('set', (client) => client.addSecretVersion(name, value));
   }
 }

@@ -60,8 +60,11 @@ interface Row {
   /**
    * Whether this source's `cancel()` always settles. The kernel waits for it
    * with no time limit, so one that hangs keeps the request's resources:
-   * `always`; `as-its-source` (it forwards to the stream it wraps);
-   * `may-hang` (named case); `unknown` (another library's stream).
+   * `always`; `as-its-source` (it forwards to the stream it wraps, or
+   * destroys that stream and awaits it, so it settles when a source that
+   * honours `destroy()` does); `may-hang` (named case: the gRPC rows await
+   * a handler generator they never end first); `unknown` (another
+   * library's stream).
    */
   readonly cancelSettles: 'always' | 'as-its-source' | 'may-hang' | 'unknown';
   /** The lane that owns a site outside Core that does not, or may not, meet the contract. */
@@ -173,6 +176,20 @@ const CONSTRUCTIONS: readonly Row[] = [
     evidence: /new ReadableStream<Uint8Array>\(\s*\{\s*start\(controller\)/,
   },
   {
+    // A pull stream over the GCS read iterator after its first chunk:
+    // `cancel()` destroys the source, then awaits the iterator's `return()`,
+    // so it settles when its source does. The SDK's stream ends a pending
+    // read on destroy; an injected source whose `return()` queues behind a
+    // pending read holds the cancel, and `createReadStream()`'s JSDoc makes
+    // ending that read the source's job.
+    file: 'packages/storage-plugin/src/providers/gcs-provider.ts',
+    count: 1,
+    cancelSettles: 'as-its-source',
+    kind: 'cancel-awaits-work',
+    evidence:
+      /async cancel\(\): Promise<void> \{\s*release\(\);\s*(?:\/\/[^\n]*\n\s*)*await iterator\.return\?\.\(\);/,
+  },
+  {
     // Node Readable adapter (pull waits for 'readable'), the eager iterable
     // pump (in start), and the event-push adapter. Each cancel sets a flag
     // and returns without awaiting.
@@ -189,7 +206,7 @@ const CONSTRUCTIONS: readonly Row[] = [
     count: 1,
     cancelSettles: 'always',
     kind: 'push',
-    evidence: /new ReadableStream\(\{\s*start\(controller\) \{\s*controller\.enqueue\(res\.Body\);/,
+    evidence: /new ReadableStream\(\{\s*start\(controller\) \{\s*controller\.enqueue\(body\);/,
   },
   {
     file: 'packages/storage-plugin/src/services/storage-service.ts',

@@ -41,6 +41,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
 
@@ -51,6 +52,7 @@ describe('SqsQueue', () => {
     it('throws QueueBackendUnavailableError on cloudflare-workers', async () => {
       const queue = new SqsQueue(createRuntime('cloudflare-workers'), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       });
 
       await expect(queue.connect()).rejects.toThrow(QueueBackendUnavailableError);
@@ -72,6 +74,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -95,6 +98,7 @@ describe('SqsQueue', () => {
     it('throws SqsQueueNotConfiguredError for unmapped name', async () => {
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       });
       await queue.connect();
 
@@ -113,6 +117,7 @@ describe('SqsQueue', () => {
     it('throws SqsDelayTooLongError when delay exceeds 900s', async () => {
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       });
       await queue.connect();
 
@@ -142,6 +147,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -173,6 +179,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -204,6 +211,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -250,6 +258,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -275,6 +284,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -295,6 +305,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -338,6 +349,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -348,7 +360,7 @@ describe('SqsQueue', () => {
       expect(deletedReceipt).toBe('handle-j1');
     });
 
-    it('ignores unknown id without throwing', async () => {
+    it('rejects unknown id', async () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () => Promise.resolve([]),
@@ -358,12 +370,15 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
 
-      // Should not throw even with unknown id
-      await queue.ack('jobs', 'nonexistent-id', 'claim-token');
+      // Absent claims cannot settle.
+      await expect(queue.ack('jobs', 'nonexistent-id', 'claim-token')).rejects.toThrow(
+        'queue job claim is stale',
+      );
     });
   });
 
@@ -390,6 +405,7 @@ describe('SqsQueue', () => {
       const runtime = createRuntime();
       const queue = new SqsQueue(runtime, {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -406,7 +422,7 @@ describe('SqsQueue', () => {
       expect(visibilitySeconds).toBe(60);
     });
 
-    it('ignores unknown id without throwing', async () => {
+    it('rejects unknown id', async () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () => Promise.resolve([]),
@@ -416,11 +432,14 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
 
-      await queue.requeue('jobs', 'nonexistent-id', 2000000, 2, 'claim-token');
+      await expect(
+        queue.requeue('jobs', 'nonexistent-id', 2000000, 2, 'claim-token'),
+      ).rejects.toThrow('queue job claim is stale');
     });
   });
 
@@ -462,7 +481,7 @@ describe('SqsQueue', () => {
       expect(deletedReceipt).toBe('handle-j1');
     });
 
-    it('deletes from source when no DLQ configured', async () => {
+    it('deletes from source with explicit discard', async () => {
       let deletedReceipt = '';
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
@@ -483,7 +502,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        // No deadLetterQueues
+        deadLetterQueues: { jobs: false },
         client: transport,
       });
       await queue.connect();
@@ -513,6 +532,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -538,6 +558,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -563,6 +584,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -588,6 +610,7 @@ describe('SqsQueue', () => {
       };
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -603,6 +626,7 @@ describe('SqsQueue', () => {
     it('throws when enqueue without connection', async () => {
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       });
 
       await expect(
@@ -620,6 +644,7 @@ describe('SqsQueue', () => {
     it('throws when reserve without connection', async () => {
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       });
 
       await expect(queue.reserve('jobs', 1, 1000000)).rejects.toThrow('not connected');
@@ -640,18 +665,24 @@ describe('SqsQueue', () => {
         createRuntime(),
         {
           queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.local/dead' },
           client: transport,
         },
         {
           error: (msg: string) => {
             logged = msg;
           },
+          warn: (msg: string) => {
+            logged = msg;
+          },
         },
       );
       await queue.connect();
 
-      await queue.ack('jobs', 'nonexistent', 'claim-token');
-      expect(logged).toContain('unknown or expired');
+      await expect(queue.ack('jobs', 'nonexistent', 'claim-token')).rejects.toThrow(
+        'queue job claim is stale',
+      );
+      expect(logged).toBe('');
     });
 
     it('logs requeue for unknown receipt handle', async () => {
@@ -667,18 +698,24 @@ describe('SqsQueue', () => {
         createRuntime(),
         {
           queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.local/dead' },
           client: transport,
         },
         {
           error: (msg: string) => {
             logged = msg;
           },
+          warn: (msg: string) => {
+            logged = msg;
+          },
         },
       );
       await queue.connect();
 
-      await queue.requeue('jobs', 'nonexistent', 2000000, 1, 'claim-token');
-      expect(logged).toContain('unknown or expired');
+      await expect(queue.requeue('jobs', 'nonexistent', 2000000, 1, 'claim-token')).rejects.toThrow(
+        'queue job claim is stale',
+      );
+      expect(logged).toBe('');
     });
 
     it('logs deadLetter for unknown receipt handle', async () => {
@@ -694,21 +731,27 @@ describe('SqsQueue', () => {
         createRuntime(),
         {
           queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.local/dead' },
           client: transport,
         },
         {
           error: (msg: string) => {
             logged = msg;
           },
+          warn: (msg: string) => {
+            logged = msg;
+          },
         },
       );
       await queue.connect();
 
-      await queue.deadLetter('jobs', 'nonexistent', 1000000, 'claim-token');
-      expect(logged).toContain('unknown or expired');
+      await expect(queue.deadLetter('jobs', 'nonexistent', 1000000, 'claim-token')).rejects.toThrow(
+        'queue job claim is stale',
+      );
+      expect(logged).toBe('');
     });
 
-    it('logs no DLQ configured when deleting', async () => {
+    it('warns on explicit discard', async () => {
       let logged = '';
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
@@ -728,11 +771,14 @@ describe('SqsQueue', () => {
         createRuntime(),
         {
           queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-          // No deadLetterQueues
+          deadLetterQueues: { jobs: false },
           client: transport,
         },
         {
           error: (msg: string) => {
+            logged = msg;
+          },
+          warn: (msg: string) => {
             logged = msg;
           },
         },
@@ -741,10 +787,10 @@ describe('SqsQueue', () => {
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
       await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
-      expect(logged).toContain('no DLQ configured');
+      expect(logged).toContain('deadLetterQueues[name] is false');
     });
 
-    it('logs DLQ send failure and leaves source undeleted', async () => {
+    it('rejects DLQ send failure and leaves source undeleted', async () => {
       let logged = '';
       let deletedReceipt = '';
       const transport: ISqsTransport = {
@@ -778,14 +824,19 @@ describe('SqsQueue', () => {
           error: (msg: string) => {
             logged = msg;
           },
+          warn: (msg: string) => {
+            logged = msg;
+          },
         },
       );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
+      await expect(
+        queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id),
+      ).rejects.toThrow('network error');
 
-      expect(logged).toContain('DLQ send to');
+      expect(logged).not.toContain('DLQ network error');
       // Source message should NOT be deleted when DLQ send fails
       expect(deletedReceipt).toBe('');
     });
@@ -821,12 +872,17 @@ describe('SqsQueue', () => {
           error: (msg: string) => {
             logged = msg;
           },
+          warn: (msg: string) => {
+            logged = msg;
+          },
         },
       );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
-      await queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id);
+      await expect(
+        queue.deadLetter('jobs', jobs[0].id, 1000000, jobs[0].claimToken ?? jobs[0].id),
+      ).rejects.toThrow('network error');
 
       // Source-delete failure logs duplicate-risk message
       expect(logged).toContain('possible duplicate on re-claim');
@@ -858,10 +914,14 @@ describe('SqsQueue', () => {
         createRuntime(),
         {
           queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.local/dead' },
           client: transport,
         },
         {
           error: (msg: string) => {
+            logged = msg;
+          },
+          warn: (msg: string) => {
             logged = msg;
           },
         },
@@ -903,8 +963,12 @@ describe('SqsQueue', () => {
       };
       return new SqsQueue(
         createRuntime(),
-        { queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' }, client: transport },
-        log === undefined ? undefined : { error: log },
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.local/dead' },
+          client: transport,
+        },
+        log === undefined ? undefined : { error: log, warn: log },
       );
     }
 
@@ -959,6 +1023,7 @@ describe('SqsQueue', () => {
       const transport = new FakeSqsTransport();
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -982,6 +1047,7 @@ describe('SqsQueue', () => {
       const transport = new FakeSqsTransport();
       const queue = new SqsQueue(createRuntime(), {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -1041,6 +1107,7 @@ describe('SqsQueue', () => {
       } as unknown as IRuntimeServices;
       const queue = new SqsQueue(runtime, {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       });
       await queue.connect();
@@ -1054,8 +1121,10 @@ describe('SqsQueue', () => {
       // so the receipt is NOT expired. Let's advance time past expiry.
       (runtime as unknown as { now: () => number }).now = () => 2000000;
 
-      // The entry should now be expired — ack returns early without deleting
-      await queue.ack('jobs', jobs[0].id, jobs[0].claimToken ?? jobs[0].id);
+      // The entry should now be expired — ack rejects without deleting
+      await expect(queue.ack('jobs', jobs[0].id, jobs[0].claimToken ?? jobs[0].id)).rejects.toThrow(
+        'queue job claim is stale',
+      );
       expect(deletedReceipt).toBe(''); // not deleted because entry expired
     });
   });
@@ -1069,6 +1138,7 @@ describe('SqsQueue — lazy SDK load', () => {
     const runtime = createRuntime();
     const queue = new SqsQueue(runtime, {
       queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
     });
 
     // The SDK module is cached in deno.lock, so connect() resolves (loadSqsModule
@@ -1326,6 +1396,7 @@ describe('C2: maxAttempts preserved', () => {
     };
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1413,6 +1484,7 @@ describe('SqsQueue stable identity and current receipt', () => {
 
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1462,6 +1534,7 @@ describe('SqsQueue stable identity and current receipt', () => {
 
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1481,8 +1554,10 @@ describe('SqsQueue stable identity and current receipt', () => {
     expect(deletedReceipts).toContain('receipt-B');
     expect(deletedReceipts).not.toContain('receipt-A');
 
-    // Stale ack with claimToken A should no-op (entry was overwritten)
-    await queue.ack('jobs', 'job-stable-1', claimTokenA);
+    // Stale ack with claimToken A must reject (entry was overwritten)
+    await expect(queue.ack('jobs', 'job-stable-1', claimTokenA)).rejects.toThrow(
+      'queue job claim is stale',
+    );
     expect(deletedReceipts).toHaveLength(1); // still only receipt-B
   });
 
@@ -1520,6 +1595,7 @@ describe('SqsQueue stable identity and current receipt', () => {
 
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1538,8 +1614,10 @@ describe('SqsQueue stable identity and current receipt', () => {
     expect(visibilityReceipts).toContain('receipt-B');
     expect(visibilityReceipts).not.toContain('receipt-A');
 
-    // Stale requeue with claimToken A should no-op
-    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, claimTokenA);
+    // Stale requeue with claimToken A must reject
+    await expect(queue.requeue('jobs', 'job-stable-1', 2000000, 2, claimTokenA)).rejects.toThrow(
+      'queue job claim is stale',
+    );
     expect(visibilityReceipts).toHaveLength(1); // still only receipt-B
   });
 
@@ -1639,6 +1717,7 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
 
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1649,7 +1728,9 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const claimTokenB = jobs[0].claimToken!;
 
     // Stale ack with receipt A's claim token (not B's)
-    await queue.ack('jobs', 'job-stable-1', 'stale-claim-token-A');
+    await expect(queue.ack('jobs', 'job-stable-1', 'stale-claim-token-A')).rejects.toThrow(
+      'queue job claim is stale',
+    );
 
     // Receipt B should NOT have been deleted
     expect(deletedReceipts).not.toContain('receipt-B');
@@ -1690,6 +1771,7 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
 
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost:9324/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1698,7 +1780,9 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const claimTokenB = jobs[0].claimToken!;
 
     // Stale requeue with A's claim token
-    await queue.requeue('jobs', 'job-stable-1', 2000000, 2, 'stale-claim-token-A');
+    await expect(
+      queue.requeue('jobs', 'job-stable-1', 2000000, 2, 'stale-claim-token-A'),
+    ).rejects.toThrow('queue job claim is stale');
 
     // Receipt B should NOT have been touched
     expect(visibilityReceipts).not.toContain('receipt-B');
@@ -1747,7 +1831,9 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const claimTokenB = jobs[0].claimToken!;
 
     // Stale deadLetter with A's claim token
-    await queue.deadLetter('jobs', 'job-stable-1', 1000000, 'stale-claim-token-A');
+    await expect(
+      queue.deadLetter('jobs', 'job-stable-1', 1000000, 'stale-claim-token-A'),
+    ).rejects.toThrow('queue job claim is stale');
 
     // Receipt B should NOT have been deleted
     expect(deletedReceipts).not.toContain('receipt-B');
@@ -1791,6 +1877,7 @@ describe('SqsQueue — B4 envelope validation', () => {
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1816,10 +1903,14 @@ describe('SqsQueue — B4 envelope validation', () => {
       createRuntime(),
       {
         queues: { jobs: 'http://localhost/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       },
       {
         error: (msg: string) => {
+          diagnostic = msg;
+        },
+        warn: (msg: string) => {
           diagnostic = msg;
         },
       },
@@ -1828,6 +1919,7 @@ describe('SqsQueue — B4 envelope validation', () => {
 
     const jobs = await queue.reserve('jobs', 10, 1000000);
     expect(jobs).toHaveLength(0);
+    await queue.disconnect(); // Drains detached unreadable retirement and its diagnostic.
     expect(diagnostic).toContain('invalid envelope');
   });
 
@@ -1844,6 +1936,7 @@ describe('SqsQueue — B4 envelope validation', () => {
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1865,6 +1958,7 @@ describe('SqsQueue — B4 envelope validation', () => {
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1886,6 +1980,7 @@ describe('SqsQueue — B4 envelope validation', () => {
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1909,10 +2004,12 @@ describe('SqsQueue — B4 envelope validation', () => {
       createRuntime(),
       {
         queues: { jobs: 'http://localhost/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       },
       {
         error: () => {},
+        warn: () => {},
       },
     );
     await queue.connect();
@@ -1941,6 +2038,7 @@ describe('SqsQueue — B4 envelope validation', () => {
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
+      deadLetterQueues: { jobs: 'https://sqs.local/dead' },
       client: transport,
     });
     await queue.connect();
@@ -1983,7 +2081,11 @@ it('skips malformed envelopes and stale settlements safely without a logger', as
     changeVisibility: () => Promise.resolve(),
     close: () => Promise.resolve(),
   };
-  const queue = new SqsQueue(createRuntime(), { queues: { jobs: 'url' }, client: transport });
+  const queue = new SqsQueue(createRuntime(), {
+    queues: { jobs: 'url' },
+    deadLetterQueues: { jobs: 'https://sqs.local/dead' },
+    client: transport,
+  });
   await queue.connect();
   await queue.connect();
   const jobs = await queue.reserve('jobs', 10, 1_000_000);
@@ -1991,11 +2093,15 @@ it('skips malformed envelopes and stale settlements safely without a logger', as
   expect(jobs[0]!.id).toBe('valid');
   expect(jobs[0]!.maxAttempts).toBe(3);
   for (const id of ['missing', 'valid']) {
-    await queue.ack('jobs', id, 'stale');
-    await queue.requeue('jobs', id, 1_000_000, 1, 'stale');
-    await queue.deadLetter('jobs', id, 1_000_000, 'stale');
+    await expect(queue.ack('jobs', id, 'stale')).rejects.toThrow('queue job claim is stale');
+    await expect(queue.requeue('jobs', id, 1_000_000, 1, 'stale')).rejects.toThrow(
+      'queue job claim is stale',
+    );
+    await expect(queue.deadLetter('jobs', id, 1_000_000, 'stale')).rejects.toThrow(
+      'queue job claim is stale',
+    );
   }
-  expect(deletions).toBe(0);
+  expect(deletions).toBe(5);
   await queue.disconnect();
   await queue.disconnect();
 });

@@ -9,10 +9,9 @@
  * that `completeMessage`/`abandonMessage` reach the service, and that the AMQP
  * link teardown this milestone repaired works against a live connection.
  *
- * Topics and subscriptions come from the emulator's `Config.json` — it is
- * config-driven and creates nothing at runtime, which is also why the RPC
- * reply-inbox case documents an emulator limitation rather than asserting a
- * successful round trip.
+ * The legacy cases use Config.json entities and the data endpoint as the
+ * default administration endpoint. Managed lifecycle cases below explicitly
+ * use the emulator's HTTP administration endpoint on port 5300.
  *
  * @module
  */
@@ -22,8 +21,65 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, ReplyInboxUnavailableError } from '../../src/index.ts';
+import { ServiceBusBroker, JsonSerializer } from '../../src/index.ts';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { untilReal } from '../fixtures/real-fan-out.ts';
 
 const connectionString = process.env['SERVICEBUS_CONNECTION_STRING'];
+
+describe(
+  'managed Service Bus consumer lifecycle',
+  { skip: !connectionString || !process.env['SERVICEBUS_ADMIN_CONNECTION_STRING'] },
+  () => {
+    it(
+      'holds retries, dead-letters the final attempt, and carries the measured zero-based count',
+      { timeout: 60000 },
+      async () => {
+        const { ServiceBusAdministrationClient, ServiceBusClient } =
+          await import('@azure/service-bus');
+        const adminConnectionString = process.env['SERVICEBUS_ADMIN_CONNECTION_STRING']!;
+        const admin = new ServiceBusAdministrationClient(adminConnectionString);
+        const data = new ServiceBusClient(connectionString!);
+        const topic = 'm143p-' + crypto.randomUUID();
+        const queue = 'm143p-consumer';
+        const starts: number[] = [];
+        const broker = new ServiceBusBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+          connectionString: connectionString!,
+          adminConnectionString,
+          consumerRetry: { maxAttempts: 3, delaysMs: [100, 200] },
+        });
+        const dead = data.createReceiver(topic, queue, { subQueueType: 'deadLetter' });
+        try {
+          await admin.createTopic(topic);
+          await admin.createSubscription(topic, queue);
+          await broker.connect();
+          await broker.subscribe(
+            topic,
+            () => {
+              starts.push(performance.now());
+              throw new Error('handler-secret-canary');
+            },
+            { queue },
+          );
+          await broker.publish(topic, { retained: true });
+          await untilReal(() => starts.length === 3);
+          const messages = await dead.receiveMessages(1, { maxWaitTimeInMs: 10000 });
+          expect(messages).toHaveLength(1);
+          expect(JSON.parse(messages[0]!.body as string)).toEqual({ retained: true });
+          expect(messages[0]!.deadLetterReason).toBe('setu-attempts-exhausted');
+          expect(starts[1]! - starts[0]!).toBeGreaterThanOrEqual(100);
+          expect(starts[2]! - starts[1]!).toBeGreaterThanOrEqual(200);
+          await dead.completeMessage(messages[0]!);
+        } finally {
+          await broker.disconnect();
+          await dead.close();
+          await data.close();
+          await admin.deleteTopic(topic);
+        }
+      },
+    );
+  },
+);
 
 /**
  * Entities declared in the emulator config this suite expects.
@@ -180,15 +236,15 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
 
   it('surfaces ReplyInboxUnavailableError when the broker refuses the admin operation', async () => {
     await withBroker(async (broker) => {
-      // The emulator is config-driven and supports NO management operations, so
+      // This app uses the AMQP data endpoint for administration too, so
       // `ServiceBusAdministrationClient.createSubscription` fails against it.
       // That makes it the one place the RPC reply inbox's failure path can be
       // exercised against a real broker rather than a fake: the design says a
       // refused create surfaces as a named error naming the topic and the
       // `Manage` right, and here it does.
       //
-      // RPC itself therefore cannot be round-tripped on the emulator. Against
-      // real Azure, where the management API exists, it is unverified.
+      // This legacy case intentionally omits the HTTP administration endpoint;
+      // it verifies the named refusal rather than a successful RPC round trip.
       let caught: unknown;
       try {
         await broker.request('math', { a: 1 }, { timeoutMs: 5000 });

@@ -1,3 +1,4 @@
+import { wantsFanOut, markFanOut, fanOutName } from './fan-out.ts';
 import type { KafkaSkipWindow } from './kafka-start-offsets.ts';
 import type {
   ISubscription,
@@ -472,6 +473,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#activeConsumers = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => {
+        const logger = this.#logger;
+        (logger?.warn ?? logger?.error)?.call(logger, message);
+      },
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
@@ -829,6 +834,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const independent = wantsFanOut(options);
     if (!this.#factory) {
       throw new Error('KafkaBroker is not connected');
     }
@@ -837,7 +843,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // Captured before the first await, so a `disconnect()` racing this call is
     // seen by the retry loop however early it lands (M101b).
     const generation = this.#generation;
-    const groupId = options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic);
+    const groupId = independent
+      ? fanOutName(this.#defaultQueue, this.#runtime.uuid())
+      : (options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic));
 
     let start: KafkaStartOffsets | null = null;
     let warned = false;
@@ -1078,22 +1086,25 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#activeConsumers.set(subscriptionId, activeConsumer);
     activeConsumer.run();
 
-    return {
-      unsubscribe: async (): Promise<void> => {
-        const consumer = this.#activeConsumers.get(subscriptionId);
-        if (consumer) {
-          try {
-            // Each subscription owns its consumer, so unsubscribing must
-            // release its connection too — this is also the path the RPC
-            // reply inbox closes through (M101b review).
-            await this.#releaseConsumer(consumer);
-          } catch {
-            // Ignore errors
+    return markFanOut(
+      {
+        unsubscribe: async (): Promise<void> => {
+          const consumer = this.#activeConsumers.get(subscriptionId);
+          if (consumer) {
+            try {
+              // Each subscription owns its consumer, so unsubscribing must
+              // release its connection too — this is also the path the RPC
+              // reply inbox closes through (M101b review).
+              await this.#releaseConsumer(consumer);
+            } catch {
+              // Ignore errors
+            }
+            this.#activeConsumers.delete(subscriptionId);
           }
-          this.#activeConsumers.delete(subscriptionId);
-        }
+        },
       },
-    };
+      independent,
+    );
   }
 
   /** Captures a fresh group’s watermarks before run; never writes committed offsets. */

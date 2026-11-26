@@ -214,6 +214,8 @@ export function onIntegrationEvent<T>(
 ): SubscriptionDefinition | RegistryFactory<SubscriptionDefinition> {
   const inbox = options?.inbox;
   if (inbox !== undefined) {
+    if (options?.fanOut === true)
+      throw new RangeError('onIntegrationEvent cannot combine inbox with fanOut');
     return inboxSubscription(definition, handler, options?.queue, inbox);
   }
   const wrapped: MessageHandler = async (

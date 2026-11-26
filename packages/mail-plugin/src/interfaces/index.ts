@@ -72,6 +72,8 @@ export interface ISmtpTransport {
       contentType?: string;
       /** Inline content id. @since 0.13.0 */
       cid?: string;
+      /** `'inline'` for an attachment the body references by `cid`. @since 0.14.0 */
+      contentDisposition?: 'inline';
     }[];
   }): Promise<unknown>;
   /**
@@ -83,6 +85,15 @@ export interface ISmtpTransport {
    * @since 0.1.0
    */
   verify?(): Promise<unknown>;
+  /**
+   * Closes the transport's pooled connections. nodemailer's real transport
+   * exposes this; the provider calls it on a transport it built itself, when
+   * `dnsTtlMs` replaces it or `disconnect()` retires it (after its sends settle).
+   * A transport passed in as `transport` is never closed.
+   *
+   * @since 0.14.0
+   */
+  close?(): void;
 }
 
 /**
@@ -197,6 +208,43 @@ export interface MailProviderOptions {
   auth?: { user: string; pass: string };
   /** (`smtp`) Injected transport facade; bypasses the lazy `nodemailer` import. */
   transport?: ISmtpTransport;
+  /**
+   * (`smtp`) How long to wait for the TCP connection, in milliseconds
+   * (nodemailer `connectionTimeout`; default 120000 ms). Also bounds each
+   * DNS refresh when `dnsTtlMs` is set.
+   *
+   * @since 0.14.0
+   */
+  connectionTimeoutMs?: number;
+  /**
+   * (`smtp`) How long to wait for the server's greeting, in milliseconds
+   * (nodemailer `greetingTimeout`).
+   *
+   * @since 0.14.0
+   */
+  greetingTimeoutMs?: number;
+  /**
+   * (`smtp`) How long an idle connection may stay silent, in milliseconds
+   * (nodemailer `socketTimeout`).
+   *
+   * @since 0.14.0
+   */
+  socketTimeoutMs?: number;
+  /**
+   * (`smtp`) Re-resolve the SMTP host through the runtime's DNS at most this
+   * often, in milliseconds, and connect to the address found. Absent:
+   * nodemailer resolves the host itself and caches the answer for 5 minutes,
+   * so a server that moves to a new address stays unreachable until then.
+   *
+   * @since 0.14.0
+   */
+  dnsTtlMs?: number;
+  /**
+   * (`ses` | `sendgrid`) Bound on one send, in milliseconds. Default `15000`.
+   *
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /** (`ses`) AWS region for the lazily-loaded client. */
   region?: string;
   /** (`ses`) AWS access key id for the lazily-loaded client. */
@@ -207,7 +255,11 @@ export interface MailProviderOptions {
   client?: ISesClient;
   /** (`sendgrid`) SendGrid API key sent as a Bearer token. */
   apiKey?: string;
-  /** (`sendgrid`) API endpoint. Default `https://api.sendgrid.com/v3/mail/send`. */
+  /**
+   * (`sendgrid` | `ses`) Endpoint. For `sendgrid` the full send URL, default
+   * `https://api.sendgrid.com/v3/mail/send`; for `ses` (since 0.14.0) the SES v2
+   * endpoint, default AWS.
+   */
   endpoint?: string;
   /** (`sendgrid`) Injected `fetch`-shaped function; defaults to global `fetch`. */
   http?: IMailHttp;

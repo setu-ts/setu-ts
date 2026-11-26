@@ -233,7 +233,12 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             throw new Error('SQS adapter requires options.sqs configuration');
           }
           const sqsLogger = resolveLogger(ctx);
-          adapter = new SqsQueue(ctx.runtime, options.sqs, sqsLogger ?? undefined);
+          adapter = new SqsQueue(
+            ctx.runtime,
+            options.sqs,
+            sqsLogger === undefined ? undefined : { error: sqsLogger.error, warn: sqsLogger.warn },
+            { maxAttempts: defaultMaxAttempts },
+          );
           break;
         }
         default:
@@ -263,9 +268,8 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // settlement evidence is the adapter's own property, known here because
       // this plugin constructed the adapter: a RabbitMQ job settles through an
       // AMQP `ack`, which the broker never confirms (its publishes are
-      // confirmed since 0.9.0, its acks cannot be), and SQS absorbs a lapsed
-      // claim or a failed dead-letter send, so a completed call there is
-      // recorded `unknown`.
+      // confirmed since 0.9.0, its acks cannot be). SQS retains its conservative
+      // unknown evidence classification; failed claims and forwards now reject.
       const observation =
         diagnosticsPolicy === null
           ? null
@@ -318,24 +322,20 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Register the service
       ctx.services.register<IQueue>(token, registrar);
 
-      // Declared processor INSTANCES register now, exactly as an imperative
-      // `process()` call made before this arm existed.
-      //
-      // UNLESS a behaviour FACTORY is declared. Registering a processor arms
-      // the poll loop, so a job already sitting in a durable queue can be
-      // reserved and dispatched before `onInit` resolved the factory
-      // behaviours — reaching the processor through a PARTIAL chain, skipping
-      // exactly the behaviours that needed a resolved capability. Deferring
-      // the whole set into the same `onInit` hook, after the chain is final,
-      // is what makes the arm's guarantee true. With no factory declared the
-      // chain is already complete here and the timing is unchanged.
-      // With no factory in the array, declared order IS registration order and
-      // the instances register here, at their pre-arm timing. With a factory
-      // present the WHOLE array is registered in `onInit` instead, in declared
-      // order — because `process()` is last-wins on a job name, and splitting
-      // the arms made `[factoryA, instanceB]` on one name resolve to factoryA,
-      // contradicting this option's own documented last-wins contract.
+      // Instances keep their register() timing when there are no processor
+      // factories. A behavior factory holds dispatch on chainReady until onInit,
+      // so registration never runs work through a partial behavior chain.
+      // With processor factories, register the WHOLE array in onInit in declared
+      // order: process() is last-wins, including mixed factories and instances.
       if (processorFactories.length === 0) {
+        try {
+          await Promise.all(
+            processorInstances.map((definition) => service.prepare(definition.name)),
+          );
+        } catch (error) {
+          await service.disconnect();
+          throw error;
+        }
         for (const definition of processorInstances) {
           registrar.process(
             definition.name,
@@ -384,7 +384,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // configured: with instances alone there is nothing to resolve, so a
       // zero-factory configuration gains no lifecycle hook at all.
       if (processorFactories.length > 0 || behaviorFactories.length > 0) {
-        ctx.lifecycle.onInit(() => {
+        ctx.lifecycle.onInit(async () => {
           try {
             // The chain is completed FIRST, before any factory processor is
             // registered below.
@@ -405,21 +405,23 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             // DECLARED order, walking the original array — not instances then
             // factories — so the last entry for a job name wins, as documented.
             if (processorFactories.length > 0) {
-              processors.forEach((entry, index) => {
-                const definition =
-                  typeof entry === 'function'
-                    ? resolveRegistryEntry(
-                        entry,
-                        ctx.services,
-                        `QueuePlugin({ processors })[${index}]`,
-                      )
-                    : entry;
+              const definitions = processors.map((entry, index) =>
+                typeof entry === 'function'
+                  ? resolveRegistryEntry(
+                      entry,
+                      ctx.services,
+                      `QueuePlugin({ processors })[${index}]`,
+                    )
+                  : entry,
+              );
+              await Promise.all(definitions.map((definition) => service.prepare(definition.name)));
+              for (const definition of definitions) {
                 registrar.process(
                   definition.name,
                   (job) => definition.processor(job),
                   definition.options,
                 );
-              });
+              }
             }
 
             // LAST: the chain is final, so any job held during startup may run.
@@ -498,7 +500,9 @@ class BehaviorChainQueueService extends QueueService {
  * @param ctx - The plugin context
  * @returns A logger surface, or `undefined`
  */
-function resolveLogger(ctx: IPluginContext): QueueLogger | undefined {
+function resolveLogger(
+  ctx: IPluginContext,
+): (QueueLogger & { warn: NonNullable<QueueLogger['warn']> }) | undefined {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) {
     return undefined;
   }

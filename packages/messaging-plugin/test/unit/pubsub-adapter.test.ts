@@ -134,7 +134,7 @@ describe('adaptPubSubModule', () => {
         }
         return {
           on(
-            event: 'message' | 'error',
+            event: 'message' | 'error' | 'close',
             handler: (msg: {
               ack: () => void;
               nack: () => void;
@@ -557,7 +557,7 @@ describe('adaptPubSubModule', () => {
       return {
         ...sub,
         on: (
-          event: 'message' | 'error',
+          event: 'message' | 'error' | 'close',
           handler: (msg: {
             ack: () => void;
             nack: () => void;
@@ -613,7 +613,7 @@ describe('adaptPubSubModule', () => {
       return {
         ...sub,
         on: (
-          event: 'message' | 'error',
+          event: 'message' | 'error' | 'close',
           handler: (msg: {
             ack: () => void;
             nack: () => void;

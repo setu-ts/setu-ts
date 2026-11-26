@@ -779,7 +779,7 @@ describe('ServiceBusBroker', () => {
   });
 
   describe('logger on handler error', () => {
-    it('renders aggregate handler members into the string logger sink', async () => {
+    it('reports handler failure without exception text', async () => {
       let logged = '';
       let onMessageCb:
         ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
@@ -801,6 +801,7 @@ describe('ServiceBusBroker', () => {
         },
         {
           client: transport,
+          consumerRetry: false,
           logger: {
             error: (msg: string) => {
               logged = msg;
@@ -817,8 +818,7 @@ describe('ServiceBusBroker', () => {
       onMessageCb!({ payload: '{}', ack: () => {}, nack: () => {} });
       await Promise.resolve();
       await Promise.resolve();
-      expect(logged).toContain('handler-error');
-      expect(logged).toContain('driver-error');
+      expect(logged).toBe('Service Bus handler failed');
     });
   });
 

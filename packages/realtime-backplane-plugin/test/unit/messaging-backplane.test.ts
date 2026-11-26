@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setImmediate } from 'node:timers/promises';
 import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 
 /**
@@ -34,6 +35,7 @@ class FakeBroker implements IMessageBroker {
     this.subscribedTopics.push(topic);
     this.#handler = handler as MessageHandler<unknown>;
     const subscription: ISubscription = {
+      fanOut: true,
       unsubscribe: (): Promise<void> => {
         this.unsubscribeCount++;
         this.#handler = undefined;
@@ -286,5 +288,153 @@ describe('MessagingBackplane isHealthy (M90b / X21-1)', () => {
   it('stays undefined when the broker has no probe — unknown, not false', () => {
     const backplane = new MessagingBackplane(new FakeBroker(), 'origin-a', 'frames');
     expect(backplane.isHealthy).toBeUndefined();
+  });
+});
+
+describe('messaging backplane independent delivery and frame age', () => {
+  it.each([false, true])(
+    'preserves a refused subscription cleanup failure, closed=%s',
+    async (closed) => {
+      const broker = new FakeBroker();
+      const cause = new Error('cleanup-secret');
+      vi.spyOn(broker, 'subscribe').mockResolvedValue({ unsubscribe: () => Promise.reject(cause) });
+      const plane = new MessagingBackplane(broker, 'a', 'frames');
+      const opening = plane.connect();
+      if (closed) await plane.close();
+      const refusal = await opening.catch((error: unknown) => error);
+      if (closed) expect(refusal).toBe(cause);
+      else {
+        expect(refusal).toBeInstanceOf(Error);
+        expect((refusal as Error).name).toBe('BackplaneFanOutUnsupportedError');
+        expect((refusal as Error).cause).toBe(cause);
+        expect((refusal as Error).message).not.toContain('cleanup-secret');
+      }
+      await plane.close();
+    },
+  );
+  it('rejects a synchronously throwing broker subscribe through the promise contract', async () => {
+    const broker = new FakeBroker();
+    const cause = new Error('subscribe failed');
+    vi.spyOn(broker, 'subscribe').mockImplementation(() => {
+      throw cause;
+    });
+    await expect(new MessagingBackplane(broker, 'a', 'frames').connect()).rejects.toBe(cause);
+  });
+  it('requests fanOut and refuses an unconfirmed competing subscription', async () => {
+    const broker = new FakeBroker();
+    const unsubscribe = vi.fn(() => Promise.resolve());
+    const subscribe = vi.spyOn(broker, 'subscribe').mockResolvedValue({ unsubscribe });
+    const backplane = new MessagingBackplane(broker, 'a', 'frames');
+    await expect(backplane.connect()).rejects.toThrow('competing subscription');
+    expect(subscribe).toHaveBeenCalledWith('frames', expect.any(Function), { fanOut: true });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    await backplane.close();
+  });
+
+  it.each([0, 100])(
+    'stamps outgoing frames and applies maxFrameAgeMs=%s before dispatch',
+    async (max) => {
+      const broker = new FakeBroker();
+      let now = 0;
+      const warn = vi.fn();
+      const backplane = new MessagingBackplane(
+        broker,
+        'node-a',
+        'frames',
+        { failed: vi.fn(), succeeded: vi.fn(), warn },
+        () => now,
+        max,
+      );
+      await backplane.connect();
+      await backplane.publish({ ...FRAME, origin: 'node-a' });
+      expect(broker.published[0]!.message).toEqual({ ...FRAME, origin: 'node-a', sentAtMs: 0 });
+      const delivered = vi.fn();
+      await backplane.subscribe(delivered);
+      now = 1000;
+      broker.deliver({ ...FRAME, sentAtMs: 0 });
+      expect(delivered).toHaveBeenCalledTimes(max === 0 ? 1 : 0);
+      broker.deliver({ ...FRAME, sentAtMs: now });
+      expect(delivered).toHaveBeenLastCalledWith(FRAME);
+      expect(warn).toHaveBeenCalledTimes(max === 0 ? 0 : 2);
+      const before = warn.mock.calls.length;
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(new Error('remote-secret'));
+      await expect(backplane.publish(FRAME)).rejects.toThrow('remote-secret');
+      expect(warn).toHaveBeenCalledTimes(before);
+      const timeout = Object.assign(new Error('timed out'), { name: 'PublishTimeoutError' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(timeout);
+      await expect(backplane.publish(FRAME)).rejects.toBe(timeout);
+      expect(warn.mock.calls.at(-1)![0]).toContain('may still arrive late');
+      const afterTimeout = warn.mock.calls.length;
+      await backplane.publish(FRAME);
+      const lost = new BackendOutcomeUnknownError('broker', { cause: new Error('lost') });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(lost);
+      await expect(backplane.publish(FRAME)).rejects.toBe(lost);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 1);
+      await backplane.publish(FRAME);
+      const reset = Object.assign(new Error('socket reset'), { code: 'ECONNRESET' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(reset);
+      await expect(backplane.publish(FRAME)).rejects.toBe(reset);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 2);
+      await backplane.publish(FRAME);
+      // A same-named error from another copy of @setu-ts/common.
+      const foreign = Object.assign(new Error('lost'), { name: 'BackendOutcomeUnknownError' });
+      vi.spyOn(broker, 'publish').mockRejectedValueOnce(foreign);
+      await expect(backplane.publish(FRAME)).rejects.toBe(foreign);
+      expect(warn).toHaveBeenCalledTimes(afterTimeout + 3);
+      expect(warn.mock.calls.at(-1)![0].includes('drop frames')).toBe(max > 0);
+      await backplane.close();
+    },
+  );
+
+  it('coalesces pending opens and closes a handle arriving after close', async () => {
+    const broker = new FakeBroker();
+    const pending = Promise.withResolvers<ISubscription>();
+    vi.spyOn(broker, 'subscribe').mockReturnValueOnce(pending.promise);
+    const backplane = new MessagingBackplane(broker, 'a', 'frames');
+    const a = backplane.connect();
+    const b = backplane.connect();
+    expect(b).toBe(a);
+    await backplane.close();
+    const unsubscribe = vi.fn(() => Promise.resolve());
+    pending.resolve({ fanOut: true, unsubscribe });
+    await a;
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    await backplane.connect();
+    await backplane.close();
+  });
+
+  it('rethrows a hostile publish rejection unchanged and logs no warning', async () => {
+    const broker = new FakeBroker();
+    const warn = vi.fn();
+    const backplane = new MessagingBackplane(
+      broker,
+      'node-a',
+      'frames',
+      { failed: vi.fn(), succeeded: vi.fn(), warn },
+      () => 0,
+    );
+    await backplane.connect();
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    vi.spyOn(broker, 'publish').mockRejectedValueOnce(proxy);
+    await expect(backplane.publish(FRAME)).rejects.toBe(proxy);
+    expect(warn).not.toHaveBeenCalled();
+    await backplane.close();
+  });
+
+  it('a connect after close does not reuse the stale pending open', async () => {
+    const broker = new FakeBroker();
+    const stale = Promise.withResolvers<ISubscription>();
+    const subscribe = vi.spyOn(broker, 'subscribe').mockReturnValueOnce(stale.promise);
+    const backplane = new MessagingBackplane(broker, 'a', 'frames');
+    const first = backplane.connect();
+    await backplane.close();
+    const second = backplane.connect();
+    expect(second).not.toBe(first);
+    stale.resolve({ fanOut: true, unsubscribe: vi.fn(() => Promise.resolve()) });
+    await first;
+    await second;
+    expect(subscribe).toHaveBeenCalledTimes(2);
+    await backplane.close();
   });
 });

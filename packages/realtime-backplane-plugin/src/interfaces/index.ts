@@ -196,6 +196,14 @@ export interface MemoryBackplaneOptions extends BackplaneCommonOptions {
  * @since 0.2.0
  */
 export interface MessagingBackplaneOptions extends BackplaneCommonOptions {
+  /**
+   * Opt-in maximum frame age in milliseconds; default 0 disables filtering.
+   * Frames without a finite timestamp remain deliverable.
+   * @returns The configured receiver age bound
+   * @throws {RangeError} At construction if outside 0..2147483647
+   * @since 0.14.0
+   */
+  readonly maxFrameAgeMs?: number;
   /** Transport discriminant. */
   transport: 'messaging';
 }
@@ -206,6 +214,14 @@ export interface MessagingBackplaneOptions extends BackplaneCommonOptions {
  * @since 0.2.0
  */
 export interface RedisBackplaneOptions extends BackplaneCommonOptions {
+  /**
+   * Opt-in maximum frame age in milliseconds; default 0 disables filtering.
+   * Frames without a finite timestamp remain deliverable.
+   * @returns The configured receiver age bound
+   * @throws {RangeError} At construction if outside 0..2147483647
+   * @since 0.14.0
+   */
+  readonly maxFrameAgeMs?: number;
   /** Transport discriminant. */
   transport: 'redis';
   /**
@@ -235,7 +251,8 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * log the failure, and an observed publish is never recorded. A
    * disconnected server is unaffected: since 0.13.0 the publisher this
    * transport builds has no offline queue, so a publish while it reconnects is
-   * refused at once and the frame is lost, never delivered late.
+   * refused at once. A command already written can still arrive late after a
+   * timeout; maxFrameAgeMs opts the receiver into dropping stamped late frames.
    *
    * The same bound limits how long `connect()` waits for the built publisher
    * to become ready (since 0.13.0); with `0` that wait ends only when the

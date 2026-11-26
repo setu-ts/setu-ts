@@ -33,6 +33,14 @@ export interface QueueDepths {
  */
 export interface QueueAdapter {
   /**
+   * Proves this consumed name is safe before polling. Not barrel-exported.
+   * @param name - Consumed name
+   * @returns Resolves after preparation
+   * @throws {Error} If consumption must be refused
+   * @since 0.14.0
+   */
+  prepareConsumer?(name: string): Promise<void>;
+  /**
    * Optional renewed delivery lease. Absent when the backend cannot renew.
    * `extend` returns false when the claim no longer belongs to this delivery.
    */
@@ -176,11 +184,18 @@ export interface QueueAdapter {
    * @param id - Job ID (stable public identity)
    * @param nowMs - Current timestamp in ms (for dead-letter timestamp)
    * @param claimToken - Opaque claim token returned from reserve (prevents stale settlement)
-   * @returns Resolves when dead-lettered
+   * @param reason - Final processor failure or dead-worker abandonment
+   * @returns Resolves after retention, or discarded after an explicit opt-out delete
    * @throws {Error} If the adapter is not connected
    * @since 0.1.0
    */
-  deadLetter(name: string, id: string, nowMs: number, claimToken: string): Promise<void>;
+  deadLetter(
+    name: string,
+    id: string,
+    nowMs: number,
+    claimToken: string,
+    reason?: 'attempts-exhausted' | 'abandoned',
+  ): Promise<void | 'discarded'>;
 
   /**
    * Stores a recurring job.
