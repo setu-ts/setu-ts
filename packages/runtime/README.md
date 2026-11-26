@@ -349,6 +349,10 @@ reported). Deno cannot tell, and reports it. On Bun the observer assumes the def
 observes no later one. The ceiling and Deno's drain statements go through the adapter's
 `reportError` channel.
 
+Bun filesystem methods reject with the original filesystem error, preserving codes such as `ENOENT`
+and `EACCES`; the default host no longer turns failures into null/false. Legacy injected hosts
+returning null for absent read/stat/resolve operations yield an `ENOENT` error.
+
 ## Exports
 
 ### `@setu-ts/runtime`

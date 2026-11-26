@@ -273,7 +273,7 @@ describe('createBoundedNodeStream', () => {
   });
 });
 
-// ── createEagerIterableStream (the GCS/Azure wrapper) ──────────────────────
+// ── createEagerIterableStream (the Azure wrapper) ──────────────────────────
 
 describe('createEagerIterableStream', () => {
   it('drains the iterable eagerly and closes when done', async () => {

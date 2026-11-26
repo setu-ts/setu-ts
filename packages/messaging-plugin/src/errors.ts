@@ -7,6 +7,56 @@
  */
 import { withHttpStatusHint } from '@setu-ts/common';
 
+/** A required RabbitMQ route returned the publication without accepting it. @since 0.14.0 */
+export class UnroutableMessageError extends Error {
+  /**
+   * @param topic - Destination exchange or topic
+   * @param routingKey - Unroutable routing key
+   * @returns The routing refusal
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor(topic: string, routingKey: string) {
+    super(
+      `RabbitMQ message to topic ${JSON.stringify(topic)} with routing key ${JSON.stringify(routingKey)} is unroutable`,
+    );
+    this.name = 'UnroutableMessageError';
+  }
+}
+
+/** Outbox activation requires publisher confirms on RabbitMQ. @since 0.14.0 */
+export class OutboxPublisherConfirmsRequiredError extends Error {
+  /**
+   * @returns The startup refusal
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor() {
+    super(
+      'RabbitMQ outbox requires publisher confirms and return listeners; inject a connection providing createConfirmChannel() with on/off listeners',
+    );
+    this.name = 'OutboxPublisherConfirmsRequiredError';
+  }
+}
+
+/** A newly created Pub/Sub subscription has no existing dead-letter topic. @since 0.14.0 */
+export class PubSubDeadLetterTopicMissingError extends Error {
+  /**
+   * @param topic - Missing dead-letter topic
+   * @param cause - Original subscription creation failure
+   * @returns The startup refusal
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor(topic: string, cause: unknown) {
+    super(
+      `Pub/Sub dead-letter topic ${JSON.stringify(topic)} does not exist; create it before consuming`,
+      { cause },
+    );
+    this.name = 'PubSubDeadLetterTopicMissingError';
+  }
+}
+
 /**
  * Thrown by {@link IMessageBroker.request} when no correlated reply arrives
  * within the configured `timeoutMs` window. The pending request is abandoned

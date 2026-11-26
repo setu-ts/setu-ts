@@ -1,3 +1,4 @@
+import { PUBLISH_REQUIRE_ROUTE } from '../brokers/publish-options.ts';
 /**
  * One sweep of one store's pending set (M107 §3.6–§3.9).
  *
@@ -230,7 +231,11 @@ function spanOptionsFor(record: OutboxRecord): SpanOptions {
 
 /** Publishes one decoded row, inside a relay span when telemetry is present. */
 function publish(ctx: RelayContext, record: OutboxRecord, row: DecodedOutboxRow): Promise<void> {
-  const send = () => ctx.broker.publish(row.topic, row.envelope, row.options);
+  const send = () =>
+    ctx.broker.publish(row.topic, row.envelope, {
+      ...row.options,
+      [PUBLISH_REQUIRE_ROUTE]: true,
+    } as import('@setu-ts/common').PublishOptions);
   if (ctx.telemetry === undefined) return send();
   return ctx.telemetry.withSpan(`outbox relay ${row.topic}`, send, spanOptionsFor(record));
 }

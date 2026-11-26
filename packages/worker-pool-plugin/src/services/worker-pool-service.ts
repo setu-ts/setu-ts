@@ -16,7 +16,12 @@ import type { WorkerPoolPluginOptions } from '../interfaces/index.ts';
 import { WorkerPoolUnavailableError } from '../errors.ts';
 import { TaskPool } from '../pool/task-pool.ts';
 import { WorkerBudget } from '../pool/worker-budget.ts';
-import { assertTaskTimeout, readSizingOptions, resolveMaxWorkers } from './sizing.ts';
+import {
+  assertAbortSignal,
+  assertTaskTimeout,
+  readSizingOptions,
+  resolveMaxWorkers,
+} from './sizing.ts';
 import type { SizingSnapshot } from './sizing.ts';
 import type { WorkerPoolCollector } from '../metrics/worker-pool-collector.ts';
 import { TaskLabels } from '../metrics/task-label.ts';
@@ -174,20 +179,27 @@ export class WorkerPoolService implements IWorkerPool {
    * support
    * @throws {RangeError} When `options.timeoutMs` is not `0` or a positive
    * integer no greater than 2 147 483 647 (the call is rejected, not admitted)
+   * @throws {TypeError} When `options.signal` is given and is not an
+   * `AbortSignal` (the call is rejected, not admitted)
    */
   run<TInput, TOutput>(
     taskModule: string,
     input: TInput,
     options?: WorkerRunOptions,
   ): Promise<TOutput> {
-    // Read once: the value checked is the value the pool uses.
-    const timeoutMs: unknown = options?.timeoutMs;
+    // Read once: the value checked is the value the pool uses. Read inside the
+    // try, so a throwing getter is a rejection, not a synchronous throw.
+    let timeoutMs: unknown;
+    let signal: unknown;
     try {
+      timeoutMs = options?.timeoutMs;
+      signal = options?.signal;
       assertTaskTimeout(timeoutMs, 'timeoutMs');
+      assertAbortSignal(signal);
     } catch (error) {
       // Refused before admission and before any pool exists. Not counted in
-      // worker_pool_tasks_rejected_total: that series' reasons describe pool
-      // state, and an invalid argument says nothing about the pool.
+      // worker_pool_tasks_rejected_total: invalid arguments are outside its
+      // vocabulary of pool-state refusals and caller cancellation.
       return Promise.reject(error);
     }
     if (this.closed) {
@@ -216,7 +228,11 @@ export class WorkerPoolService implements IWorkerPool {
     }
     // The worker protocol erases types across the thread boundary; the cast
     // re-attaches the caller's declared output type.
-    return pool.run(input, timeoutMs as number | undefined) as Promise<TOutput>;
+    return pool.run(
+      input,
+      timeoutMs as number | undefined,
+      signal as AbortSignal | undefined,
+    ) as Promise<TOutput>;
   }
 
   /**

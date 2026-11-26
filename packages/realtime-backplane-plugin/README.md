@@ -66,8 +66,18 @@ errors, oldest first. Delivery continues to other subscribers when a handler thr
 RealtimeBackplanePlugin({ transport: 'messaging' });
 ```
 
-Publishes over whatever broker is registered under `CAPABILITIES.MESSAGING` — in-memory, Redis
-Streams, RabbitMQ, NATS, or Kafka. Configuring it with no messaging capability registered throws
+Publishes over whatever broker is registered under `CAPABILITIES.MESSAGING`. Every replica must
+receive every frame, so since 0.14.0 the transport subscribes with `fanOut: true` and checks that
+the broker answered with a fan-out subscription: in-memory, Redis Streams, RabbitMQ, NATS, Kafka,
+Pub/Sub and Service Bus do (see the messaging plugin's "Fan-out subscriptions"). Before 0.14.0 a
+shared consumer group on Kafka, NATS, Redis Streams, Pub/Sub and Service Bus handed each frame to
+one replica only, so most replicas missed it. A broker that does not confirm fan-out (Cloudflare's
+`WorkersBroker`, or a `custom` broker that ignores the option) makes `register()` throw
+`BackplaneFanOutUnsupportedError`, so the application refuses to start; use the `'redis'` transport,
+or on Workers the Durable Object backplane. A broker that cannot create the fan-out subscription
+fails `register()` with its own error instead: a Redis Streams client without `xread` or `xrevrange`
+with a `TypeError` naming the method, Service Bus without the `Manage` right with the SDK's
+authorization error. Configuring the transport with no messaging capability registered also throws
 during `register()` rather than failing silently per request.
 
 ### `'redis'`
@@ -102,19 +112,20 @@ from the start. See
 
 ## Options
 
-| Option                    | Applies to         | Default                  | Description                                                                                                                                                       |
-| ------------------------- | ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                   | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
-| `origin`                  | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
-| `bus`                     | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
-| `url`                     | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
-| `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
-| `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
-| `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
-| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                   |
-| `instance`                | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
-| `localNotice`             | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
-| `diagnostics`             | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
+| Option                    | Applies to               | Default                  | Description                                                                                                                                                                               |
+| ------------------------- | ------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                   | all but memory           | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                              |
+| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                       |
+| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                        |
+| `url`                     | `'redis'`                | —                        | Connection URL, used only on the lazy-load path                                                                                                                                           |
+| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair; required together                                                                                                                                                   |
+| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                           |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations                         |
+| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | Opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this many milliseconds by the receiver's clock. `0` delivers every frame. Must be `0`–`2147483647`. See Limitations |
+| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                                           |
+| `instance`                | `'custom'`               | —                        | The transport to register, used as-is                                                                                                                                                     |
+| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                                            |
+| `diagnostics`             | all but `'custom'`       | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                                            |
 
 ## Diagnostics (M98l)
 
@@ -155,8 +166,25 @@ approved development dataset: counts aggregate every tenant using the instance.
 IDs come from `runtime.uuid()` and are globally unique, so the frame carries the excluded ID and
 each replica skips the matching member.
 
-Delivery is at-most-once and inherits the transport's guarantees. On `'redis'`, a frame published
-while a connection is down is **lost, never delivered late**:
+Delivery is at-most-once and inherits the transport's guarantees. A frame can be lost, and it can
+also arrive late: a publish already written to a server that then pauses is executed when the server
+resumes, so the frame arrives up to the length of the pause late (measured up to 20 s), on `'redis'`
+and on `'messaging'` over RabbitMQ alike, while the sender logged the publish as failed.
+
+**`maxFrameAgeMs` (opt-in).** Since 0.14.0 every frame the `'redis'` and `'messaging'` transports
+send through the plugin carries the sender's wall-clock time (`sentAtMs`, removed before a handler
+sees the frame; a 0.13.0 receiver ignores it). `createBackplane`, `MessagingBackplane` or
+`RedisBackplane` called without a `now` clock sends unstamped frames. With `maxFrameAgeMs` above
+`0`, a receiver drops a frame older than that by its own clock, and logs one `warn` when it starts
+dropping and one when it accepts frames again. It relies on the replicas' clocks agreeing (NTP keeps
+them within milliseconds); a replica with a skewed clock drops or keeps frames wrongly, which the
+warning names as a possible cause. It is off by default, as in the Socket.IO, Phoenix and Action
+Cable backplanes. A publish whose outcome is unknown (it timed out, or the connection was lost after
+the write) logs one `warn` per failing state saying the frame may still arrive late (and, with
+`maxFrameAgeMs` on, that receivers drop it if it is older than the bound). A RabbitMQ channel that
+closes before its publish confirm logs no such warning.
+
+On `'redis'`, a frame published while a connection is down is lost:
 
 - **A dropped connection: the publish is refused at once.** Since 0.13.0 the publisher connection
   this plugin builds has no offline queue (`enableOfflineQueue: false`), so a publish while it is
@@ -197,9 +225,9 @@ while a connection is down is **lost, never delivered late**:
 Frames are never persisted or replayed. `commandTimeoutMs` is the only ioredis setting reachable
 through this plugin's options, and applies only on the lazy path — an application that needs
 different behaviour, or injects its own `client`/`subscriber` pair, configures those clients
-directly. To keep the lost-not-late behaviour with an injected pair, create the ioredis publisher
-with `enableOfflineQueue: false`, or a node-redis client with `disableOfflineQueue: true`; a client
-that queues delivers late as described above.
+directly. To keep a publish refused while the connection is down with an injected pair, create the
+ioredis publisher with `enableOfflineQueue: false`, or a node-redis client with
+`disableOfflineQueue: true`; a client that queues delivers late as described above.
 
 ## Documentation
 
@@ -239,6 +267,7 @@ reports `'unknown'`.
 | `isRealtimeFrame`                  | function  |
 | `loadRedisModule`                  | function  |
 | `RealtimeBackplanePlugin`          | function  |
+| `BackplaneFanOutUnsupportedError`  | class     |
 | `MemoryBackplane`                  | class     |
 | `MessagingBackplane`               | class     |
 | `RedisBackplane`                   | class     |
@@ -257,6 +286,7 @@ reports `'unknown'`.
 | `RealtimeDiagnosticsOptions`       | interface |
 | `RealtimeFrame`                    | interface |
 | `RedisBackplaneOptions`            | interface |
+| `BackplaneReporter`                | type      |
 | `RealtimeBackplanePluginOptions`   | type      |
 | `RealtimeFrameHandler`             | type      |
 | `RealtimeFrameKind`                | type      |

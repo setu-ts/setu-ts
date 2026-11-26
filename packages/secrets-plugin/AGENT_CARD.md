@@ -44,5 +44,7 @@ export const secrets = SecretsPlugin({
 - `provider` also selects `'aws-kms'`, `'gcp'`, `'azure'` or `'vault'`; cloud providers lazy-load
   SDKs.
 - Cloud `options.client` injects the provider's facade and bypasses its SDK import.
-- Vault stores the KV v2 `value` field; `requestTimeoutMs` defaults to 5000 milliseconds.
+- Vault stores the KV v2 `value` field. `requestTimeoutMs` (5000 ms) bounds every remote arm; an
+  outage, including Vault HTTP 5xx, is `SecretProviderUnavailableError` (503). Azure also needs
+  `@azure/identity`.
 - `rotate` can create missing Vault and Azure names; AWS and GCP names must already exist.

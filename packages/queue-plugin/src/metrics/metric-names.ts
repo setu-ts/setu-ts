@@ -51,7 +51,7 @@ export type QueueCounterName = typeof QUEUE_METRICS.JOBS;
  */
 export const COUNTER_OPTIONS: Readonly<Record<QueueCounterName, MetricOptions>> = {
   [QUEUE_METRICS.JOBS]: {
-    help: 'Total queue jobs settled, by outcome (completed, retried, dead_lettered)',
+    help: 'Total queue jobs settled, by outcome (completed, retried, dead_lettered, discarded)',
     labels: [JOB_NAME_LABEL, OUTCOME_LABEL],
   },
 };

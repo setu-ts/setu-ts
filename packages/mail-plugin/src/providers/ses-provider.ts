@@ -6,9 +6,12 @@
  *
  * @module
  */
+import type { DeadlineOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISesClient, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
+import type { MailDeadline } from './bounded-send.ts';
+import { resolveMailDeadline, runMailCall, toMailError } from './bounded-send.ts';
 
 /** Methods an injected SES client facade must expose. */
 const REQUIRED_METHODS = ['sendEmail'] as const;
@@ -16,9 +19,11 @@ const REQUIRED_METHODS = ['sendEmail'] as const;
 /** The subset of the AWS SESv2 SDK the adapter uses. */
 export interface SesSdkModule {
   SESv2Client: new (config: Record<string, unknown>) => {
-    send(command: unknown): Promise<unknown>;
+    send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
   };
   SendEmailCommand: new (input: Record<string, unknown>) => unknown;
+  /** Present in `@aws-sdk/client-sesv2`; a fake module without it gets no probe. */
+  GetAccountCommand?: new (input: Record<string, never>) => unknown;
 }
 
 /**
@@ -33,6 +38,31 @@ export interface SesProviderOptions {
   accessKeyId?: string | undefined;
   /** AWS secret access key for the lazily-loaded client. */
   secretAccessKey?: string | undefined;
+  /**
+   * SES v2 endpoint for the lazily-loaded client (a private endpoint, or a
+   * local stand-in). Without it the SDK addresses AWS.
+   *
+   * @since 0.14.0
+   */
+  endpoint?: string | undefined;
+  /**
+   * Bound on one send (and on the readiness probe), in milliseconds, including
+   * the SDK's own retries. A send that does not settle in time rejects with
+   * `BackendOutcomeUnknownError` (`504`): the message may have gone out. `0`
+   * disables the bound; anything outside `0`–`2147483647` throws `RangeError`
+   * at construction.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
+  /**
+   * Timer surface the bound runs on. `MailPlugin` supplies the runtime's
+   * timers; a directly constructed provider falls back to the ambient ones.
+   *
+   * @since 0.14.0
+   */
+  timing?: DeadlineOptions['timing'];
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: ISesClient | undefined;
 }
@@ -56,12 +86,33 @@ export function validateSesClient(client: unknown): client is ISesClient {
  * @returns The facade wrapping a `SESv2Client`
  */
 export function adaptSesModule(mod: SesSdkModule, options: SesProviderOptions): ISesClient {
+  const deadline = resolveMailDeadline(options.requestTimeoutMs, options.timing);
   const client = new mod.SESv2Client(
-    buildSesConfig(options.region, options.accessKeyId, options.secretAccessKey),
+    buildSesConfig(options.region, options.accessKeyId, options.secretAccessKey, options.endpoint),
   );
-  return {
+  const send = (command: unknown): Promise<unknown> =>
+    runMailCall(deadline, 'ses', (abortSignal) => client.send(command, { abortSignal }));
+  const GetAccount = mod.GetAccountCommand;
+  const facade: ISesClient = {
     async sendEmail(message: OutgoingMail): Promise<void> {
-      await client.send(new mod.SendEmailCommand(toSesInput(message)));
+      await send(new mod.SendEmailCommand(toSesInput(message)));
+    },
+  };
+  if (GetAccount === undefined) return facade;
+  return {
+    ...facade,
+    // Readiness: `GetAccount` (non-mutating) answered. Any HTTP answer below
+    // 500 — a refused credential included — means SES is reachable; a network
+    // failure, the bound or a 5xx means it is not.
+    async isHealthy(): Promise<boolean> {
+      try {
+        await send(new GetAccount({}));
+        return true;
+      } catch (error) {
+        const status = (error as { $metadata?: { httpStatusCode?: unknown } } | null)?.$metadata
+          ?.httpStatusCode;
+        return typeof status === 'number' && status < 500;
+      }
     },
   };
 }
@@ -130,6 +181,7 @@ function buildSesConfig(
   region?: string,
   accessKeyId?: string,
   secretAccessKey?: string,
+  endpoint?: string,
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {};
   if (region !== undefined) {
@@ -137,6 +189,9 @@ function buildSesConfig(
   }
   if (accessKeyId !== undefined && secretAccessKey !== undefined) {
     config.credentials = { accessKeyId, secretAccessKey };
+  }
+  if (endpoint !== undefined) {
+    config.endpoint = endpoint;
   }
   return config;
 }
@@ -148,21 +203,27 @@ function buildSesConfig(
  */
 export class SesProvider implements MailProvider {
   #client: ISesClient | null = null;
+  /** `true` when the client was injected: its sends are bounded here, by race. */
+  #injected = false;
   readonly #options: SesProviderOptions;
+  readonly #deadline: MailDeadline;
   /**
-   * M70c: present only when the client exposes `isHealthy?()` (the real
-   * adapter issues `GetAccount`); its absence is *unknown* reachability, not
-   * `false`.
+   * Reachability probe. The lazily adapted client calls SES v2 `GetAccount`
+   * under the bound; an injected client publishes its own `isHealthy` when it
+   * has one, and the indicator reports `reachable: 'unknown'` when it does
+   * not.
    *
    * @since 0.1.0
    */
   isHealthy?: () => Promise<boolean>;
 
   /**
-   * @param options - AWS connection/injection options
+   * @param options - SES connection/injection options
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
   constructor(options?: SesProviderOptions) {
     this.#options = options ?? {};
+    this.#deadline = resolveMailDeadline(this.#options.requestTimeoutMs, this.#options.timing);
   }
 
   async connect(): Promise<void> {
@@ -172,21 +233,21 @@ export class SesProvider implements MailProvider {
         throw new Error('Injected SES client is missing the required sendEmail method');
       }
       this.#client = injected;
+      this.#injected = true;
     } else {
       this.#client = adaptSesModule(await loadSesModule(), this.#options);
+      this.#injected = false;
     }
     this.#installProbe();
   }
 
-  /**
-   * M70c: installs `isHealthy` from the client's optional member when present;
-   * leaves it absent (unknown) otherwise.
-   */
+  /** Installs `isHealthy` from the client's optional member. */
   #installProbe(): void {
     const client = this.#client;
     if (client !== null && typeof client.isHealthy === 'function') {
       const probe = client.isHealthy;
-      this.isHealthy = (): Promise<boolean> => probe();
+      this.isHealthy = (): Promise<boolean> =>
+        runMailCall(this.#deadline, 'ses', () => probe.call(client)).catch(() => false);
     } else {
       delete this.isHealthy;
     }
@@ -203,15 +264,22 @@ export class SesProvider implements MailProvider {
   }
 
   /**
-   * Sends a message via SES.
+   * Sends a message through SES v2.
    *
    * @param message - The outgoing mail
-   * @throws {Error} If the provider is not connected or SES rejects the message
+   * @throws {Error} If the provider is not connected
+   * @throws {BackendOutcomeUnknownError} When the send does not settle within
+   *   `requestTimeoutMs`
    */
-  send(message: OutgoingMail): Promise<void> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('SesProvider is not connected'));
+  async send(message: OutgoingMail): Promise<void> {
+    const client = this.#client;
+    if (client === null) throw new Error('SesProvider is not connected');
+    try {
+      await (this.#injected
+        ? runMailCall(this.#deadline, 'ses', () => client.sendEmail(message))
+        : client.sendEmail(message));
+    } catch (error) {
+      throw toMailError(error, 'ses');
     }
-    return this.#client.sendEmail(message);
   }
 }

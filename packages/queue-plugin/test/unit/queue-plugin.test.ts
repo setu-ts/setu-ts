@@ -436,6 +436,7 @@ describe('QueuePlugin SQS adapter', () => {
       adapter: 'sqs',
       sqs: {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       },
     });
@@ -515,7 +516,8 @@ describe('QueuePlugin logger propagation', () => {
 
     // Same resolveLogger pattern QueuePlugin uses
     const iLogger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
-    const adapterLogger: { error: (msg: string) => void } = {
+    const adapterLogger = {
+      warn: (message: string) => iLogger.error(message),
       error: (message: string) => iLogger.error(message),
     };
 
@@ -531,17 +533,18 @@ describe('QueuePlugin logger propagation', () => {
       new FakeRuntime() as unknown as IRuntimeServices,
       {
         queues: { jobs: 'http://localhost:9324/jobs' },
+        deadLetterQueues: { jobs: 'https://sqs.local/dead' },
         client: transport,
       },
       adapterLogger,
     );
     await sqsQueue.connect();
 
-    // Trigger diagnostic: ack unknown id → logs "unknown or expired receipt"
-    await sqsQueue.ack('jobs', 'unknown-id', 'claim-token');
+    // Trigger the consumer-preparation policy warning through the same logger.
+    await sqsQueue.prepareConsumer('jobs');
 
     // The registered logger must have received the diagnostic
-    const diagnostic = logEntries.find((e) => e.includes('ack') && e.includes('unknown-id'));
+    const diagnostic = logEntries.find((e) => e.includes('jobs') && e.includes('RedrivePolicy'));
     expect(diagnostic).toBeDefined();
   });
 });

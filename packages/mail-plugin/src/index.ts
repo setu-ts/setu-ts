@@ -67,7 +67,11 @@ export { SendGridProvider, toSendGridBody } from './providers/sendgrid-provider.
 export type { LogProviderOptions } from './providers/log-provider.ts';
 
 /** Options for {@linkcode SmtpProvider} and the `nodemailer` module shape. */
-export type { NodemailerModule, SmtpProviderOptions } from './providers/smtp-provider.ts';
+export type {
+  NodemailerModule,
+  SmtpProviderOptions,
+  SmtpRuntime,
+} from './providers/smtp-provider.ts';
 
 /** Options for {@linkcode SesProvider} and the SESv2 SDK module shape. */
 export type { SesProviderOptions, SesSdkModule } from './providers/ses-provider.ts';

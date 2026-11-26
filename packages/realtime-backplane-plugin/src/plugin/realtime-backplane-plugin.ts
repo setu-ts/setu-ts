@@ -121,7 +121,8 @@ export function RealtimeBackplanePlugin(
         resolved,
         ctx.services,
         ctx.runtime.uuid(),
-        handlerReporter,
+        { ...handlerReporter, warn: (message) => ctx.logger?.warn(message) },
+        () => ctx.runtime.now(),
       );
 
       // Awaited, so the subscription is live before the first request and

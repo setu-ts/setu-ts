@@ -24,7 +24,9 @@
  *   deterministically hit the closed controller — the same uncaught TypeError,
  *   plus a leaked upstream connection.
  *
- * Two adapters cover the three providers:
+ * Two adapters cover S3 and Azure; `GcsProvider` builds its own pull stream
+ * over the SDK iterator and uses this module only for its event-emitter
+ * fallback ({@linkcode createEagerEventStream}):
  *
  * - {@linkcode createBoundedNodeStream} — pull-driven over a node Readable
  *   (S3). The web stream's own high-water mark bounds read-ahead: this is the
@@ -32,7 +34,7 @@
  *   measured at ~3.2 MiB against the ~3.1 MiB the adapter produced, i.e. no
  *   regression of the demand-driven property that suite pins.
  * - {@linkcode createEagerIterableStream} — eager drain with a cancellation
- *   guard (GCS/Azure). Deliberately PRESERVES those providers' documented
+ *   guard (Azure). Deliberately PRESERVES that provider's documented
  *   eager behavior (the storage README's per-provider table) and adds only
  *   what was missing: a `cancel` hook that stops the pump, releases the
  *   iterator, destroys the upstream, and makes a late chunk a deliberate
@@ -203,9 +205,8 @@ export function createBoundedNodeStream(readable: NodeSdkReadable): ReadableStre
  * Structural type of the sources {@linkcode createEagerIterableStream} accepts.
  *
  * `destroy` is optional because the Azure body is typed as a bare
- * `AsyncIterable` while the GCS read stream is typed as `NodeJS.ReadableStream`;
- * at runtime both are node Readables whose `destroy` aborts the underlying
- * HTTP request. When absent, cancellation still releases the iterator.
+ * `AsyncIterable`; at runtime it is a node Readable whose `destroy` aborts the
+ * underlying HTTP request. When absent, cancellation still releases the iterator.
  *
  * @since 0.8.0
  */
@@ -216,7 +217,7 @@ export type EagerIterableSource = AsyncIterable<Uint8Array> & {
 /**
  * Wraps an async iterable in an eager-draining, cancellation-safe web stream.
  *
- * Behavior-preserving for `GcsProvider` and `AzureBlobProvider`: chunks are
+ * Behavior-preserving for `AzureBlobProvider`: chunks are
  * enqueued as fast as the source produces them (the documented eager drain —
  * NOT demand-driven; the storage README's per-provider table says so), and
  * source errors reach the consumer through `controller.error`. What the
@@ -227,8 +228,8 @@ export type EagerIterableSource = AsyncIterable<Uint8Array> & {
  * connection — and turns a chunk already in flight at cancel time into a
  * deliberate drop rather than an enqueue into a closed controller.
  *
- * @param source - The SDK's iterable body (GCS `createReadStream()`, Azure
- *                 `readableStreamBody`); `destroy` is optional and used when present
+ * @param source - The SDK's iterable body (Azure `readableStreamBody`);
+ *                 `destroy` is optional and used when present
  * @returns An eager, cancellation-safe stream of the object's chunks
  * @since 0.8.0
  */

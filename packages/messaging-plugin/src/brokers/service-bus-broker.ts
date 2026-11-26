@@ -3,9 +3,9 @@
  *
  * Publishes to topics, subscribes through named subscriptions, and supports
  * request-reply via a shared reply topic with per-instance subscriptions.
- * Both topics and ordinary subscriptions must pre-exist — the Service Bus SDK
- * cannot create them. The per-instance RPC reply subscription is created
- * through the administration client, which requires the `Manage` right.
+ * Topics and named competing subscriptions must pre-exist. Per-instance
+ * fan-out and RPC reply subscriptions are created through the administration
+ * client, which requires the `Manage` right.
  *
  * The SDK is lazy-loaded through {@linkcode loadServiceBusModule} and adapted
  * to the domain port via {@linkcode adaptServiceBusModule}, or injected
@@ -16,6 +16,7 @@
 
 import {
   createCachedProbe,
+  withDeadline,
   type ISubscription,
   type MessageHandler,
   type MessageMetadata,
@@ -24,7 +25,7 @@ import {
   type RequestOptions,
   type SubscribeOptions,
 } from '@setu-ts/common';
-import type { IRuntimeServices } from '@setu-ts/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
@@ -36,6 +37,9 @@ import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
 import { ReplyInboxUnavailableError } from '../errors.ts';
+import type { ConsumerRetryOptions } from '../interfaces/index.ts';
+import { resolveServiceBusRetry, type ResolvedConsumerRetry } from './consumer-retry.ts';
+import { fanOutName, markFanOut, SubscriptionNameExistsError, wantsFanOut } from './fan-out.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -89,6 +93,15 @@ export interface IServiceBusReceiver {
   ): { close(): Promise<void> };
   completeMessage(message: unknown): Promise<void>;
   abandonMessage(message: unknown, propertiesToModify?: Record<string, unknown>): Promise<void>;
+  /**
+   * Moves a terminal delivery into its subscription's dead-letter queue.
+   * @param message - Received SDK message
+   * @param options - Fixed reason, without exception or payload text
+   * @returns Settlement completion
+   * @throws On settlement failure
+   * @since 0.14.0
+   */
+  deadLetterMessage?(message: unknown, options: { deadLetterReason: string }): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -125,7 +138,29 @@ export interface ServiceBusSdkModule {
     close(): Promise<void>;
   };
   ServiceBusAdministrationClient: new (connectionString: string) => {
-    createSubscription(topicName: string, subscriptionName: string): Promise<unknown>;
+    /**
+     * Creates a per-instance RPC or fan-out subscription.
+     * @param topicName - Owning topic
+     * @param subscriptionName - Unique subscription name
+     * @param options - Optional ISO 8601 idle lifetime
+     * @returns Creation completion
+     * @throws On management failure
+     * @since 0.14.0
+     */
+    createSubscription(
+      topicName: string,
+      subscriptionName: string,
+      options?: { autoDeleteOnIdle?: string },
+    ): Promise<unknown>;
+    /**
+     * Reads a subscription's delivery budget when management rights permit it.
+     * @param topic - Topic name
+     * @param subscription - Subscription name
+     * @returns The configured delivery budget
+     * @throws On management failure
+     * @since 0.14.0
+     */
+    getSubscription?(topic: string, subscription: string): Promise<{ maxDeliveryCount?: number }>;
     deleteSubscription(topicName: string, subscriptionName: string): Promise<unknown>;
     /**
      * Reads the namespace's runtime description (M90b). One cheap
@@ -170,10 +205,41 @@ export interface IServiceBusTransport {
       messageId?: string;
       /** The platform-assigned enqueue time, when the transport carried one (X28-4). */
       timestamp?: Date;
+      /** Prior deliveries, zero on the first AMQP delivery. @since 0.14.0 */
+      deliveryCount?: number;
+      /**
+       * Dead-letters this delivery using a fixed reason.
+       * @param reason - Framework terminal reason
+       * @returns Settlement completion
+       * @throws On settlement failure
+       * @since 0.14.0
+       */
+      deadLetter?(reason: string): Promise<void>;
     }) => void | Promise<void>,
   ): Promise<IServiceBusSubscription>;
-  /** Create a subscription (for RPC inbox). */
-  createSubscription(topic: string, subscription: string): Promise<void>;
+  /**
+   * Creates a per-instance RPC or fan-out subscription; requires Manage rights.
+   * @param topic - Owning topic
+   * @param subscription - Unique subscription name
+   * @param options - Optional idle deletion lifetime
+   * @returns Creation completion
+   * @throws On management failure, or RangeError for an invalid idle lifetime
+   * @since 0.14.0
+   */
+  createSubscription(
+    topic: string,
+    subscription: string,
+    options?: { readonly autoDeleteOnIdleMs?: number },
+  ): Promise<void>;
+  /**
+   * Reads an existing subscription's delivery budget.
+   * @param topic - Topic name
+   * @param subscription - Subscription name
+   * @returns Optional platform delivery budget
+   * @throws On management failure
+   * @since 0.14.0
+   */
+  getSubscription?(topic: string, subscription: string): Promise<{ maxDeliveryCount?: number }>;
   /** Delete a subscription (for RPC inbox teardown). */
   deleteSubscription(topic: string, subscription: string): Promise<void>;
   /** Close the client and all senders/receivers. */
@@ -204,6 +270,8 @@ export interface IServiceBusSubscription {
  * Options for Azure Service Bus broker.
  */
 export interface ServiceBusOptions {
+  /** Held consumer retries; false restores immediate abandon. @since 0.14.0 */
+  consumerRetry?: false | ConsumerRetryOptions;
   /** Connection string for the Service Bus namespace. Required unless {@link client} is injected. */
   connectionString?: string;
   /** Connection string for the administration client (reply-subscription creation). Defaults to {@link connectionString}. */
@@ -238,7 +306,7 @@ export interface ServiceBusOptions {
    */
   dataPlaneEvidenceMs?: number;
   /** Optional logger. */
-  logger?: { error: (msg: string) => void };
+  logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
 }
 
 /**
@@ -258,6 +326,37 @@ const NAMESPACE_ABSENT_STATUSES: ReadonlySet<number> = new Set([404, 410]);
  * and got a considered reply — a send/listen-only credential is not an outage.
  */
 const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
+
+/**
+ * A log-safe label for an admin or SDK failure: its code or status, never its
+ * message text (remote text stays out of logs).
+ */
+function errorName(error: unknown): string {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    if (typeof value?.code === 'string' && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(value.code))
+      return value.code;
+    if (typeof value?.statusCode === 'number' && Number.isInteger(value.statusCode))
+      return `status ${value.statusCode}`;
+  } catch {
+    /* fall through */
+  }
+  return 'unknown error';
+}
+
+/** Whether an admin failure is an authorization refusal (401/403 or an Unauthorized code). */
+function unauthorized(error: unknown): boolean {
+  try {
+    const value = error as { code?: unknown; statusCode?: unknown } | null;
+    return (
+      value?.statusCode === 401 ||
+      value?.statusCode === 403 ||
+      (typeof value?.code === 'string' && value.code.startsWith('Unauthorized'))
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Classifies a failed administration probe (M90b, corrected for V5-2).
@@ -507,8 +606,10 @@ export function adaptServiceBusModule(
         timestamp?: Date;
       }) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
-      // createReceiver(topicName, subscriptionName) — two positional strings.
-      const receiver = client.createReceiver(topic, subscription) as IServiceBusReceiver;
+      // Explicit renewal budget protects held consumer retries.
+      const receiver = client.createReceiver(topic, subscription, {
+        maxAutoLockRenewalDurationInMs: 300000,
+      });
 
       const subHandle = receiver.subscribe(
         {
@@ -521,6 +622,7 @@ export function adaptServiceBusModule(
               // `ServiceBusReceivedMessage` carries both as core properties.
               messageId?: string;
               enqueuedTimeUtc?: Date;
+              deliveryCount?: number;
             };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
 
@@ -536,6 +638,13 @@ export function adaptServiceBusModule(
             // Await onMessage to ensure handler completes before settlement
             await onMessage({
               payload: body,
+              ...(msg.deliveryCount === undefined ? {} : { deliveryCount: msg.deliveryCount }),
+              ...(receiver.deadLetterMessage === undefined
+                ? {}
+                : {
+                    deadLetter: (reason: string) =>
+                      receiver.deadLetterMessage!(rawMessage, { deadLetterReason: reason }),
+                  }),
               ack,
               nack,
               applicationProperties: normalizeTransportHeaders(msg.applicationProperties),
@@ -582,9 +691,39 @@ export function adaptServiceBusModule(
         },
       };
     },
-    createSubscription: async (topic: string, subscription: string): Promise<void> => {
-      await admin.createSubscription(topic, subscription);
+    createSubscription: async (
+      topic: string,
+      subscription: string,
+      settings?: { readonly autoDeleteOnIdleMs?: number },
+    ): Promise<void> => {
+      const idle = settings?.autoDeleteOnIdleMs;
+      if (idle !== undefined && (!Number.isSafeInteger(idle) || idle < 1))
+        throw new RangeError('Service Bus autoDeleteOnIdleMs must be a positive integer');
+      try {
+        await admin.createSubscription(
+          topic,
+          subscription,
+          settings?.autoDeleteOnIdleMs === undefined
+            ? undefined
+            : { autoDeleteOnIdle: `PT${settings.autoDeleteOnIdleMs / 1000}S` },
+        );
+      } catch (error) {
+        const failure = error as { name?: unknown; statusCode?: unknown; code?: unknown } | null;
+        if (
+          failure?.name === 'RestError' &&
+          failure.statusCode === 409 &&
+          failure.code === 'MessageEntityAlreadyExistsError'
+        )
+          throw new SubscriptionNameExistsError(error);
+        throw error;
+      }
     },
+    ...(admin.getSubscription === undefined
+      ? {}
+      : {
+          getSubscription: (topic: string, subscription: string) =>
+            admin.getSubscription!(topic, subscription),
+        }),
     deleteSubscription: async (topic: string, subscription: string): Promise<void> => {
       await admin.deleteSubscription(topic, subscription);
     },
@@ -639,7 +778,10 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #injectedClient: IServiceBusTransport | undefined;
   #defaultQueue: string;
   #replyTopic: string;
-  #logger: { error: (msg: string) => void } | undefined;
+  #logger: { error: (msg: string) => void; warn?: (msg: string) => void } | undefined;
+  readonly #retry: ResolvedConsumerRetry;
+  readonly #warnings = new Set<string>();
+  #generation = 0;
   #transport: IServiceBusTransport | null = null;
   #ready = false;
   #subscriptions: Map<string, IServiceBusSubscription>;
@@ -677,6 +819,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #evidence: { at: number; reachable: boolean } | null = null;
 
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: ServiceBusOptions) {
+    this.#retry = resolveServiceBusRetry(options?.consumerRetry);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#connectionString = options?.connectionString ?? '';
@@ -689,6 +832,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#evidenceMs = resolveEvidenceMs(options?.dataPlaneEvidenceMs);
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => this.#write(message),
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, opts) => this.subscribe(topic, handler, opts),
       uuid: () => this.#runtime.uuid(),
@@ -791,11 +935,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   }
 
   async disconnect(): Promise<void> {
+    this.#generation++;
     await this.#rr.close();
 
-    for (const sub of this.#subscriptions.values()) {
-      await sub.close();
-    }
+    // Every subscription is closed even when one close fails; the first
+    // failure is rethrown once the transport is closed too.
+    const closes = await Promise.allSettled(
+      [...this.#subscriptions.values()].map((sub) => sub.close()),
+    );
     this.#subscriptions.clear();
 
     if (this.#transport) {
@@ -812,6 +959,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       this.#evidence = null;
     }
     this.#ready = false;
+    const failed = closes.find((result) => result.status === 'rejected');
+    if (failed !== undefined) throw failed.reason;
   }
 
   isReady(): boolean {
@@ -993,53 +1142,210 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    if (!this.#transport) {
-      throw new Error('ServiceBusBroker is not connected');
-    }
-
+    const independent = wantsFanOut(options);
+    const transport = this.#transport;
+    if (transport === null) throw new Error('ServiceBusBroker is not connected');
+    const generation = this.#generation;
     const subscriptionId = this.#runtime.uuid();
-    const queue = options?.queue ?? this.#defaultQueue;
-
-    const sub = await this.#transport.open(topic, queue, async (msg) => {
-      // B2: Separate handler invocation from settlement so a settlement rejection
-      // is not confused with a handler failure and does not trigger double-settle.
-      let handlerError: Error | null = null;
-      try {
-        const deserialized = this.#serializer.deserialize<T>(msg.payload);
-        // X28-4: copy the platform identity onto the metadata ONLY when the
-        // transport carried it, so an absent member means "none delivered".
-        const metadata: MessageMetadata = {
-          topic,
-          headers: msg.applicationProperties ?? {},
-          ...(msg.messageId !== undefined ? { messageId: msg.messageId } : {}),
-          ...(msg.timestamp !== undefined ? { timestamp: msg.timestamp } : {}),
-        };
-        await handler(deserialized, metadata);
-      } catch (err) {
-        handlerError = err as Error;
-      }
-
-      if (handlerError !== null) {
-        if (this.#logger) {
-          this.#logger.error(`Service Bus handler error: ${describeError(handlerError)}`);
-        }
-        return msg.nack();
-      }
-
-      return msg.ack();
-    });
-
-    this.#subscriptions.set(subscriptionId, sub);
-
-    return {
-      unsubscribe: async () => {
-        const existing = this.#subscriptions.get(subscriptionId);
-        if (existing) {
-          await existing.close();
-          this.#subscriptions.delete(subscriptionId);
-        }
-      },
+    let queue = independent
+      ? fanOutName(this.#defaultQueue, this.#runtime.uuid(), true)
+      : (options?.queue ?? this.#defaultQueue);
+    let ended = false;
+    let created = false;
+    let current: IServiceBusSubscription | undefined;
+    const holds = new Set<() => Promise<void>>();
+    let cancelInspection: (() => void) | undefined;
+    const warnings = independent ? new Set<string>() : this.#warnings;
+    const deleteCreated = async (): Promise<void> => {
+      if (!created) return;
+      created = false;
+      // Best effort: the subscription also deletes itself after 5 idle minutes,
+      // so a failed delete never stops the close.
+      await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
+        this.#write(
+          `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
+        );
+      });
     };
+    let closing: Promise<void> | undefined;
+    const close = (): Promise<void> => {
+      if (closing !== undefined) return closing;
+      ended = true;
+      cancelInspection?.();
+      if (independent) warnings.clear();
+      closing = (async () => {
+        await Promise.all([...holds].map((cancel) => cancel()));
+        try {
+          await current?.close();
+        } finally {
+          await deleteCreated();
+        }
+      })().finally(() => {
+        this.#subscriptions.delete(subscriptionId);
+      });
+      return closing;
+    };
+    this.#subscriptions.set(subscriptionId, { close });
+    let budget = this.#retry.maxAttempts;
+    const warnOnce = (kind: string, message: string): void => {
+      const key = kind + ':' + topic + '/' + queue;
+      if (warnings.has(key)) return;
+      warnings.add(key);
+      this.#write(message);
+    };
+    try {
+      if (independent) {
+        try {
+          await transport.createSubscription(topic, queue, { autoDeleteOnIdleMs: 300000 });
+        } catch (error) {
+          if (!(error instanceof SubscriptionNameExistsError)) throw error;
+          if (ended || generation !== this.#generation)
+            throw new Error('ServiceBusBroker disconnected while subscribing', { cause: error });
+          queue = fanOutName(this.#defaultQueue, this.#runtime.uuid(), true);
+          await transport.createSubscription(topic, queue, { autoDeleteOnIdleMs: 300000 });
+        }
+        created = true;
+      }
+      if (ended || generation !== this.#generation) {
+        await deleteCreated();
+        throw new Error('ServiceBusBroker disconnected while subscribing');
+      }
+      if (this.#retry.retry && transport.getSubscription !== undefined) {
+        try {
+          const { maxDeliveryCount } = await withDeadline(
+            () => transport.getSubscription!(topic, queue),
+            {
+              timeoutMs: 5000,
+              onTimeout: () => new Error('Service Bus subscription inspection timed out'),
+              timing: {
+                setTimer: (fn, ms) => {
+                  cancelInspection = fn;
+                  return this.#runtime.setTimeout(fn, ms);
+                },
+                clearTimer: (handle) => {
+                  this.#runtime.clearTimeout(handle);
+                  cancelInspection = undefined;
+                },
+              },
+            },
+          );
+          if (
+            maxDeliveryCount !== undefined &&
+            Number.isSafeInteger(maxDeliveryCount) &&
+            maxDeliveryCount >= 1 &&
+            maxDeliveryCount < budget
+          ) {
+            budget = maxDeliveryCount;
+            warnOnce(
+              'clamp',
+              'Service Bus consumerRetry.maxAttempts clamped to subscription maxDeliveryCount',
+            );
+          }
+        } catch {
+          warnOnce(
+            'budget',
+            'Service Bus could not inspect subscription maxDeliveryCount; configured retry budget retained',
+          );
+        }
+      }
+      if (ended || generation !== this.#generation)
+        throw new Error('ServiceBusBroker disconnected while subscribing');
+      const sub = await transport.open(topic, queue, async (msg) => {
+        if (ended) return;
+        const receivedAt = this.#runtime.hrtime();
+        let failed = false;
+        let failure: unknown;
+        try {
+          await handler(this.#serializer.deserialize<T>(msg.payload), {
+            topic,
+            headers: msg.applicationProperties ?? {},
+            ...(msg.messageId === undefined ? {} : { messageId: msg.messageId }),
+            ...(msg.timestamp === undefined ? {} : { timestamp: msg.timestamp }),
+          });
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+        if (ended) return;
+        if (!failed) return msg.ack();
+        this.#write('Service Bus handler failed', 'error');
+        if (!this.#retry.retry) return msg.nack();
+        const count = msg.deliveryCount;
+        if (
+          count === undefined ||
+          !Number.isSafeInteger(count) ||
+          count < 0 ||
+          msg.deadLetter === undefined
+        ) {
+          warnOnce(
+            'legacy',
+            'Service Bus deliveryCount or deadLetter unavailable; abandoning without consumer retry policy',
+          );
+          return msg.nack();
+        }
+        let retryable = true;
+        if (this.#retry.isRetryable !== undefined) {
+          try {
+            retryable = this.#retry.isRetryable(failure);
+          } catch {
+            this.#write('Service Bus retry classifier failed', 'error');
+          }
+        }
+        const attempt = count + 1;
+        if (!retryable || attempt >= budget)
+          return msg.deadLetter(retryable ? 'setu-attempts-exhausted' : 'setu-not-retryable');
+        const delay = this.#retry.delaysMs[Math.min(attempt - 1, this.#retry.delaysMs.length - 1)]!;
+        if (300000 - (this.#runtime.hrtime() - receivedAt) - 60000 < delay) {
+          warnOnce(
+            'lock',
+            'Service Bus retry delay exceeds remaining lock renewal budget; abandoning immediately',
+          );
+          return msg.nack();
+        }
+        const wait = new Promise<boolean>((resolve) => {
+          const cancel = async (): Promise<void> => {
+            this.#runtime.clearTimeout(timer);
+            holds.delete(cancel);
+            resolve(false);
+            try {
+              await msg.nack();
+            } catch {
+              /* Teardown abandons best effort before closing. */
+            }
+          };
+          const timer: TimerHandle = this.#runtime.setTimeout(() => {
+            holds.delete(cancel);
+            resolve(true);
+          }, delay);
+          holds.add(cancel);
+        });
+        if (await wait) return msg.nack();
+      });
+      if (ended || generation !== this.#generation) {
+        await sub.close();
+        throw new Error('ServiceBusBroker disconnected while subscribing');
+      }
+      current = sub;
+    } catch (error) {
+      if (independent && !created && !(error instanceof SubscriptionNameExistsError))
+        this.#write(
+          unauthorized(error)
+            ? 'Service Bus fanOut subscription creation was refused; the identity needs Manage rights'
+            : `Service Bus fanOut subscription creation failed (${errorName(error)})`,
+        );
+      await close().catch(() => {});
+      throw error;
+    }
+    return markFanOut({ unsubscribe: close }, independent);
+  }
+
+  #write(message: string, level: 'warn' | 'error' = 'warn'): void {
+    try {
+      const logger = this.#logger;
+      (level === 'error' ? logger?.error : (logger?.warn ?? logger?.error))?.call(logger, message);
+    } catch {
+      /* Diagnostic sinks cannot affect message disposition. */
+    }
   }
 
   /** Subscribes through the header-aware internal path. @internal */

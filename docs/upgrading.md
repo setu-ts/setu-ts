@@ -96,6 +96,149 @@ milliseconds from 1 to 2147483647 (it used to grant every caller for `Infinity`,
 negative value). `isKvNamespace` refuses an R2-shaped binding, and `bindings.d1()` and
 `bindings.service()` throw `CloudflareBindingMissingError` for a binding of another kind.
 
+### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
+
+`WorkerRunOptions.signal` now withdraws queued work or terminates and replaces a running call's
+worker, rejecting with `signal.reason` unchanged. Pre-aborted calls reject without queuing work.
+Dashboards and alerts on `worker_pool_tasks_rejected_total` gain a `reason="aborted"` series for
+these cancellations, including calls aborted after admission. They do not increment completed or
+failed counts. A `signal` that is not an `AbortSignal` of this realm (a polyfill, or one from
+another realm such as jsdom) now rejects the call with `TypeError` before it is admitted; it used to
+be ignored. To keep cancelling from such a signal, pass a native `AbortController`'s signal and call
+`controller.abort(otherSignal.reason)` at once if the other signal is already `aborted`, otherwise
+from that signal's `abort` event, so the worker call rejects with the original reason; to run
+without cancellation, omit `signal`.
+
+### Provider arms: faults, bounds and options (`@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`, `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`)
+
+- **Outages are errors.** `exists()` and `delete()` reject on an outage or a refused credential on
+  every storage provider; code that treated `false` as "not there" during an outage now sees the
+  error. `delete()` of an absent key now resolves `false` on S3 and B2 too (a `HEAD` runs first),
+  the answer every other provider gives. S3 `get`/`getStream` on a missing bucket (`NoSuchBucket`),
+  Azure `ContainerNotFound` and a GCS `ENOENT` (a local file error) now reject instead of signalling
+  an absent object. An S3 `HEAD` and a GCS `404` cannot tell a missing bucket from a missing object,
+  so `exists`/`delete` there still answer `false`.
+- **Status codes.** A storage write answered `502` now gives `BackendOutcomeUnknownError` (`504`); a
+  read keeps `503`. A storage or cloud-secrets outage answers `503` (a write that may have been
+  applied, `504`) instead of a masked `500`; a missing object read with `get`/`getStream` answers
+  `404` (`StorageObjectNotFoundError`). Catch those classes rather than matching error messages: an
+  unclassified failure's message now starts `storage-plugin (<provider>): <call> failed:` or
+  `<ProviderClass> <get|set> failed:`.
+- **Mail sends.** An SES or SendGrid send that does not settle within `requestTimeoutMs` rejects
+  with `BackendOutcomeUnknownError` (`504`): the message may have gone out. A refused connection is
+  `BackendUnavailableError` (`503`) on a single attempt; the SES client retries one by default and
+  then answers `504`, since an earlier attempt may have delivered. S3 and B2 writes follow the same
+  rule, so a write refused at connection time under the SDK's default retries is a `504`.
+- **Time bounds.** Cloud calls are bounded by `requestTimeoutMs` (storage 30 s, secrets 5 s, SES and
+  SendGrid 15 s). Raise it for large storage transfers, or set `0` to keep the old unbounded call.
+- **GCS.** The SDK's own retry is off, so a `5xx` answers at once; retry in the caller. A provider
+  constructed directly needs `now` for `getSignedUrl`. A custom `endpoint` sends credentials unless
+  `endpointAuth: false`. Install `@google-cloud/storage@^7.18.0`. With credentials on, `put` to a
+  custom endpoint uploads in one multipart request, because the SDK's resumable upload sends none.
+  Setting `endpoint` while `STORAGE_EMULATOR_HOST` is set is refused with `RangeError` (the SDK
+  sends JSON requests to the variable and uploads to `endpoint`); set one or the other. A
+  `GcsProvider` built directly with `endpoint` and no `client` now needs `runtime.env` as its fourth
+  argument, or the constructor throws `RangeError`. Buffered downloads release their streams at the
+  deadline. A `put` past its bound answers `504` while its upload request may still finish: the SDK
+  offers no way to cancel one.
+- **Azure storage.** The client the arm builds has the SDK's own retry off (one attempt per call; an
+  injected client keeps its own), so a refusal answers at once and a write's `503` means it was not
+  sent; retry in the caller. `connectionString` now works as documented; a SAS-URL passed as
+  `connectionString` is no longer accepted (use the SAS connection-string form).
+- **B2.** Set `region` (a Backblaze region such as `us-west-004`) or `endpoint`.
+- **Uploads.** A disallowed MIME type answers `415` instead of `400`. `createUploadMiddleware`
+  throws `RangeError` for a `maxSize` or `maxFiles` that is not a whole number of at least 1, a
+  `fieldname` that is not a non-empty string, or an `allowedMimeTypes` that is not an array of
+  strings.
+- **Storage keys.** A key with a `.` or `..` path segment is refused with a `400`. An empty key or
+  one of only `/`, or one that is not a string (a `String` object included), is refused the same
+  way.
+- **LaunchDarkly.** An injected client receives `waitForInitialization({ timeout })`; implement
+  `timeout`, not `timeoutSeconds`. `initTimeoutSeconds` must be a finite number in `(0, 2147483]`,
+  so `0` is refused. A failed, timed-out or invalid (`valid: false`) startup snapshot leaves
+  `status().healthy` false until a successful refill.
+- **Slack.** A notification's `subject` is now part of the posted text.
+- **SMTP.** A `contentId` attachment is sent `Content-Disposition: inline`. DNS refresh
+  failures/empty answers respect the attempt TTL and keep the last transport; with no transport yet,
+  a failed or timed-out lookup lets nodemailer resolve the host itself. `connectionTimeoutMs` also
+  bounds DNS refreshes; concurrent sends share one lookup and disconnect wins connect. Under
+  `dnsTtlMs` a send whose connection fails before any SMTP command moves to the next resolved
+  address (at most four in all), so a failing send can take about `connectionTimeoutMs` times the
+  addresses tried.
+- **Vault.** HTTP 5xx reads and writes now reject with `SecretProviderUnavailableError` (503); 4xx
+  handling is unchanged.
+- **Other refusals.** Azure downloads with no body reject unless marked deleted. Bun filesystem
+  errors retain their codes. Throwing upload-brand getters return undefined, sparse catalogue
+  prefixes throw TypeError, and abort getter errors become the task rejection reason.
+
+### SQS dead-letter targets and long jobs (`@setu-ts/queue-plugin`)
+
+**BREAKING.** Every SQS job name a process consumes now needs a dead-letter target, and a consumer
+without one is refused before its first poll with `SqsDeadLetterTargetMissingError`. A processor
+declared in `QueuePlugin({ processors })` makes `app.start()` fail. Names a process only enqueues to
+are not checked. Pick one per consumed name:
+
+- `sqs: { deadLetterQueues: { 'report.build': '<dead-letter queue URL>' } }`;
+- a redrive policy on the queue itself, used when `deadLetterQueues` has no entry for the name;
+- `deadLetterQueues: { 'report.build': false }` to discard exhausted jobs: `onFailed` still runs,
+  the message is deleted with a warning, and `queue_jobs_total` counts `discarded`.
+
+Before 0.14.0 an exhausted job with no `deadLetterQueues` entry was deleted and counted as
+dead-lettered.
+
+A consumer role now needs `sqs:GetQueueAttributes` on the source queue (not for a name set to
+`false`; with an explicit target URL a refused read only warns), plus `sqs:GetQueueUrl` and
+`sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` and `kms:Decrypt` for a
+customer-managed KMS key). With a redrive policy whose `maxReceiveCount` is at or below a job's
+`maxAttempts`, attempts are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set
+`maxReceiveCount` to `maxAttempts + 1` to keep them all.
+
+Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`; SQS can
+still deliver more than once, so keep processors idempotent. Other changes you may notice:
+`visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a message the adapter cannot read moves
+to the dead-letter target instead of returning every timeout; a stale settle is reported as
+`queue job settlement failed`; and on every adapter `queue_jobs_total` counts an outcome only after
+its settle succeeded. A custom `ISqsTransport` without `getQueueAttributes` can consume only names
+with a `deadLetterQueues` entry.
+
+`SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
+`publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
+
+### Fan-out, consumer retries and the RabbitMQ outbox (`@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/common`)
+
+- **BREAKING: the backplane's `'messaging'` transport needs fan-out.** It now refuses to start with
+  `BackplaneFanOutUnsupportedError` when the broker does not confirm a fan-out subscription. Every
+  built-in broker does. You are affected if you run it on Cloudflare's `WorkersBroker` (use the
+  Durable Object backplane), on a `custom` broker (return `fanOut: true` from `subscribe` when the
+  caller passed `fanOut: true` and every instance receives every message). On Service Bus without
+  the `Manage` right it fails with the SDK's authorization error instead (grant it, or use the
+  `'redis'` transport).
+- **BREAKING: Redis Streams clients you implement yourself.** A fan-out subscription calls `xread`
+  and `xrevrange`. `ioredis` and `fromNodeRedis` provide both; a hand-written `IRedisStreamsClient`
+  without them is refused at that `subscribe()` with a `TypeError` naming the method. Add both
+  methods (positional arguments, as `ioredis` takes them).
+- **BREAKING: Pub/Sub and Service Bus retry by default.** Pub/Sub redelivers a failing handler with
+  a delay by default, and limits attempts only with `deadLetterTopic`; Service Bus uses a delay and
+  a limit. Set `consumerRetry: false` to keep the old behaviour. On Pub/Sub, give `deadLetterTopic`
+  (an existing topic with a subscription) to bound the attempts; the policies apply only to
+  subscriptions the broker creates, so an existing subscription keeps its settings, with one
+  warning, until you change it in Google Cloud. A `deadLetterTopic` that does not exist fails the
+  subscribe with `PubSubDeadLetterTopicMissingError`. On Service Bus a retry holds the message (and,
+  at the default single concurrent call, the subscription) for its delay.
+- **BREAKING: RabbitMQ outbox rows must be routable.** The relay now marks an unroutable row
+  `failed` after its retries instead of `sent`: bind a queue for every outbox topic before rows are
+  relayed. An outbox on an injected connection without `createConfirmChannel` and return listeners
+  refuses to start with `OutboxPublisherConfirmsRequiredError`; a connection from `amqplib`'s
+  `connect()` always has them.
+- **Pub/Sub ordering.** On a broker with `enableMessageOrdering`, handlers of one ordering key now
+  run one at a time; expect lower throughput per key.
+- **Not breaking: late frames.** The backplane README no longer claims a frame is never late. To
+  drop late frames, set `maxFrameAgeMs` on the `'messaging'` or `'redis'` transport (replicas'
+  clocks must agree); the default delivers them as before.
+- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
+  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+- **`QueueSettlementState`** gains `'discarded'`: an exhaustive `switch` over it needs a new arm.
+
 ### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
 
 `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.

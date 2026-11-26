@@ -2823,6 +2823,9 @@ importers:
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel
+      '@setu-ts/messaging-plugin':
+        specifier: workspace:^
+        version: link:../messaging-plugin
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
@@ -3341,7 +3344,7 @@ importers:
         specifier: ^12
         version: 12.34.0(supports-color@10.2.2)
       '@google-cloud/storage':
-        specifier: ^7
+        specifier: ^7.18.0
         version: 7.22.0(supports-color@10.2.2)
       '@setu-ts/exceptions':
         specifier: workspace:^
@@ -6448,7 +6451,6 @@ packages:
   '@typespec/ts-http-runtime@0.3.10':
     resolution: {integrity: sha512-vddvvtZ7sejSlCv+OIkn2ztjB1O31Fc2JsxI/YK725r3elXXlF/J3o3lbXJFRhoeWRWK1tjdZ+GTi6Fdtrp+EA==}
     engines: {node: '>=22.0.0'}
-    deprecated: A newer version 0.3.11 has been published.
 
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}

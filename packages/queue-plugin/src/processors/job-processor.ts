@@ -31,7 +31,12 @@ interface JobRunnerAdapter {
     attempts: number,
     claimToken: string,
   ): Promise<void>;
-  deadLetter(name: string, id: string, nowMs: number, claimToken: string): Promise<void>;
+  deadLetter(
+    name: string,
+    id: string,
+    nowMs: number,
+    claimToken: string,
+  ): Promise<void | 'discarded'>;
 }
 
 /**
@@ -42,14 +47,13 @@ interface JobRunnerAdapter {
  * questions: retries measure flakiness, dead letters measure LOST WORK, and
  * collapsing them into one failure count hides the second behind the first.
  *
- * This is the metric vocabulary, reported BEFORE the settlement call is
- * awaited — so it names the settlement the runner is about to request, not
- * one the backend confirmed. {@linkcode JobRunnerHooks.onAttemptSettled} is
- * the post-settlement signal.
+ * Metrics are reported only after settlement resolves. Explicit SQS discard
+ * is counted separately from work retained in a dead-letter store.
+ * Diagnostics report an intentional discard as `discarded` as well.
  *
  * @since 0.3.0
  */
-export type JobOutcome = 'completed' | 'retried' | 'dead_lettered';
+export type JobOutcome = 'completed' | 'retried' | 'dead_lettered' | 'discarded';
 
 /**
  * Observers the queue service threads into {@linkcode runJob}.
@@ -64,9 +68,8 @@ export interface JobRunnerHooks<T> {
    */
   readonly onFailed?: (job: IJob<T>, error: unknown) => void | Promise<void>;
   /**
-   * The service's metrics sink, invoked once per attempt when the processor
-   * finished — BEFORE the settlement call is awaited, the timing the queue
-   * metrics have always had.
+   * The service's metrics sink, invoked once after a successful settlement.
+   * A rejected settlement counts nothing.
    */
   readonly onProcessorOutcome?: (name: string, outcome: JobOutcome) => void;
   /**
@@ -122,7 +125,7 @@ export function toJob<T>(storedJob: StoredJob<T>): IJob<T> {
  * requeue/dead-letter and then discarded, so nothing logged it anywhere.
  * @param hooks - Optional observers. `onFailed` is the application's callback,
  * invoked ONCE on the final attempt before the job is dead-lettered;
- * `onProcessorOutcome` is the service's metrics sink, invoked before the
+ * `onProcessorOutcome` is the service's metrics sink, invoked after a resolving
  * settlement call; `onAttemptSettled` is the diagnostics observer, invoked
  * after it. All are guarded: a throwing observer is reported and swallowed,
  * because losing the job as well as the notification would be strictly worse
@@ -165,7 +168,6 @@ export async function runJob<T>(
         maxAttempts: storedJob.maxAttempts,
         retryInMs: backoffMs,
       });
-      notifyOutcome(hooks, storedJob.name, 'retried', report);
       await settle(
         hooks,
         'retryable-error',
@@ -174,6 +176,7 @@ export async function runJob<T>(
           adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts, claimToken),
         report,
       );
+      notifyOutcome(hooks, storedJob.name, 'retried', report);
       return;
     } else {
       // At max attempts: dead-letter
@@ -186,12 +189,17 @@ export async function runJob<T>(
       // BEFORE the dead-letter, so an application that compensates in the
       // callback still sees the job in flight rather than already discarded.
       await notifyFailed(hooks, job, error, report);
-      notifyOutcome(hooks, storedJob.name, 'dead_lettered', report);
-      await settle(
+      const disposition = await settle(
         hooks,
         'terminal-error',
         'dead-lettered',
         () => adapter.deadLetter(storedJob.name, storedJob.id, runtime.now(), claimToken),
+        report,
+      );
+      notifyOutcome(
+        hooks,
+        storedJob.name,
+        disposition === 'discarded' ? 'discarded' : 'dead_lettered',
         report,
       );
       return;
@@ -199,7 +207,6 @@ export async function runJob<T>(
   }
 
   // Success: acknowledge (outside the try/catch so ack errors don't trigger requeue)
-  notifyOutcome(hooks, storedJob.name, 'completed', report);
   await settle(
     hooks,
     'completed',
@@ -207,6 +214,7 @@ export async function runJob<T>(
     () => adapter.ack(storedJob.name, storedJob.id, claimToken),
     report,
   );
+  notifyOutcome(hooks, storedJob.name, 'completed', report);
 }
 
 /**
@@ -223,20 +231,22 @@ export async function runJob<T>(
  * @param call - The adapter settlement call
  * @param report - Sink for a failure inside the observer itself
  */
-async function settle<T>(
+async function settle<T, R>(
   hooks: JobRunnerHooks<T> | undefined,
   outcome: QueueProcessorOutcome,
   settlement: QueueSettlementState,
-  call: () => Promise<void>,
+  call: () => Promise<R>,
   report?: (message: string, error: unknown, meta?: Record<string, unknown>) => void,
-): Promise<void> {
+): Promise<R> {
+  let result: R;
   try {
-    await call();
+    result = await call();
   } catch (error) {
     notifySettled(hooks, outcome, 'failed', report);
     throw error;
   }
-  notifySettled(hooks, outcome, settlement, report);
+  notifySettled(hooks, outcome, result === 'discarded' ? 'discarded' : settlement, report);
+  return result;
 }
 
 /**

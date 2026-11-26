@@ -188,6 +188,7 @@ describe('queue diagnostics — adapter support matrix', () => {
         adapter: 'sqs',
         sqs: {
           queues: { [JOB_NAME]: 'https://sqs.local/000/emails' },
+          deadLetterQueues: { [JOB_NAME]: 'https://sqs.local/000/dead' },
           client: new FakeSqsTransport(),
         },
       }),

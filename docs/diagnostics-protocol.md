@@ -391,11 +391,13 @@ source's `state` is `disabled` (a QueuePlugin without the `diagnostics` option),
 or `collection-failed` (the connector could not read or validate it — with the fixed failure
 `source-read-failed`). `outcome` is `completed`, `retryable-error` or `terminal-error`; `settlement`
 is reported only AFTER the adapter's settlement call returned — `acknowledged`, `requeued`,
-`dead-lettered`, `failed` (the call rejected), or `unknown` (the call completed on an adapter that
-cannot confirm it: RabbitMQ, SQS). An outcome is never presented as settlement proof. Depths come
-only from a separately opted-in, bounded, non-overlapping count cycle — a diagnostic read never
-counts, reserves or settles a job; `scope` is `process-local` (memory) or `shared-backend` (redis,
-never to be summed across sources or replicas), and a source whose adapter cannot count reports
+`dead-lettered`, `discarded` (the adapter deleted an exhausted job because its dead-letter target is
+explicitly disabled, SQS `deadLetterQueues[name]: false`; reported even where settlements cannot be
+confirmed), `failed` (the call rejected), or `unknown` (the call completed on an adapter that cannot
+confirm it: RabbitMQ, SQS). An outcome is never presented as settlement proof. Depths come only from
+a separately opted-in, bounded, non-overlapping count cycle — a diagnostic read never counts,
+reserves or settles a job; `scope` is `process-local` (memory) or `shared-backend` (redis, never to
+be summed across sources or replicas), and a source whose adapter cannot count reports
 `depthCoverage: 'unavailable'`, never zero. A depth row describes the latest cycle only (since
 M101a): a name that cycle did not read — timed out, failed, or not reached because every slot was
 still held — has no row, and the source's `failure` plus `depthCoverage: 'partial'` say why. A depth

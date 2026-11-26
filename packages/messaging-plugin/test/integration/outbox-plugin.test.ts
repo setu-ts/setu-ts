@@ -1,3 +1,11 @@
+import { FakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
+import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
+import { TracedBroker } from '../../src/tracing/traced-broker.ts';
+import { PipelinedBroker } from '../../src/pipeline/pipelined-broker.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { recordingTelemetry } from '../fixtures/outbox.ts';
+import { OutboxPublisherConfirmsRequiredError } from '../../src/errors.ts';
 /**
  * The outbox wired through a REAL kernel application (M107 §3.4, §3.8, §3.11,
  * §3.14): `createApplication` with the real `SchedulerPlugin`, the real
@@ -763,3 +771,28 @@ function failingOnInit(error: Error): IPlugin {
     },
   };
 }
+
+it.each(['direct', 'traced', 'pipelined'] as const)(
+  'refuses an outbox without RabbitMQ confirms through %s',
+  async (facade) => {
+    const inner = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeAmqpConnection({ withoutConfirmChannel: true }),
+    });
+    const instance =
+      facade === 'direct'
+        ? inner
+        : facade === 'traced'
+          ? new TracedBroker(inner, recordingTelemetry(), 'rabbitmq')
+          : new PipelinedBroker(inner, []);
+    const app = buildApp({
+      scheduler: false,
+      outbox: { store: createDatabaseOutboxStore(), relay: { schedule: false } },
+      messaging: { broker: 'custom', instance },
+    });
+    try {
+      await expect(app.start()).rejects.toBeInstanceOf(OutboxPublisherConfirmsRequiredError);
+    } finally {
+      await app.stop();
+    }
+  },
+);
