@@ -303,10 +303,10 @@ export async function editArticle(
   the count is matched rows only while the driver keeps `foundRows` on, which is the default in both
   `mariadb` (Prisma's `@prisma/adapter-mariadb`) and mysql2: keep it on. With it off, an update
   whose values equal the stored ones counts zero and reads as a miss. An entity naming
-  `compositeKeyName` without `keyColumns` is refused when the adapter is constructed: set
-  `keyColumns` to the `@@id` columns. A client extension (`$extends` query hook) or middleware
-  written for `update`/`delete` does not see these writes on the count path; hook `updateMany` /
-  `deleteMany` too.
+  `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`, is refused when the
+  adapter is constructed: set `keyColumns` to the `@@id` columns (or omit it for an `id` key). A
+  client extension (`$extends` query hook) or middleware written for `update`/`delete` does not see
+  these writes on the count path; hook `updateMany` / `deleteMany` too.
 - **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
   committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
   the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos

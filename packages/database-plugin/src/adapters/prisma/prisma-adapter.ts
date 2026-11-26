@@ -245,19 +245,13 @@ export class PrismaAdapter implements IDatabaseAdapter {
    * @throws {UnsupportedQueryFeatureError} When an entity names a
    *   `compositeKeyName` without its `keyColumns`: the key would default to
    *   `['id']`, so a conditional write on the affected-row count would address
-   *   every row sharing that `id` (another tenant's row, for one).
+   *   every row sharing that `id` (another tenant's row, for one). Also when
+   *   an entity sets an empty `keyColumns`: a conditional write would then
+   *   match rows by its predicate alone.
    */
   constructor(options?: DatabaseAdapterOptions | PrismaAdapterOptions) {
     const entities = (options as PrismaAdapterOptions | undefined)?.entities ?? {};
     for (const [entity, key] of Object.entries(entities)) {
-      if (key.keyColumns !== undefined && key.keyColumns.length === 0) {
-        throw new UnsupportedQueryFeatureError(
-          'composite-key',
-          'prisma',
-          `Prisma entity '${entity}' sets an empty entities.${entity}.keyColumns: a conditional write would match ` +
-            `rows by its predicate alone. Name the key columns, or omit keyColumns for an 'id' key.`,
-        );
-      }
       if (key.compositeKeyName !== undefined && (key.keyColumns?.length ?? 0) === 0) {
         throw new UnsupportedQueryFeatureError(
           'composite-key',
@@ -265,6 +259,14 @@ export class PrismaAdapter implements IDatabaseAdapter {
           `Prisma entity '${entity}' names compositeKeyName '${key.compositeKeyName}' without ` +
             `keyColumns. Set entities.${entity}.keyColumns to the @@id columns in schema ` +
             `declaration order (for example ['tenantId', 'id']).`,
+        );
+      }
+      if (key.keyColumns !== undefined && key.keyColumns.length === 0) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `Prisma entity '${entity}' sets an empty entities.${entity}.keyColumns: a conditional write would match ` +
+            `rows by its predicate alone. Name the key columns, or omit keyColumns for an 'id' key.`,
         );
       }
     }

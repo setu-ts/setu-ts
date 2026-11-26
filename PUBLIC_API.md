@@ -3200,8 +3200,8 @@ bound:
   `{ column: { cellLimit: number } }` (told apart from `{ column: string[] }` by `Array.isArray`),
   which every data read now sends first in its filter chain, so a facade that switches exhaustively
   over the union must handle it; `IBigtableTable.readRows` and `IBigtableRow.conditionalMutate` take
-  an optional `{ timeoutMs?: number }` call-options argument, which a facade may ignore (the call is
-  then unbounded).
+  an optional `{ timeoutMs?: number }` call-options argument, which a facade may ignore: the call is
+  still rejected at `requestTimeoutMs` (504), though the facade's own work runs on.
 
 ### Exports
 

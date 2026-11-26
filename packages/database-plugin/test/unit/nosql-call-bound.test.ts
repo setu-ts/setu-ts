@@ -168,6 +168,19 @@ describe('the timeout cause', () => {
     expect(error).toBeInstanceOf(DatabaseTimeoutError);
     expect((error as Error).cause).toBe(driverError);
   });
+
+  it('is still the driver error when the driver starts listening after an await', async () => {
+    const driverError = new Error('driver aborted after its own await');
+    const late = async ({ abortSignal }: { abortSignal?: AbortSignal }): Promise<never> => {
+      await Promise.resolve();
+      return await new Promise<never>((_, reject) => {
+        if (abortSignal?.aborted) reject(driverError);
+        abortSignal?.addEventListener('abort', () => reject(driverError), { once: true });
+      });
+    };
+    const error: unknown = await requestBound(20, late).catch((caught: unknown) => caught);
+    expect((error as Error).cause).toBe(driverError);
+  });
 });
 
 describe('a driver wait that ignores the signal', () => {

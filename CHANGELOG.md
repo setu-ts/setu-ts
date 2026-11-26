@@ -332,21 +332,21 @@ All notable changes to this project are documented here. The format follows
   (`maxWait` 2 s, so pool exhaustion answers 503, `P2028`: size the pool for it); a lost race on
   MySQL answers 409/404 instead of success; a `keyColumns` that matches several rows throws (the
   root client's short transaction rolls back; a unit of work rolls back when the throw reaches it);
-  a Prisma entity naming `compositeKeyName` without `keyColumns` stops the application at boot
-  (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before, it could look as if it worked
-  while its conditional deletes hit another tenant's row sharing the `id`; a client extension or
-  middleware for `update`/`delete` no longer sees them: hook `updateMany`/`deleteMany` too. Drizzle
-  with MySQL writes through the repository (it was a masked 500); its `contains` escapes with `!`;
-  on mysql-proxy a write's read-back runs outside a transaction, with one `warn`. A Prisma `P2010`
-  carrying a duplicate key or a write conflict through `query()` answers 409 where it was 500;
-  mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed mysql2 connection answers 503. Drizzle on mysql2
-  refuses a session whose `sql_mode` includes `NO_BACKSLASH_ESCAPES`: `connect()` throws
-  `UnsupportedSqlModeError` (new), and so does every later call once a connection the pool opened
-  later reports it; such a connection has the flag stripped from its session `sql_mode` first.
-  `connect()` now reads the session mode (primary and every `withReplicas()` replica), so start
-  fails when MySQL is unreachable or stalls past 2 s, where it used to come up. Turn the mode off
-  for the application's sessions (global `sql_mode`, `init_connect`, the application's own
-  `SET SESSION`).
+  a Prisma entity naming `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`,
+  stops the application at boot (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before,
+  it could look as if it worked while its conditional deletes hit another tenant's row sharing the
+  `id`; a client extension or middleware for `update`/`delete` no longer sees them: hook
+  `updateMany`/`deleteMany` too. Drizzle with MySQL writes through the repository (it was a masked
+  500); its `contains` escapes with `!`; on mysql-proxy a write's read-back runs outside a
+  transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key or a write conflict
+  through `query()` answers 409 where it was 500; mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed
+  mysql2 connection answers 503. Drizzle on mysql2 refuses a session whose `sql_mode` includes
+  `NO_BACKSLASH_ESCAPES`: `connect()` throws `UnsupportedSqlModeError` (new), and so does every
+  later call once a connection the pool opened later reports it; such a connection has the flag
+  stripped from its session `sql_mode` first. `connect()` now reads the session mode (primary and
+  every `withReplicas()` replica), so start fails when MySQL is unreachable or stalls past 2 s,
+  where it used to come up. Turn the mode off for the application's sessions (global `sql_mode`,
+  `init_connect`, the application's own `SET SESSION`).
 
 ### Fixed
 

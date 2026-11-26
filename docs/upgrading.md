@@ -409,9 +409,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   most one read per 5 s per connection; poll `/ready` less often to read less.
 - **An injected Bigtable facade must accept the new filter variant and call options.**
   `BigtableFilter` gains `{ column: { cellLimit: number } }`, and `readRows` and `conditionalMutate`
-  take an optional `{ timeoutMs }` (which a facade may ignore, leaving the call unbounded). Every
-  read now asks for the latest cell only: handle the variant in a facade that switches over the
-  union.
+  take an optional `{ timeoutMs }` (a facade may ignore it: the call is still rejected at
+  `requestTimeoutMs`, `504`, though its own work runs on). Every read now asks for the latest cell
+  only: handle the variant in a facade that switches over the union.
 - **Bigtable on an emulator gets `universeDomain: 'googleapis.com'`.** When `BIGTABLE_EMULATOR_HOST`
   is set, or `apiEndpoint` is set without your own `sslCreds`, and no universe domain is configured
   (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
@@ -435,7 +435,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   entity and the fix. Before, such an application could look as if it worked, but its key fell back
   to `['id']`: a conditional delete on MySQL addressed every row sharing that `id` and could delete
   another tenant's row while answering `true`. Set `entities.<Entity>.keyColumns` to the `@@id`
-  columns in schema declaration order (for example `['tenantId', 'id']`).
+  columns in schema declaration order (for example `['tenantId', 'id']`). An empty `keyColumns` is
+  refused the same way, since a conditional write would then match rows by its predicate alone: name
+  the columns, or omit `keyColumns` for an `id` key.
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.

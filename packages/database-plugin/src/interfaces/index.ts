@@ -632,7 +632,9 @@ export interface PrismaCompositeKeyOptions {
    * every row sharing that `id`. Supply every column, in declaration order, for
    * both unnamed `@@id` (derived field `tenantId_userId`) and named `@@id` models.
    *
-   * Defaults to `['id']` when absent (scalar-key path).
+   * Defaults to `['id']` when absent (scalar-key path). An empty list is
+   * refused at construction: a conditional write would match by its predicate
+   * alone.
    *
    * @example
    * ```typescript
