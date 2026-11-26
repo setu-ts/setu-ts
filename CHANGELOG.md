@@ -169,7 +169,8 @@ All notable changes to this project are documented here. The format follows
   PostgreSQL run `updateMany` and a `findUnique` read-back, or `deleteMany` decided by its count, in
   a short transaction holding a pool connection (`maxWait` 2 s, so pool exhaustion answers 503,
   `P2028`: size the pool for it); a lost race on MySQL answers 409/404 instead of success; a
-  `keyColumns` that matches several rows throws and rolls back; a client extension or middleware for
+  `keyColumns` that matches several rows throws (the root client's short transaction rolls back; a
+  unit of work rolls back when the throw reaches it); a client extension or middleware for
   `update`/`delete` no longer sees them: hook `updateMany`/`deleteMany` too. Drizzle with MySQL
   writes through the repository (it was a masked 500); its `contains` escapes with `!`; on
   mysql-proxy a write's read-back runs outside a transaction, with one `warn`. A Prisma `P2010`
@@ -268,15 +269,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
-- **`@setu-ts/database-plugin` (M143q, #TBD).** Drizzle on mysql2 under `NO_BACKSLASH_ESCAPES` was
-  open to SQL injection through any bound string: mysql2 3.24 writes bound values into the query
-  text, escaping `'` as `\'`, and under that mode the quote ends the literal, so a value such as
-  `' OR 1=1 -- ` matched every row. The adapter now refuses the mode with `UnsupportedSqlModeError`
-  at `connect()`. On a pool, each connection opened later reads its mode and has the flag removed
-  before its first caller statement, and once one reported it every later adapter call refuses. A
-  session the application switches itself with `SET SESSION` after the check, connections the pool
-  opened before `connect()`, and mysql-proxy (no connection held) are not covered. mysql2 fixes the
-  escaping in sidorares/node-mysql2#4684, not yet in a stable release.
+- **`@setu-ts/database-plugin` (M143q, #TBD).** V13-272: Drizzle on mysql2 under
+  `NO_BACKSLASH_ESCAPES` was open to SQL injection through any bound string: mysql2 3.24 writes
+  bound values into the query text, escaping `'` as `\'`, and under that mode the quote ends the
+  literal, so a value such as `' OR 1=1 -- ` matched every row. The adapter now refuses the mode
+  with `UnsupportedSqlModeError` at `connect()`. On a pool, each connection opened later reads its
+  mode and has the flag removed before its first caller statement, and once one reported it every
+  later adapter call refuses. A session the application switches itself with `SET SESSION` after the
+  check, connections the pool opened before `connect()`, and mysql-proxy (no connection held) are
+  not covered. mysql2 fixes the escaping in sidorares/node-mysql2#4684, not yet in a stable release.
 
 ## [0.13.0] — 2026-11-17
 

@@ -272,8 +272,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
   `GOOGLE_CLOUD_UNIVERSE_DOMAIN`), the lazy arm passes it so the first call skips the SDK's
   credentials lookup. Emulator boot gets faster. A project with no `apiEndpoint` and no emulator
-  variable, or with `sslCreds` beside its `apiEndpoint` and no emulator variable, sees no change. A
-  private `apiEndpoint` without `sslCreds` and with no universe configured also gets the
+  variable, or with `sslCreds` beside its `apiEndpoint` and no emulator variable, keeps its universe
+  domain (client-side metrics still turn off whenever an endpoint is set, as the metrics bullet
+  says). A private `apiEndpoint` without `sslCreds` and with no universe configured also gets the
   `googleapis.com` default; if that endpoint serves another universe, set
   `clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
 - **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
@@ -281,7 +282,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   `updateWhere` and `updateVersioned` run `updateMany` with the key and the predicate, then a
   `findUnique` read-back; `deleteWhere` and `deleteVersioned` run `deleteMany` and decide from its
   count. A lost race on MySQL now answers `409` / `404` instead of reporting success. A `keyColumns`
-  that matches several rows throws and rolls back: make `keyColumns` name the table's key.
+  that matches several rows throws, rolling back the root client's short transaction (inside a unit
+  of work, the unit of work rolls back when the throw reaches it): make `keyColumns` name the
+  table's key.
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.

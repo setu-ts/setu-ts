@@ -131,7 +131,8 @@ const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli
 /**
  * Command-line tools a member's CI steps run with `pnpm exec`, pinned so the lockfile resolves
  * their whole graph. No import names them, so the scan cannot find them. `prisma` generates the
- * MySQL Prisma test client (`.github/workflows/ci.yml`); it matches `@prisma/client`.
+ * MySQL Prisma test client (`.github/workflows/ci.yml`); bump it with the `@prisma/client` version `pnpm-lock.yaml`
+ * resolves, which no gate compares.
  */
 const TOOL_DEV_DEPENDENCIES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   'packages/database-plugin': { prisma: '7.10.1' },

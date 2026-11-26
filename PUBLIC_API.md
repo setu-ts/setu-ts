@@ -3304,10 +3304,11 @@ log, and `errorHandler` reads the hint. It is not `DatabaseUnavailableError`: th
 says the operation did not happen, and a timed-out statement may have run, so a write's outcome is
 unknown and a retry of a write must be idempotent. The bound is the driver's own — node-postgres's
 `query_timeout` and `connectionTimeoutMillis` on the `Pool` the application hands Drizzle; the
-plugin adds no JavaScript race of its own, for the reasons the README's `Bounding a call` section
-gives. The DynamoDB, Cosmos DB and Bigtable arms set their driver's own cancelling deadline,
-`requestTimeoutMs` (since 0.14.0). The behaviour of a timed-out statement inside a transaction is
-measured in this milestone and documented there. Ships in 0.10.0.
+plugin adds no JavaScript race to a call (only the bounded `sql_mode` read at `connect()` on Drizzle
+over mysql2), for the reasons the README's `Bounding a call` section gives. The DynamoDB, Cosmos DB
+and Bigtable arms set their driver's own cancelling deadline, `requestTimeoutMs` (since 0.14.0). The
+behaviour of a timed-out statement inside a transaction is measured in this milestone and documented
+there. Ships in 0.10.0.
 
 **A duplicate key answers `409 Conflict`.** A write that would duplicate a primary key or a unique
 index is thrown as `DuplicateKeyError` (exported from `@setu-ts/common`, so a package that may not

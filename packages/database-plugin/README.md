@@ -297,9 +297,10 @@ export async function editArticle(
   `{ maxWait: 2000, timeout: transactionTimeout }`, so it holds a pool connection while it runs and
   a pool that cannot supply one within 2 s answers `503` (`P2028`); inside a unit of work it runs on
   that transaction's client. A `count` above 1 means `keyColumns` do not name the table's key: it
-  throws and the write rolls back. A client extension (`$extends` query hook) or middleware written
-  for `update`/`delete` does not see these writes on the count path; hook `updateMany` /
-  `deleteMany` too.
+  throws; on the root client its short transaction rolls back, and inside a unit of work the unit of
+  work rolls back when the throw reaches it. A client extension (`$extends` query hook) or
+  middleware written for `update`/`delete` does not see these writes on the count path; hook
+  `updateMany` / `deleteMany` too.
 - **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
   committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
   the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos
@@ -1730,19 +1731,20 @@ transient rather than permanent. Branch on them with `instanceof` — every one 
 
 ## Bounding a call
 
-The plugin adds no JavaScript race of its own. A JavaScript deadline cannot cancel the statement —
-the connection stays occupied, so a deadline only moves the hang from the caller to pool exhaustion
-— and inside a transaction it rejects while the statement may still commit. The bound is the
-driver's own, enforced by the driver that owns the connection. For a SQL pool the application
-builds, the application sets it; for the DynamoDB, Cosmos DB and Bigtable clients, which the plugin
-can build itself, the plugin sets the driver's own cancelling deadline by default
-(`requestTimeoutMs`, below); on node-postgres a query that hits `query_timeout` rejects with the
-driver's `Query read timeout`, and the timed-out client is released with the error and removed from
-the pool, so the bound does not leak a connection. A call that hits the bound is answered
-`504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run, so a write's outcome
-is unknown and a retry of a write must be idempotent. A connection lost under a statement is
-answered the same way for the same reason, but its message says the connection closed before the
-call completed, so the log does not claim a bound fired (since 0.13.0).
+The plugin adds no JavaScript race to a call. (The one race it runs is outside any call: the bounded
+`sql_mode` read at `connect()` on Drizzle over mysql2, which fails start rather than a request.) A
+JavaScript deadline cannot cancel the statement — the connection stays occupied, so a deadline only
+moves the hang from the caller to pool exhaustion — and inside a transaction it rejects while the
+statement may still commit. The bound is the driver's own, enforced by the driver that owns the
+connection. For a SQL pool the application builds, the application sets it; for the DynamoDB, Cosmos
+DB and Bigtable clients, which the plugin can build itself, the plugin sets the driver's own
+cancelling deadline by default (`requestTimeoutMs`, below); on node-postgres a query that hits
+`query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
+with the error and removed from the pool, so the bound does not leak a connection. A call that hits
+the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
+so a write's outcome is unknown and a retry of a write must be idempotent. A connection lost under a
+statement is answered the same way for the same reason, but its message says the connection closed
+before the call completed, so the log does not claim a bound fired (since 0.13.0).
 
 | Adapter                  | The driver's own call bound                                                                                                                  | Status                         |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
