@@ -40,6 +40,10 @@ const ROWS: readonly [string, string | undefined, string | undefined, unknown, u
   ['version 1.3e1', KEY, '1.3e1', undefined, BAD_VERSION],
   ['version 13.0', KEY, '13.0', undefined, BAD_VERSION],
   ['version 013', KEY, '013', undefined, BAD_VERSION],
+  // JavaScript whitespace that HTTP keeps: `ws`'s `+` strips it, workerd does not.
+  ['version 13 with a vertical tab', KEY, '13\v', undefined, BAD_VERSION],
+  ['version 13 after a form feed', KEY, '\f13', undefined, BAD_VERSION],
+  ['version 13 with a no-break space', KEY, '13\u00a0', undefined, BAD_VERSION],
 ];
 
 describe('refuseHandshakeHeaders', () => {

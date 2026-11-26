@@ -1485,6 +1485,10 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   pre-check read the version with `Number()` (`ws`'s rule), so `0x0d`, `+13`, `1.3e1`, `13.0` and
   `013` passed the adapter while workerd compares the header to the string `13` and refuses them —
   the phantom `onOpen` for those spellings. `refuseHandshakeHeaders` now takes the platform's
-  version rule: `WS_VERSION_RULE` (numeric 13 or 8, Deno) and `WORKERD_VERSION_RULE` (the trimmed
+  version rule: `WS_VERSION_RULE` (numeric 13 or 8, Deno) and `WORKERD_VERSION_RULE` (the untrimmed
   header is exactly `13`, Workers). Low: a gateway that forwards only the headers drops `cf` (one
   that forwards the `Request` keeps it); the README and the adapter comment now say so.
+- **Review and third audit of the version fix.** `trim()` also strips the vertical tab, form feed
+  and no-break space, which workerd keeps in the value, so `13\v`, `\f13` and `13\xa0` passed the
+  adapter while workerd refuses them. The rule is now `raw === '13'` (spaces and tabs are stripped
+  from a header value before the Worker sees it), with unit rows for those spellings.

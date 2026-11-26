@@ -39,12 +39,14 @@ export const WS_VERSION_RULE: HandshakeVersionRule = (raw) => {
 };
 
 /**
- * workerd's rule: the header, trimmed, is exactly `13`. workerd refuses `8`,
- * `0x0d`, `+13`, `13.0` and `013` (measured on local workerd), so the Workers
- * adapter must too, or such a handshake would run `onOpen` before the platform
- * refuses it.
+ * workerd's rule: the header is exactly `13`. workerd refuses `8`, `0x0d`,
+ * `+13`, `13.0`, `013`, and `13` with a vertical tab, form feed or no-break space
+ * (measured on local workerd), so the Workers adapter must too, or such a
+ * handshake would run `onOpen` before the platform refuses it. Not trimmed:
+ * spaces and tabs are already stripped from a header value, and `trim()` would
+ * also strip the vertical tab, form feed and no-break space that workerd keeps.
  */
-export const WORKERD_VERSION_RULE: HandshakeVersionRule = (raw) => raw?.trim() === '13';
+export const WORKERD_VERSION_RULE: HandshakeVersionRule = (raw) => raw === '13';
 
 /**
  * Checks a WebSocket handshake's key the way `ws` does, and its version by the

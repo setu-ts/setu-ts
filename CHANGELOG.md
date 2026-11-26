@@ -388,7 +388,9 @@ All notable changes to this project are documented here. The format follows
   (V13-278). The check applies to requests from the edge (`request.cf` set); a Worker-to-Worker
   socket over a service binding or Durable Object stub, which has no `cf` and no key, still opens.
   In local dev and behind a gateway Worker the app receives a handshake workerd rebuilt, so the
-  check cannot act there; production behaviour is unverified here (no Cloudflare account).
+  check cannot act there; a gateway that forwards only the headers also drops `cf`, so its requests
+  are treated as Worker-to-Worker calls. Production behaviour is unverified here (no Cloudflare
+  account).
 - **`@setu-ts/runtime` (M143o).** Cloudflare's documented Worker-to-Worker WebSocket call,
   `fetch(url, { headers: { Upgrade: 'websocket' } })` over a service binding or Durable Object stub,
   reaches a Setu WebSocket route: the Workers adapter treats such an internal subrequest as an
