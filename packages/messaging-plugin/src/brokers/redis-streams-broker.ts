@@ -1,3 +1,5 @@
+import { resolveConsumerRetry } from './consumer-retry.ts';
+import { wantsFanOut } from './fan-out.ts';
 import {
   createCachedProbe,
   withDeadline,
@@ -195,6 +197,16 @@ interface ConsumerLoopDeps {
     final: boolean,
     active: () => boolean,
   ) => Promise<void>;
+}
+
+/** The leading Redis error code (`NOPERM`, `WRONGTYPE`, …) of a failure, never its text. */
+function redisErrorCode(error: unknown): string {
+  try {
+    const message = error instanceof Error ? error.message : '';
+    return /^([A-Z][A-Z_]{1,31})\b/.exec(message)?.[1] ?? 'unknown error';
+  } catch {
+    return 'unknown error';
+  }
 }
 
 /**
@@ -398,6 +410,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   /** The reporter and reconnect counter on `#client`; detached on disconnect. */
   #watch: ConnectionWatch | undefined;
   #ready = false;
+  #disconnecting = false;
   #activeSubscriptions: Map<string, ActiveSubscription>;
   #maxAttempts: number;
   #delaysMs: readonly number[];
@@ -411,6 +424,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #pollTimer: TimerHandle | undefined;
   /** The one reclaim timer serving every subscription (M131a X88-7). */
   #reclaimTimer: TimerHandle | undefined;
+  #generation = 0;
 
   /**
    * Creates a new Redis Streams broker.
@@ -429,9 +443,12 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
     this.#pollIntervalMs = options?.pollIntervalMs ?? 100;
     this.#blockSizeMs = options?.blockSizeMs ?? 100;
-    this.#maxAttempts = options?.consumerRetry?.maxAttempts ?? 5;
-    this.#delaysMs = [...(options?.consumerRetry?.delaysMs ?? [30000, 60000, 300000, 600000])];
-    this.#isRetryable = options?.consumerRetry?.isRetryable;
+    const retry = resolveConsumerRetry(options?.consumerRetry, 'RedisStreamsBroker', {
+      defaults: [30000, 60000, 300000, 600000],
+    });
+    this.#maxAttempts = retry.maxAttempts;
+    this.#delaysMs = retry.delaysMs;
+    this.#isRetryable = retry.isRetryable;
     this.#reclaimIntervalMs = options?.reclaimIntervalMs ?? 5000;
     this.#deadLetterMaxLen = options?.deadLetterMaxLen ?? 10000;
     this.#consumerIdleSweepMs = options?.consumerIdleSweepMs ?? 3600000;
@@ -442,25 +459,16 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
         );
       }
     };
-    positiveInteger('consumerRetry.maxAttempts', this.#maxAttempts);
     positiveInteger('deadLetterMaxLen', this.#deadLetterMaxLen);
     positiveInteger('reclaimIntervalMs', this.#reclaimIntervalMs, 2147483647);
     positiveInteger('consumerIdleSweepMs', this.#consumerIdleSweepMs, 2147483647);
-    if (this.#delaysMs.length === 0) {
-      throw new RangeError('RedisStreamsBroker consumerRetry.delaysMs must be nonempty');
-    }
-    for (const [index, delay] of this.#delaysMs.entries()) {
-      positiveInteger('consumerRetry.delaysMs', delay, 2147483647);
-      if (index > 0 && delay < this.#delaysMs[index - 1]) {
-        throw new RangeError('RedisStreamsBroker consumerRetry.delaysMs must be nondecreasing');
-      }
-    }
     if (options?.logger) {
       this.#logger = options.logger;
     }
     this.#reporter = options?.connectionErrorReporter;
     this.#activeSubscriptions = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => this.#logger?.error(message),
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
@@ -500,6 +508,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
+    this.#disconnecting = false;
     const resolved = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     const { client, watch } = resolved;
     this.#client = client;
@@ -551,6 +560,8 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    this.#disconnecting = true;
+    this.#generation++;
     // Stop the shared timers first: a tick landing after a subscription has
     // been removed would find nothing to serve, and a tick during the drain
     // would race the in-flight guard.
@@ -709,9 +720,13 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const independent = wantsFanOut(options);
     if (!this.#client) {
       throw new Error('RedisStreamsBroker is not connected');
     }
+    if (this.#disconnecting) throw new Error('RedisStreamsBroker disconnected while subscribing');
+
+    if (independent) return this.#subscribeFanOut(topic, handler);
 
     const groupId = options?.queue ?? this.#defaultQueue;
     const consumerId = this.#runtime.uuid();
@@ -773,6 +788,95 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     return {
       unsubscribe,
     };
+  }
+
+  /** A plain reader owns no group or pending list and never reclaims failures. */
+  async #subscribeFanOut<T>(topic: string, handler: MessageHandler<T>): Promise<ISubscription> {
+    const client = this.#client!;
+    const generation = this.#generation;
+    if (typeof client.xread !== 'function')
+      throw new TypeError('RedisStreamsBroker fanOut requires client.xread');
+    if (typeof client.xrevrange !== 'function')
+      throw new TypeError('RedisStreamsBroker fanOut requires client.xrevrange');
+    const latest = await client.xrevrange(topic, '+', '-', 'COUNT', '1');
+    if (this.#disconnecting || generation !== this.#generation)
+      throw new Error('RedisStreamsBroker disconnected while subscribing');
+    let lastId = latest[0]?.[0] ?? '0-0';
+    let stopped = false;
+    let flight: Promise<void> | undefined;
+    let readFailing = false;
+    const id = this.#runtime.uuid();
+    // A throwing logger must never escape the reader (it would reject unhandled).
+    const log = (message: string): void => {
+      try {
+        this.#logger?.error(message);
+      } catch {
+        /* Diagnostic sinks cannot stop the reader. */
+      }
+    };
+    const poll = async (): Promise<void> => {
+      const result = await client.xread!(
+        'COUNT',
+        '100',
+        'BLOCK',
+        String(this.#blockSizeMs),
+        'STREAMS',
+        topic,
+        lastId,
+      );
+      readFailing = false;
+      if (stopped || result === null) return;
+      for (const stream of result) {
+        for (const [entryId, fields] of stream[1] as Array<[string, string[]]>) {
+          if (stopped) return;
+          lastId = entryId;
+          try {
+            const headers: Array<[string, string]> = [];
+            let payload: string | undefined;
+            for (let index = 0; index < fields.length; index += 2) {
+              if (fields[index] === PAYLOAD_FIELD) payload ??= fields[index + 1];
+              else headers.push([fields[index]!, fields[index + 1]!]);
+            }
+            if (payload === undefined) throw new Error('Missing message payload');
+            await handler(this.#serializer.deserialize<T>(payload), {
+              topic,
+              messageId: entryId,
+              headers: Object.fromEntries(headers),
+            });
+          } catch {
+            log('Redis fanOut handler failed; frame is not redelivered');
+          }
+        }
+      }
+    };
+    const unsubscribe = async (): Promise<void> => {
+      stopped = true;
+      this.#activeSubscriptions.delete(id);
+      await withDeadline(() => flight ?? Promise.resolve(), {
+        timeoutMs: SHUTDOWN_DRAIN_MS,
+        onTimeout: () => new Error('Redis fanOut shutdown drain timed out'),
+        timing: resolveProbeTiming(this.#runtime),
+      }).catch(() => log('Redis fanOut shutdown drain timed out'));
+    };
+    this.#activeSubscriptions.set(id, {
+      id,
+      pollTick: () => {
+        if (stopped || flight !== undefined) return;
+        flight = poll()
+          .catch((error: unknown) => {
+            // Once per failing state, with the Redis error code, not every tick.
+            if (stopped || readFailing) return;
+            readFailing = true;
+            log(`Redis fanOut read failed (${redisErrorCode(error)}); retaining last stream ID`);
+          })
+          .finally(() => {
+            flight = undefined;
+          });
+      },
+      reclaimTick: () => {},
+      unsubscribe,
+    });
+    return { fanOut: true, unsubscribe };
   }
 
   async #deliver(

@@ -137,6 +137,7 @@ async function startQueueApplication() {
         pollIntervalMs: POLL_MS,
         sqs: {
           queues: { 'report.build': QUEUE_URL },
+          deadLetterQueues: { 'report.build': 'https://sqs.local/dead' },
           client: transport,
           credentials: { accessKeyId: CREDENTIAL_CANARY, secretAccessKey: CREDENTIAL_CANARY },
         },

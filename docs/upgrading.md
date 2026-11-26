@@ -12,6 +12,74 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### SQS dead-letter targets and long jobs (`@setu-ts/queue-plugin`)
+
+**BREAKING.** Every SQS job name a process consumes now needs a dead-letter target, and a consumer
+without one is refused before its first poll with `SqsDeadLetterTargetMissingError`. A processor
+declared in `QueuePlugin({ processors })` makes `app.start()` fail. Names a process only enqueues to
+are not checked. Pick one per consumed name:
+
+- `sqs: { deadLetterQueues: { 'report.build': '<dead-letter queue URL>' } }`;
+- a redrive policy on the queue itself, used when `deadLetterQueues` has no entry for the name;
+- `deadLetterQueues: { 'report.build': false }` to discard exhausted jobs: `onFailed` still runs,
+  the message is deleted with a warning, and `queue_jobs_total` counts `discarded`.
+
+Before 0.14.0 an exhausted job with no `deadLetterQueues` entry was deleted and counted as
+dead-lettered.
+
+A consumer role now needs `sqs:GetQueueAttributes` on the source queue (not for a name set to
+`false`; with an explicit target URL a refused read only warns), plus `sqs:GetQueueUrl` and
+`sqs:SendMessage` on a redrive-policy target (and `kms:GenerateDataKey` and `kms:Decrypt` for a
+customer-managed KMS key). With a redrive policy whose `maxReceiveCount` is at or below a job's
+`maxAttempts`, attempts are lowered to `maxReceiveCount - 1` (at least 1) and a warning says so; set
+`maxReceiveCount` to `maxAttempts + 1` to keep them all.
+
+Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`; SQS can
+still deliver more than once, so keep processors idempotent. Other changes you may notice:
+`visibilityTimeoutSeconds` outside 1 to 43,200 is refused; a message the adapter cannot read moves
+to the dead-letter target instead of returning every timeout; a stale settle is reported as
+`queue job settlement failed`; and on every adapter `queue_jobs_total` counts an outcome only after
+its settle succeeded. A custom `ISqsTransport` without `getQueueAttributes` can consume only names
+with a `deadLetterQueues` entry.
+
+`SnsPublisher.publish(message)` never produced anything `SqsQueue` could read; use
+`publishJob(name, data, options?)`, and give `SnsPublisher` a `runtime` (or pass `options.id`).
+
+### Fan-out, consumer retries and the RabbitMQ outbox (`@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/common`)
+
+- **BREAKING: the backplane's `'messaging'` transport needs fan-out.** It now refuses to start with
+  `BackplaneFanOutUnsupportedError` when the broker does not confirm a fan-out subscription. Every
+  built-in broker does. You are affected if you run it on Cloudflare's `WorkersBroker` (use the
+  Durable Object backplane), on a `custom` broker (return `fanOut: true` from `subscribe` when the
+  caller passed `fanOut: true` and every instance receives every message). On Service Bus without
+  the `Manage` right it fails with the SDK's authorization error instead (grant it, or use the
+  `'redis'` transport).
+- **BREAKING: Redis Streams clients you implement yourself.** A fan-out subscription calls `xread`
+  and `xrevrange`. `ioredis` and `fromNodeRedis` provide both; a hand-written `IRedisStreamsClient`
+  without them is refused at that `subscribe()` with a `TypeError` naming the method. Add both
+  methods (positional arguments, as `ioredis` takes them).
+- **BREAKING: Pub/Sub and Service Bus retry by default.** Pub/Sub redelivers a failing handler with
+  a delay by default, and limits attempts only with `deadLetterTopic`; Service Bus uses a delay and
+  a limit. Set `consumerRetry: false` to keep the old behaviour. On Pub/Sub, give `deadLetterTopic`
+  (an existing topic with a subscription) to bound the attempts; the policies apply only to
+  subscriptions the broker creates, so an existing subscription keeps its settings, with one
+  warning, until you change it in Google Cloud. A `deadLetterTopic` that does not exist fails the
+  subscribe with `PubSubDeadLetterTopicMissingError`. On Service Bus a retry holds the message (and,
+  at the default single concurrent call, the subscription) for its delay.
+- **BREAKING: RabbitMQ outbox rows must be routable.** The relay now marks an unroutable row
+  `failed` after its retries instead of `sent`: bind a queue for every outbox topic before rows are
+  relayed. An outbox on an injected connection without `createConfirmChannel` and return listeners
+  refuses to start with `OutboxPublisherConfirmsRequiredError`; a connection from `amqplib`'s
+  `connect()` always has them.
+- **Pub/Sub ordering.** On a broker with `enableMessageOrdering`, handlers of one ordering key now
+  run one at a time; expect lower throughput per key.
+- **Not breaking: late frames.** The backplane README no longer claims a frame is never late. To
+  drop late frames, set `maxFrameAgeMs` on the `'messaging'` or `'redis'` transport (replicas'
+  clocks must agree); the default delivers them as before.
+- **Pub/Sub terminal dead-letter forwards** always time out after 15,000 ms, even with
+  `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+- **`QueueSettlementState`** gains `'discarded'`: an exhaustive `switch` over it needs a new arm.
+
 ### `resolveHost` errors and the reserved `x-setu-unprocessed` drain marker (`@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/common`)
 
 `IDnsResolver.resolveHost` now rejects with an `AggregateError` cause when both A and AAAA fail.

@@ -1,3 +1,4 @@
+import { registerRoutedPublish, routedPublishAvailable } from '../brokers/publish-options.ts';
 /** Internal telemetry decorator for message brokers. */
 
 import {
@@ -23,6 +24,7 @@ export class TracedBroker implements MessageBrokerAdapter {
 
   constructor(broker: MessageBrokerAdapter, telemetry: ITelemetryService, system: string) {
     this.#broker = broker;
+    registerRoutedPublish(this, () => routedPublishAvailable(broker));
     this.#telemetry = telemetry;
     this.#system = system;
   }

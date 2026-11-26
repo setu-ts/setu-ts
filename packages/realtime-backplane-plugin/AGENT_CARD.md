@@ -50,7 +50,8 @@ export function registerDeployRoutes(router: IRouterApi): void {
 
 ## Other options
 
-- `'messaging'` requires `CAPABILITIES.MESSAGING`; its reach depends on that broker's transport.
+- `'messaging'` needs a broker confirming `fanOut`, else startup fails.
+- `maxFrameAgeMs` (default 0) drops late frames.
 - `'custom'` uses `instance: IRealtimeBackplane`; `'memory'` accepts a named `bus`.
 - `commandTimeoutMs: 0` disables the Redis bound; `diagnostics` observes transport activity and
   `localNotice: false` suppresses the memory notice.

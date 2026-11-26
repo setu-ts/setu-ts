@@ -419,6 +419,14 @@ export type MessageHandler<T = unknown> = (
  * @since 0.1.0
  */
 export interface SubscribeOptions {
+  /**
+   * Requests an independent subscription receiving every new publication.
+   * Mutually exclusive with `queue`. A supporting broker returns `fanOut: true`.
+   * @returns The requested delivery mode
+   * @throws {RangeError} When combined with `queue`
+   * @since 0.14.0
+   */
+  readonly fanOut?: true;
   /** Consumer group / queue name for load-balanced delivery. */
   readonly queue?: string;
 }
@@ -457,6 +465,14 @@ export type RequestHandler<TReq = unknown, TRes = unknown> = (
  * @since 0.1.0
  */
 export interface ISubscription {
+  /**
+   * Confirms that this subscription receives publications independently of peers.
+   * Absence does not establish fan-out support.
+   * @returns True when the broker honored the fan-out request
+   * @throws Never
+   * @since 0.14.0
+   */
+  readonly fanOut?: true;
   /**
    * Cancels the subscription.
    */

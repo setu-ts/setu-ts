@@ -8,7 +8,14 @@
  * @module
  */
 
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import {
+  OptionalDependencyUnavailableError,
+  contextToTraceparent,
+  TELEMETRY_CONTEXT_OPAQUE,
+  TRACEPARENT_HEADER,
+} from '@setu-ts/common';
+import type { IRuntimeServices, ITelemetryService } from '@setu-ts/common';
+import { encodeSqsEnvelope } from '../adapters/sqs-envelope.ts';
 
 /**
  * Declares the constructors used from the real AWS SNS SDK v3.
@@ -39,6 +46,10 @@ export interface ISnsTransport {
  * Options for SNS publisher.
  */
 export interface SnsPublisherOptions {
+  /** Supplies publishJob ids through uuid(); publish ignores it. @since 0.14.0 */
+  runtime?: IRuntimeServices;
+  /** Producer spans and envelope traceparent for publishJob; publish ignores it. @since 0.14.0 */
+  telemetry?: ITelemetryService;
   /** Target SNS topic ARN. */
   topicArn: string;
   /** AWS region (for lazy SDK load). */
@@ -114,8 +125,12 @@ export class SnsPublisher {
   #injectedClient: ISnsTransport | undefined;
   #transport: ISnsTransport | null = null;
   #ready = false;
+  #runtime: IRuntimeServices | undefined;
+  #telemetry: ITelemetryService | undefined;
 
   constructor(options: SnsPublisherOptions) {
+    this.#runtime = options.runtime;
+    this.#telemetry = options.telemetry;
     this.#topicArn = options.topicArn;
     this.#region = options.region;
     this.#credentials = options.credentials;
@@ -153,7 +168,8 @@ export class SnsPublisher {
   }
 
   /**
-   * Publish a message to the configured SNS topic.
+   * Publish a raw message to the configured SNS topic. The queue adapter
+   * cannot read this form; use publishJob for SQS job consumers.
    *
    * @param message - The message payload (serialized to JSON)
    * @returns The SNS message ID, or undefined if not available
@@ -163,5 +179,72 @@ export class SnsPublisher {
 
     const body = typeof message === 'string' ? message : JSON.stringify(message);
     return this.#transport.publish(this.#topicArn, body);
+  }
+  /**
+   * Publishes work readable by raw and wrapped SQS subscriptions consuming name.
+   * Headers live only in the envelope; no SNS message attributes are sent.
+   * @typeParam T - Payload type
+   * @param name - Consumed job name
+   * @param data - JSON-serializable job payload
+   * @param options - Explicit identity, optional attempt budget and copied headers
+   * @returns SNS message id, or undefined when unavailable
+   * @throws {TypeError} As a rejection without options.id or options.runtime, or for invalid work
+   * @throws {Error} As a rejection if disconnected or publishing fails
+   * @example
+   * ```typescript
+   * await publisher.publishJob('report.build', { reportId: 'r1' }, { id: 'job-1' });
+   * ```
+   * @since 0.14.0
+   */
+  async publishJob<T>(
+    name: string,
+    data: T,
+    options?: {
+      id?: string;
+      maxAttempts?: number;
+      headers?: Readonly<Record<string, string>>;
+    },
+  ): Promise<string | undefined> {
+    const transport = this.#transport;
+    if (!transport) throw new Error('SnsPublisher is not connected');
+    const id = options?.id ?? this.#runtime?.uuid();
+    if (id === undefined)
+      throw new TypeError('publishJob requires options.id or SnsPublisherOptions.runtime');
+    const publish = (
+      headers: Readonly<Record<string, string>> | undefined,
+    ): Promise<string | undefined> =>
+      transport.publish(
+        this.#topicArn,
+        encodeSqsEnvelope({
+          id,
+          name,
+          data,
+          ...(options?.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
+          ...(headers === undefined ? {} : { headers: { ...headers } }),
+        }),
+      );
+    if (!this.#telemetry) return await publish(options?.headers);
+    return await this.#telemetry.withSpan(
+      `enqueue ${name}`,
+      (span) => {
+        const traceparent = contextToTraceparent({
+          _opaque: TELEMETRY_CONTEXT_OPAQUE,
+          ...span.spanContext(),
+        });
+        return publish(
+          traceparent === null
+            ? options?.headers
+            : { ...options?.headers, [TRACEPARENT_HEADER]: traceparent },
+        );
+      },
+      {
+        kind: 'producer',
+        attributes: {
+          'messaging.system': 'queue',
+          'messaging.destination.name': name,
+          'messaging.operation': 'enqueue',
+        },
+      },
+    );
   }
 }

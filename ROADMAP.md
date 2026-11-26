@@ -17903,8 +17903,9 @@ trace. An exhausted SQS job is dead-lettered or handed to `onFailed`, never dele
 longer than the visibility timeout runs once. A message the adapter cannot read is retired, not
 redelivered forever. A failing handler on Pub/Sub and Service Bus is retried with a limit and a
 delay, and a dead Pub/Sub stream is re-opened or reported. The backplane reaches every replica on
-every broker it accepts, and refuses at startup a broker it cannot fan out on. A paused Redis or
-RabbitMQ delivers no frame late. An unroutable RabbitMQ outbox row is not marked sent.
+every broker it accepts, and refuses at startup a broker it cannot fan out on. A frame a paused
+Redis or RabbitMQ delivers late is documented, and an opt-in `maxFrameAgeMs` drops it (maintainer
+decision D5, 2026-11-23: off by default). An unroutable RabbitMQ outbox row is not marked sent.
 
 - **V13-198** (High) — An SQS job longer than the visibility timeout runs again and again, then is
   reported failed.
@@ -18384,7 +18385,7 @@ not a pass threshold.
 | 143m      | ⬜     | Messaging lane: messaging + queue + realtime-backplane — broker and queue bounds, health, errors and options                                                                                                                                                                              |
 | 143n      | ⬜     | Docs lane: docs — documentation                                                                                                                                                                                                                                                           |
 | 143o      | ⬜     | Workers lane: cloudflare + websocket + runtime (Workers adapter) — Workers: realtime, Durable Objects, queues and bindings                                                                                                                                                                |
-| 143p      | ⬜     | Messaging lane: queue + messaging + realtime-backplane — queued work and frames that are lost or repeated                                                                                                                                                                                 |
+| 143p      | ✅     | Messaging lane: queue + messaging + realtime-backplane — queued work and frames that are lost or repeated (security-audited)                                                                                                                                                              |
 | 143q      | ✅     | Data lane: database — databases off PostgreSQL (security-audited)                                                                                                                                                                                                                         |
 | 143r      | ⬜     | Integrations lane: storage + secrets + mail + notification + feature-flags + worker-pool + localization — provider arms and their options                                                                                                                                                 |
 | 144       | ⬜     | cli + website + docs — agent guidance: a repair section per `setu check` finding, `--json`, corrections in the brief, `llms.txt`                                                                                                                                                          |

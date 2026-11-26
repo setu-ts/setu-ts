@@ -65,8 +65,88 @@ All notable changes to this project are documented here. The format follows
   predicate is checked at the call and carried to the commit, and a commit that loses it throws
   `SerializationConflictError` (409) and applies nothing.
 
+- **`@setu-ts/queue-plugin` (M143p, #616).** `SnsPublisher.publishJob(name, data, options?)`
+  publishes the job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped
+  (SNS `Notification`) subscription; with the new `SnsPublisherOptions.telemetry` the publish runs
+  in a producer span and carries its `traceparent` in the envelope, and
+  `SnsPublisherOptions.runtime` supplies job ids (V13-212). `SqsDeadLetterTargetMissingError` and
+  its `SqsDeadLetterTargetMissingReason` are exported. `ISqsTransport` gains optional
+  `getQueueAttributes` and `getQueueUrl` and an `attributes` argument on `send`;
+  `SqsReceivedMessage` gains `messageId`.
+- **`@setu-ts/common`, `@setu-ts/messaging-plugin` (M143p, #616).** `SubscribeOptions.fanOut` asks a
+  broker for a subscription that receives every message published after it subscribed, independently
+  of other instances, and `ISubscription.fanOut` confirms that the broker gave one. Every built-in
+  broker honours it (memory, Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub, Service Bus); `fanOut`
+  with `queue` throws `RangeError`. `IRedisStreamsClient` gains optional `xread` and `xrevrange`,
+  and `fromNodeRedis` implements both. Pub/Sub gains `consumerRetry` and `deadLetterTopic`, Service
+  Bus `consumerRetry`. New errors: `UnroutableMessageError`, `OutboxPublisherConfirmsRequiredError`,
+  `PubSubDeadLetterTopicMissingError`; new types `PubSubCreateOptions`, `PubSubOpenOptions`.
+  `QueueSettlementState` gains `'discarded'`.
+- **`@setu-ts/realtime-backplane-plugin` (M143p, #616).** `maxFrameAgeMs` (opt-in, default `0`) on
+  the `'messaging'` and `'redis'` transports drops a frame older than the bound by the receiver's
+  clock; frames carry the sender's `sentAtMs`. `BackplaneFanOutUnsupportedError` and
+  `BackplaneReporter` are exported; `createBackplane`, `MessagingBackplane` and `RedisBackplane`
+  take an optional `now` clock. A publish whose outcome is unknown (it timed out, or the connection
+  was lost after the write) logs one `warn` per failing state,
+  `publish failed; the frame may still arrive late`; a RabbitMQ channel that closes before its
+  confirm logs none.
+
 ### Changed
 
+- **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p, #616).**
+  - Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`: the
+    adapter extends visibility every third of the timeout, up to SQS's 12-hour limit (V13-198).
+    `visibilityTimeoutSeconds` outside 1 to 43,200 is refused with a `RangeError`. SQS can still
+    deliver more than once; keep processors idempotent.
+  - A consumed name needs a dead-letter target: `deadLetterQueues[name]`, the queue's own redrive
+    policy, or `deadLetterQueues[name]: false` to discard exhausted jobs. Without one the consumer
+    is refused before its first poll with `SqsDeadLetterTargetMissingError`, so a declared processor
+    fails `app.start()`; a name only enqueued to is never checked (V13-199). An exhausted job is no
+    longer deleted when no target is configured.
+  - When the queue's redrive policy has `maxReceiveCount` at or below a job's `maxAttempts`, the
+    job's attempts are lowered to `maxReceiveCount - 1` (at least 1) with one warning per name, so
+    `onFailed` runs before SQS takes the message (V13-214).
+  - A forwarded dead letter carries `setu-dead-letter-reason`, `setu-attempts` and
+    `setu-source-message-id` message attributes. On `InvalidParameterValue` (SQS's code for an
+    oversize message, also used for other invalid parameters), the forward is retried once without
+    those attributes, with a warning. A failed forward keeps the source message.
+  - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
+    deleted, and its warning carries the message id, never the body (V13-213).
+  - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
+    of logging and returning. A dead letter whose copy already reached its target still deletes the
+    source and warns when its claim lapsed during the forward.
+  - Consuming needs `sqs:GetQueueAttributes` (not for a `false` entry; with an explicit target URL a
+    refused read only warns), and `sqs:GetQueueUrl` and `sqs:SendMessage` on a policy target.
+- **`@setu-ts/queue-plugin`, every adapter (M143p, #616).** `queue_jobs_total` counts an outcome
+  only after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle
+  that fails is no longer counted.
+- **`@setu-ts/messaging-plugin` (M143p, #616).** Pub/Sub terminal dead-letter forwards always time
+  out after 15,000 ms, even with `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+
+- **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p, #616).**
+  - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`
+    with `BackplaneFanOutUnsupportedError` a broker that does not confirm it (Cloudflare's
+    `WorkersBroker`, a `custom` broker that ignores the option); a Redis Streams client without
+    `xread` fails it with a `TypeError`, and Service Bus without `Manage` with the SDK's error. On
+    Kafka, NATS, Redis Streams, Pub/Sub and Service Bus every replica now receives every frame;
+    before, a shared consumer group handed each frame to one replica (V13-258).
+  - Pub/Sub retries a failing handler with a delay by default, and limits attempts only with
+    `deadLetterTopic`; Service Bus retries with a delay and a limit by default. Set
+    `consumerRetry: false` for the old immediate nack or abandon (V13-261). Pub/Sub sets the
+    subscription's retry and dead-letter policies only when it creates the subscription; a missing
+    `deadLetterTopic` then fails the subscribe with `PubSubDeadLetterTopicMissingError`.
+  - A Pub/Sub stream the client library closed is re-opened on a fixed schedule, and the broker
+    reports unreachable while it is closed (V13-260). On an ordering subscription, handlers run one
+    at a time per ordering key, and a failure holds the key's later messages until a held-back
+    message of that key is redelivered, so order is best effort (V13-266); past 10,000 keys held per
+    subscription the least recently used idle key is forgotten, with a warning when its failure is
+    recent enough that order can be lost.
+  - The outbox relay on RabbitMQ publishes with `mandatory`: an unroutable row is retried and then
+    marked `failed`, not `sent`, and the outbox refuses to start on a connection without publisher
+    confirms (`OutboxPublisherConfirmsRequiredError`) (V13-107). Plain `publish()` is unchanged.
+  - The backplane README no longer claims a frame is never delivered late: a publish written to a
+    paused server arrives when it resumes (X3-3). `maxFrameAgeMs` is the opt-in bound; delivery is
+    unchanged by default.
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).

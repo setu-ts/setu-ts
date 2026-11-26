@@ -928,7 +928,7 @@ describe('GcpPubSubBroker', () => {
       onMessageCb!({ payload: '{}', ack: () => {}, nack: () => {} });
       await Promise.resolve();
       await Promise.resolve();
-      expect(logged).toContain('handler-error');
+      expect(logged).toBe('Pub/Sub handler failed');
     });
   });
 });
@@ -1181,7 +1181,7 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
         }
         return {
           on(
-            event: 'message' | 'error',
+            event: 'message' | 'error' | 'close',
             handler: (msg: {
               ack: () => void;
               nack: () => void;

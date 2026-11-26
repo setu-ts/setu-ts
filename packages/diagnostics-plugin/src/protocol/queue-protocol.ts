@@ -82,6 +82,7 @@ const SETTLEMENTS: ReadonlySet<string> = new Set<QueueSettlementState>([
   'acknowledged',
   'requeued',
   'dead-lettered',
+  'discarded',
   'failed',
   'unknown',
 ]);
