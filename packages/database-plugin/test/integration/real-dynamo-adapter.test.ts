@@ -33,8 +33,15 @@ import {
   type DynamoEntityMapping,
   type IDatabaseService,
 } from '../../src/index.ts';
-import { DatabaseUnavailableError } from '../../src/errors.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DatabaseTimeoutError, DatabaseUnavailableError } from '../../src/errors.ts';
+import { DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
+import {
+  readinessAcrossFreeze,
+  relayTarget,
+  startFrozenRelay,
+  timed,
+} from '../fixtures/frozen-relay.ts';
+import { cleanupAll } from '../fixtures/cleanup-all.ts';
 
 const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
 const skipReal = dynamoEndpoint === undefined;
@@ -697,4 +704,135 @@ describe('DynamoAdapter — classified statuses (X35-2)', () => {
       await service.close();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// A frozen store: the adapter talks to DynamoDB Local through a TCP relay that
+// stops forwarding while keeping every socket open, so a call hangs exactly as
+// it would on a hung backend. The container itself is never touched.
+// ---------------------------------------------------------------------------
+
+/** The bound every outage cell configures, in milliseconds. */
+const OUTAGE_BOUND_MS = 1000;
+/** Allowed slack past the bound for the SDK to unwind the aborted request. */
+const OUTAGE_SLACK_MS = 1000;
+
+describe('DynamoAdapter behind a frozen relay (guarded)', () => {
+  const outageTables = { outage: table('outage'), ready: table('ready') } as const;
+  let outageAdmin: DynamoDBClient | undefined;
+
+  // This block provisions its own tables, so it runs alone under a name filter.
+  beforeAll(async () => {
+    if (skipReal) return;
+    outageAdmin = new DynamoDBClient({ endpoint, region, credentials });
+    await Promise.all(
+      Object.values(outageTables).map((TableName) =>
+        outageAdmin!.send(
+          new CreateTableCommand({
+            TableName,
+            BillingMode: 'PAY_PER_REQUEST',
+            AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+            KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+          }),
+        ),
+      ),
+    );
+  });
+
+  afterAll(async () => {
+    if (outageAdmin === undefined) return;
+    await Promise.all(
+      Object.values(outageTables).map((TableName) =>
+        outageAdmin!.send(new DeleteTableCommand({ TableName })),
+      ),
+    );
+    outageAdmin.destroy();
+  });
+
+  it(
+    'ends a point read, a page, a write and a unit of work with 504 within requestTimeoutMs',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const relay = await startFrozenRelay(relayTarget(endpoint));
+      const adapter = new DynamoAdapter({
+        endpoint: `http://${relay.host}:${relay.port}`,
+        region,
+        credentials,
+        requestTimeoutMs: OUTAGE_BOUND_MS,
+        entities: { Outage: mapping(outageTables.outage, 'id') },
+      });
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
+      try {
+        await adapter.connect();
+        const repository = service.getRepository<{ id: string; value: number }>('Outage');
+        await repository.create({ id: 'before', value: 1 });
+        await expect(adapter.isHealthy!()).resolves.toBe(true);
+
+        relay.freeze();
+        const calls: Readonly<Record<string, () => Promise<unknown>>> = {
+          'point read': () => repository.findById('before'),
+          page: () => repository.findPage({ limit: 2 }),
+          write: () => repository.create({ id: 'during', value: 2 }),
+          'unit of work': () =>
+            service.transaction(async (uow) => {
+              await uow.getRepository<{ id: string; value: number }>('Outage').create({
+                id: 'in-unit',
+                value: 3,
+              });
+            }),
+        };
+        for (const [name, call] of Object.entries(calls)) {
+          const settled = await timed(call);
+          expect({ name, outcome: settled.outcome }).toEqual({ name, outcome: 'rejected' });
+          if (settled.outcome !== 'rejected') continue;
+          expect(settled.error, name).toBeInstanceOf(DatabaseTimeoutError);
+          expect(httpStatusHintOf(settled.error)?.status, name).toBe(504);
+          expect(settled.elapsedMs, name).toBeLessThan(OUTAGE_BOUND_MS + OUTAGE_SLACK_MS);
+        }
+
+        // The probe's own bound is min(requestTimeoutMs, 2000): it rejects
+        // (unknown) or answers false, never true, and does not outlive it.
+        const probe = await timed(() => adapter.isHealthy!());
+        expect(probe.outcome === 'resolved' ? probe.value : 'rejected').not.toBe(true);
+        expect(probe.elapsedMs).toBeLessThan(OUTAGE_BOUND_MS + 500);
+
+        relay.thaw();
+        await expect(repository.findById('before')).resolves.toMatchObject({ value: 1 });
+        await expect(adapter.isHealthy!()).resolves.toBe(true);
+      } finally {
+        relay.thaw();
+        await cleanupAll([() => service.close(), () => relay.close()]);
+      }
+    },
+  );
+
+  it(
+    'reports /ready as not ready within the indicator bound, and ready again once thawed',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const relay = await startFrozenRelay(relayTarget(endpoint));
+      try {
+        const result = await readinessAcrossFreeze(
+          relay,
+          DatabasePlugin({
+            type: 'dynamodb',
+            options: {
+              endpoint: `http://${relay.host}:${relay.port}`,
+              region,
+              credentials,
+              requestTimeoutMs: OUTAGE_BOUND_MS,
+              entities: { Ready: mapping(outageTables.ready, 'id') },
+            },
+          }),
+        );
+        expect(result.baseline).toBe(200);
+        expect(result.frozen.status).toBe(503);
+        expect(result.frozen.elapsedMs).toBeLessThan(2000 + 500);
+        expect(['down', 'degraded']).toContain(result.frozenCheck);
+        expect(result.recovered).toBe(200);
+      } finally {
+        await relay.close();
+      }
+    },
+  );
 });

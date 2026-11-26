@@ -129,6 +129,16 @@ const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
 
 /**
+ * Command-line tools a member's CI steps run with `pnpm exec`, pinned so the lockfile resolves
+ * their whole graph. No import names them, so the scan cannot find them. `prisma` generates the
+ * MySQL Prisma test client (`.github/workflows/ci.yml`); bump it with the `@prisma/client` version `pnpm-lock.yaml`
+ * resolves, which no gate compares.
+ */
+const TOOL_DEV_DEPENDENCIES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'packages/database-plugin': { prisma: '7.10.1' },
+};
+
+/**
  * The supported Node range, written into every member manifest and the root. The floor on each
  * line is its first release carrying the 2026-10-21 security fixes (Node 22.23.4, 24.22.1 and 26.12.1);
  * Node 22 stays supported because five packages need only `Promise.withResolvers`.
@@ -360,6 +370,9 @@ export function classifyMember(
   }
   if (DENO_TYPES_MEMBERS.includes(member.dir)) {
     devDependencies.set('@types/deno', '2.7.0');
+  }
+  for (const [tool, version] of Object.entries(TOOL_DEV_DEPENDENCIES[member.dir] ?? {})) {
+    devDependencies.set(tool, version);
   }
 
   return {
@@ -871,7 +884,14 @@ async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
   for (const entry of entries) {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+      // Generated Prisma clients are git-ignored test fixtures (the packages shard writes them
+      // before its tests); their imports are not the member's, so the manifest skips them.
+      if (
+        entry.name === 'node_modules' ||
+        entry.name === 'dist' ||
+        entry.name.startsWith('prisma-client-generated')
+      )
+        continue;
       yield* walkSources(root, path);
     } else if (entry.isFile() && /\.(ts|tsx|mts)$/.test(entry.name)) {
       yield path;

@@ -36,6 +36,8 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'xml-crypto': '^6',
   '@simplewebauthn/server': '14.0.3',
   '@prisma/adapter-pg': '^7.10.0',
+  '@prisma/adapter-mariadb': '^7.10.1',
+  mysql2: '^3.24.4',
   pg: '^8.0.0',
   '@qdrant/js-client-rest': '1.20.0',
   hono: '^4.12.30',

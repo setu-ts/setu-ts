@@ -69,6 +69,7 @@ describe('test partition', () => {
       'MONGODB_URI',
       'DYNAMODB_ENDPOINT',
       'AGENT_RUNS_PG_URL',
+      'MYSQL_URL',
       'BIGTABLE_EMULATOR_ENDPOINT',
       'NATS_URL',
       'KAFKA_BROKERS',
@@ -181,6 +182,9 @@ describe('test partition', () => {
     it('isolates a suite naming a shared backend, including in a comment', () => {
       expect(isolationReason('t/a.test.ts', '// guarded on REDIS_URL\n')).toBe(
         'shared backend (REDIS_URL)',
+      );
+      expect(isolationReason('t/a.test.ts', 'skip: !process.env.MYSQL_URL')).toBe(
+        'shared backend (MYSQL_URL)',
       );
     });
 

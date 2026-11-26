@@ -234,6 +234,11 @@ function createDelegate(
     data: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<{ count: number }>;
+  deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
 } {
   return {
@@ -355,6 +360,28 @@ function createDelegate(
       return deleted;
     },
 
+    async updateMany(args) {
+      recordedCalls.push({ model: modelName, action: 'updateMany', args });
+      let count = 0;
+      for (const [key, row] of store.records) {
+        if (!matchesPrismaWhere(row, args.where)) continue;
+        store.records.set(key, { ...row, ...args.data });
+        count += 1;
+      }
+      return { count };
+    },
+
+    async deleteMany(args) {
+      recordedCalls.push({ model: modelName, action: 'deleteMany', args });
+      let count = 0;
+      for (const [key, row] of store.records) {
+        if (!matchesPrismaWhere(row, args.where)) continue;
+        store.records.delete(key);
+        count += 1;
+      }
+      return { count };
+    },
+
     async count(args) {
       recordedCalls.push({ model: modelName, action: 'count', args: args ?? {} });
       let rows = Array.from(store.records.values());
@@ -380,7 +407,9 @@ function createDelegate(
 // Forward-declared type to avoid self-referential implicit 'any' on `const client = { ... }`
 type FakePrismaClient = ReturnType<typeof createFakePrismaClient>;
 
-export function createFakePrismaClient(options: { activeProvider?: string } = {}): {
+export function createFakePrismaClient(
+  options: { activeProvider?: string; inlineSchema?: string | null } = {},
+): {
   $connect: () => Promise<void>;
   $disconnect: () => Promise<void>;
   $transaction: <T>(
@@ -399,6 +428,10 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
   // cannot be passed as `undefined` (that is a compile error under
   // `exactOptionalPropertyTypes`) and would fall back to the default anyway.
   _activeProvider: string;
+  // The generated client's schema text, which the adapter reads its relationMode from. Defaults
+  // to a datasource block naming only the provider (Prisma's default relationMode, foreignKeys);
+  // `inlineSchema: null` omits the field, modelling a client whose mode cannot be read.
+  _engineConfig?: { inlineSchema: string };
   // Recorded calls for test assertions
   recordedCalls: RecordedCall[];
   // Model delegates — accessed by lowercase name (e.g. `client.user`)
@@ -420,8 +453,17 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
     comment: { records: new Map(), idCounter: 0 },
   };
 
+  // Transactions run one at a time, as row locks would order them on a real
+  // server: an overlapping transaction waits, so a failed one's rollback can
+  // never overwrite a later commit to the same key.
+  let transactionTail: Promise<void> = Promise.resolve();
+  const inlineSchema =
+    options.inlineSchema === undefined
+      ? `datasource db {\n  provider = "${activeProvider}"\n}\n`
+      : options.inlineSchema;
   const client = {
     _activeProvider: activeProvider,
+    ...(inlineSchema === null ? {} : { _engineConfig: { inlineSchema } }),
     get connected() {
       return connected;
     },
@@ -450,8 +492,64 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
       options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
       transactionOptions = options;
-      // Pass the same client as the tx handle (real Prisma does this)
-      return fn(client);
+      const previous = transactionTail;
+      let finished!: () => void;
+      transactionTail = new Promise<void>((resolve) => {
+        finished = resolve;
+      });
+      await previous;
+      // A failed callback undoes only the rows IT wrote: each write through
+      // the transaction client records the touched keys' prior values, so a
+      // transaction that committed meanwhile keeps its rows. Restoring whole
+      // store snapshots instead erased an overlapping transaction's commit.
+      const undo = new Map<string, Map<string, Record<string, unknown> | undefined>>();
+      const journal = (name: string, write: () => unknown): unknown => {
+        const records = stores[name]!.records;
+        const before = new Map(records);
+        // The fake delegates' bodies run synchronously up to their first
+        // await, so the diff taken right after the call is this write's alone.
+        const result = write();
+        const prior = undo.get(name) ?? new Map<string, Record<string, unknown> | undefined>();
+        for (const key of new Set([...before.keys(), ...records.keys()])) {
+          if (before.get(key) !== records.get(key) && !prior.has(key)) {
+            prior.set(key, before.get(key));
+          }
+        }
+        undo.set(name, prior);
+        return result;
+      };
+      const writes = new Set(['create', 'update', 'delete', 'updateMany', 'deleteMany']);
+      const tx = new Proxy(client, {
+        get(target, property, receiver) {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof property !== 'string' || !(property in stores)) return value;
+          const delegate = value as Record<string, (...args: unknown[]) => unknown>;
+          return new Proxy(delegate, {
+            get(model, method) {
+              const member: unknown = Reflect.get(model, method);
+              if (typeof method !== 'string' || !writes.has(method)) return member;
+              return (...args: unknown[]) =>
+                journal(property, () =>
+                  (member as (...a: unknown[]) => unknown).apply(model, args),
+                );
+            },
+          });
+        },
+      });
+      try {
+        return await fn(tx);
+      } catch (error) {
+        for (const [name, prior] of undo) {
+          const records = stores[name]!.records;
+          for (const [key, row] of prior) {
+            if (row === undefined) records.delete(key);
+            else records.set(key, row);
+          }
+        }
+        throw error;
+      } finally {
+        finished();
+      }
     },
     async $queryRawUnsafe<T>(sql: string, ...params: unknown[]): Promise<T[]> {
       recordedCalls.push({

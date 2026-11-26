@@ -11,6 +11,8 @@ import { resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts
 import { PartitionKeyResolver } from '../../src/adapters/cosmos/cosmos-partition-key.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
+import type { PrismaSqlProvider } from '../../src/interfaces/index.ts';
+import { mysqlDrizzle } from './mysql-drizzle.ts';
 import { createFakePrismaClient } from './fake-prisma-client.ts';
 import { createFakeDrizzleInstance, createFakeDrizzleTable } from './fake-drizzle-instance.ts';
 import { FakeMongoClient } from './fake-mongo-client.ts';
@@ -31,7 +33,7 @@ export const operators: DrizzleOperators = {
   count: () => ({ op: 'count' }),
 };
 /** Public data-source factories and their native unknown-column outcomes. */
-export const sources: readonly {
+const sourceDefinitions: readonly {
   name: string;
   unknown: 'throws' | 'not-matched';
   make: (calls?: string[]) => IDataSource;
@@ -52,35 +54,24 @@ export const sources: readonly {
   {
     name: 'prisma',
     unknown: 'throws',
+    make: (calls) => makePrismaSource(calls, 'postgresql'),
+  },
+  ...(['mysql', undefined] as const).map((provider) => ({
+    name: provider === 'mysql' ? 'prisma-mysql' : 'prisma-undetermined',
+    unknown: 'throws' as const,
+    make: (calls?: string[]) => makePrismaSource(calls, provider),
+  })),
+  {
+    name: 'drizzle-mysql',
+    unknown: 'throws',
     make: (calls) => {
-      const client = createFakePrismaClient();
-      // Prisma has a schema: an unknown field is validation failure, not P2025.
-      const validate = (where: Record<string, unknown>): void => {
-        for (const [field, value] of Object.entries(where)) {
-          if (field === 'AND') {
-            for (const clause of value as Record<string, unknown>[]) validate(clause);
-          } else if (!['id', 'role', 'name', 'version'].includes(field)) {
-            // Real Prisma's validation error is named so and renders the
-            // whole query, values included — which is what M105 must not echo.
-            const error = new Error(
-              `Unknown argument \`${field}\`. User.update ${JSON.stringify(where)}`,
-            );
-            error.name = 'PrismaClientValidationError';
-            throw error;
-          }
-        }
-      };
-      const update = client.user.update.bind(client.user);
-      const remove = client.user.delete.bind(client.user);
-      client.user.update = async (args) => {
-        validate(args.where);
-        return await update(args);
-      };
-      client.user.delete = async (args) => {
-        validate(args.where);
-        return await remove(args);
-      };
-      return createPrismaDataSource(observe(client, calls), 'User');
+      const fixture = mysqlDrizzle();
+      return createDrizzleDataSource(
+        observe(fixture.db, calls),
+        'user',
+        { user: fixture.table },
+        operators,
+      );
     },
   },
   {
@@ -143,6 +134,13 @@ export const sources: readonly {
   },
 ];
 
+/** Capability data shared by root and transaction conformance; memory and D1 retain the refusal. */
+export const sources = sourceDefinitions.map((source) => ({
+  ...source,
+  transactionalConditional:
+    source.name === 'memory' || source.name === 'd1' ? ('refused' as const) : (true as const),
+}));
+
 /** Record actual native facade calls; promise results and row data are not proxied. */
 function observe<T extends object>(target: T, calls: string[] | undefined): T {
   if (calls === undefined) return target;
@@ -160,4 +158,49 @@ function observe<T extends object>(target: T, calls: string[] | undefined): T {
       return typeof value === 'object' && value !== null ? observe(value, calls) : value;
     },
   });
+}
+
+/** Both Prisma strategies are driven by the same schema-validating fixture. */
+function makePrismaSource(
+  calls: string[] | undefined,
+  provider: PrismaSqlProvider | undefined,
+): IDataSource {
+  const client = createFakePrismaClient();
+  // Prisma has a schema: an unknown field is validation failure, not P2025.
+  const validate = (where: Record<string, unknown>): void => {
+    for (const [field, value] of Object.entries(where)) {
+      if (field === 'AND') {
+        for (const clause of value as Record<string, unknown>[]) validate(clause);
+      } else if (!['id', 'role', 'name', 'version'].includes(field)) {
+        // Real Prisma's validation error is named so and renders the
+        // whole query, values included — which is what M105 must not echo.
+        const error = new Error(
+          `Unknown argument \`${field}\`. User.update ${JSON.stringify(where)}`,
+        );
+        error.name = 'PrismaClientValidationError';
+        throw error;
+      }
+    }
+  };
+  const update = client.user.update.bind(client.user);
+  const remove = client.user.delete.bind(client.user);
+  const updateMany = client.user.updateMany.bind(client.user);
+  const deleteMany = client.user.deleteMany.bind(client.user);
+  client.user.updateMany = async (args) => {
+    validate(args.where);
+    return await updateMany(args);
+  };
+  client.user.deleteMany = async (args) => {
+    validate(args.where);
+    return await deleteMany(args);
+  };
+  client.user.update = async (args) => {
+    validate(args.where);
+    return await update(args);
+  };
+  client.user.delete = async (args) => {
+    validate(args.where);
+    return await remove(args);
+  };
+  return createPrismaDataSource(observe(client, calls), 'User', provider);
 }

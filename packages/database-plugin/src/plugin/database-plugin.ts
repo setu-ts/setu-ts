@@ -134,7 +134,24 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const adapter = await createAdapter(options, adapterType, adapterOptions);
+      const logger = resolveLogger(ctx);
+      // The Bigtable SDK reads both variables itself; the lazy arm needs to
+      // know of them to keep its emulator defaults from overriding them.
+      const runtimeOptions =
+        adapterType === 'bigtable'
+          ? {
+              ...adapterOptions,
+              ...(ctx.runtime.env['BIGTABLE_EMULATOR_HOST']
+                ? { emulatorFromEnvironment: true }
+                : {}),
+              ...(ctx.runtime.env['GOOGLE_CLOUD_UNIVERSE_DOMAIN']
+                ? { universeFromEnvironment: true }
+                : {}),
+            }
+          : adapterOptions;
+      const adapter = await createAdapter(options, adapterType, runtimeOptions, (message) =>
+        logger?.warn(message),
+      );
 
       // Connect the adapter.
       await adapter.connect();
@@ -145,7 +162,6 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       const createDataSource = (entity: string): DataSource => adapter.createDataSource(entity);
 
       // Optional logger resolution.
-      const logger = resolveLogger(ctx);
       if (adapterType === 'drizzle') {
         const identity = (adapterOptions as DrizzleAdapterOptions).drizzleInstance;
         const database = readDrizzleDatabase(identity).database;
@@ -234,8 +250,10 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         // M95b §3.5 row (d) — the deliberate no-change row: an adapter with
         // no probe is evidence of nothing. Byte-identical to 0.6.0 — status
         // from the lifecycle read alone and `reachable` OMITTED — so a
-        // healthy probe-less application (Cosmos, Bigtable, DynamoDB, a
-        // minimal injected client) never leaves rotation on upgrade.
+        // healthy probe-less application (for example D1, a Drizzle
+        // instance without `execute()`, a DynamoDB or Bigtable adapter with
+        // no entity mapped, a minimal injected client) never leaves rotation
+        // on upgrade.
         // Mapping a MISSING probe to `degraded` would fail `/ready` for
         // every one of them: a guaranteed outage, strictly worse than the
         // finding.
@@ -255,8 +273,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         // The LIFECYCLE read still gates the probe. It is free — it reaches
         // no adapter — and dropping it would mean an adapter whose own probe
         // does not re-derive `isReady()` reports `up` for a connection it
-        // has already torn down. Three of the four bundled probes happen to
-        // re-derive it; the contract does not require an implementor to, so
+        // has already torn down. Every bundled probe re-derives it; the
+        // contract does not require that of an implementor, so
         // the gate belongs here where it holds for every adapter.
         const healthy = await probe();
         if (!healthy) {
@@ -347,6 +365,7 @@ function createAdapter(
   options: DatabasePluginOptions | undefined,
   adapterType: DatabaseAdapterType,
   adapterOptions: DatabaseAdapterOptions,
+  warn?: (message: string) => void,
 ): Promise<IDatabaseAdapter> {
   switch (adapterType) {
     case 'custom':
@@ -355,10 +374,13 @@ function createAdapter(
       return Promise.resolve((options as CustomDatabaseOptions).adapter);
     case 'prisma':
       return Promise.resolve(
-        new PrismaAdapter(adapterOptions as import('../interfaces/index.ts').PrismaAdapterOptions),
+        new PrismaAdapter(
+          adapterOptions as import('../interfaces/index.ts').PrismaAdapterOptions,
+          warn,
+        ),
       );
     case 'drizzle':
-      return Promise.resolve(new DrizzleAdapter(adapterOptions));
+      return Promise.resolve(new DrizzleAdapter(adapterOptions, warn));
     case 'cosmos':
       // The Cosmos arm's options ride the same shared bag; `buildAdapterOptions`
       // carries them through, so the arm is built from `adapterOptions` exactly
@@ -369,7 +391,7 @@ function createAdapter(
       // carries through, so the arm is built from `adapterOptions` exactly as
       // the others are — no cast to a concrete adapter.
       return Promise.resolve(
-        new BigtableAdapter(adapterOptions as unknown as BigtableAdapterOptions),
+        new BigtableAdapter(adapterOptions as unknown as BigtableAdapterOptions, undefined, warn),
       );
     case 'mongodb':
       // Mongo's options share the `DatabaseAdapterOptions` bag the other built-in
@@ -380,7 +402,7 @@ function createAdapter(
       // Dynamo mirrors Mongo: the options ride the same shared bag
       // `buildAdapterOptions` carries through, so the arm is built from
       // `adapterOptions` just like the others.
-      return Promise.resolve(new DynamoAdapter(adapterOptions as DynamoAdapterOptions));
+      return Promise.resolve(new DynamoAdapter(adapterOptions as DynamoAdapterOptions, warn));
     case 'memory':
     default:
       return Promise.resolve(new MemoryAdapter());
@@ -411,8 +433,16 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('logQueries');
   carry('prismaClient');
   carry('provider');
+  // The Prisma arm's relationMode assertion; without it an unreadable schema
+  // keeps the conditional writes refused.
+  carry('relationMode');
   carry('drizzleInstance');
   carry('drizzleTables');
+  // The Drizzle arm's explicit SQL dialect. Without this carry the option was
+  // dropped at the plugin boundary and the class-name detection decided alone,
+  // so `dialect: 'mysql'` on an undetectable instance never selected the MySQL
+  // `contains` escape or the offset-only `LIMIT`.
+  carry('dialect');
   // The Drizzle arm's per-entity key bag (T5). Without this carry a
   // `DatabasePlugin({ type: 'drizzle', options: { entities } })` silently lost
   // the composite-key mapping at the plugin boundary — the adapter kept its
@@ -448,6 +478,9 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('instance');
   carry('apiEndpoint');
   carry('tables');
+  carry('requestTimeoutMs');
+  carry('readinessEntity');
+  carry('clientOptions');
   return result as DatabaseAdapterOptions;
 }
 

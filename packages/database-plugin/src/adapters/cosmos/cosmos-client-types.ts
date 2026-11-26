@@ -120,6 +120,8 @@ export interface CosmosAccessCondition {
  * @since 0.2.0
  */
 export interface CosmosRequestOptions {
+  /** Whole-call cancellation signal supplied by the adapter. @since 0.14.0 */
+  readonly abortSignal?: AbortSignal;
   /** The optimistic-concurrency guard, when the write is conditional. */
   readonly accessCondition?: CosmosAccessCondition;
 }
@@ -158,6 +160,8 @@ export type CosmosBatchOperation =
  * @since 0.2.0
  */
 export interface CosmosBatchInsertOperation {
+  /** ETag precondition carried to the atomic batch. @since 0.14.0 */
+  readonly ifMatch?: string;
   /** The operation kind. */
   readonly operationType: 'Create' | 'Upsert';
   /** The document to write. */
@@ -173,6 +177,8 @@ export interface CosmosBatchInsertOperation {
  * @since 0.2.0
  */
 export interface CosmosBatchReplaceOperation {
+  /** ETag precondition carried to the atomic batch. @since 0.14.0 */
+  readonly ifMatch?: string;
   /** The operation kind. */
   readonly operationType: 'Replace';
   /** The document id. */
@@ -192,6 +198,8 @@ export interface CosmosBatchReplaceOperation {
  * @since 0.2.0
  */
 export interface CosmosBatchPatchOperation {
+  /** ETag precondition carried to the atomic batch. @since 0.14.0 */
+  readonly ifMatch?: string;
   /** The operation kind. */
   readonly operationType: 'Patch';
   /** The document id. */
@@ -206,6 +214,8 @@ export interface CosmosBatchPatchOperation {
  * @since 0.2.0
  */
 export interface CosmosBatchDeleteOperation {
+  /** ETag precondition carried to the atomic batch. @since 0.14.0 */
+  readonly ifMatch?: string;
   /** The operation kind. */
   readonly operationType: 'Delete';
   /** The document id. */
@@ -237,7 +247,10 @@ export interface ICosmosItems {
    * @param body - The document to insert
    * @returns The created document envelope
    */
-  create(body: Record<string, unknown>): Promise<CosmosItemResponse<Record<string, unknown>>>;
+  create(
+    body: Record<string, unknown>,
+    options?: CosmosRequestOptions,
+  ): Promise<CosmosItemResponse<Record<string, unknown>>>;
 
   /**
    * Runs a parameterized SQL query across the container.
@@ -245,7 +258,10 @@ export interface ICosmosItems {
    * @param spec - The query text and its bound parameters
    * @returns An iterator over the matching rows
    */
-  query(spec: CosmosQuerySpec): ICosmosQueryIterator<Record<string, unknown>>;
+  query(
+    spec: CosmosQuerySpec,
+    options?: CosmosRequestOptions,
+  ): ICosmosQueryIterator<Record<string, unknown>>;
 
   /**
    * Runs a transactional batch, atomic within one partition-key value.
@@ -257,6 +273,7 @@ export interface ICosmosItems {
   batch(
     operations: readonly CosmosBatchOperation[],
     partitionKey: CosmosPartitionKeyValue,
+    options?: CosmosRequestOptions,
   ): Promise<CosmosBatchResponse>;
 }
 
@@ -273,7 +290,7 @@ export interface ICosmosItem {
    * @returns The envelope; `resource` is `undefined` when the document does
    *   not exist under this partition key (a 404 does NOT throw)
    */
-  read(): Promise<CosmosItemResponse<Record<string, unknown>>>;
+  read(options?: CosmosRequestOptions): Promise<CosmosItemResponse<Record<string, unknown>>>;
 
   /**
    * Replaces the document wholesale.
@@ -295,6 +312,7 @@ export interface ICosmosItem {
    */
   patch(
     operations: readonly CosmosPatchOperation[],
+    options?: CosmosRequestOptions,
   ): Promise<CosmosItemResponse<Record<string, unknown>>>;
 
   /**
@@ -344,7 +362,7 @@ export interface ICosmosContainer {
    *
    * @returns The definition envelope
    */
-  read(): Promise<CosmosItemResponse<CosmosContainerDefinition>>;
+  read(options?: CosmosRequestOptions): Promise<CosmosItemResponse<CosmosContainerDefinition>>;
 }
 
 /**
@@ -366,7 +384,7 @@ export interface ICosmosDatabase {
    *
    * @returns The read envelope
    */
-  read(): Promise<CosmosItemResponse<Record<string, unknown>>>;
+  read(options?: CosmosRequestOptions): Promise<CosmosItemResponse<Record<string, unknown>>>;
 }
 
 /**

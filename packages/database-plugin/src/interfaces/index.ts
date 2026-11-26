@@ -555,6 +555,17 @@ export interface DatabaseAdapterOptions {
    * throws `UnsupportedFilterOperatorError` naming this option as the fix.
    * Pass it explicitly when the adapter cannot detect the connector.
    *
+   * The connector also picks the conditional-write path: `postgresql` /
+   * `postgres` keep one `update` / `delete`; every other connector (and an
+   * undetermined one) takes the `updateMany` / `deleteMany` count path, on
+   * which a client whose datasource block sets `relationMode = "prisma"` has
+   * every `updateWhere` / `deleteWhere` (so `updateVersioned` /
+   * `deleteVersioned`) refused with `UnsupportedRelationModeError`: Prisma's
+   * relation emulation drops the write's predicate there (prisma/orm#30758).
+   * Use `relationMode = "foreignKeys"` (the default). When the mode cannot be
+   * read from the client, `connect()` logs one `warn` and conditional writes
+   * are refused the same way unless `relationMode: 'foreignKeys'` is set.
+   *
    * @since 0.2.0
    */
   readonly provider?: PrismaSqlProvider;
@@ -625,13 +636,16 @@ export interface PrismaCompositeKeyOptions {
    *
    * Required when {@linkcode compositeKeyName} is set: the adapter needs the
    * column names to build the compound-key object that Prisma expects inside
-   * the `where` argument. Omitting it while naming a `compositeKeyName` leaves
-   * the columns at the scalar default `['id']`, and every composite key is
-   * refused for missing the `id` column — measured against live PostgreSQL in
-   * the M79 live suite. Supply every column, in declaration order, for both
-   * unnamed `@@id` (derived field `tenantId_userId`) and named `@@id` models.
+   * the `where` argument. Naming a `compositeKeyName` without it is refused
+   * when the adapter is constructed (`UnsupportedQueryFeatureError`,
+   * `'composite-key'`): the columns would default to `['id']`, and a
+   * conditional write decided by the affected-row count would then address
+   * every row sharing that `id`. Supply every column, in declaration order, for
+   * both unnamed `@@id` (derived field `tenantId_userId`) and named `@@id` models.
    *
-   * Defaults to `['id']` when absent (scalar-key path).
+   * Defaults to `['id']` when absent (scalar-key path). An empty list is
+   * refused at construction: a conditional write would match by its predicate
+   * alone.
    *
    * @example
    * ```typescript
@@ -657,6 +671,10 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * cannot locate an application-selected generated-client output path, and
    * `PrismaAdapter.connect()` rejects without it.
    *
+   * Its schema's `relationMode` is read at `connect()` (see `provider`): off
+   * PostgreSQL, `"prisma"` refuses conditional writes with
+   * `UnsupportedRelationModeError`.
+   *
    * @since 0.2.0
    */
   readonly prismaClient: unknown;
@@ -675,13 +693,31 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * new PrismaAdapter({
    *   prismaClient,
    *   entities: {
-   *     Enrollment: { compositeKeyName: 'enrollmentKey' },
+   *     Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
    *   },
    * });
    * ```
    * @since 0.2.0
    */
   readonly entities?: Readonly<Record<string, PrismaCompositeKeyOptions>>;
+
+  /**
+   * Asserts that the client's schema uses `relationMode = "foreignKeys"`, for
+   * a client whose mode the adapter cannot read.
+   *
+   * On every connector except `postgresql` / `postgres`, conditional writes
+   * (`updateWhere`, `deleteWhere`, so `updateVersioned`, `deleteVersioned`)
+   * are refused with `UnsupportedRelationModeError` unless the mode read from
+   * the client's datasource block at `connect()` is `foreignKeys`: under
+   * `relationMode = "prisma"` Prisma drops the write's predicate
+   * (prisma/orm#30758). When the mode cannot be read, they are refused too, and
+   * one `warn` is logged. Set this option only once you have confirmed the
+   * schema uses `foreignKeys`; it lifts that refusal and nothing else. A schema
+   * read as `"prisma"` stays refused with it.
+   *
+   * @since 0.14.0
+   */
+  readonly relationMode?: 'foreignKeys';
 }
 
 /**
@@ -757,15 +793,21 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
   readonly drizzleInstance: DrizzleDatabaseIdentity;
 
   /**
-   * The SQL dialect, used only to translate a **nested JSON filter path**
-   * (`field: ['profile', 'city']`). No two dialects spell JSON extraction
-   * alike: PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
-   * SQLite `json_extract`.
+   * The SQL dialect. It translates a **nested JSON filter path**
+   * (`field: ['profile', 'city']`): no two dialects spell JSON extraction
+   * alike, PostgreSQL uses `#>>`, MySQL `JSON_UNQUOTE(JSON_EXTRACT(...))` and
+   * SQLite `json_extract`. Since 0.14.0 `'mysql'` also selects two MySQL
+   * forms: a `contains` filter is emitted as `LIKE … ESCAPE '!'` with the
+   * pattern escaped by `!` (a backslash escape does not parse under MySQL's
+   * default `sql_mode`), and a `findAll` with an `offset` and no `limit`
+   * carries `LIMIT 18446744073709551615`, because MySQL has no `OFFSET`
+   * outside `LIMIT`.
    *
    * Absent, the adapter reads the dialect off the Drizzle instance, which
    * covers every instance Drizzle ships. Set it when that detection cannot
    * name the dialect — a nested-path filter is then refused by name rather
-   * than emitted in a guessed syntax that would return wrong rows.
+   * than emitted in a guessed syntax that would return wrong rows, and a
+   * MySQL `contains` keeps the backslash form.
    *
    * @since 0.2.0
    */
@@ -970,6 +1012,47 @@ export type MongoAdapterOptions =
  */
 export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
+   * A bound on every call this adapter makes to DynamoDB: the whole call,
+   * retries included, unlike the SDK's own per-HTTP-request
+   * `requestTimeout`. It is passed to `send` as an `abortSignal`, and the call also rejects at the deadline, so an injected facade that ignores the signal is still bounded (its own work runs on). A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
+   *
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
+  readonly requestTimeoutMs?: number;
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `region`, `endpoint` and `credentials` win over the same keys here when set. Use it for the SDK's own
+   * settings, a per-request handler or connection policy among them; those
+   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+  /**
+   * The entity whose mapped table the readiness probe reads: a point read of
+   * the absent key `'__setu_readiness__'` under the table's own key attribute
+   * names. `true` when the service answers (a found or absent row, or a
+   * `ValidationException` for a non-string key), `false` on a refusal (table
+   * missing, access denied, unreachable). Defaults to the first entry of
+   * `entities`; with neither, the adapter has no probe and logs one `warn`
+   * at `connect()` naming this option.
+   *
+   * @since 0.14.0
+   */
+  readonly readinessEntity?: string;
+
+  /**
    * Per-entity table and key mappings, keyed by the entity name passed to
    * `getRepository()`.
    *
@@ -1141,6 +1224,35 @@ export interface CosmosDatabaseOptions extends DatabaseConnectionOptions {
  */
 export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
   /**
+   * A bound on every call this adapter makes to Cosmos DB: the whole call,
+   * retries included, unlike the SDK's own per-HTTP-request
+   * `requestTimeout`. It is passed as an `abortSignal` in the request options of every call, and the call also rejects at the deadline, so an injected facade that ignores the signal is still bounded (its own work runs on). A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
+   *
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
+  readonly requestTimeoutMs?: number;
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `endpoint` and `key` win over the same keys here when set. Use it for the SDK's own
+   * settings, a per-request handler or connection policy among them; those
+   * bound each HTTP request, `requestTimeoutMs` still bounds the whole call.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+
+  /**
    * The database the containers live in. Required on both arms: a Cosmos
    * endpoint encodes no database name, so unlike a MongoDB URI there is
    * nothing to fall back to.
@@ -1263,6 +1375,56 @@ export interface BigtableDatabaseOptions extends DatabaseConnectionOptions {
  * @since 0.2.0
  */
 export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions, 'logQueries'> {
+  /**
+   * A bound on every call this adapter makes to Bigtable: the whole call,
+   * retries included, where the SDK's own gax `timeout` bounds one attempt.
+   * It is mapped to `gaxOptions.timeout` on each read and conditional write, and a read is also ended at the deadline as a whole, since the SDK retries a streaming read with a fresh deadline per attempt; an injected facade receives it as `{ timeoutMs }`. A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
+   * when it is non-zero and smaller.
+   *
+   * `0` disables the bound on calls, leaving the SDK's own defaults; the
+   * readiness probe keeps its 2000 ms bound. A non-finite or
+   * negative value, or one above 2147483647, is refused at construction with
+   * a `RangeError`; a fraction is accepted.
+   *
+   * @default 15000
+   * @since 0.14.0
+   */
+  readonly requestTimeoutMs?: number;
+  /**
+   * Options spread first into the SDK client constructor the lazy arm builds;
+   * `projectId` and `apiEndpoint` win over the same keys here when set. Use it for the SDK's own
+   * settings, credentials, `sslCreds` or gax settings among them; a gax
+   * `timeout` bounds each attempt, `requestTimeoutMs` still bounds the whole call.
+   * When an endpoint is set (`apiEndpoint`, `clientOptions.apiEndpoint`, or
+   * `BIGTABLE_EMULATOR_HOST` read by the plugin) and this does not set
+   * `metricsEnabled`, the arm passes `metricsEnabled: false`, because the
+   * SDK's client-side metrics exporter needs Google credentials; set
+   * `metricsEnabled: true` here to keep them. Against an emulator —
+   * `BIGTABLE_EMULATOR_HOST`, or an endpoint with no `sslCreds` here — the arm
+   * also passes `universeDomain: 'googleapis.com'`, unless a universe is
+   * configured here (`universeDomain` or `universe_domain`) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`
+   * read by the plugin; a caller's `universeDomain` is passed unchanged.
+   * Unread when `client` is injected.
+   *
+   * @since 0.14.0
+   */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
+  /**
+   * The entity whose mapped table the readiness probe reads: a point read of
+   * the absent row `'__setu_readiness__'`, latest cell only. `true` when the
+   * service answers, `false` on gRPC `NOT_FOUND`, `PERMISSION_DENIED`,
+   * `UNAVAILABLE` or `UNAUTHENTICATED`. Defaults to the first entry of
+   * `tables`; with neither, the adapter has no probe and logs one `warn` at
+   * `connect()` naming this option. The probe is bounded by 2000 ms, or by
+   * `requestTimeoutMs` when that is non-zero and smaller.
+   *
+   * @since 0.14.0
+   */
+  readonly readinessEntity?: string;
+
   /**
    * The Bigtable instance the tables live in. Required on both arms: a table
    * is addressed as `project/instance/table`, and neither an injected client

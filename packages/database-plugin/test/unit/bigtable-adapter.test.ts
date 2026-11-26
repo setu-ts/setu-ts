@@ -5,6 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  BigtableReadOptions,
+  IBigtableClient,
+} from '../../src/adapters/bigtable/bigtable-client-types.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
@@ -226,4 +230,90 @@ it('refuses an absent instance from untyped input and accepts an explicit transa
   const transaction = await adapter.beginTransaction();
   await transaction.rollback();
   await adapter.disconnect();
+});
+
+/** One read as the client saw it. */
+interface SeenRead {
+  readonly table: string;
+  readonly options: BigtableReadOptions;
+  readonly timeoutMs: number | undefined;
+}
+
+/** Wraps the fake client so every read records its table and call options. */
+function recordingClient(): { client: IBigtableClient; reads: SeenRead[] } {
+  const inner = createFakeBigtableClient(new FakeBigtableStore());
+  const reads: SeenRead[] = [];
+  const client: IBigtableClient = {
+    instance: (id) => {
+      const instance = inner.instance(id);
+      return {
+        table: (table) => {
+          const handle = instance.table(table);
+          return {
+            row: (key) => handle.row(key),
+            readRows: (options, callOptions) => {
+              reads.push({ table, options, timeoutMs: callOptions?.timeoutMs });
+              return handle.readRows(options, callOptions);
+            },
+          };
+        },
+      };
+    },
+    close: () => inner.close(),
+  };
+  return { client, reads };
+}
+
+describe('connect and the readiness probe', () => {
+  it('sends no request across repeated and concurrent connects', async () => {
+    const { client, reads } = recordingClient();
+    const adapter = new BigtableAdapter({ client, instance: 'app', tables: { User: {} } });
+    await Promise.all([adapter.connect(), adapter.connect()]);
+    await adapter.connect();
+    expect(reads).toEqual([]);
+    await adapter.disconnect();
+  });
+
+  const timeouts: readonly { readonly requestTimeoutMs?: number; readonly bound: number }[] = [
+    { bound: 2000 },
+    { requestTimeoutMs: 500, bound: 500 },
+    { requestTimeoutMs: 1500.5, bound: 1500.5 },
+    { requestTimeoutMs: 60_000, bound: 2000 },
+    { requestTimeoutMs: 0, bound: 2000 },
+  ];
+  for (const row of timeouts) {
+    it(`bounds the probe by ${row.bound} ms when requestTimeoutMs is ${String(row.requestTimeoutMs)}`, async () => {
+      const { client, reads } = recordingClient();
+      const adapter = new BigtableAdapter({
+        client,
+        instance: 'app',
+        tables: { User: { table: 'users' } },
+        ...(row.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: row.requestTimeoutMs }),
+      });
+      await adapter.connect();
+      expect(await adapter.isHealthy!()).toBe(true);
+      expect(reads).toEqual([
+        {
+          table: 'users',
+          options: { keys: ['__setu_readiness__'], filter: { column: { cellLimit: 1 } } },
+          timeoutMs: row.bound,
+        },
+      ]);
+      await adapter.disconnect();
+    });
+  }
+
+  it('leaves a mapping error to the call that uses it, not to connect', async () => {
+    const { client, reads } = recordingClient();
+    const adapter = new BigtableAdapter({
+      client,
+      instance: 'app',
+      tables: { Bad: { rowKey: { fields: [] } } },
+    });
+    await adapter.connect();
+    expect(adapter.isReady()).toBe(true);
+    expect(reads).toEqual([]);
+    expect(() => adapter.createDataSource('Bad')).toThrow(/empty 'rowKey.fields'/);
+    await adapter.disconnect();
+  });
 });
