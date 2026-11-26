@@ -6,9 +6,20 @@
  *
  * @module
  */
+import type { DeadlineOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAwsSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
+import type { SecretsDeadline } from './bounded-call.ts';
+import {
+  answered,
+  resolveSecretsDeadline,
+  runSecretsCall,
+  toSecretsError,
+} from './bounded-call.ts';
+
+/** Provider name carried on its errors. */
+const PROVIDER_NAME = 'AwsKmsProvider';
 
 /** Methods an injected AWS client facade must expose. */
 const REQUIRED_METHODS = ['getSecretValue', 'putSecretValue'] as const;
@@ -19,10 +30,14 @@ const NOT_FOUND = 'ResourceNotFoundException';
 /** The subset of the AWS SDK the adapter uses. */
 export interface AwsSdkModule {
   SecretsManagerClient: new (config: Record<string, unknown>) => {
-    send(command: unknown): Promise<{ SecretString?: string | undefined }>;
+    send(
+      command: unknown,
+      options?: { abortSignal?: AbortSignal },
+    ): Promise<{ SecretString?: string | undefined }>;
   };
   GetSecretValueCommand: new (input: { SecretId: string }) => unknown;
   PutSecretValueCommand: new (input: { SecretId: string; SecretString: string }) => unknown;
+  ListSecretsCommand: new (input: { MaxResults: number }) => unknown;
 }
 
 /**
@@ -44,6 +59,24 @@ export interface AwsKmsProviderOptions {
    * @since 0.8.0
    */
   endpoint?: string | undefined;
+  /**
+   * Bound on each Secrets Manager call, in milliseconds, including the SDK's
+   * own retries. A call that fails on the network, gets a `5xx`, or does not
+   * answer in time rejects with `SecretProviderUnavailableError` (`503`). `0`
+   * disables the bound; anything outside `0`–`2147483647` throws `RangeError`
+   * at construction.
+   *
+   * @default 5000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
+  /**
+   * Timer surface the bound runs on. `SecretsPlugin` supplies the runtime's
+   * timers; a directly constructed provider falls back to the ambient ones.
+   *
+   * @since 0.14.0
+   */
+  timing?: DeadlineOptions['timing'];
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IAwsSecretsClient | undefined;
 }
@@ -69,14 +102,19 @@ export function validateAwsClient(client: unknown): client is IAwsSecretsClient 
 export function adaptAwsModule(
   mod: AwsSdkModule,
   options: AwsKmsProviderOptions,
+  deadline: SecretsDeadline = resolveSecretsDeadline(options.requestTimeoutMs, options.timing),
 ): IAwsSecretsClient {
   const client = new mod.SecretsManagerClient(
     buildAwsConfig(options.region, options.accessKeyId, options.secretAccessKey, options.endpoint),
   );
+  // Every SDK call runs under the bound and receives its signal, so an expired
+  // bound also aborts the request the SDK holds.
+  const send = (command: unknown): Promise<{ SecretString?: string | undefined }> =>
+    runSecretsCall(deadline, PROVIDER_NAME, (abortSignal) => client.send(command, { abortSignal }));
   return {
     async getSecretValue(secretId: string): Promise<string | null> {
       try {
-        const res = await client.send(new mod.GetSecretValueCommand({ SecretId: secretId }));
+        const res = await send(new mod.GetSecretValueCommand({ SecretId: secretId }));
         return res.SecretString ?? null;
       } catch (error) {
         if (error instanceof Error && error.name === NOT_FOUND) {
@@ -86,7 +124,11 @@ export function adaptAwsModule(
       }
     },
     async putSecretValue(secretId: string, value: string): Promise<void> {
-      await client.send(new mod.PutSecretValueCommand({ SecretId: secretId, SecretString: value }));
+      await send(new mod.PutSecretValueCommand({ SecretId: secretId, SecretString: value }));
+    },
+    // Non-mutating: lists at most one secret's metadata, never a value.
+    isHealthy(): Promise<boolean> {
+      return answered(() => send(new mod.ListSecretsCommand({ MaxResults: 1 })));
     },
   };
 }
@@ -138,13 +180,16 @@ function buildAwsConfig(
  */
 export class AwsKmsProvider implements SecretProvider {
   #client: IAwsSecretsClient | null = null;
+  /** `true` when the client was injected: its calls are bounded here, by race. */
+  #injected = false;
   readonly #options: AwsKmsProviderOptions;
+  readonly #deadline: SecretsDeadline;
   /**
-   * Reachability probe, present only when the resolved client supplies one
-   * (M90b). The AWS SDK facade has no non-mutating probe of its own, so the
-   * adapted (lazy) path stays `undefined` and the indicator reports
-   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
-   * publishes real reachability.
+   * Reachability probe. The lazily adapted client lists at most one secret's
+   * metadata (`ListSecrets`, non-mutating) and reads reachable when Secrets
+   * Manager answers at all; an injected facade publishes its own `isHealthy`
+   * when it has one, and the indicator reports `reachable: 'unknown'` when it
+   * does not.
    *
    * @since 0.5.0
    */
@@ -152,9 +197,11 @@ export class AwsKmsProvider implements SecretProvider {
 
   /**
    * @param options - AWS connection/injection options
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
   constructor(options?: AwsKmsProviderOptions) {
     this.#options = options ?? {};
+    this.#deadline = resolveSecretsDeadline(this.#options.requestTimeoutMs, this.#options.timing);
   }
 
   async connect(): Promise<void> {
@@ -166,10 +213,12 @@ export class AwsKmsProvider implements SecretProvider {
         );
       }
       this.#client = injected;
-      this.#attachProbe(injected);
-      return;
+      this.#injected = true;
+    } else {
+      this.#client = adaptAwsModule(await loadAwsModule(), this.#options, this.#deadline);
+      this.#injected = false;
     }
-    this.#client = adaptAwsModule(await loadAwsModule(), this.#options);
+    this.#attachProbe(this.#client);
   }
 
   disconnect(): Promise<void> {
@@ -182,10 +231,10 @@ export class AwsKmsProvider implements SecretProvider {
   }
 
   /**
-   * Exposes the injected facade's optional probe, called through its OWNER
-   * so a facade reading instance state still resolves.
+   * Exposes the client's optional probe, called through its OWNER so a facade
+   * reading instance state still resolves.
    *
-   * @param client - The validated injected facade
+   * @param client - The resolved client
    */
   #attachProbe(client: IAwsSecretsClient): void {
     // Captured into a local before the guard so the closure keeps the
@@ -196,17 +245,29 @@ export class AwsKmsProvider implements SecretProvider {
     }
   }
 
+  /** Runs one client call, bounded here for an injected client, and classifies it. */
+  async #call<T>(operation: string, run: (client: IAwsSecretsClient) => Promise<T>): Promise<T> {
+    const client = this.#client;
+    if (client === null) throw new Error('AwsKmsProvider is not connected');
+    try {
+      return this.#injected
+        ? await runSecretsCall(this.#deadline, PROVIDER_NAME, () => run(client))
+        : await run(client);
+    } catch (error) {
+      throw toSecretsError(error, PROVIDER_NAME, operation);
+    }
+  }
+
   /**
    * Reads a secret from AWS Secrets Manager.
    *
    * @param name - The secret id
    * @returns The value, or `null` when absent
+   * @throws {SecretProviderUnavailableError} When Secrets Manager cannot be
+   *   reached or does not answer within `requestTimeoutMs`
    */
   get(name: string): Promise<string | null> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('AwsKmsProvider is not connected'));
-    }
-    return this.#client.getSecretValue(name);
+    return this.#call('get', (client) => client.getSecretValue(name));
   }
 
   /**
@@ -214,11 +275,10 @@ export class AwsKmsProvider implements SecretProvider {
    *
    * @param name - The secret id
    * @param value - The new value
+   * @throws {SecretProviderUnavailableError} When Secrets Manager cannot be
+   *   reached or does not answer within `requestTimeoutMs`
    */
   set(name: string, value: string): Promise<void> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('AwsKmsProvider is not connected'));
-    }
-    return this.#client.putSecretValue(name, value);
+    return this.#call('set', (client) => client.putSecretValue(name, value));
   }
 }

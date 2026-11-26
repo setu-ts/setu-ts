@@ -62,12 +62,12 @@ describe('adaptGcsModule', () => {
               file(name: string) {
                 return {
                   getMetadata() {
-                    if (!store.has(name)) throw new Error('ENOENT');
+                    if (!store.has(name)) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     return Promise.resolve([{}]);
                   },
                   download() {
                     const data = store.get(name);
-                    if (data === undefined) throw new Error('ENOENT');
+                    if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     return Promise.resolve({ body: data });
                   },
                   save(
@@ -95,7 +95,7 @@ describe('adaptGcsModule', () => {
                   },
                   createReadStream() {
                     const data = store.get(name);
-                    if (data === undefined) throw new Error('ENOENT');
+                    if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                     let emitted = false;
                     return {
                       on(event: string, fn: (...args: unknown[]) => void) {
@@ -195,7 +195,7 @@ describe('adaptGcsModule', () => {
     expect(url).toContain('signed.url');
   });
 
-  it('B4: GcsProvider.getSignedUrl uses epoch-seconds for expires (not ms)', async () => {
+  it('V13-234: GcsProvider.getSignedUrl passes expires in epoch milliseconds', async () => {
     let capturedExpires: number | undefined;
     // Inject a pre-adapted facade directly — avoids adaptGcsModule's callback wrapping.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,14 +237,13 @@ describe('adaptGcsModule', () => {
       () => Date.now(),
     );
     await provider.connect();
-    const before = Math.floor(Date.now() / 1000);
+    const before = Date.now();
     await provider.getSignedUrl('obj.txt', { expiresIn: 3600 });
-    const after = Math.floor(Date.now() / 1000);
-    // B4 fix: expires should be epoch-seconds (~1.7e9), NOT milliseconds (~5e12).
-    expect(capturedExpires).toBeGreaterThanOrEqual(before + 3600);
-    expect(capturedExpires).toBeLessThanOrEqual(after + 3600 + 1);
-    // Ensure it's NOT in millisecond range (which would be ~5 trillion).
-    expect(capturedExpires!).toBeLessThan(1e12);
+    const after = Date.now();
+    // The SDK reads a numeric `expires` as epoch MILLISECONDS (`new Date(expires)`);
+    // epoch seconds put the expiry in January 1970 and the SDK refuses it.
+    expect(capturedExpires).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(capturedExpires).toBeLessThanOrEqual(after + 3_600_000);
   });
 });
 
@@ -362,7 +361,7 @@ describe('GcsProvider', () => {
             _options: Record<string, unknown>,
             _cb: (err: Error | null) => void,
           ) => {},
-          download: () => Promise.reject(new Error('Not Found')),
+          download: () => Promise.reject(Object.assign(new Error('Not Found'), { code: 404 })),
           delete: () => Promise.resolve(),
           getMetadata: () => Promise.resolve([{}]),
           getSignedUrl: () => Promise.resolve(['https://x']),
@@ -399,7 +398,7 @@ describe('GcsProvider', () => {
     expect(result).toBe(true);
   });
 
-  it('delete returns false on rejection', async () => {
+  it('delete rejects, naming the provider, when the backend fails (V13-245)', async () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
@@ -418,8 +417,8 @@ describe('GcsProvider', () => {
     } as unknown as IGcsClient;
     const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
     await provider.connect();
-    const result = await provider.delete('fail-del');
-    expect(result).toBe(false);
+    const result = await provider.delete('fail-del').catch((e: Error) => e.message);
+    expect(result).toMatch(/^storage-plugin \(gcs\): delete failed: network error/);
   });
 
   it('exists returns true from injected client', async () => {
@@ -445,7 +444,7 @@ describe('GcsProvider', () => {
     expect(result).toBe(true);
   });
 
-  it('exists returns false on error', async () => {
+  it('exists rejects, naming the provider, when the backend fails (V13-245)', async () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
@@ -464,8 +463,8 @@ describe('GcsProvider', () => {
     } as unknown as IGcsClient;
     const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
     await provider.connect();
-    const result = await provider.exists('nope-file');
-    expect(result).toBe(false);
+    const result = await provider.exists('nope-file').catch((e: Error) => e.message);
+    expect(result).toMatch(/^storage-plugin \(gcs\): exists failed: ENOENT/);
   });
 
   it('getSignedUrl returns signed URL', async () => {
@@ -485,7 +484,7 @@ describe('GcsProvider', () => {
         }),
       }),
     } as unknown as IGcsClient;
-    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient }, () => 0);
     await provider.connect();
     const url = await provider.getSignedUrl('myfile', { expiresIn: 3600 });
     expect(url).toContain('signed.gcs.url');
@@ -632,7 +631,7 @@ describe('GcsProvider', () => {
     expect(result).toEqual(new Uint8Array([50, 60, 70]));
   });
 
-  it('getStream fires data callback with chunk and end closes', async () => {
+  it('getStream rejects when the stream fails before its first chunk', async () => {
     const fakeClient = {
       bucket: () => ({
         file: () => ({
@@ -669,13 +668,11 @@ describe('GcsProvider', () => {
     } as unknown as IGcsClient;
     const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
     await provider.connect();
-    const stream = await provider.getStream('error-stream');
-    expect(stream).toBeDefined();
-    if (stream) {
-      // The error callback triggers controller.error() inside the stream start block.
-      const reader = stream.getReader();
-      await expect(reader.read()).rejects.toThrow('stream error');
-    }
+    // The first chunk is awaited before answering, so a stream that fails at
+    // once rejects getStream itself, naming the provider (V13-235).
+    await expect(provider.getStream('error-stream')).rejects.toThrow(
+      'storage-plugin (gcs): getStream failed: stream error',
+    );
   });
 
   it('getStream handles stream that only emits end (no data)', async () => {
@@ -728,7 +725,7 @@ describe('GcsProvider', () => {
     const fakeClient = {
       bucket: () => ({
         file: () => {
-          throw new Error('Not Found');
+          throw Object.assign(new Error('Not Found'), { code: 404 });
         },
       }),
     } as unknown as IGcsClient;
@@ -957,7 +954,7 @@ describe('GcsProvider', () => {
                     return;
                   }
                   if (!store.has(nameStr)) {
-                    cb(new Error('ENOENT'));
+                    cb(Object.assign(new Error('ENOENT'), { code: 404 }));
                     return;
                   }
                   cb(null, { size: store.get(nameStr)!.length });
@@ -969,7 +966,7 @@ describe('GcsProvider', () => {
                   }
                   const data = store.get(nameStr);
                   if (data === undefined) {
-                    cb(new Error('ENOENT'));
+                    cb(Object.assign(new Error('ENOENT'), { code: 404 }));
                     return;
                   }
                   cb(null, data);
@@ -998,16 +995,14 @@ describe('GcsProvider', () => {
                   cb(null, `https://signed.url/${nameStr}?${params.toString()}`);
                 },
                 createReadStream() {
-                  const data = store.get(nameStr);
-                  if (data === undefined) throw new Error('ENOENT');
-                  let emitted = false;
+                  const data = onDownloadData ?? store.get(nameStr);
+                  if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 404 });
                   return {
-                    on(event: string, fn: (...args: unknown[]) => void) {
-                      if (!emitted && event === 'data') {
-                        emitted = true;
-                        setTimeout(() => fn(data), 0);
-                        setTimeout(() => fn(), 2);
-                      }
+                    on() {
+                      return this;
+                    },
+                    async *[Symbol.asyncIterator]() {
+                      yield data;
                     },
                   } as unknown as NodeJS.ReadableStream;
                 },
@@ -1300,7 +1295,7 @@ describe('GcsProvider', () => {
     } catch (e) {
       threw = true;
       expect(e).toBeInstanceOf(Error);
-      expect((e as Error).message).toBe('ConnectionError');
+      expect((e as Error).message).toBe('storage-plugin (gcs): getStream failed: ConnectionError');
     }
     expect(threw).toBe(true);
   });
@@ -1356,6 +1351,49 @@ describe('GcsProvider getStream cancellation safety', () => {
     await tick();
     await tick();
     await tick();
+  });
+
+  it('cancel waits for the source iterator to finish before it settles', async () => {
+    let returned = 0;
+    let finish: () => void = () => undefined;
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          createReadStream: () => {
+            let calls = 0;
+            const iterator = {
+              next: (): Promise<IteratorResult<Uint8Array>> =>
+                calls++ === 0
+                  ? Promise.resolve({ done: false, value: new Uint8Array([1]) })
+                  : new Promise<never>(() => undefined),
+              return: (): Promise<IteratorResult<Uint8Array>> => {
+                returned++;
+                return new Promise((resolve) => {
+                  finish = () => resolve({ done: true, value: undefined });
+                });
+              },
+            };
+            return { [Symbol.asyncIterator]: () => iterator };
+          },
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const stream = (await provider.getStream('wait')) as ReadableStream<Uint8Array>;
+    const reader = stream.getReader();
+    expect((await reader.read()).done).toBe(false);
+    let settled = false;
+    const cancelling = reader.cancel().then(() => {
+      settled = true;
+    });
+    await tick();
+    await tick();
+    expect(returned).toBe(1);
+    expect(settled).toBe(false);
+    finish();
+    await cancelling;
+    expect(settled).toBe(true);
   });
 });
 

@@ -271,10 +271,10 @@ describe('HashiCorpVaultProvider request bound (M101a V8-4)', () => {
     expect(disabled.armed).toHaveLength(0);
   });
 
-  it('keeps an HTTP error from a Vault that answered as a plain error', async () => {
+  it('keeps a 4xx from a Vault that answered as a plain error', async () => {
     const provider = new HashiCorpVaultProvider({
       ...base,
-      http: () => Promise.resolve(new Response('boom', { status: 500 })),
+      http: () => Promise.resolve(new Response('boom', { status: 403 })),
     });
     await provider.connect();
 
@@ -597,14 +597,14 @@ describe('HashiCorpVaultProvider secret path and body size (M101a security audit
   it('escapes control characters in a name it quotes', async () => {
     const provider = new HashiCorpVaultProvider({
       ...base,
-      http: () => Promise.resolve(new Response('no', { status: 500 })),
+      http: () => Promise.resolve(new Response('no', { status: 403 })),
     });
     await provider.connect();
     await expect(provider.get('a\r\nforged')).rejects.toThrow(
-      'Vault read failed for a\\u000d\\u000aforged: HTTP 500',
+      'Vault read failed for a\\u000d\\u000aforged: HTTP 403',
     );
     await expect(provider.set('a\u007f', 'v')).rejects.toThrow(
-      'Vault write failed for a\\u007f: HTTP 500',
+      'Vault write failed for a\\u007f: HTTP 403',
     );
   });
 });

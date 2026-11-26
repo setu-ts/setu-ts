@@ -21,6 +21,7 @@ import {
   registerCatalogueRoute,
   validateBasePath,
   validateCacheControl,
+  validateKeyPrefixes,
 } from '../routes/catalogue-route.ts';
 import { createLocalizer } from '../service/localizer.ts';
 import { VERSION } from '../version.ts';
@@ -102,6 +103,7 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
       ? undefined
       : validateBasePath(options.exposeCatalogues.basePath);
   const cacheControl = validateCacheControl(options.exposeCatalogues?.cacheControl);
+  const keyPrefixes = validateKeyPrefixes(options.exposeCatalogues?.keyPrefixes);
 
   return {
     name: PLUGIN_NAME,
@@ -142,7 +144,7 @@ export function LocalizationPlugin(options: LocalizationPluginOptions): IPlugin 
         );
       }
       if (basePath !== undefined) {
-        registerCatalogueRoute(ctx.router, basePath, store, cacheControl);
+        registerCatalogueRoute(ctx.router, basePath, store, cacheControl, keyPrefixes);
       }
       const source =
         options.source === undefined

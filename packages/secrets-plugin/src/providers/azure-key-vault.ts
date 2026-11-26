@@ -6,9 +6,20 @@
  *
  * @module
  */
+import type { DeadlineOptions } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
+import type { SecretsDeadline } from './bounded-call.ts';
+import {
+  answered,
+  resolveSecretsDeadline,
+  runSecretsCall,
+  toSecretsError,
+} from './bounded-call.ts';
+
+/** Provider name carried on its errors. */
+const PROVIDER_NAME = 'AzureKeyVaultProvider';
 
 /** Methods an injected Azure client facade must expose. */
 const REQUIRED_METHODS = ['getSecret', 'setSecret'] as const;
@@ -24,11 +35,20 @@ export interface AzureSdkModule {
   SecretClient: new (
     vaultUrl: string,
     credential: AzureCredential,
+    options?: { disableChallengeResourceVerification?: boolean },
   ) => {
-    getSecret(name: string): Promise<{ value?: string | undefined }>;
-    setSecret(name: string, value: string): Promise<unknown>;
+    getSecret(name: string, options?: AzureCallOptions): Promise<{ value?: string | undefined }>;
+    setSecret(name: string, value: string, options?: AzureCallOptions): Promise<unknown>;
+    listPropertiesOfSecrets(options?: AzureCallOptions): {
+      byPage(settings: { maxPageSize: number }): { next(): Promise<unknown> };
+    };
   };
   DefaultAzureCredential: new () => AzureCredential;
+}
+
+/** Options each bounded Key Vault call takes. */
+export interface AzureCallOptions {
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -39,6 +59,34 @@ export interface AzureSdkModule {
 export interface AzureKeyVaultProviderOptions {
   /** Key Vault URL for the lazily-loaded client. */
   vaultUrl?: string | undefined;
+  /**
+   * Passed to the SDK's `SecretClient`. The SDK checks that the vault's
+   * authentication challenge names the vault's own domain, so a bearer token is
+   * never sent to a host that is not the vault; that check refuses a vault at
+   * `localhost`. Set `true` only for an emulator or a test vault.
+   *
+   * @default false
+   * @since 0.14.0
+   */
+  disableChallengeResourceVerification?: boolean | undefined;
+  /**
+   * Bound on each Key Vault call, in milliseconds, including the SDK's own
+   * retries. A call that fails on the network, gets a `5xx`, or does not
+   * answer in time rejects with `SecretProviderUnavailableError` (`503`). `0`
+   * disables the bound; anything outside `0`–`2147483647` throws `RangeError`
+   * at construction.
+   *
+   * @default 5000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number | undefined;
+  /**
+   * Timer surface the bound runs on. `SecretsPlugin` supplies the runtime's
+   * timers; a directly constructed provider falls back to the ambient ones.
+   *
+   * @since 0.14.0
+   */
+  timing?: DeadlineOptions['timing'];
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IAzureSecretsClient | undefined;
 }
@@ -63,26 +111,39 @@ export function isAzureNotFound(error: unknown): boolean {
 }
 
 /**
- * Adapts the Azure SDK module to the facade. Pure — unit-tested with a fake
- * module.
+ * Adapts the Azure SDK modules to the facade. Pure — unit-tested with a fake
+ * module; the real modules are supplied on the lazy path by
+ * {@linkcode loadAzureModule}.
  *
- * @param mod - The Azure SDK module (real or fake)
- * @param vaultUrl - The Key Vault URL (required)
+ * @param mod - The combined Azure SDK surface (real or fake)
+ * @param options - Key Vault options
+ * @param deadline - The bound on each call
  * @returns The facade wrapping a `SecretClient`
- * @throws {Error} If the vault URL is missing
+ * @throws {Error} When `options.vaultUrl` is missing
  */
 export function adaptAzureModule(
   mod: AzureSdkModule,
-  vaultUrl: string | undefined,
+  options: AzureKeyVaultProviderOptions,
+  deadline: SecretsDeadline = resolveSecretsDeadline(options.requestTimeoutMs, options.timing),
 ): IAzureSecretsClient {
+  const vaultUrl = options.vaultUrl;
   if (vaultUrl === undefined || vaultUrl === '') {
     throw new Error('AzureKeyVaultProvider requires options.vaultUrl');
   }
-  const client = new mod.SecretClient(vaultUrl, new mod.DefaultAzureCredential());
+  const client = new mod.SecretClient(
+    vaultUrl,
+    new mod.DefaultAzureCredential(),
+    options.disableChallengeResourceVerification === true
+      ? { disableChallengeResourceVerification: true }
+      : {},
+  );
+  // Every SDK call runs under the bound and receives its signal.
+  const bounded = <T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T> =>
+    runSecretsCall(deadline, PROVIDER_NAME, run);
   return {
     async getSecret(name: string): Promise<string | null> {
       try {
-        const secret = await client.getSecret(name);
+        const secret = await bounded((abortSignal) => client.getSecret(name, { abortSignal }));
         return secret.value ?? null;
       } catch (error) {
         if (isAzureNotFound(error)) {
@@ -92,7 +153,15 @@ export function adaptAzureModule(
       }
     },
     async setSecret(name: string, value: string): Promise<void> {
-      await client.setSecret(name, value);
+      await bounded((abortSignal) => client.setSecret(name, value, { abortSignal }));
+    },
+    // Non-mutating: lists at most one secret's properties, never a value.
+    isHealthy(): Promise<boolean> {
+      return answered(() =>
+        bounded((abortSignal) =>
+          client.listPropertiesOfSecrets({ abortSignal }).byPage({ maxPageSize: 1 }).next(),
+        ),
+      );
     },
   };
 }
@@ -138,23 +207,27 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
  */
 export class AzureKeyVaultProvider implements SecretProvider {
   #client: IAzureSecretsClient | null = null;
+  /** `true` when the client was injected: its calls are bounded here, by race. */
+  #injected = false;
   readonly #options: AzureKeyVaultProviderOptions;
+  readonly #deadline: SecretsDeadline;
   /**
-   * Reachability probe, present only when the resolved client supplies one
-   * (M90b). The Azure SDK facade has no non-mutating probe of its own, so
-   * the adapted (lazy) path stays `undefined` and the indicator reports
-   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
-   * publishes real reachability.
+   * Reachability probe. The lazily adapted client lists at most one secret's
+   * properties (non-mutating) and reads reachable when Key Vault answers at
+   * all; an injected facade publishes its own `isHealthy` when it has one, and
+   * the indicator reports `reachable: 'unknown'` when it does not.
    *
    * @since 0.5.0
    */
   isHealthy?: () => Promise<boolean>;
 
   /**
-   * @param options - Azure connection/injection options
+   * @param options - Key Vault connection/injection options
+   * @throws {RangeError} When `requestTimeoutMs` is out of range
    */
   constructor(options?: AzureKeyVaultProviderOptions) {
     this.#options = options ?? {};
+    this.#deadline = resolveSecretsDeadline(this.#options.requestTimeoutMs, this.#options.timing);
   }
 
   async connect(): Promise<void> {
@@ -164,10 +237,12 @@ export class AzureKeyVaultProvider implements SecretProvider {
         throw new Error('Injected Azure client is missing required methods (getSecret, setSecret)');
       }
       this.#client = injected;
-      this.#attachProbe(injected);
-      return;
+      this.#injected = true;
+    } else {
+      this.#client = adaptAzureModule(await loadAzureModule(), this.#options, this.#deadline);
+      this.#injected = false;
     }
-    this.#client = adaptAzureModule(await loadAzureModule(), this.#options.vaultUrl);
+    this.#attachProbe(this.#client);
   }
 
   disconnect(): Promise<void> {
@@ -180,10 +255,10 @@ export class AzureKeyVaultProvider implements SecretProvider {
   }
 
   /**
-   * Exposes the injected facade's optional probe, called through its OWNER
-   * so a facade reading instance state still resolves.
+   * Exposes the client's optional probe, called through its OWNER so a facade
+   * reading instance state still resolves.
    *
-   * @param client - The validated injected facade
+   * @param client - The resolved client
    */
   #attachProbe(client: IAzureSecretsClient): void {
     // Captured into a local before the guard so the closure keeps the
@@ -194,29 +269,40 @@ export class AzureKeyVaultProvider implements SecretProvider {
     }
   }
 
-  /**
-   * Reads a secret from Azure Key Vault.
-   *
-   * @param name - The secret name
-   * @returns The value, or `null` when absent
-   */
-  get(name: string): Promise<string | null> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('AzureKeyVaultProvider is not connected'));
+  /** Runs one client call, bounded here for an injected client, and classifies it. */
+  async #call<T>(operation: string, run: (client: IAzureSecretsClient) => Promise<T>): Promise<T> {
+    const client = this.#client;
+    if (client === null) throw new Error('AzureKeyVaultProvider is not connected');
+    try {
+      return this.#injected
+        ? await runSecretsCall(this.#deadline, PROVIDER_NAME, () => run(client))
+        : await run(client);
+    } catch (error) {
+      throw toSecretsError(error, PROVIDER_NAME, operation);
     }
-    return this.#client.getSecret(name);
   }
 
   /**
-   * Sets a secret's value.
+   * Reads a secret's current value.
+   *
+   * @param name - The secret name
+   * @returns The value, or `null` when absent
+   * @throws {SecretProviderUnavailableError} When Key Vault cannot be reached or
+   *   does not answer within `requestTimeoutMs`
+   */
+  get(name: string): Promise<string | null> {
+    return this.#call('get', (client) => client.getSecret(name));
+  }
+
+  /**
+   * Sets a secret's value (creating it when absent).
    *
    * @param name - The secret name
    * @param value - The new value
+   * @throws {SecretProviderUnavailableError} When Key Vault cannot be reached or
+   *   does not answer within `requestTimeoutMs`
    */
   set(name: string, value: string): Promise<void> {
-    if (this.#client === null) {
-      return Promise.reject(new Error('AzureKeyVaultProvider is not connected'));
-    }
-    return this.#client.setSecret(name, value);
+    return this.#call('set', (client) => client.setSecret(name, value));
   }
 }

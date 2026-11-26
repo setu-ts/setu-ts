@@ -890,6 +890,11 @@ here.
 - **Milestone 143 Core follow-up** (`common` + `runtime` + `kernel` — DNS resolver with chosen name
   servers and a whole-lookup bound, `resolveHost` failing with every lookup's error, and the drain
   503's `x-setu-unprocessed` marker; Core halves of V13-246 and V13-23) — complete (PR #613).
+- **Milestone 143r** (`storage-plugin` + `secrets-plugin` + `mail-plugin` + `feature-flags-plugin`
+  - `notification-plugin` + `localization-plugin` + additive `common` — provider arms and their
+    options: every cloud arm bounded by `requestTimeoutMs`, outages as 503/504, one
+    `exists`/`delete` answer, GCS/Azure/B2/SES endpoints, the LaunchDarkly boot bound, worker-pool
+    calls cancelled by `WorkerRunOptions.signal`) — complete (PR #614).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; M143a, b, c, i, o, p, q and r can start at once.

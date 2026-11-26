@@ -132,6 +132,15 @@ export type LocalizationPluginOptions = {
      * `'public, …'` only when no session cookie reaches the route.
      */
     readonly cacheControl?: string;
+    /**
+     * Serve only the keys that start with one of these prefixes (for example
+     * `['page.', 'form.']`), so server-only text stays on the server. Absent:
+     * every key. Must be a non-empty array of non-empty strings, checked when
+     * the plugin is created.
+     *
+     * @since 0.14.0
+     */
+    readonly keyPrefixes?: readonly string[];
   };
 } & (
   | {

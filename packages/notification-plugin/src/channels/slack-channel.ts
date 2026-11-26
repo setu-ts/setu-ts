@@ -24,7 +24,10 @@ export class SlackChannel implements NotificationChannel {
   }
 
   /**
-   * Sends the body as text, optionally including `to.channel`.
+   * Sends the notification as text, optionally including `to.channel`. A
+   * non-empty `subject` leads the text in bold (`*subject*`, then the body on
+   * the next line), escaped as Slack requires so it cannot inject a mention or
+   * a link; the body is passed as given.
    *
    * @param notification - The notification to send
    * @throws {Error} If transport rejects
@@ -36,9 +39,23 @@ export class SlackChannel implements NotificationChannel {
     // webhook's default channel. Matches the truthiness check the other channels
     // apply to their own address key.
     const channel = notification.to.channel;
-    const message: SlackMessage = channel
-      ? { text: notification.body, channel }
-      : { text: notification.body };
+    const subject = notification.subject;
+    const text =
+      subject === undefined || subject === ''
+        ? notification.body
+        : `*${escapeSlackText(subject)}*\n${notification.body}`;
+    const message: SlackMessage = channel ? { text, channel } : { text };
     await this.transport.send(message);
   }
+}
+
+/**
+ * Escapes the three characters Slack's message formatting reserves, so the text
+ * renders literally (`<!channel>` would otherwise ping the channel).
+ *
+ * @param text - Text to escape
+ * @returns The escaped text
+ */
+export function escapeSlackText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

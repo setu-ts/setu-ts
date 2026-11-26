@@ -59,7 +59,11 @@ export class FakeLaunchDarklyClient implements ILaunchDarklyClient {
     return this.#options.neverInitializes !== true;
   }
 
-  waitForInitialization(_options?: { readonly timeoutSeconds?: number }): Promise<unknown> {
+  /** The options each `waitForInitialization` call received. */
+  readonly waitOptions: ({ readonly timeout?: number } | undefined)[] = [];
+
+  waitForInitialization(options?: { readonly timeout?: number }): Promise<unknown> {
+    this.waitOptions.push(options);
     if (this.#options.failInitialization === true) {
       return Promise.reject(new Error('LaunchDarkly client initialization timed out'));
     }

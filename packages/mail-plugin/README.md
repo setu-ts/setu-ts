@@ -86,6 +86,48 @@ never the bytes. There is no framework size limit: the provider refuses an overs
 40 MB, SendGrid at 30 MB, SMTP at the server's own limit). SES needs an `@aws-sdk/client-sesv2`
 release whose `SendEmailCommand` accepts `Content.Simple.Attachments`.
 
+## Bounds, endpoints and faults
+
+- `ses` and `sendgrid` bound each send, and the readiness probe, with `options.requestTimeoutMs`
+  (default `15000`, `0` disables). That is the provider's own bound; the mail health indicator also
+  gives each probe 2 s (cached 5 s) and reads a slower answer as unreachable, whatever
+  `requestTimeoutMs` says. A send that does not settle in time rejects with
+  `BackendOutcomeUnknownError` (`504`): the message may have gone out, so retry with care. A refused
+  connection rejects with `BackendUnavailableError` (`503`), unless the SES client had already
+  retried (`$metadata.attempts` above 1): an earlier attempt may have delivered, so that is a `504`.
+- `ses` takes `options.endpoint` (a private endpoint, or a local stand-in); without it the SDK
+  addresses AWS. Its readiness probe is SES v2 `GetAccount` and reads reachable when SES answers
+  below `500`.
+- A SendGrid refusal's message carries SendGrid's own first error text after the status, for the
+  log; the response stays a masked `500`.
+- `smtp` takes `connectionTimeoutMs`, `greetingTimeoutMs` and `socketTimeoutMs`, passed to
+  nodemailer only when set; each must be a whole number of milliseconds from `1` to `2147483647`
+  (`0` and anything else outside that throw `RangeError` at construction). nodemailer caches a
+  host's DNS answer for 5 minutes, so a server that moves to a new address stays unreachable until
+  then; `dnsTtlMs` makes the provider resolve the host through the runtime's DNS at most that often
+  and connect to the address found, still verifying the host as the TLS server name. A non-finite or
+  negative value throws `RangeError`; it is refused without `host`, with an injected `transport` and
+  on a runtime without DNS. An IP-literal `host` needs no lookup and is connected to as given. A
+  name that resolves to several addresses keeps the whole list: a new transport starts on a random
+  one, and a send whose connection fails before any SMTP command (a refused or unreachable connect,
+  a connect that times out, a server that never greets) is sent again on the next address, each
+  address at most once and at most four in all; the last failure is the answer. A connection dropped
+  or stalled after that is never retried, since the server may have accepted the message. A send
+  that fails over can take about `connectionTimeoutMs` (or `greetingTimeoutMs`) times the addresses
+  tried, so set those timeouts with that in mind.
+
+SES v2 has no local stand-in the project's runs could use (LocalStack community answers `501`), so
+the `ses` arm was proved only against an in-test capture server: what it sends and where, not that
+SES accepts it. No live AWS or SendGrid account was used.
+
+SMTP DNS refreshes share one in-flight lookup per generation. Failed and empty lookups retain the
+last good transport for the TTL from the attempt (`dnsTtlMs: 0` retries each time, except while an
+earlier lookup that outlived its deadline is still running); with no transport yet, a failed or
+timed-out lookup lets nodemailer resolve the host itself. `connectionTimeoutMs` also bounds DNS
+refreshes (default 120000 ms). Disconnect wins an in-flight connect, and replaced transports close
+after active sends settle. Injected SES readiness probes are bounded by `requestTimeoutMs`, retain
+their boolean results and return false on failure or timeout.
+
 ## Options
 
 | Option      | Type                                     | Default | Description                                                                                                                                  |
@@ -233,6 +275,7 @@ that wants a mail outage to drain its replicas restores the previous behaviour w
 | `SesProviderOptions`      | interface |
 | `SesSdkModule`            | interface |
 | `SmtpProviderOptions`     | interface |
+| `SmtpRuntime`             | interface |
 | `IMailHttp`               | type      |
 | `MailProviderType`        | type      |
 | `MailTemplate`            | type      |

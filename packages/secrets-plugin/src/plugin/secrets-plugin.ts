@@ -48,7 +48,8 @@ const DEFAULT_PROVIDER: SecretsProviderType = 'env';
  * @param type - The provider backend id
  * @param options - Provider-specific options
  * @param env - The runtime environment map (for `EnvProvider`)
- * @param timing - The runtime's timers, which bound each Vault request
+ * @param timing - The runtime's timers, which bound each request of the Vault,
+ *   AWS, GCP and Azure providers
  * @param config - Config fallback for the env provider (strings only); pass it
  *   only when the fallback is enabled
  * @returns The provider adapter
@@ -68,18 +69,25 @@ export function createProvider(
         accessKeyId: options.accessKeyId,
         secretAccessKey: options.secretAccessKey,
         endpoint: options.endpoint,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isAwsClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'gcp':
       return new GcpSecretManagerProvider({
         projectId: options.projectId,
         endpoint: options.endpoint,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isGcpClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'azure':
       return new AzureKeyVaultProvider({
         vaultUrl: options.vaultUrl,
+        disableChallengeResourceVerification: options.disableChallengeResourceVerification,
+        requestTimeoutMs: options.requestTimeoutMs,
         client: isAzureClient(options.client) ? options.client : undefined,
+        ...(timing !== undefined && { timing }),
       });
     case 'vault':
       return new HashiCorpVaultProvider({

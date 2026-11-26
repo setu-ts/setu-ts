@@ -148,9 +148,9 @@ export class WorkerPoolCollector {
   }
 
   /**
-   * Records one task rejected before admission. Deliberately separate from
-   * {@linkcode taskFailed}: these never became tasks, so the pool's own
-   * `failed` count cannot see them either.
+   * Records one call refused by pool state or aborted by its caller.
+   * Separate from {@linkcode taskFailed}: cancellation, including admitted
+   * work, does not increment the pool's own `failed` count.
    *
    * @param label - The task label of the module the caller asked for
    * @param reason - Why the task was refused

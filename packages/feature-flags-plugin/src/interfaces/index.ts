@@ -164,7 +164,10 @@ export interface LaunchDarklyProviderConfig {
   /**
    * Seconds to wait for the client's initial connection. Defaults to `5`. A
    * timeout is logged and tolerated, leaving the provider degraded rather than
-   * failing application startup.
+   * failing application startup. The startup snapshot `start()` awaits gets
+   * the same bound separately, so startup can take up to twice it; later
+   * background refills are not bounded. Must be a finite number above `0` and at most `2147483`;
+   * anything else throws `RangeError` when the provider is constructed.
    */
   readonly initTimeoutSeconds?: number;
   /** Options forwarded verbatim as the SDK `init()` second argument. */
