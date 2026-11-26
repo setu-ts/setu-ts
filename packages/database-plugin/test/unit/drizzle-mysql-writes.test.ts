@@ -34,7 +34,8 @@ describe('Drizzle MySQL affected-row writes', () => {
   }
   it('names the MySQL read-back when a create finds no row after its insert', async () => {
     const fixture = mysqlDrizzle();
-    // A read-back that finds nothing: the row vanished between the insert and the read.
+    // A read-back that finds nothing: on the transactional path the stored key differs from the
+    // payload's (truncated by a non-strict sql_mode, or rewritten by a BEFORE INSERT trigger).
     const db = {
       ...fixture.db,
       select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),

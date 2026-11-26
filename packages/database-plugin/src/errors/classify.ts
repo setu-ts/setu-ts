@@ -149,7 +149,10 @@ const MARIADB_SOCKET_CLOSED = '45009';
 /** MongoDB `NotWritablePrimary`: the server refused the write. */
 const MONGO_NOT_WRITABLE_PRIMARY = 10107;
 
-/** node-postgres refuses a statement on a client whose connection already failed. */
+/**
+ * A driver refuses a statement on a connection that already failed: node-postgres's two messages,
+ * and mysql2's closed-connection message.
+ */
 const PG_NOT_QUERYABLE_ANCHORS: ReadonlySet<string> = new Set([
   "Can't add new command when connection is in closed state",
   'Client has encountered a connection error and is not queryable',
