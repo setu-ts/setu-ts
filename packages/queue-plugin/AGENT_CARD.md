@@ -47,8 +47,8 @@ export function createReceiptJobProcessor(
 ## Behaviour the types do not show
 
 - `add` returns the ID; processing runs on a later poll (`pollIntervalMs`: 1000 ms). Read back
-  effects through a route. Memory is process-local; `delayMs` uses milliseconds.
-- Factories resolve capabilities at `onInit`. Default concurrency is 1 per name.
+  effects. Memory is process-local; `delayMs` uses milliseconds.
+- Factories resolve at `onInit`. Default concurrency is 1 per name.
 - `job.attempts` starts at 1. Throws retry; `onFailed` runs only after the last attempt.
 - `retryDelayMs`: fixed milliseconds or a function of the failed attempt; absent keeps backoff.
   Throwing/nonfinite results warn once and retry immediately.
@@ -60,7 +60,8 @@ export function createReceiptJobProcessor(
 - `adapter`: memory, redis or rabbitmq (`url`), sqs (`sqs`); node-redis uses `client`.
 - SQS consumed names need `deadLetterQueues[name]` (URL or false) or a redrive policy.
   `requestTimeoutMs`: 15000 (0 unbounded); `waitTimeSeconds`: 20 (0–20). Polls run independently per
-  name and abort on disconnect. The 1500 ms QueueArn probe reports missing queues and outages down.
+  name and abort on disconnect. The QueueArn probe budgets
+  `min(1500, floor(0.75 * health.probeTimeoutMs))` ms; missing queues and outages read down.
   `SnsPublisher` also accepts `requestTimeoutMs`.
 - `schedule` adds recurring jobs; `behaviors` wraps processors; `diagnostics` observes approved
   names.

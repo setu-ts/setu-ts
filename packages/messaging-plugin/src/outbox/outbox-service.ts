@@ -108,6 +108,7 @@ export class OutboxService implements IOutbox {
   #closing = false;
   #inflight: Promise<OutboxSweepResult> | undefined;
   #followUp: Promise<OutboxSweepResult | undefined> | undefined;
+  #cancelFollowUp: (() => void) | undefined;
   #lastSweep: OutboxSweepResult | undefined;
   #lastRelayOverlapAt: number | undefined;
   #saturated = false;
@@ -226,7 +227,9 @@ export class OutboxService implements IOutbox {
       if (this.#closing || this.#stores === undefined) return;
       let promise: Promise<unknown>;
       const running = this.#inflight;
-      if (running === undefined) {
+      if (this.#followUp !== undefined) {
+        promise = this.#followUp;
+      } else if (running === undefined) {
         promise = this.#start('dispatch');
       } else {
         // One follow-up waits behind the running sweep; further requests join it.
@@ -306,6 +309,7 @@ export class OutboxService implements IOutbox {
    */
   async close(): Promise<void> {
     this.#closing = true;
+    this.#cancelFollowUp?.();
     await this.#followUp?.then(noop, noop);
     await this.#inflight?.then(noop, noop);
   }
@@ -349,9 +353,24 @@ export class OutboxService implements IOutbox {
 
   #queueFollowUp(running: Promise<OutboxSweepResult>): Promise<OutboxSweepResult | undefined> {
     return (this.#followUp ??= running.then(noop, noop).then(() => {
-      this.#followUp = undefined;
-      if (this.#closing) return undefined;
-      return this.#inflight ?? this.#start('dispatch');
+      if (this.#closing) {
+        this.#followUp = undefined;
+        return undefined;
+      }
+      return new Promise<OutboxSweepResult | undefined>((resolve, reject) => {
+        const handle = this.#deps.runtime.setTimeout(() => {
+          this.#cancelFollowUp = undefined;
+          this.#followUp = undefined;
+          if (this.#closing) resolve(undefined);
+          else (this.#inflight ?? this.#start('dispatch')).then(resolve, reject);
+        }, 0);
+        this.#cancelFollowUp = () => {
+          this.#deps.runtime.clearTimeout(handle);
+          this.#cancelFollowUp = undefined;
+          this.#followUp = undefined;
+          resolve(undefined);
+        };
+      });
     }));
   }
 

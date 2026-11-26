@@ -86,7 +86,7 @@ export function asBrokerAdapter(
       if (instance.publishWithHeaders !== undefined) {
         await instance.publishWithHeaders(topic, message, headers, validated);
       } else {
-        warnOnce();
+        if (Object.keys(headers).length > 0) warnOnce();
         await instance.publish(topic, message, validated);
       }
     },
@@ -95,7 +95,7 @@ export function asBrokerAdapter(
     requestWithHeaders: (topic, message, headers, options) => {
       if (instance.requestWithHeaders !== undefined)
         return instance.requestWithHeaders(topic, message, headers, options);
-      warnOnce();
+      if (Object.keys(headers).length > 0) warnOnce();
       return instance.request(topic, message, options);
     },
     request: (topic, message, options) => adapter.requestWithHeaders(topic, message, {}, options),

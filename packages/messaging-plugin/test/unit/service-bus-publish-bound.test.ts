@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ServiceBusError } from '@azure/service-bus';
+import { serviceBusFaults } from '../fixtures/service-bus-errors.ts';
 import { BackendOutcomeUnknownError, httpStatusHintOf } from '@setu-ts/common';
 import { ServiceBusBroker, MessagingPlugin, PublishTimeoutError } from '../../src/index.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -11,6 +11,47 @@ import {
 } from '../../src/brokers/service-bus-faults.ts';
 
 describe('Service Bus publish bound', () => {
+  it('uses SDK translations, including retryable authorization refusals', () => {
+    for (const { error, code } of serviceBusFaults) expect(error).toMatchObject({ code });
+    expect(serviceBusFaults.find(({ code }) => code === 'UnauthorizedAccess')!.error).toMatchObject(
+      { retryable: true },
+    );
+  });
+  it('treats a translated session lock loss as an outage only inside an aggregate', () => {
+    const { error } = serviceBusFaults.find(({ code }) => code === 'SessionLockLost')!;
+    expect(error).toMatchObject({ code: 'SessionLockLost', retryable: false });
+    expect(isServiceBusOutage(error)).toBe(false);
+    expect(isServiceBusOutage(new AggregateError([new Error('earlier socket'), error]))).toBe(true);
+  });
+  it.each(
+    (['rejection', 'deadline', 'success'] as const).flatMap((outcome) =>
+      [false, true].map((reconnect) => ({ outcome, reconnect })),
+    ),
+  )(
+    'fences late $outcome evidence after disconnect, reconnect=$reconnect',
+    async ({ outcome, reconnect }) => {
+      const clock = clockRuntime();
+      const h = serviceBusTransport();
+      const pending = Promise.withResolvers<void>();
+      vi.mocked(h.transport.send).mockReturnValueOnce(pending.promise);
+      const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+        client: h.transport,
+        publishTimeoutMs: 25,
+      });
+      await broker.connect();
+      const result = broker.publish('orders', {}).catch((error: unknown) => error);
+      await flushCloud();
+      await broker.disconnect();
+      expect(await broker.reachability()).toBeUndefined();
+      if (reconnect) await broker.connect();
+      if (outcome === 'deadline') await clock.advance(25);
+      else if (outcome === 'rejection') pending.reject(new Error('old socket'));
+      else pending.resolve();
+      await result;
+      expect(await broker.reachability()).toBeUndefined();
+      await broker.disconnect();
+    },
+  );
   it.each([0, 25, undefined])(
     'bounds the whole send with %s and aborts on expiry',
     async (timeout) => {
@@ -47,25 +88,12 @@ describe('Service Bus publish bound', () => {
   );
 
   const cases = [
-    ...['ServiceCommunicationProblem', 'ServiceTimeout', 'ServiceBusy'].map((code) => ({
-      error: new ServiceBusError('outage', code as 'ServiceBusy'),
-      outage: true,
+    ...serviceBusFaults,
+    ...serviceBusFaults.map(({ error, aggregateOutage, code }) => ({
+      code: `aggregate-${code}`,
+      error: new AggregateError([new Error('earlier socket'), error]),
+      outage: aggregateOutage,
     })),
-    ...[
-      'MessagingEntityNotFound',
-      'UnauthorizedAccess',
-      'MessageSizeExceeded',
-      'QuotaExceeded',
-    ].map((code) => ({
-      error: Object.assign(new ServiceBusError('refused', code as 'QuotaExceeded'), {
-        retryable: false,
-      }),
-      outage: false,
-    })),
-    {
-      error: Object.assign(new Error('retryable'), { code: 'other', retryable: true }),
-      outage: true,
-    },
     { error: new Error('socket'), outage: true },
     { error: new AggregateError([new Error('first'), new Error('last failure')]), outage: true },
   ];
@@ -83,7 +111,9 @@ describe('Service Bus publish bound', () => {
       expect(httpStatusHintOf(result)?.status).toBe(504);
       expect(await broker.reachability()).toBe(false);
       if (error instanceof AggregateError)
-        expect(result).toMatchObject({ cause: { message: 'last failure', cause: error } });
+        expect(result).toMatchObject({
+          cause: { message: error.errors.at(-1).message, cause: error },
+        });
     } else {
       expect(result).toBe(error);
       expect(await broker.reachability()).toBeUndefined();
@@ -93,6 +123,9 @@ describe('Service Bus publish bound', () => {
   it('handles raw and empty aggregate causes', () => {
     expect(isServiceBusOutage(null)).toBe(true);
     expect(isServiceBusOutage('socket')).toBe(true);
+    expect(isServiceBusOutage(new AggregateError([]))).toBe(true);
+    expect(isServiceBusOutage(new AggregateError([null]))).toBe(true);
+    expect(isServiceBusOutage(new AggregateError(['last']))).toBe(true);
     expect(serviceBusPublishCause(new AggregateError([], 'empty'))).toMatchObject({
       message: 'empty',
     });

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueueService } from '../../src/services/queue-service.ts';
 import { QueuePlugin } from '../../src/index.ts';
 import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
@@ -9,6 +9,43 @@ import { HealthPlugin } from '@setu-ts/health-plugin';
 import { FakeSqsTransport } from '../fixtures/fake-sqs-transport.ts';
 
 describe('Queue probe options', () => {
+  afterEach(() => vi.useRealTimers());
+  it('threads a 1000ms SQS probe deadline through the plugin and reports a hung endpoint down at 750ms', async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const client = Object.assign(new FakeSqsTransport(() => 0), {
+      getQueueAttributes: vi.fn<
+        NonNullable<import('../../src/adapters/sqs-queue.ts').ISqsTransport['getQueueAttributes']>
+      >((_url, _names, options) => {
+        signal = options?.abortSignal;
+        return new Promise(() => {});
+      }),
+    });
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HealthPlugin({ details: true }),
+        QueuePlugin({
+          adapter: 'sqs',
+          sqs: { queues: { build: 'source' }, client },
+          health: { probeTimeoutMs: 1000, probeCacheMs: 0 },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const response = app.fetch(new Request('http://localhost/ready'));
+      await vi.advanceTimersByTimeAsync(749);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await response;
+      expect(result.status).toBe(503);
+      await result.body?.cancel();
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
   it('forwards zero caching through the plugin into a kernel health endpoint', async () => {
     const isHealthy = vi.fn(() => Promise.resolve(true));
     const client = Object.assign(new FakeSqsTransport(() => 0), { isHealthy });

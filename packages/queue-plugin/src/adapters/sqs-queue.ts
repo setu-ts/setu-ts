@@ -41,6 +41,10 @@ const SQS_MAX_RECEIVE = 10;
 /** Default visibility timeout in seconds. */
 const DEFAULT_VISIBILITY_TIMEOUT = 30;
 const SQS_PROBE_CALL_TIMEOUT_MS = 1500;
+const MAX_TIMER_MS = 2_147_483_647;
+
+/** Internal SDK probe lane: ordinary attribute reads keep the application's retry policy. */
+const probeReaders = new WeakMap<ISqsTransport, NonNullable<ISqsTransport['getQueueAttributes']>>();
 
 /**
  * Declares the constructors used from the real AWS SQS SDK v3.
@@ -230,7 +234,7 @@ export function adaptSqsModule(
   const client = new mod.SQSClient(clientConfig);
   const probeClient = new mod.SQSClient({ ...clientConfig, maxAttempts: 1 });
 
-  return {
+  const transport: ISqsTransport = {
     send: async (queueUrl, body, delaySeconds, attributes, callOptions): Promise<void> => {
       const input: Record<string, unknown> = {
         QueueUrl: queueUrl,
@@ -308,8 +312,7 @@ export function adaptSqsModule(
       );
     },
     getQueueAttributes: async (queueUrl, names, callOptions) => {
-      const reader = names.length === 1 && names[0] === 'QueueArn' ? probeClient : client;
-      const result = await reader.send(
+      const result = await client.send(
         new mod.GetQueueAttributesCommand({
           QueueUrl: queueUrl,
           AttributeNames: names,
@@ -335,6 +338,14 @@ export function adaptSqsModule(
       await probeClient.destroy();
     },
   };
+  probeReaders.set(transport, async (queueUrl, names, callOptions) => {
+    const result = await probeClient.send(
+      new mod.GetQueueAttributesCommand({ QueueUrl: queueUrl, AttributeNames: names }),
+      callOptions,
+    );
+    return (result as { Attributes?: Record<string, string> }).Attributes ?? {};
+  });
+  return transport;
 }
 
 /** Per-delivery receipt state, fenced against replacement while I/O is pending. */
@@ -380,9 +391,11 @@ export class SqsQueue implements QueueAdapter {
    * Probes every distinct configured queue URL when getQueueAttributes exists;
    * otherwise delegates to an injected isHealthy or stays absent (unknown).
    *
+   * @param probeTimeoutMs - Outer health deadline, default 2000; each request
+   * gets min(1500, floor(0.75 times this bound)). A zero call budget reads down.
    * @since 0.1.0
    */
-  isHealthy?: () => Promise<boolean>;
+  isHealthy?: (probeTimeoutMs?: number) => Promise<boolean>;
   #receipts: Map<string, ReceiptEntry>;
   #recurring: Map<string, StoredRecurring>;
   #logger: { error: (msg: string) => void; warn: (msg: string) => void } | undefined;
@@ -516,13 +529,17 @@ export class SqsQueue implements QueueAdapter {
   #installProbe(): void {
     const transport = this.#transport;
     if (transport !== null && transport.getQueueAttributes !== undefined) {
-      this.isHealthy = async (): Promise<boolean> => {
+      const read = probeReaders.get(transport) ?? transport.getQueueAttributes.bind(transport);
+      this.isHealthy = async (probeTimeoutMs = 2000): Promise<boolean> => {
+        const timeoutMs = Math.min(SQS_PROBE_CALL_TIMEOUT_MS, Math.floor(0.75 * probeTimeoutMs));
+        // At the minimum outer budget (1 ms), rounding leaves no call budget.
+        // Report down immediately; withDeadline(0) would disable the bound.
+        if (timeoutMs === 0) return false;
         const outcomes = await Promise.all(
           [...new Set(Object.values(this.#queues))].map(async (url) => {
             try {
-              // No abort signal: each probe owns its own finite race, independent of request options.
-              await withDeadline(() => transport.getQueueAttributes!(url, ['QueueArn']), {
-                timeoutMs: SQS_PROBE_CALL_TIMEOUT_MS,
+              await withDeadline((abortSignal) => read(url, ['QueueArn'], { abortSignal }), {
+                timeoutMs,
                 onTimeout: () => new Error('SQS probe timed out'),
                 timing: resolveProbeTiming(this.#runtime),
               });
@@ -679,7 +696,9 @@ export class SqsQueue implements QueueAdapter {
             { abortSignal: signal },
           );
         },
-        this.#requestTimeoutMs === 0 ? 0 : this.#waitTimeSeconds * 1000 + this.#requestTimeoutMs,
+        this.#requestTimeoutMs === 0
+          ? 0
+          : Math.min(MAX_TIMER_MS, this.#waitTimeSeconds * 1000 + this.#requestTimeoutMs),
       );
     } finally {
       this.#receives.delete(controller);

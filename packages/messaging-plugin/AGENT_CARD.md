@@ -50,15 +50,15 @@ export const messaging = MessagingPlugin({
   1 delivery can reorder. Reply inboxes expire after 5 idle minutes; receive outages affect
   readiness.
 - RPC timeout answers 504, remote handler failure 502 through `errorHandler`, without remote text.
-- Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` latency. Full successful
-  sweeps continue immediately; saturation warns once, recovery logs at info.
+- Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` latency. Full failure-free
+  sweeps continue with a macrotask yield; saturation warns once, recovery logs at info.
 
 ## Other options
 
 - `broker`: memory, redis-streams, rabbitmq, nats, kafka, pubsub, service-bus or custom.
 - Custom `instance: ICustomMessageBroker`: optional `publishWithHeaders`/`requestWithHeaders` carry
-  tracing; `subscribe` fills `MessageMetadata.headers` and confirms `fanOut`. Missing headers warn
-  once. `isHealthy` feeds reachability.
+  tracing; `subscribe` fills `MessageMetadata.headers` and confirms `fanOut`. Dropped trace headers
+  warn once. `isHealthy` feeds reachability.
 - `request`/`respond`: RPC; `behaviors`: consumers; `outbox`/`inbox`: durability.
 
 <!-- card-allow: LoggerPlugin -->

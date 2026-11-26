@@ -19,46 +19,74 @@ cutting a release renames that heading to the version and is a rename, not a rec
   response can catch and rethrow an application `HttpError` as before. RabbitMQ enqueue failures now
   distinguish definite refusal (503) from a lost confirmation or deadline (504).
 - Service Bus `publishTimeoutMs` now defaults to 15000 ms over the entire send including retries. It
-  aborts on expiry with `PublishTimeoutError` (504); a retryable send outage is also 504 because a
-  previous attempt may have arrived. Set 0 or a larger value for longer sends. `retryOptions` keeps
-  its meaning inside the bound. Non-retryable SDK refusals retain their error and no longer mark the
-  data plane down. `maxConcurrentCalls` defaults to 1, so existing ordering stays intact; opt into
-  1–1000 for throughput, allowing later messages to run first. A live reply inbox is unchanged; a
-  crashed requester's subscription now expires after five idle minutes.
-- Consume-only Service Bus services become not-ready on receive transport outages, recovering on a
-  delivery or positive management probe. Exclude `messaging` through
+  aborts on expiry with `PublishTimeoutError` (504); a send outage is also 504 because a previous
+  attempt may have arrived. Set 0 or a larger value for longer sends. `retryOptions` keeps its
+  meaning inside the bound. The refusal codes `UnauthorizedAccess`, `MessagingEntityNotFound`,
+  `MessagingEntityDisabled`, `MessageSizeExceeded` and `QuotaExceeded` take precedence over
+  `retryable`, including an SDK `UnauthorizedAccess` with `retryable: true`. Refusals are returned
+  unchanged and do not mark the data plane down. An `AggregateError` stays a refusal only when its
+  last inner error has one of these refusal codes; every other aggregate is an outage, even with a
+  final `SessionLockLost` and `retryable: false`. For non-aggregate errors, outages are
+  `retryable: true`, codes `ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and raw
+  socket errors with neither `code` nor `retryable`. `maxConcurrentCalls` defaults to 1, so existing
+  ordering stays intact; opt into 1–1000 for throughput, allowing later messages to run first. A
+  live reply inbox is unchanged; a crashed requester's subscription now expires after five idle
+  minutes.
+- Service Bus evidence now includes real publish outcomes (including timeouts), receive outages only
+  from source `receive`, and delivered application and reply-inbox messages. Consume-only services
+  become not-ready on receive transport outages, recovering on a successful publish, delivery or
+  positive management probe. Exclude `messaging` through
   `HealthPlugin({ readiness: { exclude: ['messaging'] } })` to keep them in rotation.
 - Pub/Sub create-path gRPC code 5 becomes `PubSubTopicMissingError` naming the source topic and
   subscription; the original code is on `cause.code`. A proven missing dead-letter topic still gives
-  `PubSubDeadLetterTopicMissingError`. Its topic inspection now ends within 1500 ms.
+  `PubSubDeadLetterTopicMissingError`. Its topic inspection now ends within 1500 ms. The prerelease
+  SDK facade drops unused `PubSubSdkModule.topic().exists?`; substitute SDK modules provide
+  `getMetadata` for inspection. The transport's `IPubSubTransport.topicExists` remains supported.
 - Custom brokers use `ICustomMessageBroker`. Publish options are always validated, including
   reserved headers, even for an instance implementing the full internal adapter. Existing
   `publishWithHeaders` continues to carry producer tracing. The wrapper now calls `subscribe` (which
   must populate `MessageMetadata.headers`) rather than `subscribeWithHeaders`, and derives
   reachability from `isHealthy` rather than a custom `reachability`. Without a header channel the
-  broker behaves as before with one warning. Confirm `ISubscription.fanOut` for independent copies.
+  broker behaves as before, warning once when non-empty trace headers would be dropped. Confirm
+  `ISubscription.fanOut` for independent copies.
 - Queue reserve failures move from error on every tick to warn once per name and episode, then info
   with a failure count on recovery. Update alert severity/volume expectations. The optional
   `health.probeCacheMs` (5000 ms, 0 disables caching) and `health.probeTimeoutMs` (2000 ms) preserve
   the previous defaults; failures remain cached. `retryDelayMs` adds a fixed or callable delay for
   every adapter; absence keeps existing exponential backoff.
 - SQS's SDK path now probes all distinct configured queue URLs with `GetQueueAttributes` for
-  `QueueArn`: a missing queue or outage makes readiness fail. Grant that read even on a name
-  configured to discard; `HealthPlugin.readiness.exclude` can exclude the queue indicator. SQS and
-  SNS calls now default to a 15000 ms `requestTimeoutMs`, including SDK retries; set 0 or a larger
-  value to retain longer calls. A send may have arrived on 504. Start-path redrive reads always stay
-  finite (10000 ms at 0, otherwise the smaller of the option and 10000 ms).
+  `QueueArn`, explicitly selecting a separate one-attempt SDK client rather than matching the
+  attribute list. Each request forwards `abortSignal` and aborts on expiry. Its per-call bound is
+  `min(1500, floor(0.75 * health.probeTimeoutMs))` ms: 1500 ms with the default 2000 ms outer bound,
+  750 ms with a configured 1000 ms. A hung endpoint reads down before the outer timeout. A missing
+  queue or outage makes readiness fail; `sqs:GetQueueAttributes` is needed to detect a missing
+  queue, even for a name configured to discard. Readiness can pass without that permission because
+  403 proves reachability; redrive-policy reads still need the permissions in the next section.
+  `HealthPlugin.readiness.exclude` can exclude the queue indicator. Other SQS commands and SNS
+  publishes default to a 15000 ms `requestTimeoutMs`, including SDK retries; set 0 or a larger value
+  to retain longer calls. A send may have arrived on 504. Start-path redrive reads stay finite:
+  `min(requestTimeoutMs, 10000)` ms, or 10000 ms when the option is 0.
 - SQS `waitTimeSeconds` now defaults to 20, reducing receives while delivering an arriving message
-  immediately; 0 restores short polling. Names reserve independently. An injected transport may
-  ignore the new wait parameter, retaining short polling, and should honor the new optional trailing
-  `{ abortSignal }` to end receives promptly at disconnect. Methods remain compatible.
-- A full failure-free outbox sweep now starts another immediately, including after `dispatch()` with
-  scheduling off. During backlog the store sees more reads until it drains; each sweep still
-  respects its budgets. Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs`
-  (default one second) of latency. This is explicit; there is no automatic after-commit hook.
+  immediately; 0 restores short polling. Receive uses
+  `min(2147483647, waitTimeSeconds * 1000 + requestTimeoutMs)` ms; `requestTimeoutMs: 0` keeps it
+  unbounded. Names reserve independently. An injected transport may ignore the new wait parameter,
+  retaining short polling, and should honor the new optional trailing `{ abortSignal }` to end
+  receives promptly at disconnect. Methods remain compatible.
+- A full failure-free outbox sweep now starts another, including after `dispatch()` with scheduling
+  off. Follow-ups yield through `runtime.setTimeout(..., 0)`, allowing event-loop timers between
+  batches. During a backlog the relay runs back-to-back until it drains; the extra store work is one
+  claim and one mark per delivered row, the cost of delivering the backlog. A sweep with any failure
+  is never followed up. There is no switch or tuning option for the chain; `publishLimit` caps each
+  sweep and `intervalMs` spaces scheduled sweeps, but neither throttles the chain. Call
+  `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` (default one second) of
+  latency. This is explicit; there is no automatic after-commit hook.
 - An injected Redis backplane pair must connect and subscribe within `commandTimeoutMs` (15000 ms),
-  or startup fails. Use 0 for an unbounded wait or connect clients before `app.start()`. A stop
-  during startup now closes pending waits and leaves no late service/health registration; a
+  or startup fails with `BackendUnavailableError`. Use 0 for an unbounded wait or connect clients
+  before `app.start()`. Injected clients are borrowed: normal close and cancelled, failed or
+  timed-out startup never disconnect or QUIT them. Close stops waiting, removes the backplane's
+  listeners and watches, and unsubscribes when subscribed; the connections remain caller-owned.
+  Owned clients are force-disconnected when close cancels SUBSCRIBE, including with a finite bound.
+  A stop during startup ends pending waits and leaves no late service/health registration; a
   messaging backplane connect overtaken by close rejects.
 
 ### SQS dead-letter targets and long jobs (`@setu-ts/queue-plugin`)

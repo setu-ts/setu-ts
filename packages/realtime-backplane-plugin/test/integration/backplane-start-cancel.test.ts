@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -7,7 +8,7 @@ import type { IRedisBackplaneClient } from '../../src/index.ts';
 
 describe('Backplane cancelled startup', () => {
   it.each(['connect', 'subscribe'] as const)(
-    'stop closes an injected pair during hung %s without late registration',
+    'stop detaches an injected pair during hung %s without late registration',
     async (operation) => {
       const entered = Promise.withResolvers<void>();
       const make = (): IRedisBackplaneClient => ({
@@ -39,10 +40,16 @@ describe('Backplane cancelled startup', () => {
       await entered.promise;
       await app.stop();
       expect(await start).toMatchObject({ name: 'StartCancelledError' });
-      expect(publisher.disconnect).toHaveBeenCalledOnce();
-      expect(subscriber.disconnect).toHaveBeenCalledOnce();
+      await setImmediate();
+      expect(publisher.disconnect).not.toHaveBeenCalled();
+      expect(subscriber.disconnect).not.toHaveBeenCalled();
+      expect(publisher.quit).not.toHaveBeenCalled();
+      expect(subscriber.quit).not.toHaveBeenCalled();
       expect(app.services.has(CAPABILITIES.REALTIME_BACKPLANE)).toBe(false);
       expect(app.services.has(CAPABILITIES.REALTIME_DIAGNOSTICS)).toBe(false);
+      expect(
+        app.services.getAll(CAPABILITIES.HEALTH_INDICATOR).map((indicator) => indicator.name),
+      ).not.toContain('realtime-backplane');
     },
   );
 });

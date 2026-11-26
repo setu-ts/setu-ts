@@ -296,12 +296,11 @@ zero.
 ## Seeing a job that failed for the last time
 
 A job that exhausts its attempts is dead-lettered by every adapter unless SQS explicitly discards it
-through `deadLetterQueues[name]: false` (otherwise on SQS, to the target `deadLetterQueues` or the
-queue's redrive policy names, unless `deadLetterQueues[name]` is `false`; see
-[SQS Retry and DLQ](#sqs-retry-and-dlq)), and used to be reachable only by opening a Redis client:
-`IQueue` has no `getJob` and no dead-letter accessor, the health payload was
-`{"adapter":"RedisQueue"}`, and `/metrics` carried no queue series at all. Three surfaces answer
-different questions about it:
+through `deadLetterQueues[name]: false` (otherwise on SQS, to the target named by `deadLetterQueues`
+or the queue's redrive policy; see [SQS Retry and DLQ](#sqs-retry-and-dlq)), and used to be
+reachable only by opening a Redis client: `IQueue` has no `getJob` and no dead-letter accessor, the
+health payload was `{"adapter":"RedisQueue"}`, and `/metrics` carried no queue series at all. Three
+surfaces answer different questions about it:
 
 | Surface                                  | Answers                                                               |
 | ---------------------------------------- | --------------------------------------------------------------------- |
@@ -456,23 +455,25 @@ jobs (up to 15 minutes via `DelaySeconds`), claim renewal and dead-letter forwar
 SQS's own `ApproximateReceiveCount`. Requires the `@aws-sdk/client-sqs` package at runtime (or an
 injected transport).
 
-| `sqs` option               | Default  | Meaning                                                                                                                                                             |
-| -------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `queues`                   | required | Job name to queue URL, for every name this process enqueues to or consumes                                                                                          |
-| `deadLetterQueues`         | `{}`     | Consumed job name to dead-letter queue URL, or `false` to discard exhausted jobs of that name                                                                       |
-| `visibilityTimeoutSeconds` | `30`     | Visibility timeout taken at each receive and renewed while the processor runs; an integer from 1 to 43,200, else a `RangeError`                                     |
-| `region`, `credentials`    | —        | Passed to the SDK client                                                                                                                                            |
-| `endpoint`                 | —        | Custom endpoint (ElasticMQ, LocalStack)                                                                                                                             |
-| `client`                   | —        | An injected `ISqsTransport`; the SDK is not loaded                                                                                                                  |
-| `requestTimeoutMs`         | `15000`  | Whole command bound including SDK retries; `0` disables. Receive adds `waitTimeSeconds × 1000`. Redrive reads stay at `min(requestTimeoutMs, 10000)`, or 10000 at 0 |
-| `waitTimeSeconds`          | `20`     | Long poll duration, integer 0–20; 0 restores short polling                                                                                                          |
+| `sqs` option               | Default  | Meaning                                                                                                                                                                                                                                                                 |
+| -------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queues`                   | required | Job name to queue URL, for every name this process enqueues to or consumes                                                                                                                                                                                              |
+| `deadLetterQueues`         | `{}`     | Consumed job name to dead-letter queue URL, or `false` to discard exhausted jobs of that name                                                                                                                                                                           |
+| `visibilityTimeoutSeconds` | `30`     | Visibility timeout taken at each receive and renewed while the processor runs; an integer from 1 to 43,200, else a `RangeError`                                                                                                                                         |
+| `region`, `credentials`    | —        | Passed to the SDK client                                                                                                                                                                                                                                                |
+| `endpoint`                 | —        | Custom endpoint (ElasticMQ, LocalStack)                                                                                                                                                                                                                                 |
+| `client`                   | —        | An injected `ISqsTransport`; the SDK is not loaded                                                                                                                                                                                                                      |
+| `requestTimeoutMs`         | `15000`  | Whole command bound including SDK retries; `0` disables. Receive uses `min(2147483647, waitTimeSeconds * 1000 + requestTimeoutMs)` (0 remains unbounded). Redrive reads stay at `min(requestTimeoutMs, 10000)`, or 10000 at 0. The health probe has its own bound below |
+| `waitTimeSeconds`          | `20`     | Long poll duration, integer 0–20; 0 restores short polling                                                                                                                                                                                                              |
 
-Every SQS command and `SnsPublisher.publish` / `publishJob` is bounded. SNS also accepts
-`requestTimeoutMs` (15000 ms, 0 disables), using ambient timers when no runtime is supplied. Expired
-calls abort their SDK signal and throw `BackendOutcomeUnknownError` (504). A refused connection,
-HTTP 5xx or throttling answer is 503, upgraded to 504 after multiple SDK attempts; connection loss
-in flight is 504. Other SDK refusals pass through unchanged. An injected transport is bounded even
-if it ignores the optional trailing `{ abortSignal }` on its methods.
+SQS send, delete and visibility commands and `SnsPublisher.publish` / `publishJob` use
+`requestTimeoutMs` (15000 ms, 0 disables), including SDK retries. Receive uses the composed bound
+above; redrive reads and health probes retain their separate finite bounds. SNS uses ambient timers
+when no runtime is supplied. Expired operation calls abort their SDK signal and throw
+`BackendOutcomeUnknownError` (504). A refused connection, HTTP 5xx or throttling answer is 503,
+upgraded to 504 after multiple SDK attempts; connection loss in flight is 504. Other SDK refusals
+pass through unchanged. An injected transport is bounded even if it ignores the optional trailing
+`{ abortSignal }` on its methods.
 
 Long polls run independently per consumed name, with at most one reserve per name. A message
 arriving during a wait is received immediately. Disconnect aborts in-flight receives, awaits the
@@ -482,10 +483,17 @@ long polling can exhaust the SDK's default 50 HTTP sockets and delay sends; the 
 at connect. The probe uses a separate one-attempt SDK client.
 
 The SDK path now probes every distinct URL in `queues` with `GetQueueAttributes(['QueueArn'])`, in
-parallel, each bounded at 1500 ms. A missing queue, network failure, timeout or HTTP 5xx reads down;
-another answer below 500 (including access refusal) proves reachability. This needs
-`sqs:GetQueueAttributes` even for a name explicitly configured to discard. An injected transport
-without that method can supply `isHealthy`; without either, reachability stays unknown.
+parallel. Each call is bounded at `min(1500, floor(0.75 * health.probeTimeoutMs))` ms: the default
+2000 ms outer bound gives 1500 ms per call; a configured 1000 ms gives 750 ms, so a hung endpoint
+reads down before the outer timeout. At an outer bound of 1 ms, the rounded call budget is 0 and the
+probe reads down without issuing a request. The probe explicitly selects its separate one-attempt
+SDK client, independently of the attribute list, and forwards `abortSignal` to abort the SDK request
+on expiry. A missing queue, network failure, timeout or HTTP 5xx reads down; another answer below
+500 (including a 403 access refusal) proves reachability. `sqs:GetQueueAttributes` is needed to
+detect a missing queue, including for a name explicitly configured to discard; readiness can pass
+without that permission because 403 proves reachability. Redrive-policy reads still need the
+permissions described in [SQS Retry and DLQ](#sqs-retry-and-dlq). An injected transport without that
+method can supply `isHealthy`; without either, reachability stays unknown.
 
 ### Queue health, retry delay and loop logging
 

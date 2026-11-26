@@ -539,7 +539,7 @@ export class QueueService implements IQueue {
     }
     const adapter = this.#adapter;
     return createCachedProbe<boolean | undefined>({
-      probe: () => isHealthy.call(adapter),
+      probe: () => isHealthy.call(adapter, this.#health.probeTimeoutMs),
       fallback: undefined,
       ttlMs: this.#health.probeCacheMs,
       timeoutMs: this.#health.probeTimeoutMs,

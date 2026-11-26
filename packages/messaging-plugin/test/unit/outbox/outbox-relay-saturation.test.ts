@@ -23,6 +23,13 @@ describe('Outbox relay saturation', () => {
     if (schedule) expect((await h.service.sweep()).endedBy).toBe('publish-limit');
     else h.service.dispatch();
     // Serial rows each perform several awaited store operations.
+    for (let i = 0; i < 20000 && h.broker.published.length < 100; i++) await Promise.resolve();
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+    expect(h.broker.published).toHaveLength(100);
+    for (let i = 0; i < 50; i++) h.service.dispatch();
+    for (let i = 0; i < 100; i++) await Promise.resolve();
+    expect(h.broker.published).toHaveLength(100);
+    await h.clock.advance(0);
     for (let i = 0; i < 20000 && h.broker.published.length < 150; i++) await Promise.resolve();
     for (let i = 0; i < 100; i++) await Promise.resolve();
     expect(h.broker.published).toHaveLength(150);
@@ -50,6 +57,7 @@ describe('Outbox relay saturation', () => {
     h.broker.behaviour = () =>
       h.broker.calls.length > 100 ? Promise.reject(new Error('offline')) : undefined;
     await h.service.sweep();
+    await h.clock.advance(0);
     for (let i = 0; i < 20000 && h.broker.calls.length < 150; i++) await Promise.resolve();
     for (let i = 0; i < 100; i++) await Promise.resolve();
     expect(h.logger.warn).toHaveBeenCalledTimes(1);
@@ -73,5 +81,36 @@ describe('Outbox relay saturation', () => {
     for (let i = 0; i < 100; i++) await Promise.resolve();
     expect(h.broker.calls).toHaveLength(1);
     expect(h.logger.warn).not.toHaveBeenCalled();
+  });
+  it('runs a timer callback between full follow-up sweeps and cancels a queued follow-up on close', async () => {
+    const h = await harness(false);
+    for (let n = 150; n < 350; n++) await h.write({ n });
+    await h.service.sweep();
+    const between: number[] = [];
+    h.broker.behaviour = () => {
+      if (h.broker.calls.length === 101)
+        h.clock.runtime.setTimeout(() => between.push(h.broker.published.length), 0);
+      return undefined;
+    };
+    for (let n = 0; n < 100; n++) await Promise.resolve();
+    expect(h.clock.timerCount()).toBe(1);
+    // Fire the first follow-up; its first row schedules an independent timer.
+    // The next follow-up cannot begin until a later macrotask.
+    await h.clock.advance(0);
+    expect(between).toEqual([]);
+    for (let n = 0; n < 20000 && h.broker.published.length < 200; n++) await Promise.resolve();
+    for (let n = 0; n < 100; n++) await Promise.resolve();
+    expect(h.broker.published).toHaveLength(200);
+    expect(h.clock.timerCount()).toBe(2);
+    await h.clock.advance(0);
+    expect(between).toEqual([200]);
+    for (let n = 0; n < 20000 && h.broker.published.length < 300; n++) await Promise.resolve();
+    for (let n = 0; n < 100; n++) await Promise.resolve();
+    expect(h.broker.published).toHaveLength(300);
+    expect(h.clock.timerCount()).toBe(1);
+    await h.service.close();
+    expect(h.clock.timerCount()).toBe(0);
+    await h.clock.advance(0);
+    expect(h.broker.published).toHaveLength(300);
   });
 });

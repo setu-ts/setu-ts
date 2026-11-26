@@ -195,13 +195,6 @@ export interface PubSubSdkModule {
       /** Fully qualified SDK resource name. @since 0.14.0 */
       readonly name?: string;
       /**
-       * Reads topic existence without listing subscriptions.
-       * @returns Existence tuple
-       * @throws On authorization or transport failure
-       * @since 0.14.0
-       */
-      exists?(): Promise<[boolean, ...unknown[]]>;
-      /**
        * Reads topic metadata under a finite admin-call bound.
        * @param options - Timeout and disabled retry policy
        * @returns SDK metadata tuple

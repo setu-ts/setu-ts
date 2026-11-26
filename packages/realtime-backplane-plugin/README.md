@@ -96,11 +96,11 @@ without a `subscriber` throws at construction rather than failing at the first p
 Connection errors of both built and injected Redis clients go to the application logger — the first
 error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
 `ioredis` printing every reconnect failure to `console.error`. Both pairs get reporting watches,
-removed on close. Set `connectionErrorReporter` to route them elsewhere. After a successful open,
-`close()` QUITs an injected pair too. During an injected connect or first subscribe it cancels the
-wait and force-closes both clients when they expose `disconnect` (otherwise requests QUIT without
-waiting). It removes its watches. Retired owned clients keep a no-op error sink until their `end`
-event, when it is removed.
+removed on close. Set `connectionErrorReporter` to route them elsewhere. Injected clients are
+borrowed: the backplane never calls `disconnect()` or QUIT on them, on normal close or on a
+cancelled, failed or timed-out start. It stops waiting, removes its own listeners and watches, and
+unsubscribes when subscribed; the connections remain caller-owned. Retired owned clients keep a
+no-op error sink until their `end` event, when it is removed.
 
 **node-redis.** To use node-redis instead of ioredis, pass two adapters —
 `client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
@@ -203,19 +203,21 @@ On `'redis'`, a frame published while a connection is down is lost:
   sooner.
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
   nowhere reads as a failure. Earlier releases resolved it without sending.
-- **`close()` during an outage still releases both connections.** Each step runs even when an
+- **`close()` during an outage still releases both owned connections.** Each step runs even when an
   earlier one fails, a connection whose QUIT fails is force-closed through `disconnect()` (without
   it, ioredis reconnects and re-subscribes once an unreachable server returns), and the first
   failure is rethrown afterwards, so a shutdown during an outage is reported rather than leaving
   connections reconnecting behind it. Against a silent server each step waits out the command
   timeout, so `close()` can take about three of them (≈45 s at the default); lower
   `commandTimeoutMs` if that exceeds your shutdown grace period.
-- **`close()` ends an open still waiting on SUBSCRIBE.** With `commandTimeoutMs: 0` nothing bounds a
-  SUBSCRIBE to a server that never answers, so `close()` cancels that wait (and an open it overtakes
-  later, during the publisher-ready wait, does not wait on UNSUBSCRIBE or QUIT) and force-closes the
-  connections, including an injected pair still opening (unsubscribed again if its SUBSCRIBE answers
-  later); Redis `connect()` then resolves without a connection, as it does for any open a `close()`
-  overtakes.
+- **`close()` ends an open still waiting on SUBSCRIBE, with a finite bound or with
+  `commandTimeoutMs: 0`.** It cancels the wait and force-disconnects owned connections. An open
+  overtaken later, during the publisher-ready wait, bypasses waiting on UNSUBSCRIBE or QUIT only
+  with `commandTimeoutMs: 0`. With a finite bound, it awaits unsubscribe and discards the owned
+  connections through QUIT, falling back to disconnect if QUIT fails. Injected connections remain
+  caller-owned and are never disconnected or QUIT; the backplane removes its listeners and watches
+  and undoes a subscription that answers after cancellation. Redis `connect()` then resolves without
+  a backplane connection, as it does for any open a `close()` overtakes.
 - **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
   written to a connection that looked healthy, and can reach Redis afterward (measured against a
   paused server). A caller that retries a rejected publish may therefore deliver that frame twice;

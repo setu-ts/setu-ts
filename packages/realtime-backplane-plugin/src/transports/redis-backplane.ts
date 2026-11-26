@@ -91,7 +91,6 @@ export class RedisBackplane implements IRealtimeBackplane {
    * whichever is in flight.
    */
   #openWait: AbortController | undefined;
-  #pendingInjected: readonly IRedisBackplaneClient[] | undefined;
 
   /**
    * M70c: present only when both connections expose `status` and `ping`; the
@@ -184,6 +183,7 @@ export class RedisBackplane implements IRealtimeBackplane {
    *
    * @throws {Error} Whatever the module load, connection construction, or
    * SUBSCRIBE rejected with
+   * @throws {BackendUnavailableError} If the injected pair exceeds commandTimeoutMs
    */
   async connect(): Promise<void> {
     let attempt = this.#opening;
@@ -257,7 +257,6 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
-      this.#pendingInjected = [subscriber, publisher];
       // One reporter for both: the pair fails together, so an outage's
       // identical errors from the two connections de-duplicate into one warn.
       // (M131a X88-3) an injected client's outages must be as visible as a
@@ -323,11 +322,8 @@ export class RedisBackplane implements IRealtimeBackplane {
 
     subscriber.on('message', listener);
     try {
-      // V12-53: with `commandTimeoutMs: 0` a SUBSCRIBE to a host that never
-      // answers would hold this open forever, so close() can cancel it; a
-      // close() that already landed cancels it at once (as N2 does for the
-      // ready wait below). With a bound the SUBSCRIBE settles within it, and
-      // the generation check below retires the pair with UNSUBSCRIBE and QUIT.
+      // Every SUBSCRIBE wait is cancellable, including a borrowed client's
+      // wait when the whole-open deadline expires. Only owned sockets close.
       if (!(await this.#subscribe(subscriber, generation, owned))) {
         // The host has not answered SUBSCRIBE, so it would not answer
         // UNSUBSCRIBE or QUIT either: force-close what we own, and leave an
@@ -380,7 +376,10 @@ export class RedisBackplane implements IRealtimeBackplane {
         detachAll();
         return;
       }
-      await this.#unsubscribeQuietly(subscriber);
+      // A newer open can already be reusing the borrowed subscriber.
+      if (owned || (this.#opening === undefined && this.#subscriber === undefined)) {
+        await this.#unsubscribeQuietly(subscriber);
+      }
       if (owned) {
         await this.#discard([subscriber, publisher]);
       }
@@ -393,15 +392,13 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#owned = owned;
     this.#listener = listener;
     this.#watches = watches;
-    if (!owned) this.#pendingInjected = undefined;
     this.#installProbe(publisher, subscriber);
   }
 
   /**
-   * Sends SUBSCRIBE; with `commandTimeoutMs: 0`, a `close()` cancels the wait
-   * (V12-53).
+   * Sends SUBSCRIBE; close or the injected-open deadline cancels the wait.
    *
-   * With no bound, a `close()` that already landed sends nothing, and one that
+   * A `close()` that already landed sends nothing, and one that
    * lands during the wait cancels it. An injected subscriber whose SUBSCRIBE
    * answers after that is unsubscribed again, unless a newer open is using it,
    * so the caller's connection is not left subscribed to the topic.
@@ -420,9 +417,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (generation !== this.#generation) return false;
     const subscribeWait = new AbortController();
     this.#openWait = subscribeWait;
-    const pending = subscriber.subscribe(this.#topic);
+    let pending: Promise<unknown>;
     let subscribed: boolean;
     try {
+      pending = subscriber.subscribe(this.#topic);
       subscribed = await settledUnlessCancelled(pending, subscribeWait.signal);
     } finally {
       if (this.#openWait === subscribeWait) this.#openWait = undefined;
@@ -490,8 +488,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     try {
       await subscriber.unsubscribe(this.#topic);
     } catch {
-      // Best-effort: this runs only on the superseded-by-close path, where the
-      // connection is being discarded anyway and there is no caller to inform.
+      // Best-effort on a retired subscription: the borrowed connection stays
+      // the caller's, and there is no active subscription caller to inform.
       return;
     }
   }
@@ -564,21 +562,17 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Leaves the topic and closes both connections. Every step is attempted even
-   * when an earlier one fails; a connection whose QUIT fails is force-closed
-   * through `disconnect()` when the client has one.
+   * Leaves the topic and detaches all watches. Borrowed clients remain open;
+   * owned clients are QUIT, with disconnect as the fallback on failure.
    *
-   * @throws The first failure among UNSUBSCRIBE, QUIT and `disconnect()`,
-   * after every connection has been released
+   * @throws The first failure among applicable UNSUBSCRIBE, QUIT and disconnect
+   * steps, after all cleanup has been attempted
    */
   async close(): Promise<void> {
     // Invalidate any open still in flight before reading the fields below: it
     // has not published its connections yet, so this is what tells it to retire
     // them rather than arrive after the shutdown.
     this.#generation++;
-    const pendingInjected = this.#pendingInjected;
-    this.#pendingInjected = undefined;
-    if (pendingInjected !== undefined) forceClose(pendingInjected);
     // A pending SUBSCRIBE or publisher-ready wait ends now, so the open retires
     // the pair — even with `commandTimeoutMs: 0` (V12-53, M139f audit L1).
     this.#openWait?.abort();
@@ -591,11 +585,13 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#subscriber = undefined;
     this.#publisher = undefined;
     this.#listener = undefined;
-    // Detached only after both connections are released (below): an ioredis
-    // client with no 'error' listener prints QUIT's EPIPE on an unreachable
-    // server to the console (M131a re-audit N-4).
+    // Owned clients retain their watches until release below: an ioredis client
+    // without an error listener prints QUIT's EPIPE (M131a re-audit N-4).
     const watches = this.#watches;
     this.#watches = [];
+    // Borrowed clients can keep running (or leave UNSUBSCRIBE pending) after
+    // this backplane closes. They must stop reporting into it immediately.
+    if (!owned) retireWatches(watches, []);
     // Drop the memoized open, or a connect() after this close would await the
     // already-resolved attempt and return without reconnecting.
     this.#opening = undefined;
@@ -603,9 +599,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     delete this.isHealthy;
 
     // Every step runs even when an earlier one fails. During an outage the
-    // UNSUBSCRIBE and QUIT commands reject (the command timeout, or ioredis's
-    // retry budget), and stopping at the first rejection left BOTH
-    // connections reconnecting forever after the application had stopped.
+    // UNSUBSCRIBE and owned clients' QUIT commands can reject. Stopping at the
+    // first rejection would leave owned connections reconnecting after shutdown.
     // The first failure is still reported, once everything is released.
     const failures: unknown[] = [];
     if (subscriber !== undefined) {
@@ -617,16 +612,17 @@ export class RedisBackplane implements IRealtimeBackplane {
       } catch (error) {
         failures.push(error);
       }
-      await this.#release(subscriber, failures);
+      if (owned) await this.#release(subscriber, failures);
     }
-    if (publisher !== undefined && publisher !== subscriber) {
+    if (owned && publisher !== undefined && publisher !== subscriber) {
       await this.#release(publisher, failures);
     }
-    // A shared injected client must not report into this closed backplane.
-    retireWatches(
-      watches,
-      owned ? [subscriber, publisher].filter((client) => client !== undefined) : [],
-    );
+    // Owned clients keep only a quiet sink until their final end event.
+    if (owned)
+      retireWatches(
+        watches,
+        [subscriber, publisher].filter((client) => client !== undefined),
+      );
     if (failures.length > 0) {
       throw failures[0];
     }
@@ -800,7 +796,7 @@ function settledUnlessCancelled(pending: Promise<unknown>, cancel: AbortSignal):
 }
 
 /**
- * Closes connections at once, without the QUIT a host that never answered
+ * Closes owned connections at once, without the QUIT a host that never answered
  * SUBSCRIBE would not answer either (V12-53). `disconnect()` is ioredis's
  * synchronous close, which also rejects the pending SUBSCRIBE; a client
  * without it gets a QUIT that nothing waits on.

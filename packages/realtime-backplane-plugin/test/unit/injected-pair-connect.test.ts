@@ -1,22 +1,91 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { BackendUnavailableError } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient } from '../../src/interfaces/index.ts';
 
-function client(): IRedisBackplaneClient {
-  return {
+function client(): IRedisBackplaneClient & { listenerCount(event: string): number } {
+  return Object.assign(new EventEmitter(), {
     status: 'wait',
     connect: vi.fn(async () => {}),
     publish: () => Promise.resolve(0),
     subscribe: vi.fn(() => Promise.resolve(1)),
     unsubscribe: vi.fn(() => Promise.resolve(0)),
-    on: vi.fn(),
-    off: vi.fn(),
     quit: vi.fn(async () => {}),
     disconnect: vi.fn(),
-  };
+  });
 }
 describe('Injected Redis pair connect', () => {
+  afterEach(() => vi.useRealTimers());
+  function assertBorrowed(...clients: ReturnType<typeof client>[]): void {
+    for (const connection of clients) {
+      for (const event of ['message', 'error', 'ready', 'end'])
+        expect(connection.listenerCount(event)).toBe(0);
+      expect(connection.quit).not.toHaveBeenCalled();
+      expect(connection.disconnect).not.toHaveBeenCalled();
+    }
+  }
+  it('preserves a borrowed subscription across close and immediate reconnect', async () => {
+    const publisher = Object.assign(client(), { status: 'ready' });
+    const subscriber = Object.assign(client(), { status: 'ready' });
+    const gate = Promise.withResolvers<number>();
+    let subscribed = false;
+    vi.mocked(subscriber.subscribe).mockImplementation(() => {
+      subscribed = true;
+      return gate.promise;
+    });
+    vi.mocked(subscriber.unsubscribe).mockImplementation(() => {
+      subscribed = false;
+      return Promise.resolve(0);
+    });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: publisher, subscriber, commandTimeoutMs: 250 },
+      'origin',
+      'frames',
+    );
+    const old = backplane.connect();
+    expect(subscriber.subscribe).toHaveBeenCalledTimes(1);
+    expect(subscribed).toBe(true);
+    gate.resolve(1);
+    // SUBSCRIBE wins its cancellation race before the old open resumes.
+    await Promise.resolve();
+    const closing = backplane.close();
+    const next = backplane.connect();
+    await Promise.all([old, closing, next]);
+    expect(subscriber.subscribe).toHaveBeenCalledTimes(2);
+    expect(subscribed).toBe(true);
+    expect(subscriber.unsubscribe).not.toHaveBeenCalled();
+    expect(subscriber.listenerCount('message')).toBe(1);
+    for (const connection of [publisher, subscriber]) {
+      expect(connection.listenerCount('error')).toBe(1);
+      expect(connection.listenerCount('ready')).toBe(1);
+      expect(connection.quit).not.toHaveBeenCalled();
+      expect(connection.disconnect).not.toHaveBeenCalled();
+    }
+    await backplane.close();
+    expect(subscribed).toBe(false);
+    expect(subscriber.unsubscribe).toHaveBeenCalledTimes(1);
+    assertBorrowed(publisher, subscriber);
+  });
+  it.each(['connect', 'subscribe'] as const)(
+    'detaches watches after a failed %s',
+    async (operation) => {
+      const publisher = client();
+      const subscriber = client();
+      vi.mocked(
+        operation === 'connect' ? publisher.connect! : subscriber.subscribe,
+      ).mockRejectedValue(new Error('refused'));
+      const backplane = new RedisBackplane(
+        { transport: 'redis', client: publisher, subscriber },
+        'origin',
+        'frames',
+      );
+      await expect(backplane.connect()).rejects.toThrow('refused');
+      assertBorrowed(publisher, subscriber);
+      await backplane.close();
+      assertBorrowed(publisher, subscriber);
+    },
+  );
   it.each([
     { operation: 'connect', timeout: 25 },
     { operation: 'subscribe', timeout: 25 },
@@ -48,6 +117,11 @@ describe('Injected Redis pair connect', () => {
         settled = true;
       });
       expect(settled).toBe(false);
+      for (const connection of [publisher, subscriber]) {
+        expect(connection.listenerCount('error')).toBe(1);
+        expect(connection.listenerCount('ready')).toBe(1);
+      }
+      expect(subscriber.listenerCount('message')).toBe(operation === 'subscribe' ? 1 : 0);
       await vi.advanceTimersByTimeAsync(1);
       const error = await result;
       expect(error).toBeInstanceOf(BackendUnavailableError);
@@ -55,7 +129,9 @@ describe('Injected Redis pair connect', () => {
         source: 'realtime-backplane-plugin: redis transport',
         cause: { message: expect.stringContaining('injected client pair') },
       });
+      assertBorrowed(publisher, subscriber);
       await backplane.close();
+      assertBorrowed(publisher, subscriber);
       expect(vi.getTimerCount()).toBe(0);
       vi.useRealTimers();
     },
@@ -83,8 +159,7 @@ describe('Injected Redis pair connect', () => {
         expect(settled).toBe(false);
         await backplane.close();
         await opening;
-        expect(publisher.disconnect).toHaveBeenCalledOnce();
-        expect(subscriber.disconnect).toHaveBeenCalledOnce();
+        assertBorrowed(publisher, subscriber);
       }
       expect(vi.getTimerCount()).toBe(0);
       vi.useRealTimers();
@@ -108,6 +183,7 @@ describe('Injected Redis pair connect', () => {
     await vi.advanceTimersByTimeAsync(5);
     expect(await result).toBeInstanceOf(BackendUnavailableError);
     await backplane.close();
+    assertBorrowed(publisher, subscriber);
     vi.useRealTimers();
   });
 });

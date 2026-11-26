@@ -228,19 +228,30 @@ All notable changes to this project are documented here. The format follows
   `RemoteHandlerError` answers 502 without serving remote text. RabbitMQ enqueue distinguishes 503
   refusals from 504 uncertain confirms. Service Bus adds `publishTimeoutMs` (15000 ms, 0 unbounded),
   `maxConcurrentCalls` (1, range 1–1000), five-minute idle reply-inbox cleanup, and receive-side
-  outage evidence; non-retryable send refusals no longer mark it down. Pub/Sub adds
-  `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms. The exported
-  `ICustomMessageBroker` documents optional trace-header members; every custom publish validates
-  options and consumers use `subscribe` metadata headers. Queue adds `retryDelayMs` and `health`
-  probe settings; reserve/poll/recurring failures warn once and recover at info. SQS's SDK path now
-  has the documented per-queue `GetQueueAttributes` probe, adds `requestTimeoutMs` (15000 ms, 0
+  outage and delivery evidence. Service Bus refusal codes take precedence over `retryable` and stay
+  unchanged without marking it down. An aggregate stays a refusal only when its last inner error has
+  a refusal code; every other aggregate is an outage, regardless of the last error's `retryable`
+  value. Pub/Sub adds `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms.
+  **Prerelease removal:** the unused `PubSubSdkModule.topic().exists?` facade member is removed;
+  substitute SDK modules use `getMetadata` for inspection. `IPubSubTransport.topicExists` remains
+  supported. The exported `ICustomMessageBroker` documents optional trace-header members; every
+  custom publish validates options and consumers use `subscribe` metadata headers. Queue adds
+  `retryDelayMs` and `health` probe settings; reserve/poll/recurring failures warn once and recover
+  at info. SQS's SDK path now has the documented per-queue `GetQueueAttributes` probe, explicitly
+  selects its separate one-attempt SDK client and aborts each request at
+  `min(1500, floor(0.75 * health.probeTimeoutMs))` ms. It adds `requestTimeoutMs` (15000 ms, 0
   unbounded) and `waitTimeSeconds` (20, range 0–20); SNS adds the same request bound. SDK abort
   signals and 503/504 classification cover calls; redrive reads retain a finite 10 s ceiling at
-  disabled bounds. Per-name reserves run independently and disconnect fences late results. Full
-  failure-free outbox sweeps follow up immediately, warning once on saturation and logging catch-up;
-  call `dispatch()` after commit to avoid interval latency. Injected Redis backplane startup now
-  shares the 15000 ms command bound and close cancels pending starts before late registration. See
-  the
+  disabled bounds. Receive adds the long-poll duration, capped at 2147483647 ms (0 stays unbounded).
+  Per-name reserves run independently and disconnect fences late results. Full failure-free outbox
+  sweeps follow up with a macrotask yield between batches, warning once on saturation and logging
+  catch-up; any failure stops the chain. Backlogs drain back-to-back with one claim and one mark per
+  delivered row; there is no chain switch or tuning option. Call `dispatch()` after commit to avoid
+  interval latency. Injected Redis backplane startup now shares the 15000 ms command bound and close
+  cancels pending starts before late registration. Injected clients are borrowed: close and
+  cancelled, failed or timed-out startup never disconnect or QUIT them; the backplane removes its
+  listeners and watches and unsubscribes when subscribed. Owned clients now force-disconnect when
+  close cancels an in-flight SUBSCRIBE even with a finite bound. See the
   [upgrade guide](docs/upgrading.md#broker-and-queue-bounds-health-and-delivery-setu-tsmessaging-plugin-setu-tsqueue-plugin-setu-tsrealtime-backplane-plugin).
 
 - **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while

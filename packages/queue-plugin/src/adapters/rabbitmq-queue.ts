@@ -28,6 +28,7 @@ import {
   BackendOutcomeUnknownError,
   BackendUnavailableError,
   deadlineRangeError,
+  describeError,
   ReconnectSupervisor,
   withDeadline,
 } from '@setu-ts/common';
@@ -154,7 +155,20 @@ function parseStoredJob<T>(payload: string): StoredJob<T> | null {
 
 /** Bound on one whole connection attempt, TCP and AMQP handshake together, in ms. */
 const CONNECT_TIMEOUT_MS = 10_000;
-const ENQUEUE_SOURCE = 'queue-plugin: rabbitmq enqueue';
+type RabbitPublishOperation = 'enqueue' | 'requeue' | 'dead-letter' | 'quarantine';
+
+function publishCause(queue: string, cause: unknown): Error {
+  let detail = 'driver diagnostic unavailable';
+  try {
+    detail = describeError(cause);
+  } catch {
+    // Diagnostics must never replace the original rejection retained below.
+  }
+  return new Error(
+    `RabbitMQ did not confirm the job published to queue ${JSON.stringify(queue)}: ${detail}`,
+    { cause },
+  );
+}
 
 /** Default bound on one job publish, including its confirm, in ms. */
 export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
@@ -233,6 +247,7 @@ function publishConfirmed(
   queue: string,
   content: Buffer,
   options: Record<string, unknown>,
+  source: string,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const observable = isCloseObservable(channel) ? channel : null;
@@ -249,18 +264,21 @@ function publishConfirmed(
       }
       // amqplib's first close listener drains confirm callbacks before ours.
       // Its close failure is not the broker's explicit `message nacked` refusal.
-      const Fault =
-        err instanceof Error && err.message === 'channel closed'
-          ? BackendOutcomeUnknownError
-          : BackendUnavailableError;
-      reject(new Fault(ENQUEUE_SOURCE, { cause: err }));
+      let channelClosed = false;
+      try {
+        channelClosed = err instanceof Error && err.message === 'channel closed';
+      } catch {
+        // A hostile accessor cannot escape the confirm callback or replace err.
+      }
+      const Fault = channelClosed ? BackendOutcomeUnknownError : BackendUnavailableError;
+      reject(new Fault(source, { cause: publishCause(queue, err) }));
     };
     const onClose = (): void => {
       if (settled) return;
       settled = true;
       observable?.off('close', onClose);
       reject(
-        new BackendOutcomeUnknownError(ENQUEUE_SOURCE, {
+        new BackendOutcomeUnknownError(source, {
           cause: new Error(
             `RabbitMQ channel closed before the confirm for queue "${queue}" arrived`,
           ),
@@ -273,7 +291,7 @@ function publishConfirmed(
     } catch (error) {
       settled = true;
       observable?.off('close', onClose);
-      reject(new BackendUnavailableError(ENQUEUE_SOURCE, { cause: error }));
+      reject(new BackendUnavailableError(source, { cause: publishCause(queue, error) }));
     }
   });
 }
@@ -538,6 +556,7 @@ export class RabbitMqQueue implements QueueAdapter {
     channel: IAmqpQueueChannel,
     queue: string,
     content: Buffer,
+    source: string,
     extra: Record<string, unknown> = {},
   ): Promise<void> {
     // Set only when enabled, so `persistentMessages: false` publishes exactly
@@ -549,7 +568,7 @@ export class RabbitMqQueue implements QueueAdapter {
       channel.publish('', queue, content, options);
       return;
     }
-    await publishConfirmed(channel, queue, content, options);
+    await publishConfirmed(channel, queue, content, options, source);
   }
 
   /**
@@ -560,22 +579,40 @@ export class RabbitMqQueue implements QueueAdapter {
    * exchange assert), and bounding only the confirm would leave the call
    * pending before the bound armed.
    */
-  async #bounded(queue: string, run: () => Promise<void>): Promise<void> {
+  async #bounded(queue: string, source: string, run: () => Promise<void>): Promise<void> {
     const timeoutMs = this.#publishTimeoutMs;
-    await withDeadline(run, {
-      timeoutMs,
-      onTimeout: () =>
-        new BackendOutcomeUnknownError(ENQUEUE_SOURCE, {
-          cause: new Error(
-            `RabbitMQ did not accept the job published to queue "${queue}" within ` +
-              `${timeoutMs} ms (publishTimeoutMs); it may still be accepted`,
-          ),
-        }),
-      timing: {
-        setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
-        clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+    await withDeadline(
+      async () => {
+        try {
+          await run();
+        } catch (error) {
+          if (
+            error instanceof BackendUnavailableError ||
+            error instanceof BackendOutcomeUnknownError
+          )
+            throw error;
+          throw new BackendUnavailableError(source, { cause: publishCause(queue, error) });
+        }
       },
-    });
+      {
+        timeoutMs,
+        onTimeout: () =>
+          new BackendOutcomeUnknownError(source, {
+            cause: new Error(
+              `RabbitMQ did not accept the job published to queue "${queue}" within ` +
+                `${timeoutMs} ms (publishTimeoutMs); it may still be accepted`,
+            ),
+          }),
+        timing: {
+          setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+          clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+        },
+      },
+    );
+  }
+
+  #publishSource(operation: RabbitPublishOperation): string {
+    return `queue-plugin: rabbitmq ${operation}`;
   }
 
   #createSupervisor(): ReconnectSupervisor {
@@ -705,9 +742,12 @@ export class RabbitMqQueue implements QueueAdapter {
   }
 
   async enqueue<T>(job: StoredJob<T>): Promise<void> {
+    const source = this.#publishSource('enqueue');
     if (!this.#channel || this.#supervisor.faulted) {
-      throw new BackendUnavailableError(ENQUEUE_SOURCE, {
-        cause: new Error('RabbitMqQueue is not connected or its channel is faulted'),
+      throw new BackendUnavailableError(source, {
+        cause: new Error(
+          `RabbitMqQueue is not connected or its channel is faulted for queue ${JSON.stringify(this.#readyQueue(job.name))}`,
+        ),
       });
     }
 
@@ -722,24 +762,15 @@ export class RabbitMqQueue implements QueueAdapter {
     // Check if delayed (availableAtMs > now)
     const now = this.#runtime.now();
     const delayed = job.availableAtMs > now;
-    await this.#bounded(delayed ? delayQ : readyQ, async () => {
-      try {
-        await this.#assertQueues(job.name);
-      } catch (cause) {
-        throw new BackendUnavailableError(ENQUEUE_SOURCE, { cause });
-      }
-      try {
-        await this.#publish(
-          channel,
-          delayed ? delayQ : readyQ,
-          content,
-          delayed ? { expiration: job.availableAtMs - now } : {},
-        );
-      } catch (error) {
-        if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError)
-          throw error;
-        throw new BackendUnavailableError(ENQUEUE_SOURCE, { cause: error });
-      }
+    await this.#bounded(delayed ? delayQ : readyQ, source, async () => {
+      await this.#assertQueues(job.name);
+      await this.#publish(
+        channel,
+        delayed ? delayQ : readyQ,
+        content,
+        source,
+        delayed ? { expiration: job.availableAtMs - now } : {},
+      );
     });
   }
 
@@ -769,13 +800,13 @@ export class RabbitMqQueue implements QueueAdapter {
         // it is moved, bytes unchanged, into the dead queue (audit L4).
         try {
           await this.#quarantine(name, msg);
-        } catch {
+        } catch (error) {
           // The dead queue refused the move (a reject-publish length policy, or
           // a blocked broker past publishTimeoutMs). Stop fetching and return
           // what was claimed; the message stays unacknowledged until the
           // channel closes, then is redelivered and moved again (audit N1).
           this.#reportWarning?.(
-            'queue-plugin: a RabbitMQ message that is not a stored job could not be moved to ' +
+            `${error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError ? error.source : this.#publishSource('quarantine')}: a RabbitMQ message that is not a stored job could not be moved to ` +
               'the dead queue; it stays unacknowledged until the channel closes',
           );
           break;
@@ -802,8 +833,9 @@ export class RabbitMqQueue implements QueueAdapter {
   async #quarantine(name: string, msg: IAmqpQueueMessage): Promise<void> {
     const channel = this.#channel!;
     const deadQ = this.#deadQueue(name);
-    await this.#bounded(deadQ, async () => {
-      await this.#publish(channel, deadQ, msg.content);
+    const source = this.#publishSource('quarantine');
+    await this.#bounded(deadQ, source, async () => {
+      await this.#publish(channel, deadQ, msg.content, source);
     });
     channel.ack(msg);
     this.#reportWarning?.(
@@ -861,9 +893,10 @@ export class RabbitMqQueue implements QueueAdapter {
     // Ack only AFTER the replacement is accepted: acking first would let a
     // broker failure between the two lose the job outright, where this order
     // can at worst run it twice.
-    await this.#bounded(delayQ, async () => {
+    const source = this.#publishSource('requeue');
+    await this.#bounded(delayQ, source, async () => {
       await this.#assertQueues(name);
-      await this.#publish(channel, delayQ, content, { expiration });
+      await this.#publish(channel, delayQ, content, source, { expiration });
     });
 
     // Ack the original message
@@ -889,9 +922,10 @@ export class RabbitMqQueue implements QueueAdapter {
     // Publish to dead queue — accepted before the ack, as in `requeue`.
     const content = Buffer.from(JSON.stringify(entry.job), 'utf8');
     const deadQ = this.#deadQueue(name);
-    await this.#bounded(deadQ, async () => {
+    const source = this.#publishSource('dead-letter');
+    await this.#bounded(deadQ, source, async () => {
       await this.#assertQueues(name);
-      await this.#publish(channel, deadQ, content, { timestamp: nowMs });
+      await this.#publish(channel, deadQ, content, source, { timestamp: nowMs });
     });
 
     // Ack the original message

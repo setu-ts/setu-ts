@@ -61,12 +61,20 @@ describe('SQS request bounds and faults', () => {
     expect(sends[0]).toHaveBeenCalledTimes(6);
     for (const call of sends[0]!.mock.calls) expect(call[1]).toBe(options);
     expect(sends[0]!.mock.calls[1]![0]).toMatchObject({ input: { WaitTimeSeconds: 7 } });
-    await transport.getQueueAttributes!('source', ['QueueArn']);
+    await transport.getQueueAttributes!('source', ['QueueArn'], options);
+    expect(sends[0]).toHaveBeenCalledTimes(7);
+    expect(sends[1]).not.toHaveBeenCalled();
+    const queue = new SqsQueue(new FakeRuntimeServices(0), {
+      queues: { build: 'source' },
+      client: transport,
+    });
+    await queue.connect();
+    expect(await queue.isHealthy!()).toBe(true);
     expect(sends[1]).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ input: { QueueUrl: 'source', AttributeNames: ['QueueArn'] } }),
-      undefined,
+      { abortSignal: expect.any(AbortSignal) },
     );
-    await transport.close();
+    await queue.disconnect();
     for (const destroy of destroys) expect(destroy).toHaveBeenCalledOnce();
   });
   it.each([undefined, 0])(

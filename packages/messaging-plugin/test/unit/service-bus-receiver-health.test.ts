@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ServiceBusError } from '@azure/service-bus';
+import { serviceBusFaults } from '../fixtures/service-bus-errors.ts';
 import { ServiceBusBroker, adaptServiceBusModule } from '../../src/index.ts';
 import type { IServiceBusTransport } from '../../src/index.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -47,20 +47,27 @@ describe('Service Bus receiver health', () => {
       await broker.connect();
       await broker.subscribe('orders', () => {});
       const handlers = sdk.subscribe.mock.calls[0]![0];
-      const error = (code: 'ServiceBusy' | 'UnauthorizedAccess') =>
-        handlers.processError({
-          error: Object.assign(new ServiceBusError('fault', code), {
-            retryable: code !== 'UnauthorizedAccess',
-          }),
-          errorSource: source,
-          entityPath: 'orders',
-          fullyQualifiedNamespace: 'x',
-          identifier: 'x',
-        });
-      await error('UnauthorizedAccess');
-      expect(await broker.reachability()).toBeUndefined();
-      await error('ServiceBusy');
-      expect(await broker.reachability()).toBe(source === 'receive' ? false : undefined);
+      for (const { error, outage, aggregateOutage } of serviceBusFaults) {
+        for (const { failure, expectedOutage } of [
+          { failure: error, expectedOutage: outage },
+          {
+            failure: new AggregateError([new Error('socket'), error]),
+            expectedOutage: aggregateOutage,
+          },
+        ]) {
+          await handlers.processMessage({ body: '{}' });
+          await handlers.processError({
+            error: failure,
+            errorSource: source,
+            entityPath: 'orders',
+            fullyQualifiedNamespace: 'x',
+            identifier: 'x',
+          });
+          expect(await broker.reachability()).toBe(
+            expectedOutage && source === 'receive' ? false : true,
+          );
+        }
+      }
       await handlers.processMessage({ body: '{}' });
       expect(await broker.reachability()).toBe(true);
       await broker.disconnect();

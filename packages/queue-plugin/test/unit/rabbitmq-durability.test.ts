@@ -160,7 +160,10 @@ describe('RabbitMqQueue durability', () => {
       name: 'BackendUnavailableError',
       source: 'queue-plugin: rabbitmq enqueue',
     });
-    expect((error as Error).cause).toBe(refusal);
+    expect((error as Error).cause).toMatchObject({
+      message: expect.stringContaining('he.queue.emails.ready'),
+      cause: refusal,
+    });
     await queue.disconnect();
   });
 
@@ -170,7 +173,7 @@ describe('RabbitMqQueue durability', () => {
     });
     await expect(queue.enqueue(job(runtime, 'a'))).rejects.toMatchObject({
       name: 'BackendUnavailableError',
-      cause: 'nacked',
+      cause: { message: expect.stringContaining('he.queue.emails.ready'), cause: 'nacked' },
     });
     await queue.disconnect();
   });
@@ -189,11 +192,23 @@ describe('RabbitMqQueue durability', () => {
     const before = acks(channel);
     await expect(
       queue.requeue('emails', reserved!.id, runtime.now() + 10, 1, reserved!.claimToken),
-    ).rejects.toMatchObject({ name: 'BackendUnavailableError', cause: { message: 'refused' } });
+    ).rejects.toMatchObject({
+      name: 'BackendUnavailableError',
+      cause: {
+        message: expect.stringContaining('he.queue.emails.'),
+        cause: { message: 'refused' },
+      },
+    });
     expect(acks(channel)).toBe(before);
     await expect(
       queue.deadLetter('emails', reserved!.id, runtime.now(), reserved!.claimToken),
-    ).rejects.toMatchObject({ name: 'BackendUnavailableError', cause: { message: 'refused' } });
+    ).rejects.toMatchObject({
+      name: 'BackendUnavailableError',
+      cause: {
+        message: expect.stringContaining('he.queue.emails.'),
+        cause: { message: 'refused' },
+      },
+    });
     expect(acks(channel)).toBe(before);
     await queue.disconnect();
   });
@@ -297,7 +312,10 @@ describe('RabbitMqQueue durability', () => {
     const failingBaseline = failing.channel.listenerCount('close');
     await expect(failing.queue.enqueue(job(failing.runtime, 'x'))).rejects.toMatchObject({
       name: 'BackendUnavailableError',
-      cause: { message: 'Publish failed' },
+      cause: {
+        message: expect.stringContaining('he.queue.emails.'),
+        cause: { message: 'Publish failed' },
+      },
     });
     expect(failing.channel.listenerCount('close')).toBe(failingBaseline);
     await failing.queue.disconnect();
@@ -413,7 +431,7 @@ describe('QueuePlugin RabbitMQ durability options', () => {
     // The confirm channel reached `add()`: the broker's refusal rejects it.
     await expect(queue.add('emails', { to: 'a@example.com' })).rejects.toMatchObject({
       name: 'BackendUnavailableError',
-      cause: { message: 'nacked' },
+      cause: { message: expect.stringContaining('he.queue.emails.'), cause: { message: 'nacked' } },
     });
     const channel = await connection.createChannel();
     const [sent] = publishes(channel);

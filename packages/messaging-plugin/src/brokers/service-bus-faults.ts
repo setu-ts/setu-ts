@@ -1,6 +1,13 @@
 /** Service Bus data-plane outage classification shared by sends and receives. @module */
 
 const OUTAGE_CODES = new Set(['ServiceCommunicationProblem', 'ServiceTimeout', 'ServiceBusy']);
+const REFUSAL_CODES = new Set([
+  'UnauthorizedAccess',
+  'MessagingEntityNotFound',
+  'MessagingEntityDisabled',
+  'MessageSizeExceeded',
+  'QuotaExceeded',
+]);
 
 /**
  * Determines whether a Service Bus failure is evidence of a transport outage.
@@ -9,9 +16,17 @@ const OUTAGE_CODES = new Set(['ServiceCommunicationProblem', 'ServiceTimeout', '
  * @since 0.14.0
  */
 export function isServiceBusOutage(error: unknown): boolean {
-  if (error instanceof AggregateError) return true;
+  if (error instanceof AggregateError) {
+    const last: unknown = error.errors.at(-1);
+    return !(
+      last !== null &&
+      typeof last === 'object' &&
+      REFUSAL_CODES.has(String((last as { code?: unknown }).code))
+    );
+  }
   if (error === null || typeof error !== 'object') return true;
   const { code, retryable } = error as { code?: unknown; retryable?: unknown };
+  if (REFUSAL_CODES.has(String(code))) return false;
   return (
     retryable === true ||
     OUTAGE_CODES.has(String(code)) ||

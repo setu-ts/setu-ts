@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Buffer } from 'node:buffer';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { errorHandler } from '@setu-ts/exceptions';
 import { createApplication } from '@setu-ts/kernel';
@@ -8,6 +9,126 @@ import { FakeAmqpQueueConnection } from '../fixtures/fake-amqplib-client.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('RabbitMQ enqueue faults', () => {
+  it.each(['toString', 'message getter'] as const)(
+    'preserves a synchronous confirm rejection with a throwing %s',
+    async (rendering) => {
+      const runtime = new FakeRuntimeServices(0);
+      const client = new FakeAmqpQueueConnection();
+      const queue = new RabbitMqQueue(runtime, { client, publishTimeoutMs: 25 });
+      await queue.connect();
+      const channel = await client.createChannel();
+      const cause =
+        rendering === 'toString'
+          ? {
+              toString() {
+                throw new Error('diagnostic coercion failed');
+              },
+            }
+          : Object.defineProperty(new Error(), 'message', {
+              get() {
+                throw new Error('diagnostic getter failed');
+              },
+            });
+      vi.spyOn(channel, 'publish').mockImplementation(
+        (_exchange, _key, _body, _options, confirm) => {
+          confirm?.(cause);
+          return true;
+        },
+      );
+      try {
+        const error: unknown = await queue
+          .enqueue({
+            id: 'j',
+            name: 'build',
+            data: {},
+            attempts: 0,
+            maxAttempts: 3,
+            availableAtMs: 0,
+          })
+          .catch((failure: unknown) => failure);
+        expect(error).toBeInstanceOf(BackendUnavailableError);
+        expect(error).toMatchObject({
+          source: 'queue-plugin: rabbitmq enqueue',
+          cause: { message: expect.stringContaining('he.queue.build.ready') },
+        });
+        expect(((error as Error).cause as Error).cause).toBe(cause);
+        expect(channel.listenerCount('close')).toBe(1);
+      } finally {
+        await queue.disconnect();
+      }
+    },
+  );
+  it.each(['enqueue', 'requeue', 'dead-letter', 'quarantine'] as const)(
+    'labels %s faults at every shared publish path and keeps the original claim unacked',
+    async (operation) => {
+      for (const failure of ['nack', 'close', 'closed-callback', 'timeout', 'throw'] as const) {
+        const runtime = new FakeRuntimeServices(0);
+        const client = new FakeAmqpQueueConnection();
+        const reportWarning = vi.fn();
+        const queue = new RabbitMqQueue(runtime, { client, publishTimeoutMs: 25, reportWarning });
+        await queue.connect();
+        const channel = await client.createChannel();
+        const job = {
+          id: 'j',
+          name: 'build',
+          data: {},
+          attempts: 1,
+          maxAttempts: 3,
+          availableAtMs: 0,
+        };
+        await queue.enqueue(job);
+        const reserved = (await queue.reserve('build', 1, 0))[0]!;
+        if (operation === 'quarantine')
+          channel.publish('', 'he.queue.build.ready', Buffer.from('unreadable'));
+        const original = new Error(
+          failure === 'closed-callback' ? 'channel closed' : 'message nacked',
+        );
+        vi.spyOn(channel, 'publish').mockImplementation(
+          (_exchange, _key, _body, _options, confirm) => {
+            if (failure === 'throw') throw original;
+            if (failure === 'nack' || failure === 'closed-callback')
+              queueMicrotask(() => confirm?.(original));
+            return true;
+          },
+        );
+        const result = (
+          operation === 'enqueue'
+            ? queue.enqueue(job)
+            : operation === 'requeue'
+              ? queue.requeue('build', reserved.id, 1000, 2, reserved.claimToken!)
+              : operation === 'dead-letter'
+                ? queue.deadLetter('build', reserved.id, 0, reserved.claimToken!)
+                : queue.reserve('build', 1, 0)
+        ).catch((error: unknown) => error);
+        for (let n = 0; n < 40; n++) await Promise.resolve();
+        if (failure === 'close') channel.emitClose();
+        if (failure === 'timeout') await runtime.advanceMs(25);
+        const error = await result;
+        const target =
+          operation === 'enqueue' ? 'ready' : operation === 'requeue' ? 'delay' : 'dead';
+        if (operation === 'quarantine') {
+          expect(error).toEqual([]);
+          expect(reportWarning).toHaveBeenCalledWith(
+            expect.stringContaining('queue-plugin: rabbitmq quarantine:'),
+          );
+        } else {
+          expect(error).toBeInstanceOf(
+            ['close', 'closed-callback', 'timeout'].includes(failure)
+              ? BackendOutcomeUnknownError
+              : BackendUnavailableError,
+          );
+          expect(error).toMatchObject({
+            source: `queue-plugin: rabbitmq ${operation}`,
+            cause: { message: expect.stringContaining(`he.queue.build.${target}`) },
+          });
+          if (['nack', 'closed-callback', 'throw'].includes(failure))
+            expect((error as Error).cause).toMatchObject({ cause: original });
+        }
+        expect(channel.calls.filter((call) => call.method === 'ack')).toHaveLength(0);
+        await queue.disconnect();
+      }
+    },
+  );
   it.each([
     'not-connected',
     'faulted',

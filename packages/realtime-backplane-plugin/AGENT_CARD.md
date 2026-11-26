@@ -38,19 +38,19 @@ export function registerDeployRoutes(router: IRouterApi): void {
 - Redis needs two connections: injected `client` and `subscriber` must be supplied together
   (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
   `ioredis` and builds both.
-- Pairs get error/ready watches, detached on close. Injected opens QUIT on close; opening pairs are
-  cancelled and disconnected. Retired owned clients keep an error sink until end.
+- Injected clients are borrowed: close and cancelled/failed/timed-out starts never disconnect or
+  QUIT them. Close stops waiting, removes own listeners/watches and unsubscribes when subscribed.
+  Owned clients force-disconnect on cancelled SUBSCRIBE, even with a finite bound.
 - Replicas share `topic` (default `setu-ts.realtime`); generated `origin` prevents self-replay.
 - WebSocket/SSE broadcasts fan out automatically. Membership counts stay local.
 - Outages keep health up and local delivery working; inspect `data.reachable`.
 - Built Redis commands default to 15000 ms. A timed-out publish can still arrive later.
-- `commandTimeoutMs` also bounds an injected pair's connect and first subscribe together (15000 ms,
-  0 unbounded). A cancelled application start closes it before registering services or health.
+- `commandTimeoutMs` bounds injected connect + first subscribe (15000 ms, 0 unbounded); expiry is
+  `BackendUnavailableError`. Cancelled starts end waits before registering services or health.
 
 ## Other options
 
 - `'messaging'` needs a broker confirming `fanOut`, else startup fails.
 - `maxFrameAgeMs` (default 0) drops late frames.
 - `'custom'` uses `instance: IRealtimeBackplane`; `'memory'` accepts a named `bus`.
-- `commandTimeoutMs: 0` disables the Redis bound; `diagnostics` observes transport activity and
-  `localNotice: false` suppresses the memory notice.
+- `diagnostics` observes transport activity; `localNotice: false` suppresses the memory notice.

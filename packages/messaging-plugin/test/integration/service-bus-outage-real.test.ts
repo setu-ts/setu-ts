@@ -46,29 +46,133 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MessagingPlugin } from '../../src/index.ts';
-import { ServiceBusBroker, JsonSerializer } from '../../src/index.ts';
+import { ServiceBusBroker, JsonSerializer, adaptServiceBusModule } from '../../src/index.ts';
+import type { ServiceBusSdkModule } from '../../src/index.ts';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 
 const connectionString = process.env['SERVICEBUS_CONNECTION_STRING'];
 const skipReal = connectionString === undefined;
 
+/** Probe backend support before making a claim about the reply inbox lifetime. */
+async function supportsIdleLifetime(
+  admin: import('@azure/service-bus').ServiceBusAdministrationClient,
+  topic: string,
+): Promise<boolean> {
+  const subscription = 'm143m-idle-capability';
+  await admin.createSubscription(topic, subscription, { autoDeleteOnIdle: 'PT5M' });
+  const readback = (await admin.getSubscription(topic, subscription)).autoDeleteOnIdle;
+  if (/^P10675199DT2H48M5(?:\.4775807)?S$/.test(readback)) return false;
+  expect(readback).toMatch(/^PT(5M|300S)$/);
+  return true;
+}
+
+async function cleanupSteps(
+  steps: readonly (() => Promise<unknown>)[],
+  originalFailed: boolean,
+): Promise<void> {
+  const failures: unknown[] = [];
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (!originalFailed && failures.length > 0)
+    throw new AggregateError(failures, 'Service Bus test cleanup failed');
+}
+
+describe('Service Bus proof cleanup', () => {
+  it('runs every step in order and aggregates failures in order', async () => {
+    const calls: string[] = [];
+    const firstFailure = new Error('first cleanup failed');
+    const thirdFailure = new Error('third cleanup failed');
+    const failure: unknown = await cleanupSteps(
+      [
+        () => {
+          calls.push('first');
+          return Promise.reject(firstFailure);
+        },
+        () => {
+          calls.push('middle');
+          return Promise.resolve();
+        },
+        () => {
+          calls.push('third');
+          return Promise.reject(thirdFailure);
+        },
+      ],
+      false,
+    ).catch((error: unknown) => error);
+
+    expect(calls).toEqual(['first', 'middle', 'third']);
+    expect(failure).toBeInstanceOf(AggregateError);
+    const failures = (failure as AggregateError).errors;
+    expect(failures).toHaveLength(2);
+    expect(failures[0]).toBe(firstFailure);
+    expect(failures[1]).toBe(thirdFailure);
+  });
+
+  it('preserves the original proof error while attempting every cleanup', async () => {
+    const calls: string[] = [];
+    const original = new Error('original proof failed');
+    const disconnectFailure = new Error('disconnect failed');
+    const deleteFailure = new Error('first delete failed');
+    const proof = async (): Promise<void> => {
+      let originalFailed = false;
+      try {
+        throw original;
+      } catch (error) {
+        originalFailed = true;
+        throw error;
+      } finally {
+        await cleanupSteps(
+          [
+            () => {
+              calls.push('disconnect');
+              return Promise.reject(disconnectFailure);
+            },
+            () => {
+              calls.push('delete-first');
+              return Promise.reject(deleteFailure);
+            },
+            () => {
+              calls.push('delete-second');
+              return Promise.resolve();
+            },
+          ],
+          originalFailed,
+        );
+      }
+    };
+
+    await expect(proof()).rejects.toBe(original);
+    expect(calls).toEqual(['disconnect', 'delete-first', 'delete-second']);
+  });
+});
+
 describe(
   'Service Bus idle lifetime SDK control',
   { skip: skipReal || !process.env['SERVICEBUS_ADMIN_CONNECTION_STRING'] },
   () => {
-    it('reads back a direct SDK five-minute subscription lifetime', async () => {
+    it('probes backend support for a five-minute idle lifetime', async (context) => {
       const { ServiceBusAdministrationClient } = await import('@azure/service-bus');
       const admin = new ServiceBusAdministrationClient(
         process.env['SERVICEBUS_ADMIN_CONNECTION_STRING']!,
       );
-      const topic = 'm143m-' + createNodeRuntimeServices().uuid();
-      const subscription = 'm143m-idle-control';
-      await admin.createTopic(topic);
+      const topic = `m143m-idle-${createNodeRuntimeServices().uuid()}`;
+      let created = false;
+      let originalFailed = false;
       try {
-        await admin.createSubscription(topic, subscription, { autoDeleteOnIdle: 'PT5M' });
-        expect((await admin.getSubscription(topic, subscription)).autoDeleteOnIdle).toBe('PT5M');
+        await admin.createTopic(topic);
+        created = true;
+        if (!(await supportsIdleLifetime(admin, topic)))
+          await context.annotate('autoDeleteOnIdle not honoured by this backend');
+      } catch (error) {
+        originalFailed = true;
+        throw error;
       } finally {
-        await admin.deleteTopic(topic);
+        await cleanupSteps(created ? [() => admin.deleteTopic(topic)] : [], originalFailed);
       }
     });
   },
@@ -78,11 +182,30 @@ describe(
   'Service Bus bounded consumer operations',
   { skip: skipReal || !process.env['SERVICEBUS_ADMIN_CONNECTION_STRING'] },
   () => {
-    it.each(['consumer concurrency', 'reply inbox idle deletion'] as const)(
+    it.for(['consumer concurrency', 'reply inbox idle deletion'] as const)(
       'proves %s through the SDK',
       { timeout: 60000 },
-      async (proof) => {
-        const { ServiceBusAdministrationClient } = await import('@azure/service-bus');
+      async (proof, context) => {
+        const sdk = await import('@azure/service-bus');
+        const { ServiceBusAdministrationClient } = sdk;
+        const inboxRequests: string[] = [];
+        class RecordingAdministrationClient extends ServiceBusAdministrationClient {
+          constructor(value: string) {
+            super(value);
+            this.pipeline.addPolicy({
+              name: 'm143m-idle-request-proof',
+              sendRequest(request, next) {
+                if (
+                  request.method === 'PUT' &&
+                  request.url.includes('rr-inbox-') &&
+                  typeof request.body === 'string'
+                )
+                  inboxRequests.push(request.body);
+                return next(request);
+              },
+            });
+          }
+        }
         const runtime = createNodeRuntimeServices();
         const adminConnectionString = process.env['SERVICEBUS_ADMIN_CONNECTION_STRING']!;
         const admin = new ServiceBusAdministrationClient(adminConnectionString);
@@ -90,8 +213,17 @@ describe(
         const replies = topic + '-reply';
         const subscription = 'm143m-worker';
         const broker = new ServiceBusBroker(runtime, new JsonSerializer(), {
-          connectionString: connectionString!,
-          adminConnectionString,
+          client: adaptServiceBusModule(
+            {
+              ...sdk,
+              ServiceBusAdministrationClient: RecordingAdministrationClient,
+            } as unknown as ServiceBusSdkModule,
+            {
+              connectionString: connectionString!,
+              adminConnectionString,
+              retryOptions: { maxRetries: 0, timeoutInMs: 2000 },
+            },
+          ),
           replyTopic: replies,
           maxConcurrentCalls: 4,
           publishTimeoutMs: 2000,
@@ -108,6 +240,7 @@ describe(
             await new Promise<void>((resolve) => runtime.setTimeout(resolve, 20));
           expect(predicate()).toBe(true);
         };
+        let originalFailed = false;
         try {
           await admin.createTopic(topic);
           topics.push(topic);
@@ -131,22 +264,36 @@ describe(
             release.resolve();
             await until(() => completed === 4);
           } else {
+            const honoursIdle = await supportsIdleLifetime(admin, replies);
+            await admin.deleteSubscription(replies, 'm143m-idle-capability');
+            if (!honoursIdle)
+              await context.annotate('autoDeleteOnIdle not honoured by this backend');
             // The missing request channel is never provisioned; opening the inbox happens first.
             await broker.request(topic, {}, { timeoutMs: 1000 }).catch(() => {});
             const inboxes = [];
             for await (const entry of admin.listSubscriptions(replies)) inboxes.push(entry);
             expect(inboxes).toHaveLength(1);
             const inbox = await admin.getSubscription(replies, inboxes[0]!.subscriptionName);
-            expect(inbox.autoDeleteOnIdle).toMatch(/^PT(5M|300S)$/);
+            expect(inboxRequests).toHaveLength(1);
+            expect(inboxRequests[0]).toMatch(/<AutoDeleteOnIdle[^>]*>PT300S<\/AutoDeleteOnIdle>/);
+            if (honoursIdle) expect(inbox.autoDeleteOnIdle).toMatch(/^PT(5M|300S)$/);
             await broker.disconnect();
             const remaining = [];
             for await (const entry of admin.listSubscriptions(replies)) remaining.push(entry);
             expect(remaining).toHaveLength(0);
           }
+        } catch (error) {
+          originalFailed = true;
+          throw error;
         } finally {
           release.resolve();
-          await broker.disconnect();
-          for (const name of topics.reverse()) await admin.deleteTopic(name);
+          await cleanupSteps(
+            [
+              () => broker.disconnect(),
+              ...topics.reverse().map((name) => () => admin.deleteTopic(name)),
+            ],
+            originalFailed,
+          );
         }
       },
     );

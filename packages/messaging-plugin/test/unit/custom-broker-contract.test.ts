@@ -36,6 +36,20 @@ function custom(headers: boolean): ICustomMessageBroker {
 }
 
 describe('Custom broker contract', () => {
+  it.each(['publish', 'request'] as const)(
+    'warns only when %s drops headers',
+    async (operation) => {
+      const warn = vi.fn();
+      const adapter = asBrokerAdapter(custom(false), warn);
+      await adapter.publish('orders', {});
+      await adapter.request('orders', {});
+      expect(warn).not.toHaveBeenCalled();
+      if (operation === 'publish')
+        await adapter.publishWithHeaders('orders', {}, { traceparent: 'p' });
+      else await adapter.requestWithHeaders('orders', {}, { traceparent: 'p' });
+      expect(warn).toHaveBeenCalledTimes(1);
+    },
+  );
   it.each([false, true])(
     'validates every publish entry with header channel=%s',
     async (headers) => {

@@ -1,9 +1,34 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { sqsHarness } from '../fixtures/sqs-harness.ts';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('SQS long polling', () => {
+  afterEach(() => vi.useRealTimers());
+  it('caps the composed receive deadline at the runtime timer maximum', async () => {
+    vi.useFakeTimers();
+    const runtime = createNodeRuntimeServices();
+    const { FakeSqsTransport } = await import('../fixtures/fake-sqs-transport.ts');
+    const receive = vi.fn(() => new Promise<readonly []>(() => {}));
+    const queue = new SqsQueue(runtime, {
+      queues: { build: 'source' },
+      deadLetterQueues: { build: false },
+      requestTimeoutMs: 2147483647,
+      waitTimeSeconds: 20,
+      client: Object.assign(new FakeSqsTransport(() => runtime.now()), { receive }),
+    });
+    await queue.connect();
+    const result = queue.reserve('build', 1, 0).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(receive).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(2147483646);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await result).toMatchObject({ name: 'BackendOutcomeUnknownError' });
+    await queue.disconnect();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('keeps receive unbounded when the request bound is explicitly disabled', async () => {
     const gate =
       Promise.withResolvers<

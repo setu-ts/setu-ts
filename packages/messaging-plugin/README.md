@@ -134,8 +134,8 @@ Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugi
 `messaging-plugin.<name>` — so several brokers can coexist in one application.
 
 Every other option is arm-specific — `url`/`client` for `'redis-streams'`, credentials for the cloud
-arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
-than a startup throw. See [Brokers](#brokers) for the full arm list.
+arms, an injected `ICustomMessageBroker` for `'custom'`. A missing per-arm field is a compile error
+rather than a startup throw. See [Brokers](#brokers) for the full arm list.
 
 Broker-specific `logger` options are string sinks (`{ error: (message: string) => void }`). Broker
 failures are rendered into that message with the error name, message, safe classifier fields, cause
@@ -186,16 +186,16 @@ handler. With no behaviours configured, no `PipelinedBroker` decorator is applie
 
 ## Brokers
 
-| `broker`          | Backing client            | Request-reply | Driven against a real backend in CI |
-| ----------------- | ------------------------- | ------------- | ----------------------------------- |
-| `'memory'`        | none                      | yes           | — (in-process; no backend)          |
-| `'redis-streams'` | `ioredis`                 | yes           | yes — Redis 7 (`redis-real` suites) |
-| `'rabbitmq'`      | `amqplib`                 | yes           | yes — RabbitMQ 4 (outage suite)     |
-| `'nats'`          | NATS JetStream client     | yes           | yes — `nats:2-alpine -js` (M90d)    |
-| `'kafka'`         | `kafkajs`                 | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
-| `'pubsub'`        | `@google-cloud/pubsub`    | yes²          | no — emulator suite is local-only   |
-| `'service-bus'`   | `@azure/service-bus`      | yes²          | no — emulator suite is local-only   |
-| `'custom'`        | injected `IMessageBroker` | yes³          | — (whatever the adapter provides)   |
+| `broker`          | Backing client                  | Request-reply | Driven against a real backend in CI |
+| ----------------- | ------------------------------- | ------------- | ----------------------------------- |
+| `'memory'`        | none                            | yes           | — (in-process; no backend)          |
+| `'redis-streams'` | `ioredis`                       | yes           | yes — Redis 7 (`redis-real` suites) |
+| `'rabbitmq'`      | `amqplib`                       | yes           | yes — RabbitMQ 4 (outage suite)     |
+| `'nats'`          | NATS JetStream client           | yes           | yes — `nats:2-alpine -js` (M90d)    |
+| `'kafka'`         | `kafkajs`                       | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
+| `'pubsub'`        | `@google-cloud/pubsub`          | yes²          | no — emulator suite is local-only   |
+| `'service-bus'`   | `@azure/service-bus`            | yes²          | no — emulator suite is local-only   |
+| `'custom'`        | injected `ICustomMessageBroker` | yes³          | — (whatever the adapter provides)   |
 
 ¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
 pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
@@ -554,14 +554,20 @@ their original error.
 | `publishTimeoutMs`   | `15000` | Whole send, including SDK retries; `0` disables. Expiry aborts the SDK signal and throws `PublishTimeoutError` (504) |
 | `maxConcurrentCalls` | `1`     | Integer 1–1000 on application subscriptions, including realtime fan-out; reply inboxes stay at 1                     |
 
-A receive-side transport outage makes a consume-only service not-ready. Only errors from `receive`
-count; authorization, missing-entity refusals and settlement errors do not. A delivery or positive
-management probe restores reachability. To keep this dependency out of readiness, use
-`HealthPlugin({ readiness: { exclude: ['messaging'] } })`.
+A receive-side transport outage makes a consume-only service not-ready. Only outages with source
+`receive` count; settlement errors do not. A successful publish, a delivered application or
+reply-inbox message, or a positive management probe restores reachability. To keep this dependency
+out of readiness, use `HealthPlugin({ readiness: { exclude: ['messaging'] } })`.
 
 Send outages throw `BackendOutcomeUnknownError` (504), because a retried send may already have
-arrived. Non-retryable entity, authorization, size and quota refusals retain their original SDK
-error.
+arrived. Classification checks refusal codes `UnauthorizedAccess`, `MessagingEntityNotFound`,
+`MessagingEntityDisabled`, `MessageSizeExceeded` and `QuotaExceeded` before `retryable`, so even an
+SDK `UnauthorizedAccess` with `retryable: true` is returned unchanged and does not mark the data
+plane down. An `AggregateError` whose last inner error has one of these refusal codes stays a
+refusal; every other aggregate is an outage, even with a final `SessionLockLost` and
+`retryable: false`. For non-aggregate errors, outages are `retryable: true`, codes
+`ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and raw socket errors with neither
+`code` nor `retryable`. Publish deadline expiry is `PublishTimeoutError` (504).
 
 Since 0.14.0 a failing Service Bus handler is retried with a delay by default. The broker holds the
 message for the delay while the SDK renews its lock, then abandons it; on the final attempt, or when
@@ -815,8 +821,8 @@ optional `publishWithHeaders(topic, message, headers, options?)` and
 including `traceparent` and `tracestate`; deliver them through `MessageMetadata.headers` on
 `subscribe`, so the consumer span joins the producer's trace. Caller options are always validated
 first, including reserved-header refusal, even if the instance implements the internal adapter
-members. Without a header member the wrapper calls `publish` or `request` and warns once that traces
-will not cross the broker.
+members. Without a header member the wrapper calls `publish` or `request`; it warns once when
+non-empty trace headers would be dropped.
 
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
@@ -1488,15 +1494,18 @@ large after conversion, so the relay still refuses it as `invalid-row` in `claim
 
 Without `outbox.dispatch()` after the transaction resolves, a committed row waits up to
 `relay.intervalMs` (default 1000 ms) for a scheduled sweep. Every sweep is limited by `publishLimit`
-(default 100), and rows run serially: claim, publish, then mark. A full sweep with no publish
-failures starts a follow-up immediately, including with `relay.schedule: false` after `dispatch()`.
-Backlog throughput is therefore bounded by the serial cost of a row rather than `intervalMs`. Failed
-sweeps retain the retry backoff and do not start an automatic follow-up. Closing stops the chain.
+(default 100), and rows run serially: claim, publish, then mark. A full sweep with zero failures
+starts a follow-up, including with `relay.schedule: false` after `dispatch()`. Follow-ups yield
+through `runtime.setTimeout(..., 0)`, so event-loop timers can run between batches. During a backlog
+the relay runs back-to-back until it drains; throughput is bounded by the serial cost of a row. The
+extra store work is one claim and one mark per delivered row, the cost of delivering the backlog.
+There is no switch or tuning option for this chain; `publishLimit` caps each sweep and `intervalMs`
+spaces scheduled sweeps, but neither throttles the chain. A sweep with any failure is never followed
+up; retry backoff still applies. Closing stops the chain.
 
 The first full sweep warns `outbox relay is at its sweep budget` with `publishLimit` and
 `intervalMs`; the first failure-free completed lap logs `outbox relay caught up` at info. A sweep
-with failures neither starts nor clears that warning episode. During a backlog the store sees
-back-to-back reads until the relay catches up.
+with failures neither starts nor clears that warning episode.
 
 The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
 failed row, a row in retry backoff, a row held by another relay, or a row whose status write failed
@@ -2046,31 +2055,35 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
 **Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
-records the outcome of every real publish — the **data plane** — as evidence and `reachability()`
-consults it FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs`
-(default `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected
-topic or a quota error is an application-level fact, never an outage) resolves `false` until a
-successful publish or positive management probe contradicts it. **Since M101a** that retained
-failure is answered at once: the management probe runs in the background, and only a `true` answer
-clears the outcome, for the NEXT read — before, `reachability()` awaited the probe, whose own 2 s
-bound tied the indicator's, so the indicator's bound fired first and a recorded outage was reported
-`up`. A failure inside a window the indicator has already cached as `up` is reported at the first
-poll after that 5 s cache expires. The plane distinction is the substance: the management round trip
-proves the **management** plane is reachable — evidence about the data plane, never proof of it —
-and that gap is what let a stopped namespace report `up` while every publish threw. Two further
-changes, and the first has **two layers** because the health indicator is not the only caller. The
-indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
-bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
-condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
-open. `RabbitMqBroker`, `ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build
-their own cached, bounded probes, which is what `isHealthy()` reads; that inner layer is what
-protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'` transport, which
-resolves the broker itself and never passes through this indicator. Second, the RabbitMQ probe is a
-real round trip (a throwaway channel open/close), replacing the connection-fault flag read that a
-hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
-Bus management plane is unreachable and that publishes nothing keeps reporting
-`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
-can publish synthetically.
+records real publish outcomes (including timeouts), receive outages only from source `receive`, and
+delivered application and reply-inbox messages as **data-plane** evidence. `reachability()` consults
+it FIRST: a successful publish or delivery resolves `true` for
+`ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`); a publish outage or deadline, or a receive
+outage, resolves `false` until a successful publish, delivery or positive management probe
+contradicts it. Refusal codes take precedence over `retryable`. An `AggregateError` stays a refusal
+only when its last inner error has a refusal code; every other aggregate is an outage. See
+[Service Bus retries](#service-bus-retries) for the full classification. Refusals stay unchanged and
+do not mark the data plane down. **Since M101a** that retained failure is answered at once: the
+management probe runs in the background, and only a `true` answer clears the outcome, for the NEXT
+read — before, `reachability()` awaited the probe, whose own 2 s bound tied the indicator's, so the
+indicator's bound fired first and a recorded outage was reported `up`. A failure inside a window the
+indicator has already cached as `up` is reported at the first poll after that 5 s cache expires. The
+plane distinction is the substance: the management round trip proves the **management** plane is
+reachable — evidence about the data plane, never proof of it — and that gap is what let a stopped
+namespace report `up` while every publish threw. Two further changes, and the first has **two
+layers** because the health indicator is not the only caller. The indicator wraps every arm's
+`reachability()` in its own `createCachedProbe` (5-second TTL, 2-second bound), which is the
+universal outer bound: a probe that cannot answer — a **hung** broker, the condition a stopped one
+never produces — settles `reachable: 'unknown'` instead of holding `/health` open. `RabbitMqBroker`,
+`ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build their own cached, bounded
+probes, which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller,
+such as `realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and
+never passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway
+channel open/close), replacing the connection-fault flag read that a hung broker never trips.
+Residual exposure, stated rather than implied: a deployment whose Service Bus management plane is
+unreachable and that has no publish outcome, receive outage or delivery keeps reporting
+`reachable: 'unknown'` with status `up` — an operator who needs the signal can publish
+synthetically.
 
 A Kafka publish bound covers everything `send()` waits for, including leader election for a topic
 the broker auto-creates on first use — measured at over 2 s right after a broker restart — so keep

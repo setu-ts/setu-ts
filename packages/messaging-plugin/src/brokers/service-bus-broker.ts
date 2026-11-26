@@ -314,7 +314,7 @@ export interface ServiceBusOptions {
   /**
    * How long a positive data-plane outcome stays authoritative, in ms.
    * Default `5000`. A negative data-plane outcome is retained until a
-   * successful publish or a positive management probe contradicts it; elapsed
+   * successful publish, a delivery or a positive management probe contradicts it; elapsed
    * time alone does not report a known outage as healthy.
    *
    * Must be a positive integer; a non-finite, fractional, zero or negative
@@ -808,14 +808,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #probeSource: (() => Promise<boolean | undefined>) | null = null;
   /**
    * How long a positive data-plane outcome stays authoritative (M99a).
-   * A negative outcome stays authoritative until a successful publish or a
+   * A negative outcome stays authoritative until a successful publish, a delivery or a
    * positive management probe contradicts it.
    */
   #evidenceMs: number;
   /**
    * The most recent data-plane outcome (M95b): `at` is a monotonic
-   * `runtime.hrtime()` reading and `reachable` is whether the last real
-   * `transport.send` completed. `null` means no authoritative evidence, so
+   * `runtime.hrtime()` reading. Publishes (including deadlines), receive outages
+   * and delivered messages supply evidence. `null` means no authoritative evidence, so
    * `reachability()` falls through to the management probe; a negative record
    * stays authoritative until contradicted. Private state, read only by this
    * broker's own `reachability()`.
@@ -991,9 +991,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * in M95b; a negative outcome answers at once in M101a).
    *
    * The evidence is consulted FIRST: a data-plane outcome —
-   * the success or network-layer failure of a real publish, recorded in
-   * {@linkcode ServiceBusBroker.publishWithHeaders} at zero extra round
-   * trips — answers directly, because the thing reported on should be the
+   * a successful publish or delivery, a publish outage or deadline, or a receive
+   * outage, recorded at zero extra round trips — answers directly, because the thing reported on should be the
    * plane the application actually uses. Positive evidence expires after
    * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}; negative evidence is
    * retained until contradicted.
@@ -1074,7 +1073,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
   /**
    * Reads authoritative data-plane evidence. A negative result is retained
-   * until a successful publish or a positive management probe contradicts
+   * until a successful publish, a delivery or a positive management probe contradicts
    * it; elapsed time does not heal an outage. A positive result expires after
    * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}, then falls through to
    * the management probe.
@@ -1104,7 +1103,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #recordDataPlaneOutcome(reachable: boolean): void {
     this.#evidence = { at: this.#runtime.hrtime(), reachable };
     if (!reachable) {
-      // A positive cached management answer from before the failed publish
+      // A positive cached management answer from before the data-plane outage
       // cannot contradict the outage. Rebuild the cache so the next check
       // asks the management plane anew.
       this.#probe = this.#createManagementProbe();
@@ -1137,13 +1136,17 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (!this.#transport) {
       throw new Error('ServiceBusBroker is not connected');
     }
+    const transport = this.#transport;
+    const generation = this.#generation;
     const validated = await validatePublishOptions(options);
+    if (generation !== this.#generation || transport !== this.#transport)
+      throw new Error('ServiceBusBroker is not connected');
     const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     try {
       await withDeadline(
         (signal) =>
-          this.#transport!.send(topic, serialized, wireHeaders, validated.deduplicationId, {
+          transport.send(topic, serialized, wireHeaders, validated.deduplicationId, {
             abortSignal: signal,
           }),
         {
@@ -1161,7 +1164,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // before the transport was reached and say nothing about the network;
       // only a send rejection is offered to the evidence predicate.
       if (error instanceof PublishTimeoutError || isServiceBusOutage(error)) {
-        this.#recordDataPlaneOutcome(false);
+        if (generation === this.#generation) this.#recordDataPlaneOutcome(false);
         if (!(error instanceof PublishTimeoutError))
           throw new BackendOutcomeUnknownError('messaging-plugin: service-bus publish', {
             cause: serviceBusPublishCause(error),
@@ -1169,7 +1172,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       }
       throw error;
     }
-    this.#recordDataPlaneOutcome(true);
+    if (generation === this.#generation) this.#recordDataPlaneOutcome(true);
   }
 
   async subscribe<T>(

@@ -93,10 +93,11 @@ export interface QueueAdapter {
    * fact (reachability), not a policy: the indicator owns the `up`/`down`
    * mapping.
    *
+   * @param probeTimeoutMs - Outer health bound; adapters can budget their own requests below it
    * @returns `true` when the backend is reachable
    * @since 0.1.0
    */
-  isHealthy?(): Promise<boolean>;
+  isHealthy?(probeTimeoutMs?: number): Promise<boolean>;
 
   /**
    * M70k (X8-4): reports how many jobs are sitting in each of this name's three
