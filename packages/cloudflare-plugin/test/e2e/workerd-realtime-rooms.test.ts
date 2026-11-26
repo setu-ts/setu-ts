@@ -292,13 +292,12 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
-    "refuses a client's handshake with no Sec-WebSocket-Key with 400, before onOpen runs",
+    "answers a client's handshake with no Sec-WebSocket-Key 400 through the gateway Worker",
     async () => {
-      // The client-fault arm on Workers (V13-278): workerd checks the handshake
-      // only after the Worker accepted the pair, so without the adapter's own
-      // check onOpen ran first and the client still got 400. The open count is
-      // what tells the two apart.
-      const before = (await text('/a/opens')).body;
+      // Behind a gateway the edge refuses it: workerd builds a fresh handshake
+      // for the subrequest, so Worker A sees a valid key whatever the client
+      // sent and cannot refuse it itself (workerd-handshake.test.ts covers an
+      // app that receives edge requests directly).
       const head = await new Promise<string>((resolve, reject) => {
         const socket = connect(port, '127.0.0.1', () => {
           socket.write(
@@ -318,13 +317,12 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       });
 
       expect(head).toBe('HTTP/1.1 400 Bad Request');
-      expect((await text('/a/opens')).body).toBe(before);
     },
     CASE_TIMEOUT_MS,
   );
 
   it(
-    'opens a Worker-to-Worker socket over a service binding: no cf and no key, still 101 and onOpen',
+    'opens a Worker-to-Worker socket over a service binding to another Worker: still 101 and onOpen',
     async () => {
       // workerd builds that handshake itself; the adapter's check is for
       // requests from the edge, which carry `cf` (V13-278 exemption).

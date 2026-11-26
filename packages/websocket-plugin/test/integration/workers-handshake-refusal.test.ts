@@ -135,10 +135,12 @@ describe('a malformed handshake on Workers runs no route handler (V13-278)', () 
   it('a Worker-to-Worker subrequest (no cf, no key) is not refused: the route opens', async () => {
     calls.length = 0;
 
-    // A service binding's `fetch(url, { headers: { Upgrade: 'websocket' } })`.
+    // A service binding's `fetch(url, { headers: { Upgrade, Connection } })`.
     // Under Node the 101 cannot be built after the pair is accepted, so the
     // handshake then fails; what matters is that onOpen ran, i.e. no refusal.
-    await app.fetch(new Request('http://worker/ws', { headers: { upgrade: 'websocket' } }));
+    await app.fetch(
+      new Request('http://worker/ws', { headers: { upgrade: 'websocket', connection: 'Upgrade' } }),
+    );
 
     expect(calls[0]).toBe('open');
   });

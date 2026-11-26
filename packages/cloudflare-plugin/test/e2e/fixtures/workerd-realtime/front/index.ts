@@ -3,7 +3,7 @@
  * configuration, so this one routes `/a/*` to Worker A, `/b/*` to Worker B,
  * and `/hub-count` to the hub's fixture-only socket count. `/worker-to-worker`
  * opens a socket to Worker A's `/chat` the way one Worker calls another over a
- * service binding — only `Upgrade: websocket`, no key — and answers the status.
+ * service binding — `Upgrade` and `Connection`, no key — and answers the status.
  *
  * @module
  */
@@ -27,16 +27,16 @@ export default {
   fetch(request: Request, env: FrontEnv): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/worker-to-worker') {
-      return env.A.fetch('https://a/chat', { headers: { Upgrade: 'websocket' } }).then(
-        (response) => {
-          const socket = (response as Response & { webSocket?: UpgradedSocket | null }).webSocket;
-          if (socket) {
-            socket.accept();
-            socket.close(1000);
-          }
-          return new Response(String(response.status));
-        },
-      );
+      return env.A.fetch('https://a/chat', {
+        headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
+      }).then((response) => {
+        const socket = (response as Response & { webSocket?: UpgradedSocket | null }).webSocket;
+        if (socket) {
+          socket.accept();
+          socket.close(1000);
+        }
+        return new Response(String(response.status));
+      });
     }
     if (url.pathname === '/hub-count') {
       return env.REALTIME.get(env.REALTIME.idFromName('chat')).fetch('https://hub/count');
