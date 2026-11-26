@@ -804,6 +804,11 @@ record for the PR body.
 
 ## 12. Open decisions for the maintainer
 
+**R4, DECIDED by the maintainer, 2026-11-26: (a).** R2 is narrowed: a normal `close()` sends QUIT to
+an injected Redis pair, as in 0.13.0 (and as the CLI-generated `node-redis.ts` header, `docs/cli.md`
+and `packages/common/README.md` say); a failed or cancelled start still leaves the application's
+clients alone. The R2 comparison had wrongly said 0.13.0 never touched the pair on close.
+
 **Out-of-lane additions approved by the maintainer, 2026-11-26** (two PR #614 review leftovers, each
 its own commit, made by Claude, not Codex): (A1) `AI_GUIDELINES.md` §6.7 names the practice the
 repository follows: a real-backend test is skipped unless that backend's own connection variable is
