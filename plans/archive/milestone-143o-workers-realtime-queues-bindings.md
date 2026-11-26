@@ -1433,3 +1433,17 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   request forwarded through the front Worker is still checked (e2e, no-key 400 with the open count
   unchanged); Setu's own Durable Object links (`connection-link.ts`, `reply-inbox.ts`) open sockets
   to the hub objects, which accept them directly, and the room e2e cases exercise them.
+- **V13-278 follow-up — what local workerd shows (measured 2026-11-27, wrangler 4.153.0).** Two
+  corrections to the WIP note: `new Request(url, request)` keeps `cf`; and the Worker-to-Worker 404s
+  came from the kernel rule that an upgrade needs `Connection: Upgrade` as well as
+  `Upgrade: websocket` (`isWebSocketUpgradeRequest` in `common`), pre-existing — whether to register
+  or fix it (Core lane) is with the maintainer. With both headers the `cf` exemption works on real
+  workerd. Logged at the app: for every raw client handshake, valid or not, the Worker receives `cf`
+  set and a freshly generated valid key, because `wrangler dev` puts its proxy Worker in front and
+  workerd rebuilds the handshake for that subrequest, as it does behind any gateway Worker. The
+  pre-check therefore cannot act in local dev or behind a gateway. The maintainer chose (a) + (c):
+  keep the pre-check, proven by the app-level fake-pair tests and their negative control; drop the
+  three edge-refusal workerd cases; keep the workerd valid-handshake and Worker-to-Worker cases; and
+  add a workerd case asserting the rebuilt handshake (`cf` set, a key other than the one sent,
+  valid), so a wrangler change shows up. Production behaviour — whether Cloudflare passes the
+  client's own handshake headers to the Worker — is unverified (no account), and the README says so.

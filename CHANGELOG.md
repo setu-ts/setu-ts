@@ -218,8 +218,8 @@ All notable changes to this project are documented here. The format follows
   version other than 13 gets 426 with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`
   (V13-278). The check applies to requests from the edge (`request.cf` set); a Worker-to-Worker
   socket over a service binding or Durable Object stub, which has no `cf` and no key, still opens.
-  Behind a gateway Worker the app sees workerd's fresh handshake and cannot refuse a client's
-  malformed one.
+  In local dev and behind a gateway Worker the app receives a handshake workerd rebuilt, so the
+  check cannot act there; production behaviour is unverified here (no Cloudflare account).
 - **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
   `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
   7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose

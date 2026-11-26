@@ -5,6 +5,8 @@
  * Routes:
  * - `GET /ws` (WebSocket): counts each connection that opens.
  * - `GET /opens`: how many `/ws` connections have opened in this isolate.
+ * - `GET /last-handshake`: what the Worker itself received on the last `/ws`
+ *   request — whether `cf` was set, and its `Sec-WebSocket-Key` and version.
  * - `GET /self-socket`: opens a socket to this Worker's own `/ws` over the
  *   `SELF` service binding, the way one Worker calls another — `Upgrade` and
  *   `Connection` only, no key — and answers the status.
@@ -27,6 +29,7 @@ interface UpgradedSocket {
 }
 
 let opens = 0;
+let lastHandshake: { cf: boolean; key: string | null; version: string | null } | undefined;
 let booted: Promise<IKernelApplication> | undefined;
 
 /** Builds the app once per isolate. */
@@ -55,7 +58,16 @@ async function build(): Promise<IKernelApplication> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (new URL(request.url).pathname === '/self-socket') {
+    const path = new URL(request.url).pathname;
+    if (path === '/ws') {
+      lastHandshake = {
+        cf: (request as Request & { cf?: unknown }).cf !== undefined,
+        key: request.headers.get('sec-websocket-key'),
+        version: request.headers.get('sec-websocket-version'),
+      };
+    }
+    if (path === '/last-handshake') return Response.json(lastHandshake ?? null);
+    if (path === '/self-socket') {
       const response = await env.SELF.fetch('https://self/ws', {
         headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
       });

@@ -2,15 +2,18 @@
  * The WebSocket handshake on real workerd, against a Setu app that receives
  * edge requests directly (V13-278).
  *
- * workerd invokes the Worker before it checks the handshake, so without the
- * adapter's own check a malformed one ran the route's `onOpen` and the client
- * still got 400 or 426; the open count is what tells the two apart. A
- * Worker-to-Worker socket over a service binding carries no `cf` and no key —
- * workerd builds that handshake — and must still open.
+ * A valid client handshake opens, and a Worker-to-Worker socket over a service
+ * binding — no `cf`, no key, workerd builds that handshake — must still open
+ * (the adapter's pre-check skips it).
  *
- * Not covered here, and not coverable by the app: behind a gateway Worker,
- * workerd builds a fresh handshake for the subrequest, so the app sees a valid
- * key whatever the client sent (the realtime fixture's front Worker shows it).
+ * The pre-check itself cannot be shown here: wrangler dev puts its proxy
+ * Worker in front, so the app receives a subrequest with a handshake workerd
+ * rebuilt — `cf` set, a fresh valid key — whatever the client sent, and the
+ * same holds behind any gateway Worker. One case pins that, so a wrangler
+ * change shows up. The pre-check is proven by websocket-plugin's
+ * `workers-handshake-refusal.test.ts` (a kernel app with a fake
+ * `WebSocketPair`); whether production Cloudflare hands the Worker the
+ * client's own headers is unverified (no account).
  *
  * Guarded like the other workerd e2e suites: skipped off CI when the `wrangler`
  * binary cannot run, failed on CI.
@@ -117,32 +120,29 @@ describe.skipIf(skip)('the WebSocket handshake on workerd (V13-278)', () => {
     }
   });
 
-  for (const entry of [
-    { name: 'no key', extra: ['Sec-WebSocket-Version: 13'], status: '400 Bad Request' },
-    {
-      name: 'a malformed key',
-      extra: ['Sec-WebSocket-Key: short', 'Sec-WebSocket-Version: 13'],
-      status: '400 Bad Request',
-    },
-    {
-      name: 'version 8',
-      extra: [`Sec-WebSocket-Key: ${KEY}`, 'Sec-WebSocket-Version: 8'],
-      status: '426 Upgrade Required',
-    },
-  ]) {
-    it(
-      `refuses ${entry.name} from the edge with ${entry.status}, and onOpen never runs`,
-      async () => {
-        const before = await text('/opens');
-        const head = await handshake(entry.extra);
-        await sleep(200);
+  it(
+    'local dev rebuilds a client handshake: the app receives cf and a fresh valid key, not the one sent',
+    async () => {
+      // Pins the limit the adapter's pre-check works within. wrangler dev puts
+      // its proxy Worker in front, so the app sees a subrequest whose
+      // handshake workerd generated, whatever the client sent; the pre-check
+      // cannot act here or behind a gateway Worker. If this ever fails, local
+      // dev started passing the client's own headers through.
+      await handshake(['Sec-WebSocket-Key: short', 'Sec-WebSocket-Version: 13']);
+      await sleep(200);
+      const seen = JSON.parse(await text('/last-handshake')) as {
+        cf: boolean;
+        key: string | null;
+        version: string | null;
+      };
 
-        expect(head.split('\r\n')[0]).toBe(`HTTP/1.1 ${entry.status}`);
-        expect(await text('/opens')).toBe(before);
-      },
-      CASE_TIMEOUT_MS,
-    );
-  }
+      expect(seen.cf).toBe(true);
+      expect(seen.key).not.toBe('short');
+      expect(seen.key).toMatch(/^[+/0-9A-Za-z]{22}==$/);
+      expect(seen.version).toBe('13');
+    },
+    CASE_TIMEOUT_MS,
+  );
 
   it(
     'opens a valid client handshake from the edge',

@@ -47,12 +47,13 @@ It checks requests from the edge, which workerd marks with `request.cf`. A Worke
 over a service binding or Durable Object stub has no `cf` and no key (workerd builds that
 handshake), so it is not checked and opens as before; such a caller sends `Upgrade: websocket` and
 `Connection: Upgrade`, since a request without `Connection: Upgrade` is not an upgrade to Setu.
-Three limits remain. Behind a gateway Worker, workerd gives the subrequest a fresh, valid handshake
-whatever the client sent, so the app behind it cannot see a client's malformed one, and its `onOpen`
-runs before the edge refuses the client. Where an edge request lacks `cf`, as in the dashboard
-preview, the check is skipped. And that every production edge request carries `cf` is Cloudflare's
-documented behaviour, not verified by this repository's tests, which run on local workerd. Browsers
-send version 13.
+Three limits remain. In local dev (`wrangler dev` puts its own proxy Worker in front) and behind any
+gateway Worker, workerd gives the app a rebuilt handshake (`cf` set, a fresh valid key) whatever the
+client sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before
+the client is refused. Where an edge request lacks `cf`, as in the dashboard preview, the check is
+skipped. And whether production Cloudflare hands the Worker the client's own handshake headers,
+which is what the pre-check needs, is not verified by this repository's tests, which run on local
+workerd. Browsers send version 13.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
