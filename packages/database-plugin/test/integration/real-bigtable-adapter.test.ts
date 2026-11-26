@@ -660,6 +660,29 @@ describe('BigtableAdapter against a real Bigtable emulator (guarded)', () => {
     },
   );
 
+  it(
+    'applies a conditional update in a unit of work through the real SDK filter',
+    { skip: skipReal },
+    async () => {
+      const table = await provision(`txcond_${suffix}`, ['cf']);
+      const adapter = await connect({ User: { table } });
+      try {
+        const users = adapter.createDataSource('User');
+        await users.create({ id: 'c1', name: 'ada', version: 1 });
+        const tx = await adapter.beginTransaction();
+        const scoped = tx.createDataSource('User');
+        // The pre-read sends a chain inside the latest-cell chain; the SDK must accept it.
+        expect(await scoped.updateWhere!('c1', { version: 1 }, { version: 2 })).toMatchObject({
+          version: 2,
+        });
+        await tx.commit();
+        expect(await users.findById('c1')).toMatchObject({ name: 'ada', version: 2 });
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
+
   it('commits delete-then-write as ONE atomic mutation list', { skip: skipReal }, async () => {
     const table = await provision(`tx_${suffix}`, ['cf']);
     const adapter = await connect({ User: { table } });

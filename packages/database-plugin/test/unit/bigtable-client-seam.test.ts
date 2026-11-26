@@ -488,6 +488,30 @@ it('loads and closes the installed Bigtable SDK without making a remote call', a
   await client.close();
 });
 
+it('flattens nested chains into one array the real SDK parses', async () => {
+  // The seam file mocks the package entry, so read the SDK's real parser from its own module.
+  const { Filter } = (await import('@google-cloud/bigtable/build/src/filter.js')) as {
+    Filter: { parse: (filters: unknown) => unknown };
+  };
+  const log = newLog();
+  const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });
+  // The shape the buffered conditional pre-read sends: a chain inside the latest-cell chain.
+  const filter: BigtableFilter = {
+    chain: [
+      { column: { cellLimit: 1 } },
+      { chain: [{ column: ['version'] }, { value: { start: 'n:1', end: 'n:1' } }] },
+    ],
+  };
+  await client.instance('i').table('t').readRows({ filter });
+  const sent = (log.reads[0] as { filter: unknown }).filter;
+  expect(sent).toEqual([
+    { column: { cellLimit: 1 } },
+    { column: ['version'] },
+    { value: { start: 'n:1', end: 'n:1' } },
+  ]);
+  expect(() => Filter.parse(sent)).not.toThrow();
+});
+
 it('preserves both interleaved filter arms on the SDK read wire', async () => {
   const log = newLog();
   const client = adaptBigtableSdkModule(fakeModule(log), { projectId: 'p' });

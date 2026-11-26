@@ -244,20 +244,35 @@ function adaptReadRow(row: BigtableSdkReadRow): BigtableReadRow {
  * @returns The SDK filter
  */
 function adaptFilter(filter: BigtableFilter): unknown {
-  if ('chain' in filter) return filter.chain.map(adaptFilter);
+  if ('chain' in filter) return adaptChain(filter.chain);
   if ('interleave' in filter) {
-    return { interleave: filter.interleave.map((arm) => arm.map(adaptFilter)) };
+    return { interleave: filter.interleave.map(adaptChain) };
   }
   if ('condition' in filter) {
     const { test, pass } = filter.condition;
     return {
       condition:
         pass === undefined
-          ? { test: test.map(adaptFilter) }
-          : { test: test.map(adaptFilter), pass: pass.map(adaptFilter) },
+          ? { test: adaptChain(test) }
+          : { test: adaptChain(test), pass: adaptChain(pass) },
     };
   }
   return filter;
+}
+
+/**
+ * Translates a sequence of filters into ONE flat SDK filter array. The SDK's
+ * `Filter.parse` reads each element's first key, so a nested chain (an array
+ * inside the array) is refused as `Unknown filter: 0.`; a sequential chain
+ * means the same as its elements in order, so it is spliced in.
+ *
+ * @param filters - The facade filters, applied in order
+ * @returns The flat SDK filter array
+ */
+function adaptChain(filters: readonly BigtableFilter[]): unknown[] {
+  return filters.flatMap((filter) =>
+    'chain' in filter ? adaptChain(filter.chain) : [adaptFilter(filter)],
+  );
 }
 
 /**
@@ -410,7 +425,7 @@ export function adaptBigtableSdk(
                   if (branches.onNoMatch !== undefined) {
                     sdkBranches.onNoMatch = branches.onNoMatch.map(adaptMutation);
                   }
-                  const [matched] = await row.filter(test.map(adaptFilter), sdkBranches);
+                  const [matched] = await row.filter(adaptChain(test), sdkBranches);
                   return matched === true;
                 },
               };
