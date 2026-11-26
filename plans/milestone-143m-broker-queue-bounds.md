@@ -809,6 +809,14 @@ an injected Redis pair, as in 0.13.0 (and as the CLI-generated `node-redis.ts` h
 and `packages/common/README.md` say); a failed or cancelled start still leaves the application's
 clients alone. The R2 comparison had wrongly said 0.13.0 never touched the pair on close.
 
+**R5, DECIDED by the maintainer, 2026-11-27: (a).** "Start" in R2 and R4 means the backplane's own
+open. Once that open has succeeded, any `close()` sends QUIT to an injected pair, including the
+close the kernel runs after a later plugin fails or `stop()` cancels the application start, as in
+0.13.0. Every copy says "a failed or cancelled backplane open leaves the clients alone" and that
+after a failed application start the injected clients are quit, so an application that retries
+`start()` creates new ones. A kernel-level test proves it (a later plugin fails, both clients QUIT
+once).
+
 **Out-of-lane additions approved by the maintainer, 2026-11-26** (two PR #614 review leftovers, each
 its own commit, made by Claude, not Codex): (A1) `AI_GUIDELINES.md` §6.7 names the practice the
 repository follows: a real-backend test is skipped unless that backend's own connection variable is
