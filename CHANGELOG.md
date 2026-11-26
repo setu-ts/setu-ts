@@ -139,6 +139,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
+  version with `isWireError`. Invalid `grpc-status` metadata fails the instance; valid status 13
+  remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
+  remaining deadline after discovery picks and sends nothing or reports nothing if it is spent.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids escape `%` and `@` within
+  serviceName/address as `%25` and `%40`, then join as `<serviceName>@<address>:<port>`; explicit
+  ids still win. DNS aggregate failure codes take precedence over absent members, and watches keep
+  at most one raw lookup pending even after timeout. Late Kubernetes token reads cannot overwrite
+  newer credentials or send after cancellation. Watch setup respects close; last unsubscribe
+  reapplies the empty-only cap. Async listener rejections are isolated, and delivery skips removed
+  subscribers. Cold failures cannot evict warm reporters; superseded read failures open no outage.
+  Held empty answers preserve served-list age, and change comparison reads all instance fields.
+- **Docs (`@setu-ts/resilience-plugin`, M143c, #618).** Clarify that mid-flight cancellation counts
+  as failure only when the protected function rejects; a resolving function counts as success.
+
 - **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Provider reads now default to a
   2 s bound; set `resolveTimeoutMs: 0` to restore unbounded reads.
 - **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Warm names always answer from
@@ -159,14 +174,16 @@ All notable changes to this project are documented here. The format follows
   `provider: 'custom'` with a `discovery` provider that rejects absent-name lookups if that policy
   is required.
 - **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids default to
-  `<serviceName>-<address>-<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
+  `<serviceName>@<address>:<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
   an existing identity; `address` must be the instance's own address, never a shared hostname.
 - **BREAKING — `@setu-ts/grpc-plugin` (M143c, #618).** Instance outcomes now distinguish server
   answers from transport faults. A server's `Internal`, `Unknown` or `DataLoss` answer counts as
-  success, so a throwing handler does not eject replicas. The same codes without a server answer
+  success, except an `Internal` decoded from invalid `grpc-status` metadata, so a throwing handler
+  does not eject replicas. The same codes without a server answer
   fail. Take a replica whose handlers fail every call out through readiness (health checks). No
   answer, a refused stream, `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), and
-  the peer's own `Canceled` still fail. Every other server answer reports success. Caller aborts and
+  the peer's own `Canceled` still fail. Every other server answer reports success, except an `Internal` decoded from invalid
+  `grpc-status` metadata. Caller aborts and
   pre-send faults (binary serialization, `writeMaxBytes`, a request header Node refuses) report
   nothing; a header name or value `Headers` rejects now fails the call before any instance is
   picked. No option restores the old outcome mapping; `ejection: false` on discovery disables
@@ -205,11 +222,11 @@ All notable changes to this project are documented here. The format follows
   preserves it on watch unsubscribe, and sets `data.degraded` for warm failed reads or held empty
   answers while the status stays `up` (visible with `HealthPlugin({ details: true })`). Cold
   failures leave no cached failure state. A name keeps its reporter while its failure run is open
-  (repeats at debug, recovery at info), bounded at 256 concurrently failing names. Watch listener
-  errors are isolated and warn once per failing run. A read that started before a newer watch
-  delivery neither replaces the delivered list nor marks the name failed or starts retry spacing;
-  its failure is still logged and opens a failure run that the next success closes. Kubernetes probe
-  timeouts name the API and bound.
+  (repeats at debug, recovery at info), bounded at 256 concurrently failing cold names; warm
+  reporters are protected. Watch listener errors are isolated and warn once per failing run. A read
+  that started before a newer watch delivery neither replaces the delivered list nor marks the name
+  failed or starts retry spacing; a superseded failure opens no outage or recovery log. Kubernetes
+  probe timeouts name the API and bound.
 - **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`; M143c, #618).** Clarify
   per-pod discovery for connection balancing, the marked drain-503 unary resend rule, grace-expiry
   watch delivery, the shared 5 s provider-health cache and instance-address requirements for

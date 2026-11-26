@@ -278,7 +278,8 @@ export class ConsulProvider implements DiscoveryProvider {
       return existing;
     }
     const id =
-      registration.id ?? `${registration.serviceName}-${registration.address}-${registration.port}`;
+      registration.id ??
+      `${registration.serviceName.replaceAll('%', '%25').replaceAll('@', '%40')}@${registration.address.replaceAll('%', '%25').replaceAll('@', '%40')}:${registration.port}`;
     this.#selfIds.set(registration, id);
     return id;
   }

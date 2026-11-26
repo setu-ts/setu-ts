@@ -44,15 +44,15 @@ export function registerRpcService(
 - Native `application/grpc` is refused with gRPC status 12 (HTTP 200); Connect and gRPC-Web are
   served.
 - A duplicate service type name throws; no implementation means reflection only.
-- Server answers succeed, thrown handler errors too; no answer, unavailable, unimplemented, deadline
-  and peer cancel fail. Abort, pre-send faults and early ENHANCE_YOUR_CALM resets report nothing, as
-  do headers over a peer's advertised limit and 8 KiB, or over 64 KiB refused on an open session
-  with no known limit; at or under 8 KiB the instance fails.
+- Valid server answers (handler errors) succeed; invalid grpc-status, no answer, unavailable,
+  unimplemented, deadline and peer cancel fail. Abort, pre-send faults and early ENHANCE_YOUR_CALM
+  resets report nothing, as do headers over a peer's advertised limit and 8 KiB, or over 64 KiB
+  refused on an open session with no known limit; at or under 8 KiB the instance fails.
 - Marked drain 503s resent once; discover pods.
 - Stream cancel aborts `ctx.signal`, then awaits cleanup unbounded.
-- The health bridge serves with no health capability; aggregate degraded is not serving.
+- The health bridge works without health; aggregate degraded is not serving.
 
-## Other options
+## Options
 
 - `interceptors` adds Connect interceptors.
 - `connectModule` injects a loaded runtime; `adaptConnectModule` adapts modules.

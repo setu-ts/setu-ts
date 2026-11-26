@@ -18,7 +18,7 @@ export const CONNECT_NODE_SPECIFIER = '@connectrpc/connect-node';
 
 /** How to install it, named in the load error. */
 const INSTALL_COMMAND =
-  'deno add npm:@connectrpc/connect-node@^2.1.2 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node';
+  'deno add npm:@connectrpc/connect-node@^2.2.0 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node';
 
 /**
  * An HTTP/2 session shared by every call to one origin. Its `request` is

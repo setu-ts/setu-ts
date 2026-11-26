@@ -122,10 +122,19 @@ export class DnsProvider implements DiscoveryProvider {
   }
 
   async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    return await this.#resolveLookup(
+      signal?.aborted ? Promise.resolve([]) : this.#lookup(serviceName),
+      signal,
+    );
+  }
+
+  async #resolveLookup(
+    lookup: Promise<readonly ServiceInstance[]>,
+    signal?: AbortSignal,
+  ): Promise<readonly ServiceInstance[]> {
     let onAbort: (() => void) | undefined;
     try {
       signal?.throwIfAborted();
-      const lookup = this.#lookup(serviceName);
       const instances =
         signal === undefined
           ? await lookup
@@ -188,7 +197,8 @@ export class DnsProvider implements DiscoveryProvider {
    * Polls at `watchIntervalMs`, firing only when the instance list changed.
    *
    * DNS has no push channel. Polling is the honest implementation: a `watch()`
-   * that never fires would be worse than a documented interval.
+   * that never fires would be worse than a documented interval. After a deadline,
+   * ticks still wait for the one raw resolver lookup to settle before starting another.
    */
   watch(
     serviceName: string,
@@ -198,15 +208,22 @@ export class DnsProvider implements DiscoveryProvider {
     let stopped = false;
     let inFlight = false;
     let active: AbortController | undefined;
+    let raw: Promise<readonly ServiceInstance[]> | undefined;
     const tick = async (): Promise<void> => {
-      if (stopped || inFlight) return;
+      if (stopped || inFlight || raw !== undefined) return;
       inFlight = true;
       const local = new AbortController();
       active = local;
       const ms = this.#options.resolveTimeoutMs ?? 2000;
+      const lookup = this.#lookup(serviceName);
+      raw = lookup;
+      const settled = (): void => {
+        if (raw === lookup) raw = undefined;
+      };
+      void lookup.then(settled, settled);
       try {
         const instances = await withDeadline(
-          (signal) => this.resolve(serviceName, AbortSignal.any([signal, local.signal])),
+          (signal) => this.#resolveLookup(lookup, AbortSignal.any([signal, local.signal])),
           {
             timeoutMs: ms,
             timing: resolveProbeTiming(this.#runtime),
@@ -252,6 +269,9 @@ export function isNameAbsent(error: unknown): boolean {
   const visit = (current: unknown, depth: number): boolean => {
     if (depth > 5 || --remaining < 0) return false;
     if (current === null || typeof current !== 'object') return false;
+    const record = current as { code?: unknown; name?: unknown; cause?: unknown };
+    if (record.code !== undefined && record.code !== 'ENOTFOUND' && record.code !== 'ENODATA')
+      return false;
     if (current instanceof AggregateError) {
       const members: unknown[] = current.errors;
       return (
@@ -260,7 +280,6 @@ export function isNameAbsent(error: unknown): boolean {
         members.every((member) => visit(member, depth + 1))
       );
     }
-    const record = current as { code?: unknown; name?: unknown; cause?: unknown };
     // An explicit failure code must not be hidden by an absent nested cause.
     if (record.code !== undefined) return record.code === 'ENOTFOUND' || record.code === 'ENODATA';
     if (record.name === 'NotFound') return true;

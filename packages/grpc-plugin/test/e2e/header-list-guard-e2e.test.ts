@@ -140,3 +140,37 @@ describe.skipIf(typeof Deno !== 'undefined')('header-list guard on a real HTTP/2
     }
   });
 });
+
+it.skipIf(typeof Deno !== 'undefined')(
+  'sends Latin-1 headers that fit a real advertised limit',
+  async () => {
+    const server = createServer({ settings: { maxHeaderListSize: 1600 } });
+    server.on('stream', (stream) => {
+      stream.respond({ ':status': 200 });
+      stream.end('ok');
+    });
+    let client: ClientHttp2Session | undefined;
+    try {
+      const listening = once(server, 'listening');
+      server.listen(0, '127.0.0.1');
+      await listening;
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('No TCP address');
+      client = connect(`http://127.0.0.1:${address.port}`);
+      await once(client, 'remoteSettings');
+      const stream = client.request({ ':path': '/', 'x-latin': 'é'.repeat(1000) });
+      const errors: unknown[] = [];
+      stream.on('error', (error: unknown) => errors.push(error));
+      const session = { request: () => Promise.resolve(stream) };
+      guardHeaderList(session);
+      await session.request();
+      stream.resume();
+      await once(stream, 'end');
+      expect(headerListSize(stream.sentHeaders)).toBeLessThan(1600);
+      expect(errors).toEqual([]);
+    } finally {
+      client?.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  },
+);

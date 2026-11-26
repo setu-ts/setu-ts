@@ -9570,6 +9570,9 @@ cannot be cancelled.
 
 Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across instances.
 
+Breaker accounting skips already-aborted calls. A mid-flight abort records failure only when the
+protected function rejects; a function that ignores its signal and resolves records success.
+
 ---
 
 ## Storage (`@setu-ts/storage-plugin`)
@@ -13849,8 +13852,9 @@ before the socket binds, so the instance is advertised a moment before it can se
 harmless only because Consul marks a newly registered service critical until its first check passes
 and every read here sends `passing=true`.
 
-The Consul default id is `<serviceName>-<address>-<port>`, unique within the agent and stable across
-restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
+The Consul default id is `<serviceName>@<address>:<port>`, stable across restarts. An explicit `id`
+wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%40`; other characters
+(including IPv6 colons) remain readable. Deregistration encodes the whole id in the URL path.
 
 ### Exports
 
@@ -13906,17 +13910,18 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   `service-discovery-plugin: watch listener for '<name>' failed` with the masked error and no
   instance data, once per name until every failing listener has succeeded, unsubscribed, or its
   watch stopped. A read that started before a newer watch delivery neither replaces the delivered
-  list nor marks the name failed or starts retry spacing; its failure is still logged and opens a
-  failure run that the next success closes.
+  list nor marks the name failed or starts retry spacing; a superseded failure opens no outage or
+  recovery log.
 - Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
   await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
   16, then 30 s; success resets spacing. Cold failures are not spaced and leave no cached failure
   state. A name keeps its reporter while its failure run is open and drops it at recovery; at most
-  256 names keep one at once, and a 257th failing name evicts the one whose last failure is oldest.
-  Resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a
-  budget of 20 `warn` lines a minute (past it `debug`, with one notice per minute window); a name
-  with a non-empty list always warns. Per-name reporters warn on first/changed error, debug on
-  identical repeats, info on recovery, with URL userinfo masked. DNS can also log its probe failure.
+  256 cold names keep one at once; a 257th cold failure evicts the least recently failing cold name.
+  Warm names with nonempty lists retain their reporter until recovery. Resolve warnings of names
+  with no non-empty list (never resolved, or only ever empty) share a budget of 20 `warn` lines a
+  minute (past it `debug`, with one notice per minute window); a name with a non-empty list always
+  warns. Per-name reporters warn on first/changed error, debug on identical repeats, info on
+  recovery, with URL userinfo masked. DNS can also log its probe failure.
 - DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through bounded causes and
   aggregates resolve `[]` only when every member says absent; other failures reject and affect
   health. Use a trusted resolver. On Deno SERVFAIL also reads as absence after the grace rule.
@@ -13931,9 +13936,10 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   TTLs are not read: `cacheTtlMs` stays the freshness bound.
 - `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
   Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
-  bounded, never overlap, and arm the interval before the first lookup. An abandoned lookup may keep
-  running in the resolver until its own timeout: the resolver takes no signal. Stopping a watch
-  preserves the prior lookup outcome.
+  bounded and arm the interval before the first lookup. Each watch keeps at most one raw lookup
+  pending, skipping ticks until it settles even after the caller-facing bound. An abandoned lookup
+  may keep running in the resolver until its own timeout: the resolver takes no signal. Stopping a
+  watch preserves the prior lookup outcome.
 - `onClose` stops watches and clears cache, in-flight, retry, reporter and ejection state. Late
   refreshes do not write state.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
@@ -13945,7 +13951,15 @@ restarts. An explicit `id` wins. Deregistration encodes the id in the URL path.
   inside the process. The `http` option is the escape hatch for a caller-supplied TLS-configured
   client.
 
+- Async watch listener rejections follow the same isolated warning path as synchronous throws. A fulfilled listener promise clears its failure without blocking other subscribers. Only the
+  latest call to each listener can settle its failure state; older settlements are ignored. Unsubscribing or
+  closing during a delivery skips removed listeners in the snapshot. Stopping the last watch reapplies
+  the empty-only cap and releases watch sequencing once no older read can settle. `staleForMs` measures time since the last successful refresh that was not a held empty answer;
+  an identical successful list resets that age too. Abandoned or older Kubernetes
+  token reads cannot overwrite newer cached credentials or send after cancellation.
+
 ---
+
 
 ### Health status
 
@@ -16937,7 +16951,8 @@ grpc.addService(AnotherDefinition, anotherImpl);
 
 An instance fails when it did not answer, refused the stream, returned `Unavailable`,
 `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
-server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`.
+server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`,
+except an `Internal` decoded from invalid `grpc-status` metadata.
 The same codes without a server answer fail. A request that makes a healthy handler throw must not
 eject replicas. A replica whose handlers fail every call with `Internal` (a broken dependency, say)
 is not ejected by call outcomes. Take it out through readiness (health checks) instead. On the
@@ -16992,6 +17007,13 @@ Service address pins the session to one pod.
 Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals
 are unchanged.
+
+A wire `Internal` derived from an invalid `grpc-status` is a protocol failure: the metadata's status
+must be decimal 0–16. A valid `grpc-status: 13` remains an application answer. The resend's
+remaining deadline is checked after discovery picks again; an exhausted budget sends nothing and
+records no outcome for that attempt. Header-list size uses Node's Latin-1 encoding, one octet per
+UTF-16 code unit in names and values, plus 32 per field. Bun sends UTF-8, so values above U+007F
+are undercounted there; gRPC metadata values are ASCII by spec.
 
 ### Notes
 
@@ -17112,7 +17134,7 @@ are unchanged.
 - **Descriptors are addressed by their suffixed proto path.** Reflection clients ask for
   `example/echo.proto`; Protobuf-ES's `DescFile.name` drops the `.proto` suffix while `proto.name`
   retains it, and the registry keys on the latter.
-- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
+- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.2.0`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.
 - **No adapter seam.** Since M70a the kernel dispatches gRPC from its terminal handler after the

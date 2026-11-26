@@ -222,13 +222,13 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     NAME, built like the probe's (`service-discovery-plugin.ts:83-86`) with source
     `service-discovery-plugin: <kind> resolve '<serviceName>'`, created on the name's first failure
     kept while its failure run is open, across cold and warm failures (repeats at `debug`, recovery
-    at `info`), dropped at recovery, bounded at 256 concurrently failing names, and dropped by
-    `close()`. One shared reporter cannot warn once per run: it deduplicates by the last rendered
-    message only (`connection-errors.ts:136-152`), so two failing names alternate and each repeat
-    warns again. The plugin passes the service a factory `(serviceName) => ConnectionErrorReporter`.
-    The probe's reporter is unchanged; for the DNS arm the probe re-reports the last lookup's error
-    (§3.5), so one DNS fault can produce one line from each reporter, which is accepted and stated
-    in the README. Verified behaviour of that reporter
+    at `info`), dropped at recovery, bounded at 256 concurrently failing cold names; warm reporters
+    are protected, and dropped by `close()`. One shared reporter cannot warn once per run: it
+    deduplicates by the last rendered message only (`connection-errors.ts:136-152`), so two failing
+    names alternate and each repeat warns again. The plugin passes the service a factory
+    `(serviceName) => ConnectionErrorReporter`. The probe's reporter is unchanged; for the DNS arm
+    the probe re-reports the last lookup's error (§3.5), so one DNS fault can produce one line from
+    each reporter, which is accepted and stated in the README. Verified behaviour of that reporter
     (`packages/common/src/health/connection-errors.ts:15-17`, `:133-163`): the first error of a run,
     or an error whose rendered text differs from the previous one, at `warn`; an identical repeat at
     `debug` with a count; the first success after errors at `info`. The read is reported with
@@ -338,8 +338,9 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
 
 ### 3.3 A stable default Consul registration id (V13-103)
 
-- **Decision:** `selfId` defaults to `` `${serviceName}-${address}-${port}` `` when
-  `registration.id` is absent. The memo per registration object stays. The `SelfRegistration.id`
+- **Decision:** `selfId` defaults to `` `${serviceName}@${address}:${port}` `` when
+  `registration.id` is absent; `%` and `@` within the service name and address become `%25` and
+  `%40`, with no other escaping. The memo per registration object stays. The `SelfRegistration.id`
   JSDoc, README and PUBLIC_API say: unique within the agent, and the same across restarts so a
   restarted process replaces its own entry. `deregisterSelf` already puts the id in the URL path
   through `encodeURIComponent` (`consul-provider.ts:252`); a test pins it, because an IPv6 address
@@ -350,7 +351,7 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   collides across hosts, which is why the address is part of this id. Two live processes cannot
   share an address and port, so the id stays unique, and a restart on the same address re-registers
   over its orphan. No option is added: `id` already exists for anything else.
-- **Test home:** `test/unit/consul-provider.test.ts` (default id is `<name>-<address>-<port>`, the
+- **Test home:** `test/unit/consul-provider.test.ts` (default id is `<name>@<address>:<port>`, the
   explicit id wins, deregistration uses the same id, an IPv6 address is encoded in the deregister
   path); `test/integration/self-registration.test.ts` (two plugin instances in sequence on one fake
   agent with the same registration: the agent holds one entry).
@@ -435,7 +436,8 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     the README), and trips when the window holds at least `minimumCalls` calls and
     `failures * 100 / calls >= failureRateThreshold`. Cancellation is counted as today on both arms:
     a call whose signal was already aborted is not recorded (`circuit-breaker.ts:69-71`); a call
-    aborted mid-flight is recorded as a failure (`:88-92`). Half-open is unchanged.
+    aborted mid-flight is recorded as a failure only if the protected call rejects; a call that
+    ignores the signal and resolves records success (`:88-92`). Half-open is unchanged.
   - `ResilienceService` validates a breaker policy at `wrap()` and `ResiliencePlugin()` with a
     `RangeError` naming the field, through `common`'s `breakerPolicyRangeError(policy)` (exported by
     the Core PR; `validateCircuitBreakerPolicy` in `patterns/circuit-breaker.ts` becomes a call to
@@ -477,12 +479,13 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   Hystrix do (ten buckets). A union, rather than optional fields beside a required `threshold`,
   avoids a required field that the rate arm would never read (the dead-surface rule).
 - **Test home:** `test/unit/circuit-breaker.test.ts` (the count arm's existing cases unchanged,
-  including a mid-flight abort recorded as a failure; the rate arm: below `minimumCalls` never
-  trips, at the rate trips, old buckets expire on the fake clock, one failing instance in three at
-  high volume does not trip at 50 %); (bucket rotation and sums are tested in `common` with the
-  primitive, §11); `test/unit/resilience-service.test.ts` (each refusal row; a rate policy through
-  `wrap` and through `circuitBreaker: true` with a rate default, the two entry points under the same
-  non-default policy give the same trips).
+  including a mid-flight abort recorded as failure when the protected function rejects (success if
+  it resolves); the rate arm: below `minimumCalls` never trips, at the rate trips, old buckets
+  expire on the fake clock, one failing instance in three at high volume does not trip at 50 %);
+  (bucket rotation and sums are tested in `common` with the primitive, §11);
+  `test/unit/resilience-service.test.ts` (each refusal row; a rate policy through `wrap` and through
+  `circuitBreaker: true` with a rate default, the two entry points under the same non-default policy
+  give the same trips).
 
 ### 3.8 `grpcClient` reports every fault that is the instance's as an instance failure (V13-25)
 
@@ -694,6 +697,23 @@ because the drain answer is written through the application's error responder wh
   `test/e2e/grpc-streaming-e2e.test.ts` (extend): a streaming row through a running kernel app and
   `inject()`: a server-stream handler awaiting its next event is cancelled by `body.cancel()` and
   its `finally` runs.
+
+### Review corrections (PR #618)
+
+- Consul ids use `<serviceName>@<address>:<port>`, escaping `%` and `@` within the two string
+  components as `%25` and `%40`; explicit ids win. This replaces the ambiguous hyphen tuple.
+- Connect/connect-node require ^2.2.0. Invalid grpc-status metadata is a protocol failure; valid
+  status 13 remains an application answer. Node header-list accounting uses Latin-1 code units. A
+  resend rechecks its deadline after pick and skips transport/reporting if the budget expired.
+- DNS aggregate explicit non-absence codes win; every member must still be absent. Watch ticks
+  retain one raw lookup until it settles, even after their caller-facing timeout.
+- Cancelled or older token reads cannot replace a newer Kubernetes token memo or send after abort.
+- Queued watch setup skips a closed watch; teardown reapplies the empty-only cap. Async listener
+  rejections use the same isolated warning path. Only the latest call to each listener may settle
+  its failure state; older async settlements are ignored. Broadcast skips removed listeners. Only cold
+  reporters are capped at 256; warm reporters survive cold churn. A held empty answer preserves
+  served-list age separately from refresh freshness. Comparisons read every ServiceInstance field.
+  Superseded read failures open no outage. Watch sequences are released only after reads settle.
 
 ### 3.12 Security audit fixes (committed-tree audit of 73e025603, 2026-11-23)
 
@@ -917,7 +937,7 @@ OD4b). Core states its own line. Ships in minor 0.14.0.
 | `service-discovery-plugin/test/unit/refresh-backoff.test.ts` (new)                | `refresh-backoff.ts`                     | 1, 2, 4, 8, 16, 30, 30 s spacing on a fake clock; reset on success; names independent.                                                                                                         |
 | `service-discovery-plugin/test/unit/empty-answer-rule.test.ts` (new)              | `service-discovery-service.ts`           | §3.2 table through `resolve()` and `watch()`.                                                                                                                                                  |
 | `service-discovery-plugin/test/unit/options.test.ts` (extend)                     | `options.ts`                             | Defaults `2000`/`30_000`, `0` accepted, `-1`/`NaN`/over range refused; `servers` shape refused.                                                                                                |
-| `service-discovery-plugin/test/unit/consul-provider.test.ts` (extend)             | `consul-provider.ts`                     | Signal on `request`; default id `<name>-<address>-<port>`.                                                                                                                                     |
+| `service-discovery-plugin/test/unit/consul-provider.test.ts` (extend)             | `consul-provider.ts`                     | Signal on `request`; default id `<name>@<address>:<port>`.                                                                                                                                     |
 | `service-discovery-plugin/test/unit/providers/consul-health.test.ts` (extend)     | `consul-provider.ts`                     | Probe bound through `withDeadline`; results unchanged.                                                                                                                                         |
 | `service-discovery-plugin/test/unit/kubernetes-provider.test.ts` (extend)         | `kubernetes-provider.ts`                 | Signal on `request` in `resolve`.                                                                                                                                                              |
 | `service-discovery-plugin/test/unit/providers/kubernetes-health.test.ts` (extend) | `kubernetes-provider.ts`                 | Named bound message, no `AbortError`.                                                                                                                                                          |

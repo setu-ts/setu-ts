@@ -85,7 +85,8 @@ const INVALID_REQUEST_HEADER_CODES: ReadonlySet<string> = new Set([
  * Reports failure for no server answer, a refused stream, `Unavailable`,
  * `Unimplemented`, `DeadlineExceeded` (wire or not), or the peer's own `Canceled`.
  * Every other server answer reports success, including `Internal`, `Unknown`
- * and `DataLoss`: a request that makes a healthy handler throw must not eject
+ * and `DataLoss`, except Internal decoded from invalid grpc-status metadata:
+ * a request that makes a healthy handler throw must not eject
  * replicas. The same codes without a server answer fail. Caller cancellation
  * and the client faults `isPreSendFault` recognises report nothing, including
  * oversized headers refused on an open session when no header-list limit was
@@ -112,8 +113,17 @@ export function callOutcome(
   if (!wire && isExcessiveLoadReset(error)) return undefined;
   if (typeof code === 'number' && FAILURE_CODES.has(code)) return 'failure';
   if (code === GRPC_CODE.Canceled) return 'failure';
+  if (wire && code === GRPC_CODE.Internal && hasInvalidGrpcStatus(error)) return 'failure';
   if (typeof code === 'number' && wire && WIRE_SUCCESS_CODES.has(code)) return 'success';
   return 'failure';
+}
+
+/** Invalid peer statuses are protocol failures even though Connect marks them as wire errors. */
+function hasInvalidGrpcStatus(error: unknown): boolean {
+  const metadata = (error as { metadata?: unknown }).metadata;
+  if (!(metadata instanceof Headers)) return false;
+  const status = metadata.get('grpc-status');
+  return status !== null && (!/^[0-9]+$/.test(status) || Number(status) > 16);
 }
 
 /**

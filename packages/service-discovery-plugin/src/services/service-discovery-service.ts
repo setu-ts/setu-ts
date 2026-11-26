@@ -42,6 +42,8 @@ const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} }
 interface CacheEntry {
   instances: readonly ServiceInstance[];
   stampMs: number;
+  servedSinceMs: number;
+  snapshot: readonly ReturnType<typeof snapshotInstance>[];
   failed: boolean;
   emptySince?: number;
 }
@@ -80,6 +82,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #resolveReporters = new Map<string, ConnectionErrorReporter>();
   readonly #resolveReporter: (name: string, warm: boolean) => ConnectionErrorReporter;
   readonly #onListenerError: (name: string, error: unknown) => void;
+  readonly #listenerCalls = new WeakMap<(instances: readonly ServiceInstance[]) => void, number>();
   readonly #listenerFailures = new Map<
     string,
     Set<(instances: readonly ServiceInstance[]) => void>
@@ -168,7 +171,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   get staleForMs(): number {
     let age = 0;
     for (const entry of this.#cache.values()) {
-      if (entry.failed) age = Math.max(age, this.#runtime.hrtime() - entry.stampMs);
+      if (entry.failed) age = Math.max(age, this.#runtime.hrtime() - entry.servedSinceMs);
     }
     return age;
   }
@@ -230,6 +233,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     const read = this.#read(serviceName).finally(() => {
       if (this.#inFlight.get(serviceName) === read) this.#inFlight.delete(serviceName);
       this.#scheduleEmptyRefresh(serviceName);
+      if (!this.#inFlight.has(serviceName) && !this.#nameWatches.has(serviceName))
+        this.#watchSequences.delete(serviceName);
     });
     this.#inFlight.set(serviceName, read);
     return read;
@@ -282,23 +287,25 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       const created = state;
       created.ready = Promise.resolve()
         .then(() =>
-          this.#provider.watch(serviceName, (instances) => {
-            if (!created.closed) {
-              this.#watchSequences.set(
-                serviceName,
-                (this.#watchSequences.get(serviceName) ?? 0) + 1,
-              );
-              const accepted = this.#accept(serviceName, instances);
-              this.#broadcast(serviceName, accepted.instances);
-            }
-          }),
+          created.closed
+            ? () => {}
+            : this.#provider.watch(serviceName, (instances) => {
+                if (!created.closed) {
+                  this.#watchSequences.set(
+                    serviceName,
+                    (this.#watchSequences.get(serviceName) ?? 0) + 1,
+                  );
+                  const accepted = this.#accept(serviceName, instances);
+                  this.#broadcast(serviceName, accepted.instances);
+                }
+              }),
         )
         .then((stop) => {
           created.stop = stop;
           if (created.closed) stop();
         });
     }
-    const subscribed = (instances: readonly ServiceInstance[]): void => listener(instances);
+    const subscribed = (instances: readonly ServiceInstance[]): unknown => listener(instances);
     state.listeners.add(subscribed);
     try {
       const cached = this.#cache.get(serviceName);
@@ -348,6 +355,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#listenerFailures.delete(name);
     if (this.#nameWatches.get(name) === state) this.#nameWatches.delete(name);
     state.stop?.();
+    if (!this.#inFlight.has(name)) this.#watchSequences.delete(name);
+    if (!this.#closed) this.#evictEmptyOnly();
   }
 
   #clearEmptyTimer(name: string): void {
@@ -393,30 +402,61 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     listener: (instances: readonly ServiceInstance[]) => void,
     instances: readonly ServiceInstance[],
   ): void {
+    const call = (this.#listenerCalls.get(listener) ?? 0) + 1;
+    this.#listenerCalls.set(listener, call);
+    const current = (): boolean =>
+      this.#listenerCalls.get(listener) === call &&
+      this.#nameWatches.get(name)?.listeners.has(listener) === true;
     try {
-      listener(instances);
-      this.#forgetListener(name, listener);
+      const result: unknown = listener(instances);
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        'then' in result &&
+        typeof result.then === 'function'
+      ) {
+        void Promise.resolve(result).then(
+          () => {
+            if (current())
+              this.#forgetListener(name, listener);
+          },
+          (error: unknown) => {
+            if (current())
+              this.#listenerFailed(name, listener, error);
+          },
+        );
+      } else if (current()) this.#forgetListener(name, listener);
     } catch (error) {
-      const failed =
-        this.#listenerFailures.get(name) ??
-        new Set<(instances: readonly ServiceInstance[]) => void>();
-      const warn = failed.size === 0;
-      failed.add(listener);
-      this.#listenerFailures.set(name, failed);
-      if (warn) {
-        try {
-          this.#onListenerError(name, error);
-        } catch {
-          /* A diagnostic sink must not change discovery or skip subscribers. */
-        }
+      if (current()) this.#listenerFailed(name, listener, error);
+    }
+  }
+
+  #listenerFailed(
+    name: string,
+    listener: (instances: readonly ServiceInstance[]) => void,
+    error: unknown,
+  ): void {
+    const failed =
+      this.#listenerFailures.get(name) ??
+      new Set<(instances: readonly ServiceInstance[]) => void>();
+    const warn = failed.size === 0;
+    failed.add(listener);
+    this.#listenerFailures.set(name, failed);
+    if (warn) {
+      try {
+        this.#onListenerError(name, error);
+      } catch {
+        /* A diagnostic sink must not change discovery or skip subscribers. */
       }
     }
   }
 
   #broadcast(name: string, instances: readonly ServiceInstance[]): void {
     const state = this.#nameWatches.get(name);
-    for (const listener of [...(state?.listeners ?? [])])
-      this.#invokeListener(name, listener, instances);
+    for (const listener of [...(state?.listeners ?? [])]) {
+      if (state?.closed || this.#nameWatches.get(name) !== state) break;
+      if (state?.listeners.has(listener)) this.#invokeListener(name, listener, instances);
+    }
   }
 
   #resolveReporterFor(name: string): ConnectionErrorReporter {
@@ -427,15 +467,17 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     const reporter = this.#resolveReporters.get(name) ?? this.#resolveReporter(name, warm);
     this.#resolveReporters.delete(name);
     this.#resolveReporters.set(name, reporter);
-    if (this.#resolveReporters.size > 256)
-      this.#resolveReporters.delete(this.#resolveReporters.keys().next().value!);
+    const cold = [...this.#resolveReporters.keys()].filter(
+      (key) => (this.#cache.get(key)?.instances.length ?? 0) === 0,
+    );
+    if (cold.length > 256) this.#resolveReporters.delete(cold[0]!);
     return reporter;
   }
 
   #readSucceeded(name: string): void {
     this.#backoff.reset(name);
     // The reporter lives only while the name's failure run is open, so the
-    // 256 bound counts names failing now, never names that recovered long ago.
+    // cold-name bound counts failures open now, never recovered or warm names.
     const reporter = this.#resolveReporters.get(name);
     if (reporter !== undefined) {
       this.#resolveReporters.delete(name);
@@ -450,7 +492,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * failing one only when no other is left; an evicted name's retry spacing
    * and reporter go with it. Watched names can keep the set above the cap.
    */
-  #evictEmptyOnly(current: string): void {
+  #evictEmptyOnly(current?: string): void {
     while (this.#emptyOnly.size > MAX_EMPTY_ONLY_NAMES) {
       const name =
         this.#evictableEmptyOnly(current, false) ?? this.#evictableEmptyOnly(current, true);
@@ -463,7 +505,7 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   /** The oldest evictable empty-only name; failing ones only when allowed. */
-  #evictableEmptyOnly(current: string, failing: boolean): string | undefined {
+  #evictableEmptyOnly(current: string | undefined, failing: boolean): string | undefined {
     for (const name of this.#emptyOnly) {
       if (name === current || this.#nameWatches.has(name)) continue;
       if (!failing && this.#cache.get(name)?.failed === true) continue;
@@ -497,6 +539,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#cache.set(serviceName, {
       instances: accepted,
       stampMs: now,
+      servedSinceMs: held ? old.servedSinceMs : now,
+      snapshot: accepted.map(snapshotInstance),
       failed: false,
       ...(held ? { emptySince } : {}),
     });
@@ -504,7 +548,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#evictEmptyOnly(serviceName);
     if (held) this.#scheduleEmptyRefresh(serviceName);
     else this.#clearEmptyTimer(serviceName);
-    const changed = old === undefined || JSON.stringify(old.instances) !== JSON.stringify(accepted);
+    const changed =
+      old === undefined || !sameInstances(old.snapshot, this.#cache.get(serviceName)!.snapshot);
     return { instances: accepted, changed };
   }
 
@@ -523,15 +568,15 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
       });
     } catch (error) {
       if (!this.#closed) {
-        const reporter = this.#resolveReporterFor(serviceName);
-        reporter.report(error);
         const stale = this.#cache.get(serviceName);
         // A newer watch delivery arrived while this read was in flight: the
         // list in hand is fresher than the failed read, so it is not marked
         // failed and no retry spacing starts.
-        if (stale !== undefined && (this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
-          return stale.instances;
+        if ((this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
+          // An evicted watch entry was empty-only, so its newest answer is still [].
+          return stale?.instances ?? [];
         }
+        this.#resolveReporterFor(serviceName).report(error);
         if (stale !== undefined) {
           stale.failed = true;
           this.#backoff.failed(serviceName);
@@ -559,10 +604,55 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     if (this.#closed) return instances;
     if ((this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
       this.#readSucceeded(serviceName);
-      return this.#cache.get(serviceName)?.instances ?? instances;
+      return this.#cache.get(serviceName)?.instances ?? [];
     }
     const accepted = this.#accept(serviceName, instances);
     if (accepted.changed) this.#broadcast(serviceName, accepted.instances);
     return accepted.instances;
   }
+}
+
+/** Read the committed ServiceInstance fields, including prototype accessors. */
+function snapshotInstance(instance: ServiceInstance) {
+  return {
+    id: instance.id,
+    serviceName: instance.serviceName,
+    host: instance.host,
+    port: instance.port,
+    secure: instance.secure,
+    weight: instance.weight,
+    tags: instance.tags === undefined ? undefined : [...instance.tags],
+    metadata: instance.metadata === undefined ? undefined : { ...instance.metadata },
+  };
+}
+
+/** Compare field values; object identity and property enumerability do not define a change. */
+function sameInstances(
+  before: readonly ReturnType<typeof snapshotInstance>[],
+  after: readonly ReturnType<typeof snapshotInstance>[],
+): boolean {
+  return (
+    before.length === after.length &&
+    before.every((a, index) => {
+      const b = after[index]!;
+      return (
+        a.id === b.id &&
+        a.serviceName === b.serviceName &&
+        a.host === b.host &&
+        a.port === b.port &&
+        a.secure === b.secure &&
+        a.weight === b.weight &&
+        (a.tags === undefined
+          ? b.tags === undefined
+          : b.tags !== undefined &&
+            a.tags.length === b.tags.length &&
+            a.tags.every((tag, i) => tag === b.tags![i])) &&
+        (a.metadata === undefined
+          ? b.metadata === undefined
+          : b.metadata !== undefined &&
+            Object.keys(a.metadata).length === Object.keys(b.metadata).length &&
+            Object.entries(a.metadata).every(([key, value]) => b.metadata![key] === value))
+      );
+    })
+  );
 }

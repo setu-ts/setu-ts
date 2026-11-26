@@ -12,11 +12,11 @@
   "imports": {
     "@bufbuild/protobuf": "npm:@bufbuild/protobuf@^2.7.0",
     "@bufbuild/protobuf/wkt": "npm:@bufbuild/protobuf@^2.7.0/wkt",
-    "@connectrpc/connect": "npm:@connectrpc/connect@^2.1.2",
-    "@connectrpc/connect-node": "npm:@connectrpc/connect-node@^2.1.2",
-    "@connectrpc/connect/protocol": "npm:@connectrpc/connect@^2.1.2/protocol",
-    "@connectrpc/connect/protocol-connect": "npm:@connectrpc/connect@^2.1.2/protocol-connect",
-    "@connectrpc/connect/protocol-grpc": "npm:@connectrpc/connect@^2.1.2/protocol-grpc",
+    "@connectrpc/connect": "npm:@connectrpc/connect@^2.2.0",
+    "@connectrpc/connect-node": "npm:@connectrpc/connect-node@^2.2.0",
+    "@connectrpc/connect/protocol": "npm:@connectrpc/connect@^2.2.0/protocol",
+    "@connectrpc/connect/protocol-connect": "npm:@connectrpc/connect@^2.2.0/protocol-connect",
+    "@connectrpc/connect/protocol-grpc": "npm:@connectrpc/connect@^2.2.0/protocol-grpc",
     "vitest": "npm:vitest@5.0.3"
   }
 }

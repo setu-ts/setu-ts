@@ -8,9 +8,6 @@
  */
 import { GrpcHeaderListTooLargeError } from '../errors/grpc-errors.ts';
 
-/** One encoder for every size computation. */
-const ENCODER = new TextEncoder();
-
 /** Node's `maxHeaderListSize` default before SETTINGS or when no limit is advertised. */
 const NO_ADVERTISED_LIMIT = 4294967295;
 
@@ -91,8 +88,10 @@ export interface GuardableSessionLike {
 
 /**
  * A header list's size as RFC 7541 §4.1 defines it: for each field, the
- * name's and the value's octets plus 32. A multi-value field counts once per
- * value, as it is sent.
+ * name's and the value's octets plus 32. Node sends Latin-1: one octet per
+ * UTF-16 code unit. Bun sends UTF-8, so values above U+007F are undercounted
+ * there; gRPC metadata values are ASCII by spec. A multi-value field counts
+ * once per value, as it is sent.
  *
  * @param headers - The header list, as `ClientHttp2Stream.sentHeaders` holds it
  * @returns The size in octets
@@ -103,7 +102,7 @@ export function headerListSize(headers: Readonly<Record<string, unknown>>): numb
     const values = Array.isArray(value) ? (value as unknown[]) : [value];
     for (const one of values) {
       if (one === undefined) continue;
-      size += ENCODER.encode(name).length + ENCODER.encode(String(one)).length + 32;
+      size += name.length + String(one).length + 32;
     }
   }
   return size;

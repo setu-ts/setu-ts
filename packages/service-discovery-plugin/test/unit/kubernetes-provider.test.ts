@@ -420,3 +420,48 @@ it('forwards the resolve signal to the API request', async () => {
   await provider.resolve('billing', controller.signal);
   expect(http.calls[0].init?.signal).toBe(controller.signal);
 });
+
+for (const aborted of [false, true]) {
+  it(`does not let an older token read replace a newer cached token (aborted=${aborted})`, async () => {
+    const { fs } = tokenFs(['new-token']);
+    let finish!: (bytes: Uint8Array) => void;
+    let reads = 0;
+    fs.readFile = () =>
+      ++reads === 1
+        ? new Promise<Uint8Array>((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve(new TextEncoder().encode('new-token'));
+    const runtime = createFakeRuntime({ fs });
+    const http = createFakeHttp();
+    const { provider } = setup({}, http, runtime);
+    const controller = new AbortController();
+    const old = provider.resolve('old', controller.signal).catch((error: unknown) => error);
+    runtime.advance(100);
+    if (aborted) controller.abort(new Error('expired'));
+    await provider.resolve('new');
+    finish(new TextEncoder().encode('old-token'));
+    await old;
+    expect(await provider.authHeader()).toBe('Bearer new-token');
+    expect(http.calls).toHaveLength(aborted ? 1 : 2);
+    expect(reads).toBe(2);
+  });
+}
+it('does not send a probe after its token read exceeded the deadline', async () => {
+  const { fs } = tokenFs([]);
+  let finish!: (bytes: Uint8Array) => void;
+  fs.readFile = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  const runtime = createFakeRuntime({ fs });
+  const { provider, http } = setup({}, createFakeHttp(), runtime);
+  const result = provider.isHealthy().catch((error: unknown) => error);
+  for (let n = 0; n < 30; n++) await Promise.resolve();
+  runtime.advance(2000);
+  runtime.runTimeouts();
+  await expect(result).resolves.toBeInstanceOf(Error);
+  finish(new TextEncoder().encode('abandoned'));
+  for (let n = 0; n < 30; n++) await Promise.resolve();
+  expect(http.calls).toEqual([]);
+});

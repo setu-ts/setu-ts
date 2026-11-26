@@ -311,10 +311,6 @@ function flush(times = 30): Promise<void> {
   return chain;
 }
 
-async function flushOutcomes(): Promise<void> {
-  for (let n = 0; n < 30; n++) await Promise.resolve();
-}
-
 describe('DNS lookup outcomes', () => {
   it('records even a rejection with no value, and observes an abort raised during lookup startup', async () => {
     const options = {
@@ -402,17 +398,22 @@ describe('DNS lookup outcomes', () => {
     controller.abort(error);
     await expect(call).rejects.toBe(error);
     finish(['10.0.0.1']);
-    await flushOutcomes();
+    await flush();
     await expect(provider.isHealthy()).rejects.toBe(error);
     await expect(provider.resolve('billing', controller.signal)).rejects.toBe(error);
   });
-  it('arms the interval before the first tick, skips overlap, and retries after its bound', async () => {
+  it('arms the interval before the first tick, skips raw overlap after its bound, and retries after the lookup settles', async () => {
     const runtime = createFakeRuntime();
     let calls = 0;
+    let finish!: (list: string[]) => void;
     const resolver = {
       resolveHost: () => {
         calls++;
-        return calls === 1 ? new Promise<never>(() => {}) : Promise.resolve(['10.0.0.1']);
+        return calls === 1
+          ? new Promise<string[]>((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve(['10.0.0.1']);
       },
       resolveSrv: () => Promise.resolve([]),
     };
@@ -426,15 +427,20 @@ describe('DNS lookup outcomes', () => {
     const seen: unknown[] = [];
     const stop = await provider.watch('billing', (list) => seen.push(list));
     expect(runtime.intervals).toHaveLength(1);
-    await flushOutcomes();
+    await flush();
     runtime.runIntervals();
-    await flushOutcomes();
+    await flush();
     expect(calls).toBe(1);
     runtime.runTimeouts();
-    await flushOutcomes();
+    await flush();
     await expect(provider.isHealthy()).rejects.toThrow('within 50 ms');
     runtime.runIntervals();
-    await flushOutcomes();
+    await flush();
+    expect(calls).toBe(1);
+    finish(['late']);
+    await flush();
+    runtime.runIntervals();
+    await flush();
     expect(calls).toBe(2);
     expect(seen).toHaveLength(1);
     expect(await provider.isHealthy()).toBe(true);
@@ -466,12 +472,14 @@ for (const previousFailure of [false, true]) {
     });
     await provider.resolve('billing').catch(() => {});
     hung = true;
-    const stop = await provider.watch('billing', () => {
-      throw new Error('hung tick delivered');
+    const deliveries: unknown[] = [];
+    const stop = await provider.watch('billing', (list) => {
+      deliveries.push(list);
     });
-    await flushOutcomes();
+    await flush();
     stop();
-    await flushOutcomes();
+    await flush();
+    expect(deliveries).toEqual([]);
     if (previousFailure) await expect(provider.isHealthy()).rejects.toBe(error);
     else expect(await provider.isHealthy()).toBe(true);
     expect(runtime.timeouts.every((timer) => timer.cleared)).toBe(true);
@@ -500,7 +508,50 @@ it('accepts a directly constructed DNS watch with an unbounded tick', async () =
     resolveTimeoutMs: 0,
   });
   const stop = await provider.watch('billing', () => {});
-  await flushOutcomes();
+  await flush();
   stop();
   expect(runtime.timeouts).toHaveLength(0);
 });
+
+it('does not hide an aggregate timeout behind absent members or hide failed members behind an absent code', () => {
+  const absent = Object.assign(new Error('absent'), { code: 'ENODATA' });
+  const timed = Object.assign(new AggregateError([absent]), { code: 'ETIMEOUT' });
+  expect(isNameAbsent(timed)).toBe(false);
+  expect(
+    isNameAbsent(Object.assign(new AggregateError([new Error('failed')]), { code: 'ENODATA' })),
+  ).toBe(false);
+});
+for (const mode of ['a', 'srv'] as const) {
+  it(`keeps only one raw ${mode} lookup pending across bounded watch intervals`, async () => {
+    let calls = 0;
+    const hung = () => {
+      calls++;
+      return new Promise<never>(() => {});
+    };
+    const runtime = createFakeRuntime();
+    const provider = new DnsProvider({ resolveHost: hung, resolveSrv: hung }, runtime, {
+      mode,
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+      resolveTimeoutMs: 50,
+    });
+    const seen: unknown[] = [];
+    const stop = await provider.watch('billing', (list) => seen.push(list));
+    await flush();
+    runtime.advance(50);
+    runtime.runTimeouts();
+    await flush();
+    for (let n = 0; n < 5; n++) {
+      runtime.advance(100);
+      runtime.runIntervals();
+      await flush();
+      runtime.runTimeouts();
+      await flush();
+    }
+    expect(calls).toBe(1);
+    expect(seen).toEqual([]);
+    await expect(provider.isHealthy()).rejects.toThrow('within 50 ms');
+    stop();
+  });
+}

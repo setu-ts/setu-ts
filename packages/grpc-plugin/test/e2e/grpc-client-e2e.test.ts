@@ -129,9 +129,10 @@ describeNode('grpcClient — a member calling another through the plugin', () =>
     ]);
     const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
     const counts = new Map<string, number>();
+    const outcomes: string[] = [];
     const report = discovery.report.bind(discovery);
     discovery.report = (instance, outcome) => {
-      expect(outcome).toBe('success');
+      outcomes.push(outcome);
       counts.set(instance.id, (counts.get(instance.id) ?? 0) + 1);
       report(instance, outcome);
     };
@@ -139,6 +140,7 @@ describeNode('grpcClient — a member calling another through the plugin', () =>
     const client = grpcClient(caller.services, echo as never, 'echo') as unknown as EchoClient;
     for (let n = 0; n < 100; n++)
       expect((await client.echo({ message: 'balanced' })).response).toContain('echo: balanced');
+    expect(outcomes).toEqual(Array.from({ length: 100 }, () => 'success'));
     expect(counts.size).toBe(2);
     for (const count of counts.values()) {
       expect(count).toBeGreaterThanOrEqual(40);

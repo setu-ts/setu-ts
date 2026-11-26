@@ -3,7 +3,7 @@
 **Add:** `setu add service-discovery`; register in `setu.config.ts`. Provides
 `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
 
-## Configure a static service pool
+## Static pool
 
 ```ts
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
@@ -16,7 +16,7 @@ export const discovery = ServiceDiscoveryPlugin({
 });
 ```
 
-## Resolve a URL
+## URL
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -35,7 +35,7 @@ export function registerBillingRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour
+## Rules
 
 - `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
   return `null` when empty. Default: round-robin.
@@ -49,10 +49,10 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - Data `degraded` (status stays `up`): warm failures/held empties. `staleForMs`: failed-list age.
   All providers cache health for 5 s; DNS uses its last lookup outcome. DNS absent names resolve
   `[]`; other errors reject.
-- Failing names keep a reporter (max 256; 20 cold warns/min). At most 256 unwatched empty-only names
-  stay cached. Listener errors are isolated, warn once. Failed reads older than a watch delivery
-  keep its list.
-- Consul ids default to `<serviceName>-<address>-<port>` (own address).
+- Warm reporters survive cold failures (256 cold reporters; 20 cold warns/min). At most 256
+  unwatched empty-only names stay cached. Sync/async listener errors are isolated, warn once.
+  Superseded reads open no outage.
+- Consul ids default to `<serviceName>@<address>:<port>`; escape `%`/`@` as `%25`/`%40`.
 - Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears state.
 
 Providers: static/consul/kubernetes/dns/custom. Strategies: random/weighted-random.

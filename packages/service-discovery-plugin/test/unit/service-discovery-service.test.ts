@@ -286,8 +286,9 @@ describe('ServiceDiscoveryService — cache', () => {
     await service.resolve('billing');
     await service.resolve('billing');
     await flush();
+    const calls = provider.resolveCalls;
     await service.resolve('billing');
-    expect(provider.resolveCalls).toBeGreaterThanOrEqual(2);
+    expect(provider.resolveCalls).toBe(calls + 1);
   });
 
   it('coalesces concurrent reads of a cold service into one provider call', async () => {

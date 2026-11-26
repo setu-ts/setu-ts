@@ -220,3 +220,15 @@ describe('CircuitBreaker — the rate arm', () => {
     expect(active.state).toBe('open');
   });
 });
+
+it('records success when a protected call ignores a mid-flight abort and resolves', async () => {
+  const breaker = new CircuitBreaker({ threshold: 1, timeout: 1000, resetTimeout: 1000 }, () => 0);
+  const controller = new AbortController();
+  await expect(
+    breaker.execute(() => {
+      controller.abort(new Error('cancelled'));
+      return Promise.resolve('ok');
+    }, controller.signal),
+  ).resolves.toBe('ok');
+  expect(breaker.state).toBe('closed');
+});

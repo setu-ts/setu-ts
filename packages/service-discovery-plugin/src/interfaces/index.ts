@@ -109,7 +109,7 @@ export interface SelfRegistrationCheck {
 export interface SelfRegistration {
   /** Logical service name other applications resolve. */
   readonly serviceName: string;
-  /** Instance id, unique within the agent and stable across restarts. Defaults to `<serviceName>-<address>-<port>`. */
+  /** Instance id, stable across restarts. Defaults to `<serviceName>@<address>:<port>`, with `%` and `@` escaped as `%25` and `%40` within the name and address. */
   readonly id?: string;
   /** Address other applications should reach this instance on. */
   readonly address: string;

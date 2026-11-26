@@ -18,7 +18,7 @@ describe('headerListSize', () => {
     expect(headerListSize({ ':path': '/x' })).toBe(5 + 2 + 32);
     expect(headerListSize({ a: ['1', '22'] })).toBe(1 + 1 + 32 + (1 + 2 + 32));
     expect(headerListSize({ 'x-é': 'ü', skipped: undefined, n: 7 })).toBe(
-      4 + 2 + 32 + (1 + 1 + 32),
+      3 + 1 + 32 + (1 + 1 + 32),
     );
   });
 });
@@ -358,4 +358,13 @@ describe('guardHeaderList', () => {
       ),
     ).toBe('failure');
   });
+});
+
+it('keeps a Latin-1 list that fits the advertised peer limit', async () => {
+  const stream = streamWith({ 'x-latin': 'é'.repeat(1000) }, 1600);
+  const session = sessionFor(stream);
+  guardHeaderList(session);
+  await session.request();
+  expect(headerListSize(stream.sentHeaders!)).toBe(1039);
+  expect(stream.destroyedWith).toEqual([]);
 });

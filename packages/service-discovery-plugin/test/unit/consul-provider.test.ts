@@ -225,10 +225,12 @@ describe('ConsulProvider — self registration', () => {
     await provider.deregisterSelf(anonymous);
 
     const id = JSON.parse(String(http.calls[0].init?.body)).ID as string;
-    expect(id).toBe('orders-10.0.0.7-3000');
+    expect(id).toBe('orders@10.0.0.7:3000');
     // Deregistering must target the id that was actually registered — a fresh
     // uuid here would leave the instance advertised forever.
-    expect(http.calls[1].url).toBe(`http://consul:8500/v1/agent/service/deregister/${id}`);
+    expect(http.calls[1].url).toBe(
+      `http://consul:8500/v1/agent/service/deregister/${encodeURIComponent(id)}`,
+    );
   });
 
   it('deregisters by instance id', async () => {
@@ -297,6 +299,35 @@ it('forwards the read signal and encodes an IPv6 stable registration id', async 
   const registration = { serviceName: 'orders', address: 'fe80::1%eth0', port: 3000 };
   await provider.registerSelf(registration);
   await provider.deregisterSelf(registration);
-  expect(JSON.parse(String(http.calls[1].init?.body)).ID).toBe('orders-fe80::1%eth0-3000');
-  expect(http.calls[2].url).toContain('/deregister/orders-fe80%3A%3A1%25eth0-3000');
+  expect(JSON.parse(String(http.calls[1].init?.body)).ID).toBe('orders@fe80::1%25eth0:3000');
+  expect(http.calls[2].url).toContain('/deregister/orders%40fe80%3A%3A1%2525eth0%3A3000');
+});
+
+it('keeps ambiguous hyphen tuples distinct and deregisters only its own id', async () => {
+  const entries = new Map<string, unknown>();
+  const http = {
+    ...createFakeHttp(),
+    request: (url: string, init?: RequestInit) => {
+      if (url.endsWith('/register')) {
+        const body = JSON.parse(String(init?.body)) as { ID: string };
+        entries.set(body.ID, body);
+      } else entries.delete(decodeURIComponent(url.split('/').at(-1)!));
+      return Promise.resolve({ ok: true, status: 200, headers: new Headers(), text: '' });
+    },
+  };
+  const provider = new ConsulProvider(
+    { address: 'http://agent', waitSeconds: 30 },
+    http,
+    createFakeRuntime(),
+  );
+  const first = { serviceName: 'orders-api', address: 'node', port: 3000 };
+  const second = { serviceName: 'orders', address: 'api-node', port: 3000 };
+  await provider.registerSelf(first);
+  await provider.registerSelf(second);
+  expect([...entries.keys()]).toEqual(['orders-api@node:3000', 'orders@api-node:3000']);
+  await provider.deregisterSelf(first);
+  expect([...entries.keys()]).toEqual(['orders@api-node:3000']);
+  expect(provider.selfId({ serviceName: 'ord@ers%', address: 'fe80::1@%', port: 80 })).toBe(
+    'ord%40ers%25@fe80::1%40%25:80',
+  );
 });

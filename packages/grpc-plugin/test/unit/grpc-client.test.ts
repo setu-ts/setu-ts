@@ -889,7 +889,7 @@ describe('GrpcClients', () => {
     expect(error).toBeInstanceOf(GrpcRuntimeLoadError);
     expect((error as GrpcRuntimeLoadError).specifier).toBe(CONNECT_NODE_SPECIFIER);
     expect((error as Error).message).toBe(
-      'Cannot load Connect runtime module: @connectrpc/connect-node. Run: deno add npm:@connectrpc/connect-node@^2.1.2 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node',
+      'Cannot load Connect runtime module: @connectrpc/connect-node. Run: deno add npm:@connectrpc/connect-node@^2.2.0 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node',
     );
   });
 });
@@ -1413,4 +1413,31 @@ it('refuses an invalid caller header before picking or reporting an instance', a
   await client.transport.unary({}, undefined, undefined, { 'x-a': 'ok' }, {});
   expect(calls).toBe(1);
   clientSet.close();
+});
+
+it('does not send or report a resend whose pick consumed the remaining deadline', async () => {
+  const discovery = fakeDiscovery([instance('first', 1), instance('second', 2)]);
+  let picks = 0;
+  let now = 0;
+  let sent = 0;
+  const pick = discovery.pick.bind(discovery);
+  discovery.pick = async (name) => {
+    const found = await pick(name);
+    if (++picks === 2) now = 101;
+    return found;
+  };
+  const refusal = Object.assign(new Error('NGHTTP2_REFUSED_STREAM'), {
+    code: 'ERR_HTTP2_STREAM_ERROR',
+  });
+  const node = fakeNode(() => {
+    sent++;
+    return Promise.reject(refusal);
+  });
+  const { clients: c } = clients({ discovery: () => discovery, clock: () => now }, node);
+  await expect(call(c.client(BILLING, 'billing'), undefined, 100)).rejects.toThrow(
+    'refused the call',
+  );
+  expect(picks).toBe(2);
+  expect(sent).toBe(1);
+  expect(discovery.reports).toEqual([['first', 'failure']]);
 });

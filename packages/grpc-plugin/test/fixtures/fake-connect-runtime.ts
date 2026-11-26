@@ -2,7 +2,7 @@
  * Test fixture: a fake {@linkcode ConnectRuntime} plus descriptor builders.
  *
  * The fake honors the REAL runtime's contract, verified against
- * `@connectrpc/connect@2.1.2` / `@bufbuild/protobuf@2.13.0`:
+ * `@connectrpc/connect@2.3.0` / `@bufbuild/protobuf@2.17.0`:
  *
  * - `DescFile.name` has NO `.proto` suffix while `proto.name` retains it, so a
  *   fixture that used one name for both would hide the filename-keying bug.

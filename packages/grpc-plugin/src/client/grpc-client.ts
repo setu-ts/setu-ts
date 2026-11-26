@@ -446,12 +446,22 @@ export class GrpcClients {
         target,
         base,
         options,
-        (transport) =>
-          signal?.aborted ? Promise.reject(error.error) : run(transport, remaining ?? timeoutMs),
+        (transport) => {
+          const left = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+          // Return the refusal as an unsent sentinel: #attempt must record no outcome.
+          if (signal?.aborted || (left !== undefined && left <= 0)) return Promise.resolve(error);
+          return run(transport, left ?? timeoutMs);
+        },
         signal,
-      ).catch((again: unknown) => {
-        throw again instanceof RefusedStream ? again.error : again;
-      });
+      ).then(
+        (result) => {
+          if (result instanceof RefusedStream) throw result.error;
+          return result;
+        },
+        (again: unknown) => {
+          throw again instanceof RefusedStream ? again.error : again;
+        },
+      );
     }
   }
 
@@ -487,7 +497,7 @@ export class GrpcClients {
     const transport = pending instanceof Promise ? await pending : pending;
     try {
       const result = await run(transport);
-      this.#report(discovery, instance, 'success');
+      if (!(result instanceof RefusedStream)) this.#report(discovery, instance, 'success');
       return result;
     } catch (error) {
       const outcome = callOutcome(error, signal, runtime.isWireError);

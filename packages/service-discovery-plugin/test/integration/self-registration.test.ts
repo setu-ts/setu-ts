@@ -21,12 +21,14 @@ const SELF = { serviceName: 'orders', id: 'orders-1', address: '10.0.0.7', port:
 
 it('replaces a crashed process registration across two application starts on one agent', async () => {
   const entries = new Map<string, unknown>();
+  const registrations: string[] = [];
   const http = {
     ...createFakeHttp(),
-    request: (_url: string, init?: RequestInit) => {
-      if (init?.body !== undefined) {
-        const body = JSON.parse(String(init.body)) as { ID: string };
+    request: (url: string, init?: RequestInit) => {
+      if (url.endsWith('/v1/agent/service/register')) {
+        const body = JSON.parse(String(init?.body)) as { ID: string };
         entries.set(body.ID, body);
+        registrations.push(body.ID);
       }
       // Retain the entry to model a previous process that died before deregistering.
       return Promise.resolve({ ok: true, status: 200, headers: new Headers(), text: '' });
@@ -47,7 +49,8 @@ it('replaces a crashed process registration across two application starts on one
     await app.start();
     await app.stop();
   }
-  expect([...entries.keys()]).toEqual(['orders-10.0.0.7-3000']);
+  expect(registrations).toEqual(['orders@10.0.0.7:3000', 'orders@10.0.0.7:3000']);
+  expect([...entries.keys()]).toEqual(['orders@10.0.0.7:3000']);
 });
 
 function appWith(http: FakeHttp, extra: { drainDelayMs?: number } = {}) {

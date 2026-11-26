@@ -48,7 +48,7 @@ const SPECIFIERS = {
  */
 const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
   connect:
-    'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
+    'deno add npm:@connectrpc/connect@^2.2.0 · npm i @connectrpc/connect · bun add @connectrpc/connect',
   protobuf:
     'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
   wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',

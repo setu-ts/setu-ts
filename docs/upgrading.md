@@ -36,15 +36,22 @@ with IP literals (optional ports; IPv6 ports need brackets). This requires a run
 for the runtime's integer whole-lookup bound. On Deno SERVFAIL reads as absence after the grace
 rule, and the underlying lookup may end about 2 s past the bound.
 
-Consul defaults the registration id to `<serviceName>-<address>-<port>` so restarts replace their
-own entry. Explicit ids still win. Once after upgrading, list `/v1/agent/services`, identify old
-uuid entries left by crashed processes, and deregister each via
-`PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot remove those old ids.
+Consul defaults the registration id to `<serviceName>@<address>:<port>` so restarts replace their
+own entry. `%` and `@` inside serviceName/address become `%25` and `%40`; other characters,
+including IPv6 colons, remain readable. Explicit ids still win. Once after upgrading, list
+`/v1/agent/services`, identify old uuid entries left by crashed processes, and
+deregister each via `PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot
+remove those old ids.
+
+Connect and connect-node now require `^2.2.0` or newer, which first supplies `isWireError`; update
+older peer installations. A wire `Internal` decoded from invalid `grpc-status` metadata now fails;
+valid status 13 remains an application answer.
 
 The gRPC client reports instance failure when it did not answer, refused the stream, returned
 `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own.
 Every other server answer reports success, including application codes and `Internal`, `Unknown`,
-`DataLoss`. The same codes without a server answer fail. A request that makes a healthy handler
+`DataLoss`, except an `Internal` decoded from invalid `grpc-status` metadata. The same codes without
+a server answer fail. A request that makes a healthy handler
 throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a broken
 dependency, say) is not ejected by call outcomes. Take it out through readiness (health checks)
 instead; the same holds for a wrong service or proxy answering a well-formed JSON error object on a

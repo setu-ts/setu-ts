@@ -33,17 +33,18 @@ export function registerBillingRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
 - Layers execute bulkhead, circuit breaker, retry, timeout, then the function.
 - Breaker and bulkhead state live per `wrap`; retain the callable across requests.
 - A breaker policy is a count or rate arm, not both.
-- `retry.limit` counts total attempts; `1` means one attempt. It must be a safe integer at least 1;
-  retry delay must be finite and non-negative. Invalid defaults throw RangeError at registration; an
-  invalid selected policy throws RangeError at wrap time. Delays, breaker windows, cooldowns and
-  timeouts are milliseconds. Timeout applies separately to each attempt.
+- `retry.limit` counts total attempts (safe integer at least 1); delay is finite and non-negative.
+  Invalid defaults throw RangeError at registration; selected policies at wrap. All timing is ms;
+  timeout applies per attempt.
+- Breakers skip already-aborted calls. Mid-flight abort fails only if the function rejects; a
+  function ignoring its signal and resolving records success.
 - Timeout aborts the attempt's signal. Forward it to the underlying I/O to cancel that work;
-  ignoring it only rejects the caller's wait. A caller signal cancels the whole chain.
+  ignoring it only rejects the caller's wait. Caller cancellation stops retries and queued work.
 - A full bulkhead rejects after its queue fills; omitted `maxQueue` means no waiting queue.
 
 ## Other options

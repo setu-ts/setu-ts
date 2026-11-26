@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { findTrailerError } from '@connectrpc/connect/protocol-grpc';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { codeFromHttpStatus, errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
@@ -374,3 +375,33 @@ for (const [status, body, expected] of [
     expect(callOutcome(error, undefined, runtime.isWireError)).toBe(expected);
   });
 }
+
+it('classifies real decoded valid and invalid grpc-status without matching the message', async () => {
+  const runtime = await loadConnectModule();
+  for (const status of ['99', '-1', 'nope', '13x', '13.1', '17', '13']) {
+    const error = findTrailerError(
+      new Headers({ 'grpc-status': status, 'grpc-message': 'same message' }),
+    );
+    expect(error).toBeInstanceOf(ConnectError);
+    expect(runtime.isWireError(error)).toBe(true);
+    expect(callOutcome(error, undefined, runtime.isWireError), status).toBe(
+      status === '13' ? 'success' : 'failure',
+    );
+  }
+  // The real JSON decoder erases an unknown code string and retains only the HTTP fallback.
+  // With Internal as fallback this is indistinguishable from a valid wire Internal.
+  const fallback = () => new ConnectError('HTTP 400', codeFromHttpStatus(400));
+  const unknown = errorFromJson({ code: 'not_a_code', message: 'same' }, undefined, fallback());
+  const valid = errorFromJson({ code: 'internal', message: 'same' }, undefined, fallback());
+  expect({
+    code: unknown.code,
+    metadata: [...unknown.metadata],
+    wire: unknown.isWireError,
+    raw: unknown.rawMessage,
+  }).toEqual({
+    code: valid.code,
+    metadata: [...valid.metadata],
+    wire: valid.isWireError,
+    raw: valid.rawMessage,
+  });
+});

@@ -867,6 +867,7 @@ describeNode('grpcClient and a peer header-list limit', () => {
     const { Http2SessionManager } = await import('@connectrpc/connect-node');
     let sentSize = 0;
     const request = Http2SessionManager.prototype.request;
+    const restore: (() => void)[] = [];
     const requests = vi
       .spyOn(Http2SessionManager.prototype, 'request')
       .mockImplementation(async function (this: InstanceType<typeof Http2SessionManager>, ...args) {
@@ -875,18 +876,23 @@ describeNode('grpcClient and a peer header-list limit', () => {
         expect(stream.session!.remoteSettings.maxHeaderListSize).toBe(4294967295);
         return stream;
       });
-    const caller = await startCaller(
-      [
-        { id: 'a', port: a.port },
-        { id: 'b', port: b.port },
-      ],
-      { ejection: {} },
-    );
-    const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
-    const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
-    const picks = vi.spyOn(discovery, 'pick');
-    const reports = vi.spyOn(discovery, 'report');
+    restore.push(() => requests.mockRestore());
     try {
+      const caller = await startCaller(
+        [
+          { id: 'a', port: a.port },
+          { id: 'b', port: b.port },
+        ],
+        { ejection: {} },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      const picks = vi.spyOn(discovery, 'pick');
+      const reports = vi.spyOn(discovery, 'report');
+      restore.push(
+        () => picks.mockRestore(),
+        () => reports.mockRestore(),
+      );
       // No warm-up: the fallback must also work on a session's first call.
       const errors: ConnectError[] = [];
       for (let n = 0; n < 6; n++) {
@@ -928,9 +934,7 @@ describeNode('grpcClient and a peer header-list limit', () => {
       ).toBe('echo: under');
       expect(sentSize).toBe(UNADVERTISED_HEADER_LIST_LIMIT - 1);
     } finally {
-      requests.mockRestore();
-      picks.mockRestore();
-      reports.mockRestore();
+      for (const undo of restore.reverse()) undo();
     }
   });
 

@@ -159,8 +159,8 @@ listeners or mark discovery degraded. Its error logs at `warn` as
 `service-discovery-plugin: watch listener for '<name>' failed`, with the service name and masked
 error and no instance data, once per name until every failing listener has succeeded, unsubscribed,
 or its watch stopped. A read that started before a newer watch delivery neither replaces the
-delivered list nor marks the name failed or starts retry spacing; its failure is still logged and
-opens a failure run that the next success closes.
+delivered list nor marks the name failed or starts retry spacing; a superseded failure opens no
+outage or recovery log.
 
 Discovery names should be chosen by the application, never taken from a request. As a backstop, the
 resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a budget
@@ -190,10 +190,11 @@ leave callers routed at a closed port for up to one check interval on every roll
 `drainDelayMs` then keeps serving normally for that long after deregistering, so callers holding a
 stale instance list are served rather than refused while the change propagates.
 
-The default id is `<serviceName>-<address>-<port>`, unique within the agent and stable across
-restarts, so a restarted process replaces its own orphan. `address` must be this instance's own
-address: a shared hostname gives two instances the same default id, so one replaces the other's
-entry. Set `id` explicitly for another identity.
+The default id is `<serviceName>@<address>:<port>`, stable across restarts, so a restarted process
+replaces its own orphan. `address` must be this instance's own address: a shared hostname gives two
+instances the same default id, so one replaces the other's entry. Inside the service name and
+address, `%` becomes `%25` and `@` becomes `%40`; no other character is encoded, so IPv6 remains
+readable. Set `id` explicitly for another identity.
 
 The health check is **not optional**: it defaults to
 `{ httpPath: '/health', intervalSeconds: 10, deregisterAfterSeconds: 60 }` and cannot be disabled.
@@ -314,11 +315,11 @@ Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name
 keeps its reporter while its failure run is open, across cold and warm failures, so repeats log at
 debug and the first success logs the recovery at info; the reporter is dropped at recovery. At most
-256 names keep a reporter at once; when a 257th name starts failing, the reporter of the name that
-failed least recently is dropped (its recovery then logs nothing, and its next failure warns again).
-A watch listener error logs at `warn` once per name (see Watching). Cold failures are not
-retry-spaced and do not mark discovery degraded. A DNS failure may also produce a probe reporter
-line.
+256 cold names keep a reporter at once; a 257th cold failure evicts the least recently failing cold
+name (its recovery then logs nothing). Warm names with nonempty cached lists retain their reporter
+until recovery, regardless of cold-name churn. A watch listener error logs at `warn` once per name
+(see Watching). Cold failures are not retry-spaced and do not mark discovery degraded. A DNS failure
+may also produce a probe reporter line.
 
 ## Health indicator
 
@@ -417,3 +418,14 @@ at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe r
 `AbortSignal` aborted after 2 s by runtime timers, cleared on completion. Health reads now issue at
 most one backend probe request per 5 s window per service instance. Before M113b, the detached
 provider call threw before I/O and issued none.
+
+Watch lookup and cache ordering: DNS polling keeps at most one raw resolver lookup pending per
+watch, even after the caller-facing deadline; later ticks wait for it to settle. Kubernetes token
+reads abandoned by cancellation do not update the token memo or start an HTTP request; an older read
+cannot replace a newer cached token. Stopping the last subscriber also reapplies the empty-only
+cache bound. Async listener rejections are isolated like synchronous throws. Only the latest call to each
+listener can settle its failure state; older settlements are ignored. Removing a subscriber
+or closing discovery during delivery prevents further calls to removed listeners in that broadcast.
+Superseded reads never open outage or recovery logs. Empty-answer grace refreshes update retry
+freshness without resetting the age used by `staleForMs`: time since the last successful refresh
+that was not a held empty answer. An identical successful list resets that age too.

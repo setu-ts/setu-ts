@@ -108,6 +108,7 @@ export class KubernetesProvider implements DiscoveryProvider {
    * Resolves the bearer token, reading the projected file when no explicit
    * token was configured.
    *
+   * @param signal - Caller cancellation; abandoned reads never update the token memo
    * @returns The `Authorization` header value
    * @throws {DiscoveryUnavailableError} If the projected token file does not
    * exist (not running in a pod); configure token and apiServer explicitly.
@@ -115,7 +116,8 @@ export class KubernetesProvider implements DiscoveryProvider {
    * character an HTTP header value cannot carry, with a fixed message that
    * never contains the token (M139f audit M1)
    */
-  async authHeader(): Promise<string> {
+  async authHeader(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     if (this.#options.token !== undefined) {
       return bearer(this.#options.token);
     }
@@ -151,7 +153,9 @@ export class KubernetesProvider implements DiscoveryProvider {
     }
     const value = new TextDecoder().decode(bytes).trim();
     const header = bearer(value);
-    this.#cachedToken = { value, stampMs: now };
+    if (!signal?.aborted && (this.#cachedToken === null || this.#cachedToken.stampMs <= now)) {
+      this.#cachedToken = { value, stampMs: now };
+    }
     return header;
   }
 
@@ -195,8 +199,10 @@ export class KubernetesProvider implements DiscoveryProvider {
   }
 
   async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    const authorization = await this.authHeader(signal);
+    signal?.throwIfAborted();
     const response = await this.#http.request(this.listUrl(serviceName), {
-      headers: { Authorization: await this.authHeader() },
+      headers: { Authorization: authorization },
       ...(signal !== undefined ? { signal } : {}),
     });
     if (!response.ok) {
@@ -226,8 +232,10 @@ export class KubernetesProvider implements DiscoveryProvider {
         const url =
           `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
           `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
+        const authorization = await this.authHeader(signal);
+        signal.throwIfAborted();
         const response = await this.#http.request(url, {
-          headers: { Authorization: await this.authHeader() },
+          headers: { Authorization: authorization },
           signal,
         });
         if (!response.ok)
