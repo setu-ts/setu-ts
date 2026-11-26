@@ -406,7 +406,8 @@ export class RedisBackplane implements IRealtimeBackplane {
    * @param subscriber - The subscriber-mode connection
    * @param generation - The open attempt's generation
    * @param owned - Whether this backplane built the connection
-   * @returns `false` when a `close()` cancelled the subscription, `true` otherwise
+   * @returns `false` when close or the injected-open deadline cancelled the subscription,
+   * `true` otherwise
    * @throws Whatever SUBSCRIBE rejected with, when it settles first
    */
   async #subscribe(
@@ -562,8 +563,9 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Leaves the topic and detaches all watches. Borrowed clients remain open;
-   * owned clients are QUIT, with disconnect as the fallback on failure.
+   * Leaves the topic and QUITs both successfully opened clients, with disconnect
+   * as the fallback on failure. Failed or cancelled injected opens leave the
+   * clients caller-owned. Detaches all watches after normal close cleanup.
    *
    * @throws The first failure among applicable UNSUBSCRIBE, QUIT and disconnect
    * steps, after all cleanup has been attempted
@@ -585,13 +587,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#subscriber = undefined;
     this.#publisher = undefined;
     this.#listener = undefined;
-    // Owned clients retain their watches until release below: an ioredis client
+    // Both pairs retain their watches until release below: an ioredis client
     // without an error listener prints QUIT's EPIPE (M131a re-audit N-4).
     const watches = this.#watches;
     this.#watches = [];
-    // Borrowed clients can keep running (or leave UNSUBSCRIBE pending) after
-    // this backplane closes. They must stop reporting into it immediately.
-    if (!owned) retireWatches(watches, []);
     // Drop the memoized open, or a connect() after this close would await the
     // already-resolved attempt and return without reconnecting.
     this.#opening = undefined;
@@ -599,8 +598,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     delete this.isHealthy;
 
     // Every step runs even when an earlier one fails. During an outage the
-    // UNSUBSCRIBE and owned clients' QUIT commands can reject. Stopping at the
-    // first rejection would leave owned connections reconnecting after shutdown.
+    // UNSUBSCRIBE and QUIT commands can reject. Stopping at the first rejection
+    // would leave connections reconnecting after shutdown.
     // The first failure is still reported, once everything is released.
     const failures: unknown[] = [];
     if (subscriber !== undefined) {
@@ -612,17 +611,16 @@ export class RedisBackplane implements IRealtimeBackplane {
       } catch (error) {
         failures.push(error);
       }
-      if (owned) await this.#release(subscriber, failures);
+      await this.#release(subscriber, failures);
     }
-    if (owned && publisher !== undefined && publisher !== subscriber) {
+    if (publisher !== undefined && publisher !== subscriber) {
       await this.#release(publisher, failures);
     }
     // Owned clients keep only a quiet sink until their final end event.
-    if (owned)
-      retireWatches(
-        watches,
-        [subscriber, publisher].filter((client) => client !== undefined),
-      );
+    retireWatches(
+      watches,
+      owned ? [subscriber, publisher].filter((client) => client !== undefined) : [],
+    );
     if (failures.length > 0) {
       throw failures[0];
     }

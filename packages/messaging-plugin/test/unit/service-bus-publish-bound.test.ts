@@ -52,6 +52,55 @@ describe('Service Bus publish bound', () => {
       await broker.disconnect();
     },
   );
+  it.each([false, true])(
+    'fences a send begun during transport close, reconnect=%s',
+    async (reconnect) => {
+      const h = serviceBusTransport();
+      const closeEntered = Promise.withResolvers<void>();
+      const closeGate = Promise.withResolvers<void>();
+      const sendEntered = Promise.withResolvers<void>();
+      const sendGate = Promise.withResolvers<void>();
+      vi.mocked(h.transport.close).mockImplementationOnce(() => {
+        closeEntered.resolve();
+        return closeGate.promise;
+      });
+      vi.mocked(h.transport.send).mockImplementationOnce(() => {
+        sendEntered.resolve();
+        return sendGate.promise;
+      });
+      const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {
+        client: h.transport,
+      });
+      await broker.connect();
+      const closing = broker.disconnect();
+      await closeEntered.promise;
+      const result = broker.publish('orders', {}).catch((error: unknown) => error);
+      await sendEntered.promise;
+      closeGate.resolve();
+      await closing;
+      if (reconnect) await broker.connect();
+      sendGate.reject(new Error('retired socket'));
+      expect(await result).toBeInstanceOf(BackendOutcomeUnknownError);
+      expect(await broker.reachability()).toBeUndefined();
+      await broker.disconnect();
+    },
+  );
+  it('keeps an in-flight send current across an already-ready connect', async () => {
+    const h = serviceBusTransport();
+    const pending = Promise.withResolvers<void>();
+    vi.mocked(h.transport.send).mockReturnValueOnce(pending.promise);
+    const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {
+      client: h.transport,
+    });
+    await broker.connect();
+    const result = broker.publish('orders', {});
+    await flushCloud();
+    await broker.connect();
+    pending.resolve();
+    await result;
+    expect(await broker.reachability()).toBe(true);
+    await broker.disconnect();
+  });
   it.each([0, 25, undefined])(
     'bounds the whole send with %s and aborts on expiry',
     async (timeout) => {

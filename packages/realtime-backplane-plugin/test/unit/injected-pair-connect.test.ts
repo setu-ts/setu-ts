@@ -17,15 +17,20 @@ function client(): IRedisBackplaneClient & { listenerCount(event: string): numbe
 }
 describe('Injected Redis pair connect', () => {
   afterEach(() => vi.useRealTimers());
-  function assertBorrowed(...clients: ReturnType<typeof client>[]): void {
+  function assertDetached(...clients: ReturnType<typeof client>[]): void {
     for (const connection of clients) {
       for (const event of ['message', 'error', 'ready', 'end'])
         expect(connection.listenerCount(event)).toBe(0);
+    }
+  }
+  function assertBorrowed(...clients: ReturnType<typeof client>[]): void {
+    assertDetached(...clients);
+    for (const connection of clients) {
       expect(connection.quit).not.toHaveBeenCalled();
       expect(connection.disconnect).not.toHaveBeenCalled();
     }
   }
-  it('preserves a borrowed subscription across close and immediate reconnect', async () => {
+  it('preserves the successor subscription while a cancelled injected open retires', async () => {
     const publisher = Object.assign(client(), { status: 'ready' });
     const subscriber = Object.assign(client(), { status: 'ready' });
     const gate = Promise.withResolvers<number>();
@@ -65,8 +70,72 @@ describe('Injected Redis pair connect', () => {
     await backplane.close();
     expect(subscribed).toBe(false);
     expect(subscriber.unsubscribe).toHaveBeenCalledTimes(1);
-    assertBorrowed(publisher, subscriber);
+    assertDetached(publisher, subscriber);
+    for (const connection of [publisher, subscriber]) {
+      expect(connection.quit).toHaveBeenCalledTimes(1);
+      expect(connection.disconnect).not.toHaveBeenCalled();
+    }
   });
+  it.each(['unsubscribe', 'quit'] as const)(
+    'attempts every injected close step after %s fails, keeping watches until cleanup ends',
+    async (firstFailure) => {
+      const publisher = Object.assign(client(), { status: 'ready' });
+      const subscriber = Object.assign(client(), { status: 'ready' });
+      const backplane = new RedisBackplane(
+        { transport: 'redis', client: publisher, subscriber },
+        'origin',
+        'frames',
+      );
+      await backplane.connect();
+      const steps: string[] = [];
+      const unsubscribeError = new Error('unsubscribe refused');
+      const quitError = new Error('subscriber quit refused');
+      const record = (step: string): void => {
+        steps.push(step);
+        expect(subscriber.listenerCount('message')).toBe(0);
+        for (const connection of [publisher, subscriber]) {
+          expect(connection.listenerCount('error')).toBe(1);
+          expect(connection.listenerCount('ready')).toBe(1);
+        }
+      };
+      vi.mocked(subscriber.unsubscribe).mockImplementation(() => {
+        record('unsubscribe');
+        return firstFailure === 'unsubscribe'
+          ? Promise.reject(unsubscribeError)
+          : Promise.resolve(0);
+      });
+      for (const [name, connection] of [
+        ['subscriber', subscriber],
+        ['publisher', publisher],
+      ] as const) {
+        vi.mocked(connection.quit).mockImplementation(() => {
+          record(`${name} quit`);
+          return Promise.reject(
+            name === 'subscriber' ? quitError : new Error('publisher quit refused'),
+          );
+        });
+        vi.mocked(connection.disconnect!).mockImplementation(() => {
+          record(`${name} disconnect`);
+          throw new Error(`${name} disconnect refused`);
+        });
+      }
+      await expect(backplane.close()).rejects.toBe(
+        firstFailure === 'unsubscribe' ? unsubscribeError : quitError,
+      );
+      expect(steps).toEqual([
+        'unsubscribe',
+        'subscriber quit',
+        'subscriber disconnect',
+        'publisher quit',
+        'publisher disconnect',
+      ]);
+      assertDetached(publisher, subscriber);
+      for (const connection of [publisher, subscriber]) {
+        expect(connection.quit).toHaveBeenCalledTimes(1);
+        expect(connection.disconnect).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
   it.each(['connect', 'subscribe'] as const)(
     'detaches watches after a failed %s',
     async (operation) => {

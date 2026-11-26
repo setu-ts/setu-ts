@@ -1,7 +1,7 @@
 # @setu-ts/realtime-backplane-plugin — share room and channel broadcasts
 
-**Add it:** `setu add realtime-backplane` wires `RealtimeBackplanePlugin()` in functional config.
-Provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`); replicas need Redis or messaging.
+**Add it:** `setu add realtime-backplane` wires `RealtimeBackplanePlugin()`; provides
+`CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`). Replicas need Redis or messaging.
 
 ## Connect replicas through Redis
 
@@ -35,18 +35,20 @@ export function registerDeployRoutes(router: IRouterApi): void {
 ## Behaviour the types do not show
 
 - Default `'memory'`: process-local, bus `default`; it does not connect replicas.
-- Redis needs two connections: injected `client` and `subscriber` must be supplied together
-  (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
-  `ioredis` and builds both.
-- Injected clients are borrowed: close and cancelled/failed/timed-out starts never disconnect or
-  QUIT them. Close stops waiting, removes own listeners/watches and unsubscribes when subscribed.
-  Owned clients force-disconnect on cancelled SUBSCRIBE, even with a finite bound.
+- Supply Redis `client`/`subscriber` together (node-redis: `client: nodeRedisClient(url)` and
+  `subscriber`); omit both to load `ioredis` and build them.
+- After successful Redis start, close UNSUBSCRIBEs then QUITs both clients; disconnect on QUIT
+  failure. Failed/cancelled/timed-out injected starts leave clients open, remove own
+  listeners/watches and undo late subscriptions unless a newer open uses the subscriber. Owned
+  clients force-close on cancelled SUBSCRIBE, even with a finite bound.
 - Replicas share `topic` (default `setu-ts.realtime`); generated `origin` prevents self-replay.
 - WebSocket/SSE broadcasts fan out automatically. Membership counts stay local.
 - Outages keep health up and local delivery working; inspect `data.reachable`.
-- Built Redis commands default to 15000 ms. A timed-out publish can still arrive later.
-- `commandTimeoutMs` bounds injected connect + first subscribe (15000 ms, 0 unbounded); expiry is
-  `BackendUnavailableError`. Cancelled starts end waits before registering services or health.
+- `commandTimeoutMs` bounds built commands (default 15000 ms, 0 disables). Timed-out publishes may
+  arrive.
+- `commandTimeoutMs` bounds injected connect + first subscribe (default 15000 ms, 0 disables);
+  expiry is `BackendUnavailableError`. Cancelled starts end waits before registering services or
+  health.
 
 ## Other options
 

@@ -435,7 +435,7 @@ export class RabbitMqQueue implements QueueAdapter {
   /**
    * Assert the per-name queues (ready, delay, dead) lazily and idempotently.
    */
-  async #assertQueues(name: string): Promise<void> {
+  async #assertQueues(name: string, operation?: RabbitPublishOperation): Promise<void> {
     if (!this.#channel) {
       throw new Error('RabbitMqQueue is not connected');
     }
@@ -452,16 +452,26 @@ export class RabbitMqQueue implements QueueAdapter {
     // Assert all three queues if not already done
     for (const q of [readyQ, delayQ, deadQ]) {
       if (!this.#asserted.has(q)) {
-        if (q === delayQ) {
-          // Delay queue with DLX → ready
-          await this.#channel.assertQueue(q, {
-            durable: true,
-            deadLetterExchange: '',
-            deadLetterRoutingKey: readyQ,
+        try {
+          if (q === delayQ) {
+            // Delay queue with DLX → ready
+            await this.#channel.assertQueue(q, {
+              durable: true,
+              deadLetterExchange: '',
+              deadLetterRoutingKey: readyQ,
+            });
+          } else {
+            // Ready and dead queues: durable only
+            await this.#channel.assertQueue(q, { durable: true });
+          }
+        } catch (cause) {
+          if (operation === undefined) throw cause;
+          throw new BackendUnavailableError(this.#publishSource(operation), {
+            cause: new Error(
+              `RabbitMQ could not declare queue ${JSON.stringify(q)} before ${operation}`,
+              { cause },
+            ),
           });
-        } else {
-          // Ready and dead queues: durable only
-          await this.#channel.assertQueue(q, { durable: true });
         }
         this.#asserted.add(q);
       }
@@ -763,7 +773,7 @@ export class RabbitMqQueue implements QueueAdapter {
     const now = this.#runtime.now();
     const delayed = job.availableAtMs > now;
     await this.#bounded(delayed ? delayQ : readyQ, source, async () => {
-      await this.#assertQueues(job.name);
+      await this.#assertQueues(job.name, 'enqueue');
       await this.#publish(
         channel,
         delayed ? delayQ : readyQ,
@@ -895,7 +905,7 @@ export class RabbitMqQueue implements QueueAdapter {
     // can at worst run it twice.
     const source = this.#publishSource('requeue');
     await this.#bounded(delayQ, source, async () => {
-      await this.#assertQueues(name);
+      await this.#assertQueues(name, 'requeue');
       await this.#publish(channel, delayQ, content, source, { expiration });
     });
 
@@ -924,7 +934,7 @@ export class RabbitMqQueue implements QueueAdapter {
     const deadQ = this.#deadQueue(name);
     const source = this.#publishSource('dead-letter');
     await this.#bounded(deadQ, source, async () => {
-      await this.#assertQueues(name);
+      await this.#assertQueues(name, 'dead-letter');
       await this.#publish(channel, deadQ, content, source, { timestamp: nowMs });
     });
 

@@ -82,12 +82,15 @@ cutting a release renames that heading to the version and is a rename, not a rec
   latency. This is explicit; there is no automatic after-commit hook.
 - An injected Redis backplane pair must connect and subscribe within `commandTimeoutMs` (15000 ms),
   or startup fails with `BackendUnavailableError`. Use 0 for an unbounded wait or connect clients
-  before `app.start()`. Injected clients are borrowed: normal close and cancelled, failed or
-  timed-out startup never disconnect or QUIT them. Close stops waiting, removes the backplane's
-  listeners and watches, and unsubscribes when subscribed; the connections remain caller-owned.
-  Owned clients are force-disconnected when close cancels SUBSCRIBE, including with a finite bound.
-  A stop during startup ends pending waits and leaves no late service/health registration; a
-  messaging backplane connect overtaken by close rejects.
+  before `app.start()`. After successful startup, close UNSUBSCRIBEs then QUITs both injected Redis
+  clients, with disconnect as the fallback if QUIT fails, preserving 0.13.0 normal-close behavior;
+  no normal-close migration is needed. A cancelled, failed or timed-out injected start never
+  disconnects or QUITs them. Close stops waiting, removes the backplane's listeners and watches, and
+  undoes late subscriptions unless a newer open is using the subscriber. The option also bounds
+  built-client commands; injected-client commands after connect retain their own settings. Owned
+  clients are force-disconnected when close cancels SUBSCRIBE, including with a finite bound. A stop
+  during startup ends pending waits and leaves no late service/health registration; a messaging
+  backplane connect overtaken by close rejects.
 
 ### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
 

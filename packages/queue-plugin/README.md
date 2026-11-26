@@ -480,20 +480,22 @@ arriving during a wait is received immediately. Disconnect aborts in-flight rece
 reserve tasks and dispatches nothing returned from an old connection generation. A custom transport
 ignoring the signal may hold stop until its receive returns. Fifty or more configured names with
 long polling can exhaust the SDK's default 50 HTTP sockets and delay sends; the adapter warns once
-at connect. The probe uses a separate one-attempt SDK client.
+at connect. On the SDK path, the probe uses a separate one-attempt SDK client.
 
 The SDK path now probes every distinct URL in `queues` with `GetQueueAttributes(['QueueArn'])`, in
 parallel. Each call is bounded at `min(1500, floor(0.75 * health.probeTimeoutMs))` ms: the default
 2000 ms outer bound gives 1500 ms per call; a configured 1000 ms gives 750 ms, so a hung endpoint
 reads down before the outer timeout. At an outer bound of 1 ms, the rounded call budget is 0 and the
-probe reads down without issuing a request. The probe explicitly selects its separate one-attempt
-SDK client, independently of the attribute list, and forwards `abortSignal` to abort the SDK request
-on expiry. A missing queue, network failure, timeout or HTTP 5xx reads down; another answer below
-500 (including a 403 access refusal) proves reachability. `sqs:GetQueueAttributes` is needed to
-detect a missing queue, including for a name explicitly configured to discard; readiness can pass
-without that permission because 403 proves reachability. Redrive-policy reads still need the
-permissions described in [SQS Retry and DLQ](#sqs-retry-and-dlq). An injected transport without that
-method can supply `isHealthy`; without either, reachability stays unknown.
+probe reads down without issuing a request. On the SDK path, the probe explicitly selects its
+separate one-attempt SDK client, independently of the attribute list. An injected transport with
+`getQueueAttributes` is probed through its own method, with the same adaptive bound and
+`abortSignal`. The SDK request aborts on expiry. A missing queue, network failure, timeout or HTTP
+5xx reads down; another answer below 500 (including a 403 access refusal) proves reachability.
+`sqs:GetQueueAttributes` is needed to detect a missing queue, including for a name explicitly
+configured to discard; readiness can pass without that permission because 403 proves reachability.
+Redrive-policy reads still need the permissions described in
+[SQS Retry and DLQ](#sqs-retry-and-dlq). An injected transport without that method can supply
+`isHealthy`; without either, reachability stays unknown.
 
 ### Queue health, retry delay and loop logging
 

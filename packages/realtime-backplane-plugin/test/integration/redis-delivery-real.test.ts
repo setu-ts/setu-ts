@@ -18,7 +18,7 @@ describe.each(REDIS_CLIENTS)('%s real Redis backplane delivery', (variant) => {
     'delivers once to the other instance and suppresses its own echo',
     { skip: url === undefined },
     async () => {
-      const topic = `m117-delivery-${crypto.randomUUID()}`;
+      const topic = `m143m-delivery-${crypto.randomUUID()}`;
       const apps = ['a', 'b'].map((origin) =>
         createApplication({
           plugins: [

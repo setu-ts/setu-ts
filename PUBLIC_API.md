@@ -5419,12 +5419,15 @@ pending transport waits and registers no service, health indicator or diagnostic
 An injected Redis pair's connect and first subscribe share `commandTimeoutMs` (default 15000 ms, 0
 unbounded); expiry fails as `BackendUnavailableError` with source
 `realtime-backplane-plugin: redis transport`. Close cancels that wait even with a finite bound.
-Injected Redis clients are borrowed: normal close and cancelled, failed or timed-out startup never
-disconnect or QUIT them. Close stops waiting, removes the backplane's listeners and watches, and
-unsubscribes when subscribed; the caller retains the connections. Owned clients are still
-force-disconnected when close cancels an in-flight SUBSCRIBE, including with a finite bound. Closing
-a messaging backplane during connect rejects the connect promise and cleans up a late subscription;
-the broker still owns its subscribe timeout.
+After a successful Redis start, close UNSUBSCRIBEs then QUITs both injected clients, with disconnect
+as the fallback if QUIT fails, as for built clients and in 0.13.0. Failed, cancelled or timed-out
+injected startup never disconnects or QUITs those clients. Close stops waiting, removes the
+backplane's listeners and watches, and undoes late subscriptions unless a newer open is using the
+subscriber. `commandTimeoutMs` bounds built-client commands and an injected pair's whole startup
+(default 15000 ms, 0 disables); injected commands after connect retain their own settings. Owned
+clients are still force-disconnected when close cancels an in-flight SUBSCRIBE, including with a
+finite bound. Closing a messaging backplane during connect rejects the connect promise and cleans up
+a late subscription; the broker still owns its subscribe timeout.
 
 ### Options
 
@@ -8717,9 +8720,16 @@ queues; a 403 still proves reachability, so readiness can pass without that perm
 Redrive-policy reads retain their permission requirements.
 
 Reserve failures warn once per name and episode and recover at info with `failures`; poll and
-recurring-enqueue failures follow the same rule. RabbitMQ enqueue throws `BackendUnavailableError`
-with source `queue-plugin: rabbitmq enqueue` for definite refusal, and `BackendOutcomeUnknownError`
-for expiry or close after writing but before confirmation. `QueueService.add` preserves both.
+recurring-enqueue failures follow the same rule. RabbitMQ publish paths use the operation-specific
+sources `queue-plugin: rabbitmq enqueue`, `queue-plugin: rabbitmq requeue`,
+`queue-plugin: rabbitmq dead-letter` and `queue-plugin: rabbitmq quarantine`. Definite refusals
+throw `BackendUnavailableError` (503); uncertain confirmations, expiry or close after writing but
+before confirmation throw `BackendOutcomeUnknownError` (504). `QueueService.add` preserves both.
+Driver-error causes are queue-naming wrappers whose own `cause` is the original driver error;
+synthetic deadline or channel-close causes need not have an underlying driver error. Declaration
+rejections say `RabbitMQ could not declare queue <name> before <operation>`, without implying a
+publish occurred. A failed quarantine move produces a safe warning carrying the quarantine source;
+reserve does not reject for that move, and the warning does not expose driver text.
 
 ### Exports
 

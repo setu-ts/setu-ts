@@ -1,6 +1,6 @@
 # @setu-ts/messaging-plugin — broker messages
 
-`setu add messaging` wires `MessagingPlugin()`; provides `CAPABILITIES.MESSAGING`
+**Add it:** `setu add messaging` wires `MessagingPlugin()`; provides `CAPABILITIES.MESSAGING`
 (`IMessageBroker`).
 
 ## Publish
@@ -47,8 +47,7 @@ export const messaging = MessagingPlugin({
 - Pub/Sub and Service Bus retry by default; `consumerRetry: false` disables.
 - `{ fanOut: true }` requests one copy per instance; verify `subscription.fanOut`.
 - Service Bus `publishTimeoutMs`: 15000, 0 unbounded. `maxConcurrentCalls`: 1, integer 1–1000; above
-  1 delivery can reorder. Reply inboxes expire after 5 idle minutes; receive outages affect
-  readiness.
+  1 delivery can reorder. Reply inboxes expire after 5 min idle; receive outages affect readiness.
 - RPC timeout answers 504, remote handler failure 502 through `errorHandler`, without remote text.
 - Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` latency. Full failure-free
   sweeps continue with a macrotask yield; saturation warns once, recovery logs at info.

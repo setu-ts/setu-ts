@@ -9,6 +9,59 @@ import { FakeAmqpQueueConnection } from '../fixtures/fake-amqplib-client.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('RabbitMQ enqueue faults', () => {
+  it.each(['ready', 'delay', 'dead'])(
+    'names a rejected %s declaration before enqueue without claiming a publish',
+    async (suffix) => {
+      const client = new FakeAmqpQueueConnection();
+      const queue = new RabbitMqQueue(new FakeRuntimeServices(0), { client });
+      await queue.connect();
+      const channel = await client.createChannel();
+      const driverError = new Error('declaration refused');
+      const physicalQueue = `he.queue.build.${suffix}`;
+      const assertQueue = channel.assertQueue.bind(channel);
+      vi.spyOn(channel, 'assertQueue').mockImplementation((name, options) =>
+        name === physicalQueue ? Promise.reject(driverError) : assertQueue(name, options),
+      );
+      const publish = vi.spyOn(channel, 'publish');
+      try {
+        const error: unknown = await queue
+          .enqueue({
+            id: 'j',
+            name: 'build',
+            data: {},
+            attempts: 0,
+            maxAttempts: 3,
+            availableAtMs: 0,
+          })
+          .catch((failure: unknown) => failure);
+        expect(error).toBeInstanceOf(BackendUnavailableError);
+        expect(error).toMatchObject({
+          source: 'queue-plugin: rabbitmq enqueue',
+          cause: {
+            message: `RabbitMQ could not declare queue ${JSON.stringify(physicalQueue)} before enqueue`,
+          },
+        });
+        expect(((error as Error).cause as Error).cause).toBe(driverError);
+        expect(publish).not.toHaveBeenCalled();
+      } finally {
+        await queue.disconnect();
+      }
+    },
+  );
+  it('preserves a reserve declaration rejection unchanged', async () => {
+    const client = new FakeAmqpQueueConnection();
+    const queue = new RabbitMqQueue(new FakeRuntimeServices(0), { client });
+    await queue.connect();
+    const channel = await client.createChannel();
+    const driverError = new Error('reserve declaration refused');
+    vi.spyOn(channel, 'assertQueue').mockRejectedValue(driverError);
+    try {
+      await expect(queue.reserve('build', 1, 0)).rejects.toBe(driverError);
+      expect(channel.calls.filter((call) => call.method === 'publish')).toHaveLength(0);
+    } finally {
+      await queue.disconnect();
+    }
+  });
   it.each(['toString', 'message getter'] as const)(
     'preserves a synchronous confirm rejection with a throwing %s',
     async (rendering) => {

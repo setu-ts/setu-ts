@@ -924,6 +924,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
     assertNotCloudflareWorkers(this.#runtime, 'Azure Service Bus', '@azure/service-bus');
 
+    this.#generation++;
     if (this.#injectedClient !== undefined) {
       this.#transport = this.#injectedClient;
     } else {
@@ -1164,7 +1165,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // before the transport was reached and say nothing about the network;
       // only a send rejection is offered to the evidence predicate.
       if (error instanceof PublishTimeoutError || isServiceBusOutage(error)) {
-        if (generation === this.#generation) this.#recordDataPlaneOutcome(false);
+        if (generation === this.#generation && transport === this.#transport)
+          this.#recordDataPlaneOutcome(false);
         if (!(error instanceof PublishTimeoutError))
           throw new BackendOutcomeUnknownError('messaging-plugin: service-bus publish', {
             cause: serviceBusPublishCause(error),
@@ -1172,7 +1174,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       }
       throw error;
     }
-    if (generation === this.#generation) this.#recordDataPlaneOutcome(true);
+    if (generation === this.#generation && transport === this.#transport)
+      this.#recordDataPlaneOutcome(true);
   }
 
   async subscribe<T>(

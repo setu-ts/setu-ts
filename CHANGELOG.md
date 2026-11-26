@@ -306,8 +306,15 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/messaging-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/realtime-backplane-plugin`
   (M143m).** RPC `RequestTimeoutError` now carries `topic`/`timeoutMs` and answers 504;
-  `RemoteHandlerError` answers 502 without serving remote text. RabbitMQ enqueue distinguishes 503
-  refusals from 504 uncertain confirms. Service Bus adds `publishTimeoutMs` (15000 ms, 0 unbounded),
+  `RemoteHandlerError` answers 502 without serving remote text. RabbitMQ publish paths distinguish
+  503 refusals from 504 uncertain confirms or expiry, with sources `queue-plugin: rabbitmq enqueue`,
+  `queue-plugin: rabbitmq requeue`, `queue-plugin: rabbitmq dead-letter` and
+  `queue-plugin: rabbitmq quarantine`. Driver-error causes name the queue in a wrapper whose own
+  `cause` is the original driver error; synthetic deadline or channel-close causes need not have a
+  driver error. Declaration refusals say
+  `RabbitMQ could not declare queue <name> before <operation>`, without implying a publish occurred.
+  A failed quarantine move emits a safe warning with its source, without exposing driver text or
+  rejecting reserve for that move. Service Bus adds `publishTimeoutMs` (15000 ms, 0 unbounded),
   `maxConcurrentCalls` (1, range 1–1000), five-minute idle reply-inbox cleanup, and receive-side
   outage and delivery evidence. Service Bus refusal codes take precedence over `retryable` and stay
   unchanged without marking it down. An aggregate stays a refusal only when its last inner error has
@@ -329,10 +336,12 @@ All notable changes to this project are documented here. The format follows
   catch-up; any failure stops the chain. Backlogs drain back-to-back with one claim and one mark per
   delivered row; there is no chain switch or tuning option. Call `dispatch()` after commit to avoid
   interval latency. Injected Redis backplane startup now shares the 15000 ms command bound and close
-  cancels pending starts before late registration. Injected clients are borrowed: close and
-  cancelled, failed or timed-out startup never disconnect or QUIT them; the backplane removes its
-  listeners and watches and unsubscribes when subscribed. Owned clients now force-disconnect when
-  close cancels an in-flight SUBSCRIBE even with a finite bound. See the
+  cancels pending starts before late registration. After successful Redis startup, close
+  UNSUBSCRIBEs then QUITs both injected clients, with disconnect on failed QUIT, preserving 0.13.0
+  normal-close behavior. Cancelled, failed or timed-out injected startup never disconnects or QUITs
+  them; the backplane removes its listeners and watches and undoes late subscriptions unless a newer
+  open is using the subscriber. Owned clients now force-disconnect when close cancels an in-flight
+  SUBSCRIBE even with a finite bound. See the
   [upgrade guide](docs/upgrading.md#broker-and-queue-bounds-health-and-delivery-setu-tsmessaging-plugin-setu-tsqueue-plugin-setu-tsrealtime-backplane-plugin).
 
 - **Provider arms (#614).** Storage writes answered 502 now reject with `BackendOutcomeUnknownError`

@@ -34,9 +34,15 @@ describe('SQS reachability', () => {
     });
     await h.queue.disconnect();
   });
-  it.each([2000, 1000, 2, 1])(
-    'reports down inside outer bound %s and aborts its request',
-    async (probeTimeoutMs) => {
+  it.each([
+    { probeTimeoutMs: 10000, callBound: 1500 },
+    { probeTimeoutMs: 2000, callBound: 1500 },
+    { probeTimeoutMs: 1000, callBound: 750 },
+    { probeTimeoutMs: 2, callBound: 1 },
+    { probeTimeoutMs: 1, callBound: 0 },
+  ])(
+    'reports down at $callBound inside outer bound $probeTimeoutMs and aborts its request',
+    async ({ probeTimeoutMs, callBound }) => {
       const runtime = new FakeRuntimeServices(0);
       let signal: AbortSignal | undefined;
       const client = Object.assign(new FakeSqsTransport(() => runtime.now()), {
@@ -57,7 +63,6 @@ describe('SQS reachability', () => {
       });
       // Flush the nested probe setup before moving its timer.
       for (let i = 0; i < 20; i++) await Promise.resolve();
-      const callBound = Math.min(1500, Math.floor(0.75 * probeTimeoutMs));
       if (callBound > 0) {
         await runtime.advanceMs(callBound - 1);
         expect(settled).toBe(false);
