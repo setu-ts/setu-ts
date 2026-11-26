@@ -357,7 +357,9 @@ All notable changes to this project are documented here. The format follows
   trials). The mode is read at `connect()` from the datasource block of the generated client; when
   it cannot be read, `connect()` logs one `warn` and conditional writes run. Way out: set
   `relationMode = "foreignKeys"` (the default), or wait for prisma/orm#30758 (fix
-  prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is unaffected.
+  prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is not refused: Prisma keeps
+  the predicate there, though an emulated `onUpdate: Cascade` can still have run for a write that
+  loses its race.
 
 ### Fixed
 

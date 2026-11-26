@@ -5,7 +5,8 @@
  * literal-substring escaping to its `contains` translation — one copy, not two
  * (the M30b `pemToDer` situation the plan refuses to recreate).
  *
- * The escaping is inert without an `ESCAPE '\'` clause (Drizzle emits one) or a
+ * The escaping is inert without an `ESCAPE` clause naming its escape character
+ * (Drizzle emits `ESCAPE '\'`, or `ESCAPE '!'` with the `!` form on MySQL) or a
  * connector whose `LIKE` defaults its escape character to backslash (PostgreSQL,
  * MySQL, SQL Server, CockroachDB). On a connector with no default escape
  * character (SQLite) the escaping would be a different wrong answer, so the

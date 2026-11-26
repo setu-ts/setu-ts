@@ -2490,8 +2490,13 @@ read at `connect()` from the datasource block of the client's `_engineConfig.inl
 root, transaction and `$extends` clients share it); a block without the setting is Prisma's default,
 `foreignKeys`. When the field is absent or unreadable, `connect()` logs one `warn` and nothing is
 refused. The message names the mode, the hazard and the ways out: `relationMode = "foreignKeys"`, or
-wait for the upstream fix and a Setu release that accepts it. `postgresql` / `postgres` keep the
-single statement and are unaffected.
+wait for the upstream fix and a Setu release that accepts it. `postgresql` / `postgres` are not
+refused: Prisma keeps the predicate there (it reads, runs the emulated `onUpdate` actions, then
+updates with the predicate), but a conditional write that changes a field another model references
+with `onUpdate: Cascade` and loses a race can still have updated the child rows. `PrismaAdapter`,
+`DrizzleAdapter`, `DynamoAdapter` and `BigtableAdapter` take an optional `warn` callback as their
+last constructor parameter; the plugin passes its logger, and an adapter built directly without one
+logs nothing.
 
 The memory overlay and D1 batch transaction sources omit both members: the result is unknown until
 commit, so the repository refuses `'conditional-write'`. Prisma, Drizzle and MongoDB transaction
@@ -3099,8 +3104,9 @@ neither a client nor a project encodes it. `BigtableAdapterOptionsBase` is the h
 `rowKey` is a `BigtableRowKeyMapping` and whose `valueEncoding` is a `BigtableValueEncoding`; an
 unmapped entity uses its own name as the table, `['id']` as the row-key fields, `'cf'` as the column
 family and tagged values. `BigtableAdapter`'s constructor also takes an optional second parameter, a
-`BigtableClientLoader`, which overrides the inject-or-lazy choice and whose `owned` flag decides
-whether `disconnect()` closes the client it produced.
+`BigtableClientLoader` (and a third, the optional `warn` callback), which overrides the
+inject-or-lazy choice and whose `owned` flag decides whether `disconnect()` closes the client it
+produced.
 
 **The adapter provisions nothing and `connect()` makes no admin call.** Column families,
 garbage-collection policies and split points belong to the application's provisioning, and a missing

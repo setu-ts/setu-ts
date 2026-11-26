@@ -94,6 +94,46 @@ describe('relationModeOf', () => {
       'foreignKeys',
     ],
     [
+      'the deprecated referentialIntegrity name',
+      {
+        _engineConfig: {
+          inlineSchema: schemaWith(['  provider = "mysql"', '  referentialIntegrity = "prisma"']),
+        },
+      },
+      'prisma',
+    ],
+    [
+      'a header carrying a trailing comment',
+      {
+        _engineConfig: {
+          inlineSchema:
+            'datasource db { // primary\n  provider = "mysql"\n  relationMode = "prisma"\n}\n',
+        },
+      },
+      'prisma',
+    ],
+    [
+      'a header whose brace is on the next line (unreadable)',
+      {
+        _engineConfig: { inlineSchema: 'datasource db\n{\n  relationMode = "prisma"\n}\n' },
+      },
+      undefined,
+    ],
+    [
+      'a datasource key outside the known list (unreadable)',
+      {
+        _engineConfig: {
+          inlineSchema: schemaWith(['  provider = "mysql"', '  someFutureKey = "x"']),
+        },
+      },
+      undefined,
+    ],
+    [
+      'a relationMode value that is not a plain string (unreadable)',
+      { _engineConfig: { inlineSchema: schemaWith(['  relationMode = env("MODE")']) } },
+      undefined,
+    ],
+    [
       'a schema with no datasource block',
       { _engineConfig: { inlineSchema: 'model A {}' } },
       undefined,

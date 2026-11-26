@@ -101,6 +101,9 @@ function conditionalPathFor(provider: PrismaSqlProvider | undefined): 'single' |
  * structurally and an absent or unrecognisable one is `undefined` (the
  * caller warns), never a guess. Only lines inside `datasource <name> { … }`
  * are read, so a model field or a comment naming `relationMode` cannot answer.
+ * The deprecated `referentialIntegrity` name counts the same. A header or line
+ * it cannot read, or a key outside Prisma's datasource keys, answers
+ * `undefined`, so the caller warns rather than trusting a guess.
  * A datasource block without the setting answers Prisma's default for the SQL
  * connectors, `'foreignKeys'`.
  *
@@ -114,18 +117,47 @@ export function relationModeOf(client: unknown): string | undefined {
   if (typeof schema !== 'string') return undefined;
   let inDatasource = false;
   let found = false;
+  let mode: string | undefined;
   for (const raw of schema.split('\n')) {
-    const line = raw.trim();
+    // A trailing `//` comment is not part of the setting.
+    const line = raw.replace(/\/\/.*$/, '').trim();
     if (!inDatasource) {
       if (/^datasource\s+\w+\s*\{$/.test(line)) inDatasource = found = true;
+      else if (/^datasource\b/.test(line)) return undefined;
       continue;
     }
-    if (line.startsWith('}')) inDatasource = false;
-    const mode = /^relationMode\s*=\s*"(\w+)"/.exec(line)?.[1];
-    if (mode !== undefined) return mode;
+    if (line === '') continue;
+    if (line.startsWith('}')) {
+      inDatasource = false;
+      continue;
+    }
+    const setting = /^(\w+)\s*=\s*(.*)$/.exec(line);
+    // An unreadable line or an unknown key fails toward the warning, never a guess.
+    if (setting === null || !DATASOURCE_KEYS.has(setting[1]!)) return undefined;
+    if (setting[1] === 'relationMode' || setting[1] === 'referentialIntegrity') {
+      const value = /^"(\w+)"$/.exec(setting[2]!.trim())?.[1];
+      if (value === undefined) return undefined;
+      mode = value;
+    }
   }
-  return found ? 'foreignKeys' : undefined;
+  if (!found) return undefined;
+  return mode ?? 'foreignKeys';
 }
+
+/**
+ * The datasource keys Prisma's schema accepts. `referentialIntegrity` is the
+ * deprecated name of `relationMode`, which Prisma still maps to the same mode.
+ */
+const DATASOURCE_KEYS: ReadonlySet<string> = new Set([
+  'provider',
+  'url',
+  'directUrl',
+  'shadowDatabaseUrl',
+  'relationMode',
+  'referentialIntegrity',
+  'extensions',
+  'schemas',
+]);
 
 function prismaIsolationLevel(
   level: TransactionIsolationLevel | undefined,
