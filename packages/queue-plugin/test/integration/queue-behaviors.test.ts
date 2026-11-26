@@ -9,7 +9,7 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type {
   IIngressBehavior,
   IJob,
@@ -17,6 +17,7 @@ import type {
   IPluginContext,
   IQueue,
 } from '@setu-ts/common';
+import { QueueService } from '../../src/services/queue-service.ts';
 import { QueuePlugin } from '../../src/plugin/queue-plugin.ts';
 import { computeBackoffMs } from '../../src/retry/retry-strategy.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
@@ -323,3 +324,42 @@ function envelopeRecorderWithLabel(
     },
   };
 }
+
+it('registers processor instances during register when only behavior factories are declared', async () => {
+  const { ctx, lifecycle } = createHarness();
+  const registered = vi.spyOn(QueueService.prototype, 'process');
+  const preparation = Promise.withResolvers<void>();
+  const prepared = vi
+    .spyOn(QueueService.prototype, 'prepare')
+    .mockReturnValueOnce(preparation.promise);
+  const processor = vi.fn();
+  const behavior = vi.fn(() => ({
+    handle: (_ctx: IngressContext, next: () => Promise<void>) => next(),
+  }));
+  const plugin = QueuePlugin({
+    adapter: 'memory',
+    processors: [{ name: 'work', processor }],
+    behaviors: [behavior],
+  });
+  const registering = plugin.register(ctx);
+  try {
+    for (let tick = 0; tick < 30; tick++) await Promise.resolve();
+    expect(prepared).toHaveBeenCalledExactlyOnceWith('work');
+    expect(registered).not.toHaveBeenCalled();
+    preparation.resolve();
+    await registering;
+    expect(behavior).not.toHaveBeenCalled();
+    expect(registered).toHaveBeenCalledTimes(1);
+    expect(registered.mock.calls[0]![0]).toBe('work');
+    for (const hook of lifecycle.initHooks) await hook();
+    expect(behavior).toHaveBeenCalledTimes(1);
+    expect(registered).toHaveBeenCalledTimes(1);
+    expect(prepared).toHaveBeenCalledTimes(1);
+  } finally {
+    preparation.resolve();
+    await registering;
+    registered.mockRestore();
+    prepared.mockRestore();
+    await lifecycle.triggerClose();
+  }
+});

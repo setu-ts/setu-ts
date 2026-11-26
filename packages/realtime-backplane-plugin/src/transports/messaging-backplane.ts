@@ -1,3 +1,5 @@
+import { BackplaneFanOutUnsupportedError } from '../errors.ts';
+import { FrameAge, type BackplaneReporter } from './frame-age.ts';
 /**
  * Backplane transport over the registered message broker.
  *
@@ -13,7 +15,7 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
-import { dispatchRealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, dispatchRealtimeFrame, toBackendFault } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { createTransportHandlerReporter } from './handler-errors.ts';
 
@@ -44,11 +46,35 @@ export function isRealtimeFrame(value: unknown): value is RealtimeFrame {
 }
 
 /**
+ * Whether a rejected publish may still reach the broker: a publish timeout or an
+ * outcome-unknown backend fault, including a raw connection error after the
+ * write. The name check also covers a `BackendOutcomeUnknownError` from a
+ * second installed copy of `@setu-ts/common`, which `instanceof` cannot
+ * recognise. Never throws: a hostile rejection value counts as known.
+ */
+function outcomeUnknown(error: unknown): boolean {
+  try {
+    if (
+      error instanceof Error &&
+      (error.name === 'PublishTimeoutError' || error.name === 'BackendOutcomeUnknownError')
+    )
+      return true;
+    return (
+      toBackendFault(error, 'realtime-backplane-plugin: messaging transport') instanceof
+      BackendOutcomeUnknownError
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Carries frames over whatever broker is registered under
  * `CAPABILITIES.MESSAGING`.
  *
  * This reuses every broker the messaging plugin already ships — in-memory,
- * Redis Streams, RabbitMQ, NATS, Kafka — and adds no dependency of its own.
+ * Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub and Service Bus — and requires
+ * the broker to confirm independent fan-out delivery.
  * The broker's own `connect`/`disconnect` are left to its owning plugin; this
  * transport only publishes and subscribes.
  *
@@ -62,7 +88,10 @@ export class MessagingBackplane implements IRealtimeBackplane {
   /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
   readonly #handlerReporter: IRealtimeHandlerErrorReporter;
+  readonly #frameAge: FrameAge;
   #subscription: ISubscription | undefined;
+  #opening: Promise<void> | undefined;
+  #generation = 0;
 
   /**
    * M70c: delegates to the resolved broker's `isHealthy?()` — the only way the
@@ -87,18 +116,26 @@ export class MessagingBackplane implements IRealtimeBackplane {
    * @param broker - The broker resolved from `CAPABILITIES.MESSAGING`
    * @param origin - This instance's identity
    * @param topic - The topic every instance shares
-   * @param reporter - Optional subscriber failure and recovery sink; history is always retained
+   * @param reporter - Optional subscriber and transport diagnostic sink; history is always retained
+   * @param now - Optional wall clock for timestamps and frame age checks
+   * @param maxFrameAgeMs - Maximum frame age, default 0 (disabled)
+   * @returns The messaging transport
+   * @throws {RangeError} When maxFrameAgeMs is outside the finite timer range
+   * @since 0.14.0
    */
   constructor(
     broker: IMessageBroker,
     origin: string,
     topic: string,
-    reporter?: IRealtimeHandlerErrorReporter,
+    reporter?: BackplaneReporter,
+    now?: () => number,
+    maxFrameAgeMs = 0,
   ) {
     this.#broker = broker;
     this.origin = origin;
     this.#topic = topic;
     this.#handlerReporter = createTransportHandlerReporter(this.#handlerErrors, reporter);
+    this.#frameAge = new FrameAge(maxFrameAgeMs, now, reporter?.warn?.bind(reporter));
     // Captured into a local before the guard: the delegation below must call
     // the member through its OWNER, and a `const` local keeps the narrowed
     // function type inside the closure.
@@ -113,25 +150,48 @@ export class MessagingBackplane implements IRealtimeBackplane {
     return this.#handlerErrors;
   }
 
-  async connect(): Promise<void> {
-    if (this.#subscription !== undefined) {
-      return;
-    }
-    this.#subscription = await this.#broker.subscribe<unknown>(this.#topic, (message): void => {
-      if (!isRealtimeFrame(message)) {
-        return;
-      }
-      if (message.origin === this.origin) {
-        return;
-      }
-      // Isolated per handler: the WebSocket and SSE plugins share this
-      // subscription, so one consumer throwing must not starve the other,
-      // and this loop runs inside the broker's delivery callback where
-      // nothing above would catch a throw.
-      const delivered = dispatchRealtimeFrame(this.#handlers, message, this.#handlerReporter);
-      // M98l: counted only after the shape and own-origin filters.
-      realtimeObserverOf(this)?.observe('backplane-receive', delivered);
-    });
+  connect(): Promise<void> {
+    if (this.#subscription !== undefined) return Promise.resolve();
+    if (this.#opening !== undefined) return this.#opening;
+    const generation = this.#generation;
+    const opening = Promise.resolve()
+      .then(() =>
+        this.#broker.subscribe<unknown>(
+          this.#topic,
+          (message): void => {
+            if (
+              generation !== this.#generation ||
+              !isRealtimeFrame(message) ||
+              message.origin === this.origin
+            )
+              return;
+            const frame = this.#frameAge.receive(message);
+            if (frame === null) return;
+            const delivered = dispatchRealtimeFrame(this.#handlers, frame, this.#handlerReporter);
+            realtimeObserverOf(this)?.observe('backplane-receive', delivered);
+          },
+          { fanOut: true },
+        ),
+      )
+      .then(async (subscription) => {
+        if (generation !== this.#generation || subscription.fanOut !== true) {
+          try {
+            await subscription.unsubscribe();
+          } catch (error) {
+            if (generation === this.#generation)
+              throw new BackplaneFanOutUnsupportedError({ cause: error });
+            throw error;
+          }
+          if (generation === this.#generation) throw new BackplaneFanOutUnsupportedError();
+          return;
+        }
+        this.#subscription = subscription;
+      })
+      .finally(() => {
+        if (this.#opening === opening) this.#opening = undefined;
+      });
+    this.#opening = opening;
+    return opening;
   }
 
   publish(frame: RealtimeFrame): Promise<void> {
@@ -145,7 +205,17 @@ export class MessagingBackplane implements IRealtimeBackplane {
 
   /** The publication itself: handed to the broker on the shared topic. */
   async #publish(frame: RealtimeFrame): Promise<void> {
-    await this.#broker.publish(this.#topic, frame);
+    try {
+      await this.#broker.publish(this.#topic, this.#frameAge.stamp(frame));
+    } catch (error) {
+      // A publish timeout or an outcome-unknown backend fault (including a raw
+      // connection error after the write) means the broker may still deliver
+      // the frame. PublishTimeoutError is matched by name: it belongs to the
+      // messaging plugin, which this package cannot import.
+      this.#frameAge.publishFailed(outcomeUnknown(error));
+      throw error;
+    }
+    this.#frameAge.publishSucceeded();
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {
@@ -156,6 +226,9 @@ export class MessagingBackplane implements IRealtimeBackplane {
   }
 
   async close(): Promise<void> {
+    this.#generation++;
+    // A stale open must not be handed to a later connect().
+    this.#opening = undefined;
     this.#handlers.clear();
     const subscription = this.#subscription;
     this.#subscription = undefined;

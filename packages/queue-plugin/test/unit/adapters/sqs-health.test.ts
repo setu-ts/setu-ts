@@ -17,7 +17,10 @@ function makeTransport(isHealthy?: () => Promise<boolean>): ISqsTransport {
   return transport as unknown as ISqsTransport;
 }
 
-const OPTIONS = { queues: { jobs: 'https://sqs/jobs' } };
+const OPTIONS = {
+  queues: { jobs: 'https://sqs/jobs' },
+  deadLetterQueues: { jobs: 'https://sqs.local/dead' },
+};
 
 describe('SqsQueue health (M70c)', () => {
   it('delegates to the transport isHealthy when present (true)', async () => {

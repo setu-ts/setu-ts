@@ -4,7 +4,7 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createBackplane } from '../../src/transports/backplane-factory.ts';
@@ -106,3 +106,37 @@ describe('createBackplane', () => {
     ).toThrow(/unrecognized transport carrier-pigeon/);
   });
 });
+
+it.each(['redis', 'messaging'] as const)(
+  'passes the clock and maxFrameAgeMs through the %s factory arm',
+  async (transport) => {
+    const publish = vi.fn(() => Promise.resolve());
+    const broker = {
+      publish,
+      subscribe: () => Promise.resolve({ fanOut: true, unsubscribe: () => Promise.resolve() }),
+    } as unknown as IMessageBroker;
+    const registry = registryWith({ [CAPABILITIES.MESSAGING]: broker });
+    const client = redisClient();
+    const redisPublish = vi.spyOn(client, 'publish');
+    const options =
+      transport === 'redis'
+        ? { transport, client, subscriber: redisClient(), maxFrameAgeMs: 100 }
+        : { transport, maxFrameAgeMs: 100 };
+    const backplane = createBackplane(options, registry, 'a', undefined, () => 50);
+    await backplane.connect();
+    await backplane.publish({ kind: 'ws-room', origin: 'a', name: 'n', data: 'd' });
+    if (transport === 'messaging')
+      expect(publish).toHaveBeenCalledWith(
+        'setu-ts.realtime',
+        expect.objectContaining({ sentAtMs: 50 }),
+      );
+    else expect(JSON.parse(redisPublish.mock.calls[0]![1])).toHaveProperty('sentAtMs', 50);
+    await backplane.close();
+    expect(() => createBackplane({ ...options, maxFrameAgeMs: NaN }, registry, 'a')).toThrow(
+      RangeError,
+    );
+    const warn = vi.fn();
+    createBackplane(options, registry, 'a', { failed: vi.fn(), succeeded: vi.fn(), warn });
+    expect(warn).toHaveBeenCalledOnce();
+  },
+);

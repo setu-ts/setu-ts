@@ -177,7 +177,7 @@ describe('QueueService lease renewal', () => {
         await s.runtime.advanceMs(200);
         expect(s.processor).not.toHaveBeenCalled();
         expect(s.extend).not.toHaveBeenCalled();
-        expect(s.dead).toHaveBeenCalledWith('email', 'j', 100, 'delivery');
+        expect(s.dead).toHaveBeenCalledWith('email', 'j', 100, 'delivery', 'abandoned');
         expect(s.log.mock.calls.map(([message]) => message)).toContain(
           'queue job abandoned by a dead worker — dead-lettered',
         );
@@ -280,7 +280,7 @@ describe('QueueService lease renewal', () => {
         availableAtMs: 0,
       });
       await runtime.advanceMs(100);
-      expect(dead).toHaveBeenCalledWith('email', 'j', 100, 'j');
+      expect(dead).toHaveBeenCalledWith('email', 'j', 100, 'j', 'abandoned');
     } finally {
       await service.disconnect();
     }

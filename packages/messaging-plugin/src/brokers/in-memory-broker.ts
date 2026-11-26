@@ -1,3 +1,4 @@
+import { wantsFanOut, markFanOut } from './fan-out.ts';
 import type {
   ISubscription,
   MessageHandler,
@@ -55,6 +56,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     this.#subscribers = new Map();
     this.#queueCursors = new Map();
     this.#rr = new RequestReplyCore({
+      warn: (message) => this.#options?.warn?.(message),
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
       subscribe: (topic, handler, options) => this.subscribe(topic, handler, options),
       uuid: () => this.#runtime.uuid(),
@@ -289,6 +291,7 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     handler: MessageHandler<T>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
+    const independent = wantsFanOut(options);
     const id = this.#runtime.uuid();
     const subscriber: Subscriber = {
       id,
@@ -301,18 +304,21 @@ export class InMemoryBroker implements MessageBrokerAdapter {
     }
     this.#subscribers.get(topic)!.push(subscriber);
 
-    return {
-      // eslint-disable-next-line require-await
-      unsubscribe: async (): Promise<void> => {
-        const subs = this.#subscribers.get(topic);
-        if (subs) {
-          const idx = subs.findIndex((s) => s.id === id);
-          if (idx !== -1) {
-            subs.splice(idx, 1);
+    return markFanOut(
+      {
+        // eslint-disable-next-line require-await
+        unsubscribe: async (): Promise<void> => {
+          const subs = this.#subscribers.get(topic);
+          if (subs) {
+            const idx = subs.findIndex((s) => s.id === id);
+            if (idx !== -1) {
+              subs.splice(idx, 1);
+            }
           }
-        }
+        },
       },
-    };
+      independent,
+    );
   }
 
   /** Subscribes through the header-aware internal path. @internal */

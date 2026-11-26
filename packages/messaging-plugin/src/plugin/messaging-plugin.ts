@@ -1,3 +1,6 @@
+import { resolvePubSubRetry, resolveServiceBusRetry } from '../brokers/consumer-retry.ts';
+import { routedPublishAvailable } from '../brokers/publish-options.ts';
+import { OutboxPublisherConfirmsRequiredError } from '../errors.ts';
 import type {
   HealthIndicatorFn,
   IInboxStore,
@@ -173,6 +176,12 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
   ) {
     resolvePublishTimeoutMs((options as { publishTimeoutMs?: number }).publishTimeoutMs);
   }
+  if (brokerType === 'pubsub')
+    resolvePubSubRetry(options as import('../brokers/pubsub-broker.ts').PubSubOptions);
+  if (brokerType === 'service-bus')
+    resolveServiceBusRetry(
+      (options as import('../brokers/service-bus-broker.ts').ServiceBusOptions).consumerRetry,
+    );
   if (brokerType === 'nats') resolveNatsReconnect(options as NatsOptions);
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
@@ -305,7 +314,13 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           : undefined;
 
       // Resolve optional logger
-      let logger: { error: (msg: string) => void; warn?: (msg: string) => void } | undefined;
+      let logger:
+        | {
+            error: (msg: string) => void;
+            warn?: (msg: string) => void;
+            info?: (msg: string) => void;
+          }
+        | undefined;
       if (ctx.services.has('logger')) {
         logger = ctx.services.get('logger');
       }
@@ -319,6 +334,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
 
       if (brokerType === 'memory') {
         broker = new InMemoryBroker(ctx.runtime, serializer, {
+          warn: (message) => ctx.logger?.warn(message),
           // `publish` resolves on dispatch hand-off (M89c), so a rejected
           // handler's only observable outcome is this report. The logger is
           // read at CALL time, not captured here — the M52b lesson, where a
@@ -439,6 +455,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else if (brokerType === 'pubsub') {
         const pubSubOpts = options as {
+          consumerRetry?: false | import('../interfaces/index.ts').ConsumerRetryOptions;
+          deadLetterTopic?: string;
           projectId?: string;
           credentials?: unknown;
           client?: import('../brokers/pubsub-broker.ts').IPubSubTransport;
@@ -448,6 +466,10 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           publishTimeoutMs?: number;
         };
         const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
+        if (pubSubOpts.consumerRetry !== undefined)
+          pubSubOptions.consumerRetry = pubSubOpts.consumerRetry;
+        if (pubSubOpts.deadLetterTopic !== undefined)
+          pubSubOptions.deadLetterTopic = pubSubOpts.deadLetterTopic;
         if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
         if (pubSubOpts.credentials !== undefined) {
           pubSubOptions.credentials = pubSubOpts.credentials;
@@ -466,6 +488,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         broker = new GcpPubSubBroker(ctx.runtime, serializer, pubSubOptions);
       } else if (brokerType === 'service-bus') {
         const serviceBusOpts = options as {
+          consumerRetry?: false | import('../interfaces/index.ts').ConsumerRetryOptions;
           connectionString?: string;
           adminConnectionString?: string;
           client?: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
@@ -474,6 +497,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           retryOptions?: import('../interfaces/index.ts').ServiceBusRetryOptions;
         };
         const serviceBusOptions: import('../brokers/service-bus-broker.ts').ServiceBusOptions = {};
+        if (serviceBusOpts.consumerRetry !== undefined)
+          serviceBusOptions.consumerRetry = serviceBusOpts.consumerRetry;
         if (serviceBusOpts.connectionString !== undefined) {
           serviceBusOptions.connectionString = serviceBusOpts.connectionString;
         }
@@ -608,7 +633,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
       // guarantee true. With no factory declared the chain is already
       // complete here and the timing is unchanged.
       for (const definition of subscriptionInstances) {
-        await subscribeDefinition(broker, definition);
+        await subscribeDefinition(broker, definition, (message) => ctx.logger?.warn(message));
       }
 
       // Register health indicator. M70c: reports BOTH signals. `isReady()` is
@@ -689,7 +714,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
                 ctx.services,
                 `MessagingPlugin({ subscriptions })[${slot.index}]`,
               );
-              await subscribeDefinition(broker, definition);
+              await subscribeDefinition(broker, definition, (message) => ctx.logger?.warn(message));
             }
 
             // LAST: the chain is final, so any delivery held during startup may
@@ -722,8 +747,20 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
 async function subscribeDefinition(
   broker: IMessageBroker,
   definition: SubscriptionDefinition,
+  warn: (message: string) => void,
 ): Promise<void> {
-  await broker.subscribe(definition.topic, definition.handler, definition.options);
+  const subscription = await broker.subscribe(
+    definition.topic,
+    definition.handler,
+    definition.options,
+  );
+  if (definition.options?.fanOut === true && subscription.fanOut !== true) {
+    try {
+      warn('Messaging declarative fanOut subscription was not confirmed by the broker');
+    } catch {
+      /* Diagnostics cannot change subscription startup. */
+    }
+  }
 }
 
 /**
@@ -802,6 +839,7 @@ function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): 
       if (!ctx.services.has(CAPABILITIES.SCHEDULER)) throw new OutboxRelayUnscheduledError();
       scheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
     }
+    if (routedPublishAvailable(broker) === false) throw new OutboxPublisherConfirmsRequiredError();
     const active = resolveOutboxStores(ctx, options);
     const stores = active.kind === 'single' ? [active.store] : [...active.stores.values()];
     for (const store of stores) {

@@ -1,3 +1,4 @@
+import type { BackplaneReporter } from './frame-age.ts';
 /**
  * Builds the configured transport from the plugin's discriminated options.
  *
@@ -5,12 +6,7 @@
  * @since 0.2.0
  */
 
-import type {
-  IMessageBroker,
-  IRealtimeBackplane,
-  IRealtimeHandlerErrorReporter,
-  IServiceRegistry,
-} from '@setu-ts/common';
+import type { IMessageBroker, IRealtimeBackplane, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { DEFAULT_TOPIC } from '../interfaces/index.ts';
@@ -25,17 +21,20 @@ import { RedisBackplane } from './redis-backplane.ts';
  * @param services - Registry used to resolve `CAPABILITIES.MESSAGING` for the
  * `'messaging'` arm
  * @param origin - This instance's identity, used when no `origin` is configured
- * @param reporter - Optional subscriber failure and recovery sink
+ * @param reporter - Optional subscriber and transport warning sink
+ * @param now - Optional wall clock for frame timestamps and age checks
  * @returns The transport
  * @throws {Error} When the `'messaging'` arm is selected with no messaging
  * capability registered, or when the transport discriminant is unrecognized
+ * @throws {RangeError} When a transport's frame age or command bound is invalid
  * @since 0.2.0
  */
 export function createBackplane(
   options: RealtimeBackplanePluginOptions,
   services: IServiceRegistry,
   origin: string,
-  reporter?: IRealtimeHandlerErrorReporter,
+  reporter?: BackplaneReporter,
+  now?: () => number,
 ): IRealtimeBackplane {
   if (options.transport === 'custom') {
     return options.instance;
@@ -54,11 +53,18 @@ export function createBackplane(
         );
       }
       const broker = services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-      return new MessagingBackplane(broker, resolvedOrigin, topic, reporter);
+      return new MessagingBackplane(
+        broker,
+        resolvedOrigin,
+        topic,
+        reporter,
+        now,
+        options.maxFrameAgeMs ?? 0,
+      );
     }
 
     case 'redis': {
-      return new RedisBackplane(options, resolvedOrigin, topic, reporter);
+      return new RedisBackplane(options, resolvedOrigin, topic, reporter, now);
     }
 
     case 'memory':

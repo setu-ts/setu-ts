@@ -312,3 +312,103 @@ describe('loadSnsModule — the guarded import (M113d §3.1)', () => {
     }
   });
 });
+
+import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
+import { fakeTelemetry, TRACEPARENT } from '../fixtures/fake-telemetry.ts';
+import { encodeSqsEnvelope, decodeSqsEnvelope } from '../../src/adapters/sqs-envelope.ts';
+
+describe('SNS job publishing', () => {
+  for (const telemetry of [undefined, fakeTelemetry().service]) {
+    it.each([
+      { label: 'NaN attempts', data: {}, maxAttempts: NaN },
+      { label: 'undefined data', data: undefined, maxAttempts: 3 },
+      { label: 'BigInt data', data: 1n, maxAttempts: 3 },
+    ])(
+      `rejects $label consistently with telemetry=${telemetry !== undefined}`,
+      async ({ data, maxAttempts }) => {
+        const publish = vi.fn(() => Promise.resolve('mid'));
+        const publisher = new SnsPublisher({
+          topicArn: 'topic',
+          ...(telemetry === undefined ? {} : { telemetry }),
+          client: { publish, close: () => Promise.resolve() },
+        });
+        await publisher.connect();
+        try {
+          await expect(
+            publisher.publishJob('build', data, { id: 'explicit', maxAttempts }),
+          ).rejects.toThrow(TypeError);
+          expect(publish).not.toHaveBeenCalled();
+        } finally {
+          await publisher.disconnect();
+        }
+      },
+    );
+  }
+  it('uses runtime identity, copies headers and omits an absent attempt budget', async () => {
+    const publish = vi.fn(() => Promise.resolve('message-id'));
+    const publisher = new SnsPublisher({
+      topicArn: 'topic',
+      runtime: new FakeRuntimeServices(0),
+      client: { publish, close: async () => {} },
+    });
+    await publisher.connect();
+    const headers = { tenant: 't1' };
+    expect(await publisher.publishJob('build', { value: 1 }, { headers })).toBe('message-id');
+    const body = publish.mock.calls[0] as unknown as [string, string];
+    expect(body).toEqual([
+      'topic',
+      encodeSqsEnvelope({ id: 'fake-uuid-0', name: 'build', data: { value: 1 }, headers }),
+    ]);
+    expect(decodeSqsEnvelope(body[1], 'build')).toMatchObject({ ok: true });
+    expect(JSON.parse(body[1])).not.toHaveProperty('maxAttempts');
+    expect(headers).toEqual({ tenant: 't1' });
+    await publisher.disconnect();
+  });
+  it('requires runtime or explicit id and validates the same encoder inputs', async () => {
+    const publisher = new SnsPublisher({
+      topicArn: 'topic',
+      client: { publish: () => Promise.resolve(undefined), close: async () => {} },
+    });
+    await expect(publisher.publishJob('build', {})).rejects.toThrow('not connected');
+    await publisher.connect();
+    await expect(publisher.publishJob('build', {})).rejects.toThrow(/options.id.*runtime/);
+    expect(
+      await publisher.publishJob('build', {}, { id: 'explicit', maxAttempts: 5 }),
+    ).toBeUndefined();
+    await expect(
+      publisher.publishJob('build', {}, { id: 'explicit', maxAttempts: NaN }),
+    ).rejects.toThrow(TypeError);
+    await publisher.disconnect();
+  });
+  it.each([true, false])(
+    'injects a producer context only when valid=%s, without SNS attributes',
+    async (valid) => {
+      const { service, spans } = fakeTelemetry(valid);
+      const publish = vi.fn<(topic: string, body: string) => Promise<string | undefined>>(() =>
+        Promise.resolve('mid'),
+      );
+      const publisher = new SnsPublisher({
+        topicArn: 'topic',
+        telemetry: service,
+        client: { publish, close: async () => {} },
+      });
+      await publisher.connect();
+      const headers = { traceparent: 'caller', tenant: 't1' };
+      await publisher.publishJob('build', null, { id: 'j1', headers });
+      expect(publish.mock.calls[0]).toHaveLength(2);
+      expect(JSON.parse(publish.mock.calls[0]![1]).headers).toEqual({
+        traceparent: valid ? TRACEPARENT : 'caller',
+        tenant: 't1',
+      });
+      expect(spans).toHaveBeenCalledWith(
+        'enqueue build',
+        expect.objectContaining({ kind: 'producer' }),
+      );
+      expect(headers.traceparent).toBe('caller');
+      await publisher.publish('unchanged');
+      expect(publish.mock.calls[1]).toEqual(['topic', 'unchanged']);
+      expect(spans).toHaveBeenCalledTimes(1);
+      await publisher.disconnect();
+    },
+  );
+});

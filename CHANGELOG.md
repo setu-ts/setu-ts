@@ -18,6 +18,35 @@ All notable changes to this project are documented here. The format follows
   the other signal is already `aborted`, otherwise from that signal's `abort` event; to run without
   cancellation, omit `signal`.
 
+- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (M143, #613).** Optional
+  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
+  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
+  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
+  independent of status. An application setting the marker claims no processing and a client that
+  honours the marker may send that request again.
+
+- **`@setu-ts/common` (M143r, #614).** `StorageObjectNotFoundError` (a `404` status hint, the key in
+  `message` and on `.key`, never in the served body) and the upload brand `UPLOAD_METADATA` /
+  `withUploadMetadata` / `uploadMetadataOf` (typed `UploadMetadata`), which `createUploadMiddleware`
+  now carries so a documentation generator can see a multipart route (`@setu-ts/openapi-plugin` does
+  not read it yet).
+
+- **Provider options (M143r, #614; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
+  `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
+  `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault; on every storage and secrets arm
+  `requestTimeoutMs: 0` disables the bound, restoring the unbounded calls of before) and the `ses`
+  and `sendgrid` mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the
+  key form) and `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm;
+  `connectionTimeoutMs`, `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime
+  it reads is the exported `SmtpRuntime` type; under `dnsTtlMs` a send whose connection fails before
+  any SMTP command is sent again on the next resolved address, at most four in all);
+  `exposeCatalogues.keyPrefixes` on the localization catalogue route.
+
+- **Readiness probes (M143r, #614; V13-215, the lane half).** The `gcs` and `azure` storage arms,
+  the `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each
+  reads reachable when the backend answers: an HTTP status below `500`, or for `gcp` any gRPC code
+  but `UNAVAILABLE` and `DEADLINE_EXCEEDED`.
+
 - **`@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker, #612).** A circuit
   breaker can trip on a failure rate: `CircuitBreakerPolicy` gains a rate arm,
   `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (`CircuitBreakerRatePolicy`),
@@ -27,12 +56,6 @@ All notable changes to this project are documented here. The format follows
   policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
   still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
   the breaker. V13-104.
-- **`@setu-ts/common`, `@setu-ts/runtime`, `@setu-ts/kernel` (M143, #613).** Optional
-  `IRuntimeServices.createDnsResolver` and `DnsResolverOptions` select IP-literal name servers with
-  a whole-lookup bound on Node, Bun and Deno. `UNPROCESSED_HEADER` and `UNPROCESSED_SHUTDOWN` export
-  the reserved `x-setu-unprocessed: shutdown` marker set on the kernel's pre-pipeline drain answer,
-  independent of status. An application setting the marker claims no processing and a client that
-  honours the marker may send that request again.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
@@ -47,6 +70,7 @@ All notable changes to this project are documented here. The format follows
   `start()`, which now rejects with `StartCancelledError` (new, `@setu-ts/kernel`).
   `WorkerRunOptions.signal` adds the cancel signal to the worker pool's `run`, consumed by
   `@setu-ts/worker-pool-plugin` in M143r (V13-131). V13-11, V13-12, V13-13, V13-23, V13-26, V13-43.
+
 - **`@setu-ts/react-router-plugin` (M142, #604).** `serviceCall(request, work)` keeps a service
   refusal's status in a loader, action or resource route: an error carrying a 4xx status hint (every
   4xx `HttpError`) is thrown as an RFC 9457 Problem Details `Response`, which React Router returns
@@ -54,35 +78,45 @@ All notable changes to this project are documented here. The format follows
   answered 500. `pageAction(intent, work)` returns such a refusal to the form as
   `{ ok: false, intent, error, status }` (the `PageActionResult` type). A fault, 5xx included, is
   rethrown by both.
+
 - **`@setu-ts/cli` (M142, #604).** `setu check` warns `setu.W007` when a module under `app/` calls
   `fetch` on a path under `/api/`: a page writes through its action. `setu g module --page` writes
   `test/support/pages.ts` (`postForm`, and `pageData`, which reads a route's loader data through
   React Router's decoder). The full-stack template's products page adds a product through its
   action, and a guarded `/logout` page signs out.
+
 - **Docs (M142, #604).** A new guide, [Pages that write through actions](docs/pages.md): forms,
   refusals, uploads, downloads, streams, sign-out and testing pages. `docs/ai.md` shows the chat
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
 
-- **`@setu-ts/common` (M143r, #614).** `StorageObjectNotFoundError` (a `404` status hint, the key in
-  `message` and on `.key`, never in the served body) and the upload brand `UPLOAD_METADATA` /
-  `withUploadMetadata` / `uploadMetadataOf` (typed `UploadMetadata`), which `createUploadMiddleware`
-  now carries so a documentation generator can see a multipart route (`@setu-ts/openapi-plugin` does
-  not read it yet).
-- **Provider options (M143r, #614; V13-216, V13-228, V13-248, V13-255, V13-119, V12-132).**
-  `requestTimeoutMs` on the `s3`, `b2`, `gcs` and `azure` storage arms (default 30 s), the
-  `aws-kms`, `gcp` and `azure` secrets arms (default 5 s, as Vault; on every storage and secrets arm
-  `requestTimeoutMs: 0` disables the bound, restoring the unbounded calls of before) and the `ses`
-  and `sendgrid` mail arms (default 15 s); `endpoint` on `gcs` (with `endpointAuth`), `azure` (the
-  key form) and `ses`; `disableChallengeResourceVerification` on the `azure` secrets arm;
-  `connectionTimeoutMs`, `greetingTimeoutMs`, `socketTimeoutMs` and `dnsTtlMs` on SMTP (the runtime
-  it reads is the exported `SmtpRuntime` type; under `dnsTtlMs` a send whose connection fails before
-  any SMTP command is sent again on the next resolved address, at most four in all);
-  `exposeCatalogues.keyPrefixes` on the localization catalogue route.
-- **Readiness probes (M143r, #614; V13-215, the lane half).** The `gcs` and `azure` storage arms,
-  the `aws-kms`, `gcp` and `azure` secrets arms and the `ses` mail arm report reachability; each
-  reads reachable when the backend answers: an HTTP status below `500`, or for `gcp` any gRPC code
-  but `UNAVAILABLE` and `DEADLINE_EXCEEDED`.
+- **`@setu-ts/queue-plugin` (M143p, #616).** `SnsPublisher.publishJob(name, data, options?)`
+  publishes the job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped
+  (SNS `Notification`) subscription; with the new `SnsPublisherOptions.telemetry` the publish runs
+  in a producer span and carries its `traceparent` in the envelope, and
+  `SnsPublisherOptions.runtime` supplies job ids (V13-212). `SqsDeadLetterTargetMissingError` and
+  its `SqsDeadLetterTargetMissingReason` are exported. `ISqsTransport` gains optional
+  `getQueueAttributes` and `getQueueUrl` and an `attributes` argument on `send`;
+  `SqsReceivedMessage` gains `messageId`.
+
+- **`@setu-ts/common`, `@setu-ts/messaging-plugin` (M143p, #616).** `SubscribeOptions.fanOut` asks a
+  broker for a subscription that receives every message published after it subscribed, independently
+  of other instances, and `ISubscription.fanOut` confirms that the broker gave one. Every built-in
+  broker honours it (memory, Redis Streams, RabbitMQ, NATS, Kafka, Pub/Sub, Service Bus); `fanOut`
+  with `queue` throws `RangeError`. `IRedisStreamsClient` gains optional `xread` and `xrevrange`,
+  and `fromNodeRedis` implements both. Pub/Sub gains `consumerRetry` and `deadLetterTopic`, Service
+  Bus `consumerRetry`. New errors: `UnroutableMessageError`, `OutboxPublisherConfirmsRequiredError`,
+  `PubSubDeadLetterTopicMissingError`; new types `PubSubCreateOptions`, `PubSubOpenOptions`.
+  `QueueSettlementState` gains `'discarded'`.
+
+- **`@setu-ts/realtime-backplane-plugin` (M143p, #616).** `maxFrameAgeMs` (opt-in, default `0`) on
+  the `'messaging'` and `'redis'` transports drops a frame older than the bound by the receiver's
+  clock; frames carry the sender's `sentAtMs`. `BackplaneFanOutUnsupportedError` and
+  `BackplaneReporter` are exported; `createBackplane`, `MessagingBackplane` and `RedisBackplane`
+  take an optional `now` clock. A publish whose outcome is unknown (it timed out, or the connection
+  was lost after the write) logs one `warn` per failing state,
+  `publish failed; the frame may still arrive late`; a RabbitMQ channel that closes before its
+  confirm logs none.
 
 ### Changed
 
@@ -119,6 +153,67 @@ All notable changes to this project are documented here. The format follows
   text has its control characters replaced. An SMTP `contentId` attachment is sent inline. Slack
   posts the subject in bold before the body.
 
+- **`@setu-ts/runtime` (M143, #613).** `IDnsResolver.resolveHost` now rejects with an
+  `AggregateError` cause containing both address-family failures in A-then-AAAA order; migrate
+  readers of `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
+
+- **BREAKING — `@setu-ts/queue-plugin` SQS adapter (M143p, #616).**
+  - Renewal reduces timeout-driven redelivery of jobs longer than `visibilityTimeoutSeconds`: the
+    adapter extends visibility every third of the timeout, up to SQS's 12-hour limit (V13-198).
+    `visibilityTimeoutSeconds` outside 1 to 43,200 is refused with a `RangeError`. SQS can still
+    deliver more than once; keep processors idempotent.
+  - A consumed name needs a dead-letter target: `deadLetterQueues[name]`, the queue's own redrive
+    policy, or `deadLetterQueues[name]: false` to discard exhausted jobs. Without one the consumer
+    is refused before its first poll with `SqsDeadLetterTargetMissingError`, so a declared processor
+    fails `app.start()`; a name only enqueued to is never checked (V13-199). An exhausted job is no
+    longer deleted when no target is configured.
+  - When the queue's redrive policy has `maxReceiveCount` at or below a job's `maxAttempts`, the
+    job's attempts are lowered to `maxReceiveCount - 1` (at least 1) with one warning per name, so
+    `onFailed` runs before SQS takes the message (V13-214).
+  - A forwarded dead letter carries `setu-dead-letter-reason`, `setu-attempts` and
+    `setu-source-message-id` message attributes. On `InvalidParameterValue` (SQS's code for an
+    oversize message, also used for other invalid parameters), the forward is retried once without
+    those attributes, with a warning. A failed forward keeps the source message.
+  - A message the adapter cannot read is sent to the dead-letter target with reason `unreadable` and
+    deleted, and its warning carries the message id, never the body (V13-213).
+  - A stale `ack`, retry or dead-letter rejects (reported as `queue job settlement failed`) instead
+    of logging and returning. A dead letter whose copy already reached its target still deletes the
+    source and warns when its claim lapsed during the forward.
+  - Consuming needs `sqs:GetQueueAttributes` (not for a `false` entry; with an explicit target URL a
+    refused read only warns), and `sqs:GetQueueUrl` and `sqs:SendMessage` on a policy target.
+
+- **`@setu-ts/queue-plugin`, every adapter (M143p, #616).** `queue_jobs_total` counts an outcome
+  only after the adapter's settlement call succeeded, and gains the `discarded` outcome; a settle
+  that fails is no longer counted.
+
+- **`@setu-ts/messaging-plugin` (M143p, #616).** Pub/Sub terminal dead-letter forwards always time
+  out after 15,000 ms, even with `publishTimeoutMs: 0`; ordinary publishes still honor 0.
+
+- **BREAKING — `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin` (M143p, #616).**
+  - The backplane's `'messaging'` transport subscribes with `fanOut` and refuses at `register()`
+    with `BackplaneFanOutUnsupportedError` a broker that does not confirm it (Cloudflare's
+    `WorkersBroker`, a `custom` broker that ignores the option); a Redis Streams client without
+    `xread` fails it with a `TypeError`, and Service Bus without `Manage` with the SDK's error. On
+    Kafka, NATS, Redis Streams, Pub/Sub and Service Bus every replica now receives every frame;
+    before, a shared consumer group handed each frame to one replica (V13-258).
+  - Pub/Sub retries a failing handler with a delay by default, and limits attempts only with
+    `deadLetterTopic`; Service Bus retries with a delay and a limit by default. Set
+    `consumerRetry: false` for the old immediate nack or abandon (V13-261). Pub/Sub sets the
+    subscription's retry and dead-letter policies only when it creates the subscription; a missing
+    `deadLetterTopic` then fails the subscribe with `PubSubDeadLetterTopicMissingError`.
+  - A Pub/Sub stream the client library closed is re-opened on a fixed schedule, and the broker
+    reports unreachable while it is closed (V13-260). On an ordering subscription, handlers run one
+    at a time per ordering key, and a failure holds the key's later messages until a held-back
+    message of that key is redelivered, so order is best effort (V13-266); past 10,000 keys held per
+    subscription the least recently used idle key is forgotten, with a warning when its failure is
+    recent enough that order can be lost.
+  - The outbox relay on RabbitMQ publishes with `mandatory`: an unroutable row is retried and then
+    marked `failed`, not `sent`, and the outbox refuses to start on a connection without publisher
+    confirms (`OutboxPublisherConfirmsRequiredError`) (V13-107). Plain `publish()` is unchanged.
+  - The backplane README no longer claims a frame is never delivered late: a publish written to a
+    paused server arrives when it resumes (X3-3). `maxFrameAgeMs` is the opt-in bound; delivery is
+    unchanged by default.
+
 - **BREAKING — `@setu-ts/common`, `@setu-ts/sdk` (M143 Core follow-up, circuit breaker; V13-104,
   #612).** `CircuitBreakerPolicy` is a union of the count and rate arms, so code that reads
   `.threshold` off a `CircuitBreakerPolicy` must narrow first (`policy.threshold !== undefined`).
@@ -133,10 +228,6 @@ All notable changes to this project are documented here. The format follows
   rate field); `NaN` or a numeric string for `threshold`, `timeout` or `resetTimeout` (the old code
   coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
   negative, infinite or over-range `resetTimeout`, or a missing one.
-
-- **`@setu-ts/runtime` (M143, #613).** `IDnsResolver.resolveHost` now rejects with an
-  `AggregateError` cause containing both address-family failures in A-then-AAAA order; migrate
-  readers of `error.cause.code` to inspect `error.cause.errors`. One successful family still wins.
 
 - **`@setu-ts/kernel` (M143i, #611).** Every `GET` route answers `HEAD` with the `GET`'s headers and
   no body, through a server and through `inject()`, `dispatch()` and `app.fetch()`; an explicit
@@ -159,6 +250,7 @@ All notable changes to this project are documented here. The format follows
   `stop()` during `start()` cancels the start: its close hooks run, a close hook registered later
   runs at once, no later startup step runs, and a `listen()` already pending is closed when it
   resolves; a `stop()` after startup's last step waits for `start()` and stops normally (V13-43).
+
 - **`@setu-ts/runtime` (M143i, #611).** Node answers a refused WebSocket upgrade with the
   framework's response (status, reason phrase, headers, body), as Bun and Deno do;
   `rejectRawUpgrade` takes its reason phrases from a status table (V13-53). Bun keeps a quiet
@@ -172,28 +264,33 @@ All notable changes to this project are documented here. The format follows
   as `Response trailers failed`. Adapter statements (a WebSocket ceiling, Deno's no-`GOAWAY` drain)
   are logged at `warn`, faults at `error`. `onFatalError` does not report a throw an application
   captures with `process.setUncaughtExceptionCaptureCallback` (on Node a rejection too).
+
 - **`@setu-ts/logger-plugin` (M143i, #611).** The request log records `101` (was `200`) for an
   accepted WebSocket upgrade (V13-223), and `499` with `aborted: true` (was the handler's status)
   for a request whose client left before the response (the logger-plugin half of V13-110), so alerts
   that count 5xx request lines no longer count those requests. In a Deno application that logs
   requests, Deno now prints its one-time legacy-abort notice; `--unstable-no-legacy-abort` removes
   it.
+
 - **BREAKING — `@setu-ts/cli` (M143b; V13-140, #610).** `setu new --env-file <path>` and
   `setu generate app --env-file <path>` are renamed `--dotenv <path>`, with the same grammar. Node
   reads `--env-file` anywhere on its command line, even after the script name, so under Node the old
   flag never reached `setu`: Node tried to load the file and exited 9. `--env-file` is now refused
   by name (exit 2) on Bun and Deno too.
+
 - **`@setu-ts/cli`, `@setu-ts/create` (M143b; V13-166, #610).** `setu` and `npm create @setu-ts`
   refuse to start below Node 22.9.0 (exit 1, naming the supported range), the lowest version on
   which the CLI and a generated project both work. Between that floor and the supported range they
   warn and continue. The check is the new `@setu-ts/cli/node-version` subpath (`nodeFloorRefusal`,
   `isNodeBelowFloor`, `isSupportedNode`, `HARD_FLOOR_NODE`, `SUPPORTED_NODE`), which both
   executables load before anything else.
+
 - **`@setu-ts/auth-plugin` (M142, #604).** The sign-in login, callback and logout routes, the SAML
   login, ACS and metadata routes, and the RFC 9728 protected-resource metadata route leave the
   OpenAPI document (`excludeFromDocument`): they are browser redirects, a form post and a discovery
   document a client finds from a `401`'s `WWW-Authenticate`, not API operations. They still answer
   as before.
+
 - **`@setu-ts/cli` (M142, #604).** `setu g module <name> --page` writes a guarded page loader,
   action and CSRF form, and no longer writes `/api/<name>` routes. Pass `--page --api` to generate
   both; without `--page`, the API remains the default. The generated service parses input for both
@@ -229,6 +326,7 @@ All notable changes to this project are documented here. The format follows
   WebSocket route). A refused upgrade's socket is destroyed once its bytes are flushed or once it
   has been idle for 5 s, so a client that never closes its side, or never reads, does not hold the
   descriptor, and a status outside 200–599 is answered as 500.
+
 - **`@setu-ts/session-plugin` (M143a, #609; V13-135, V13-136, V13-137).** On the store strategy a
   `destroy()` or `regenerate()` stays in force whatever request on the session was already in
   flight: a revocation writes a `revoked:`/`superseded:` marker before it deletes the row, and every
@@ -245,6 +343,7 @@ All notable changes to this project are documented here. The format follows
   (`storeCommit: 'changes'`, the new default; `'snapshot'` keeps the whole-payload write), so a
   concurrent request's keys survive. `SessionService.commit` takes an optional `SessionCommitPolicy`
   and returns a `SessionCommitOutcome` (`'written' | 'refused' | 'skipped'`), both exported.
+
 - **`@setu-ts/session-plugin`, `@setu-ts/react-router-plugin` (M143a, #609; V13-111, V13-112,
   V13-20).** A signed-in visitor's response, a response setting the session cookie and one carrying
   a CSRF token answer `Cache-Control: private, no-store` with `Vary: Cookie`, marked as early as
@@ -255,6 +354,7 @@ All notable changes to this project are documented here. The format follows
   a refresh-only commit and a new visitor's CSRF-token-only session are not committed, so a form on
   a page marked `public` fails CSRF. A missing asset starts no session. The React Router bridge sets
   a route's `Cache-Control` instead of appending it.
+
 - **`@setu-ts/cache-plugin` (M143a, #609; V13-111).** `cacheMiddleware` stores no response marked
   `private` or `no-store`, and serves a request carrying `Authorization` or a credential cookie only
   from a `public` entry that does not vary on `Cookie`/`Authorization`, storing only such a
@@ -269,12 +369,15 @@ All notable changes to this project are documented here. The format follows
   to its headers. New option `credentialCookies`. `Cache-Control` directives are read outside quoted
   arguments through the new `cacheControlDirectives` in `@setu-ts/common`, which `session-plugin`
   uses too; a value with an unclosed quote is never stored.
+
 - **`@setu-ts/http-security-plugin` (M143a, #609; V13-34).** Security headers run at priority 10 and
   CORS at 125, so the request-size 400 and 413 carry them.
+
 - **`@setu-ts/openapi-plugin`, `@setu-ts/common` (M143a, #609; V13-60).** Swagger UI's Try-it-out
   sends the form-CSRF token on same-origin unsafe calls, from a new `GET <docs>/csrf-token` route
   read through `ICsrfTokenAccess` (`CSRF_TOKEN_ACCESS_STATE_KEY`, new in `@setu-ts/common`). The
   docs page, spec and assets commit no session.
+
 - **`@setu-ts/cli` (M143b; V13-36, V13-141, V13-142, V13-143, V13-145, V13-148, V13-154, V13-161,
   V13-168, #610).** A built-in option given with no value (`--template` at the end, `--template=`)
   is refused by name with exit 2, where it silently meant the default. `setu new` refuses a target

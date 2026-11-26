@@ -18,6 +18,7 @@ import type { ISqsTransport, SqsReceivedMessage } from '../../src/adapters/sqs-q
 
 /** A message held by the fake queue. */
 interface FakeMessage {
+  messageId: string;
   receiptHandle: string;
   body: string;
   /** Wall-clock ms before which the message is not receivable. */
@@ -33,7 +34,12 @@ interface FakeMessage {
  */
 export class FakeSqsTransport implements ISqsTransport {
   /** Every `SendMessage` seen, in order. */
-  readonly sent: { queueUrl: string; body: string; delaySeconds: number | undefined }[] = [];
+  readonly sent: {
+    queueUrl: string;
+    body: string;
+    delaySeconds: number | undefined;
+    attributes?: Parameters<ISqsTransport['send']>[3];
+  }[] = [];
   /** Every `DeleteMessage` seen, in order. */
   readonly deleted: { queueUrl: string; receiptHandle: string }[] = [];
   /** Every `ChangeMessageVisibility` seen, in order. */
@@ -58,11 +64,22 @@ export class FakeSqsTransport implements ISqsTransport {
     return this.#queues.get(queueUrl)?.length ?? 0;
   }
 
-  send(queueUrl: string, body: string, delaySeconds?: number): Promise<void> {
-    this.sent.push({ queueUrl, body, delaySeconds });
+  send(
+    queueUrl: string,
+    body: string,
+    delaySeconds?: number,
+    attributes?: Parameters<ISqsTransport['send']>[3],
+  ): Promise<void> {
+    this.sent.push({
+      queueUrl,
+      body,
+      delaySeconds,
+      ...(attributes === undefined ? {} : { attributes }),
+    });
     const queue = this.#queues.get(queueUrl) ?? [];
     queue.push({
-      receiptHandle: `rh-${++this.#handleCounter}`,
+      messageId: `msg-${++this.#handleCounter}`,
+      receiptHandle: '',
       body,
       visibleAtMs: this.#now() + (delaySeconds ?? 0) * 1000,
       receiveCount: 0,
@@ -85,9 +102,11 @@ export class FakeSqsTransport implements ISqsTransport {
       if (message.visibleAtMs > now) continue;
 
       // Claim it: invisible for the visibility window, delivery count climbs.
+      message.receiptHandle = `rh-${++this.#handleCounter}`;
       message.receiveCount++;
       message.visibleAtMs = now + visibilitySeconds * 1000;
       out.push({
+        messageId: message.messageId,
         receiptHandle: message.receiptHandle,
         body: message.body,
         approximateReceiveCount: String(message.receiveCount),

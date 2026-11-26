@@ -45,10 +45,12 @@ export const messaging = MessagingPlugin({
   copy per group, selected round-robin.
 - Memory `publish` resolves on dispatch hand-off, before handlers finish. Handler failures go to the
   logger when available and never reject that publish. Make consumers idempotent.
-- Subscription factories resolve at `onInit`, after capabilities are registered. The example's
-  `CAPABILITIES.LOGGER` needs `LoggerPlugin` (every template registers it).
+- Subscription factories resolve at `onInit`. The example's `CAPABILITIES.LOGGER` needs
+  `LoggerPlugin` (every template registers it).
 - `name` registers a named capability such as `messaging.orders`, replacing the bare token for that
   instance.
+- Pub/Sub and Service Bus retry by default; `consumerRetry: false` disables.
+- `{ fanOut: true }`: each instance gets every message; check `subscription.fanOut`.
 
 ## Other options
 

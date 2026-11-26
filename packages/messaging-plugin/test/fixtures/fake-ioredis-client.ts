@@ -63,6 +63,25 @@ export class FakeRedisStreamsClient implements IRedisStreamsClient {
     this.#streams.clear();
     this.#groups.clear();
   }
+  /** Plain stream reads retain a caller-owned cursor and create no group. */
+  xread(...args: string[]): Promise<unknown[][] | null> {
+    this.#record('xread', args);
+    const start = args.indexOf('STREAMS');
+    const topic = args[start + 1]!;
+    const after = args[start + 2]!;
+    const greater = (id: string): boolean => {
+      const [ms, seq] = id.split('-').map(BigInt);
+      const [afterMs, afterSeq] = after.split('-').map(BigInt);
+      return ms! > afterMs! || (ms === afterMs && seq! > afterSeq!);
+    };
+    const entries = (this.#streams.get(topic) ?? []).filter(([id]) => greater(id));
+    return Promise.resolve(entries.length === 0 ? null : [[topic, entries]]);
+  }
+  /** Captures the stream's last ID, including an absent stream's empty result. */
+  xrevrange(...args: string[]): Promise<Array<[string, string[]]>> {
+    this.#record('xrevrange', args);
+    return Promise.resolve((this.#streams.get(args[0]!) ?? []).slice(-1).reverse());
+  }
   #group(topic: string, group: string): Group {
     const state = this.#groups.get(topic)?.get(group);
     if (!state) throw new Error('NOGROUP');

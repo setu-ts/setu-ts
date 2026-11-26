@@ -7,9 +7,10 @@ function brokerWith(overrides: Record<string, unknown> = {}): IMessageBroker {
     connect: () => Promise.resolve(),
     disconnect: () => Promise.resolve(),
     publish: () => Promise.resolve(),
-    subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+    subscribe: () =>
+      Promise.resolve({ fanOut: true as const, unsubscribe: () => Promise.resolve() }),
     request: () => Promise.resolve(null as never),
-    respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+    respond: () => Promise.resolve({ fanOut: true as const, unsubscribe: () => Promise.resolve() }),
     ...overrides,
   };
 }

@@ -403,6 +403,28 @@ class RedisAdapter {
     return this.#command('XREADGROUP', args);
   }
 
+  /**
+   * Reads stream entries without a consumer group.
+   * @param args - Positional XREAD arguments
+   * @returns Stream and entry pairs, or null after an empty blocking read
+   * @throws {Error} When connecting or the command fails
+   * @since 0.14.0
+   */
+  xread(...args: Argument[]): Promise<unknown[][] | null> {
+    return this.#command('XREAD', args);
+  }
+
+  /**
+   * Reads stream entries in reverse ID order.
+   * @param args - Positional XREVRANGE arguments
+   * @returns Entry IDs and field/value arrays
+   * @throws {Error} When connecting or the command fails
+   * @since 0.14.0
+   */
+  xrevrange(...args: Argument[]): Promise<Array<[string, string[]]>> {
+    return this.#command('XREVRANGE', args);
+  }
+
   /** Sends XPENDING with ioredis positional arguments. */
   xpending(...args: Argument[]): Promise<Array<[string, string, number, number]>> {
     return this.#command('XPENDING', args);

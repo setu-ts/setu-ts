@@ -24,8 +24,133 @@ import { FakeNatsConnection } from '../../test/fixtures/fake-nats-client.ts';
 import { FakeKafkaFactory } from '../../test/fixtures/fake-kafkajs-client.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 import type { IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
+import { pubSubTransport, serviceBusTransport } from '../fixtures/cloud-transports.ts';
 
 describe('M113a plugin option forwarding', () => {
+  it('keeps a declarative subscription active when its fan-out diagnostic sink throws', async () => {
+    const h = createFakeContext();
+    const warn = vi.fn(() => {
+      throw new Error('logger');
+    });
+    Object.defineProperty(h.ctx, 'logger', { value: { warn } });
+    const subscribe = vi.fn(() => Promise.resolve({ unsubscribe: () => Promise.resolve() }));
+    const instance = new InMemoryBroker(h.ctx.runtime, new JsonSerializer());
+    vi.spyOn(instance, 'subscribe').mockImplementation(subscribe);
+    try {
+      await expect(
+        MessagingPlugin({
+          broker: 'custom',
+          instance,
+          subscriptions: [{ topic: 'orders', handler: () => {}, options: { fanOut: true } }],
+        }).register(h.ctx),
+      ).resolves.toBeUndefined();
+      expect(subscribe).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      for (const close of h.onCloseHandlers) await close();
+    }
+  });
+  it.each(['pubsub', 'service-bus'] as const)(
+    'validates %s consumer retry at plugin construction',
+    (broker) => {
+      for (const delaysMs of [[NaN], [-1], [Infinity]])
+        expect(() =>
+          MessagingPlugin({
+            broker,
+            projectId: 'p',
+            connectionString: 'unused',
+            consumerRetry: { delaysMs },
+          } as import('../../src/interfaces/index.ts').MessagingPluginOptions),
+        ).toThrow(RangeError);
+      expect(() =>
+        MessagingPlugin({
+          broker: 'pubsub',
+          projectId: 'p',
+          consumerRetry: { isRetryable: () => false },
+        }),
+      ).toThrow('deadLetterTopic');
+    },
+  );
+  it('forwards Pub/Sub retry, target and info logger to the broker', async () => {
+    const h = createFakeContext();
+    const fake = pubSubTransport();
+    const info = vi.fn();
+    h.registered.set('logger', { error: vi.fn(), warn: vi.fn(), info });
+    vi.mocked(fake.transport.topicHasSubscriptions!).mockRejectedValue({ code: 7 });
+    const plugin = MessagingPlugin({
+      broker: 'pubsub',
+      client: fake.transport,
+      deadLetterTopic: 'dead',
+      consumerRetry: { maxAttempts: 8, delaysMs: [100, 200] },
+      subscriptions: [{ topic: 'orders', handler: () => {} }],
+    });
+    try {
+      await plugin.register(h.ctx);
+      expect(fake.opens[0]!.options?.create).toEqual({
+        retryPolicy: { minimumBackoffMs: 100, maximumBackoffMs: 200 },
+        deadLetterPolicy: { deadLetterTopic: 'dead', maxDeliveryAttempts: 8 },
+      });
+      expect(info).toHaveBeenCalledOnce();
+    } finally {
+      for (const close of h.onCloseHandlers) await close();
+    }
+  });
+  it('forwards Service Bus consumer retry and warns once for an unconfirmed declarative fanOut', async () => {
+    const h = createFakeContext();
+    const fake = serviceBusTransport();
+    const warn = vi.fn();
+    Object.defineProperty(h.ctx, 'logger', { value: { warn } });
+    h.registered.set('logger', { error: vi.fn(), warn });
+    const plugin = MessagingPlugin({
+      broker: 'service-bus',
+      client: fake.transport,
+      consumerRetry: { maxAttempts: 2, delaysMs: [1] },
+      subscriptions: [
+        {
+          topic: 'orders',
+          handler: () => {
+            throw 1;
+          },
+        },
+      ],
+    });
+    try {
+      await plugin.register(h.ctx);
+      const deadLetter = vi.fn(() => Promise.resolve());
+      await fake.opens[0]!.deliver({
+        payload: '{}',
+        deliveryCount: 1,
+        ack: vi.fn(),
+        nack: vi.fn(),
+        deadLetter,
+      });
+      expect(deadLetter).toHaveBeenCalledWith('setu-attempts-exhausted');
+    } finally {
+      for (const close of h.onCloseHandlers) await close();
+    }
+    const custom = createFakeContext();
+    Object.defineProperty(custom.ctx, 'logger', { value: { warn } });
+    const instance: IMessageBroker = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      publish: () => Promise.resolve(),
+      subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+      request: () => Promise.reject(new Error('unused')),
+      respond: () => Promise.reject(new Error('unused')),
+    };
+    try {
+      await MessagingPlugin({
+        broker: 'custom',
+        instance,
+        subscriptions: [{ topic: 'orders', handler: () => {}, options: { fanOut: true } }],
+      }).register(custom.ctx);
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        'Messaging declarative fanOut subscription was not confirmed by the broker',
+      );
+    } finally {
+      for (const close of custom.onCloseHandlers) await close();
+    }
+  });
   it.each(['kafka', 'pubsub'] as const)(
     'refuses invalid %s publishTimeoutMs at construction',
     (broker) => {
