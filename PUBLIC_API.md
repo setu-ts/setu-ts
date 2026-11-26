@@ -1921,18 +1921,19 @@ requested isolation level is refused by name, so pass `provider` explicitly. Dri
 configuration created by `createDrizzleDatabase(database, transactionBridge)`; the registry's tables
 must carry an `id` column and the adapter translates every repository field to a real Drizzle
 column. Drizzle `create`, `update`, and `delete` return actual driver rows: through `RETURNING`
-where the builder offers it, and on MySQL (since 0.14.0) by the write's affected-row count followed
-by a read-back by key, both in one Drizzle `transaction()` (unwrapped, with one `warn`, on
-mysql-proxy). A `create` whose key the database fills is served through `$returningId()` only for
-one column-level primary key that auto-increments or has a `$defaultFn`, and is otherwise refused
-before sending with `UnsupportedQueryFeatureError('create')`; a result carrying no readable
-`affectedRows` is refused with `UnsupportedQueryFeatureError('write')`. Both are configuration
-refusals (masked `500`). Promise-aware SQLite Proxy and libsql-shaped Drizzle instances without
-`execute()` are accepted for repository, transaction, and typed-builder use. Calling
-`IDatabaseService.query()` on such an instance rejects with guidance to use Drizzle's typed query
-builder. That refusal is permanent rather than pending: those drivers do expose `all()`, but on a
-raw statement the proxy protocol answers with **positional** rows, because Drizzle has no field map
-for a statement it did not build — and `query<T>()` promises row objects.
+where the builder offers it, and on MySQL (since 0.14.0) a `create` or `update` by the write's
+affected-row count followed by a read-back by key, both in one Drizzle `transaction()` (unwrapped,
+with one `warn`, on mysql-proxy), while a MySQL `delete` decides from its count alone, outside a
+transaction and with no read-back. A `create` whose key the database fills is served through
+`$returningId()` only for one column-level primary key that auto-increments or has a `$defaultFn`,
+and is otherwise refused before sending with `UnsupportedQueryFeatureError('create')`; a result
+carrying no readable `affectedRows` is refused with `UnsupportedQueryFeatureError('write')`. Both
+are configuration refusals (masked `500`). Promise-aware SQLite Proxy and libsql-shaped Drizzle
+instances without `execute()` are accepted for repository, transaction, and typed-builder use.
+Calling `IDatabaseService.query()` on such an instance rejects with guidance to use Drizzle's typed
+query builder. That refusal is permanent rather than pending: those drivers do expose `all()`, but
+on a raw statement the proxy protocol answers with **positional** rows, because Drizzle has no field
+map for a statement it did not build — and `query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -3189,7 +3190,8 @@ Each adapter assigns `isHealthy` (see Health status above). The injection facade
 bound:
 
 - `IDynamoClient`: every method takes an optional second argument `{ abortSignal?: AbortSignal }`,
-  which the adapter always passes; an injected facade that ignores it is unbounded.
+  which the adapter passes on every call while `requestTimeoutMs` is above `0` (at `0` it passes
+  none); an injected facade that ignores it is unbounded.
 - `ICosmosClient` family: `CosmosRequestOptions` gains an optional `abortSignal`, every member that
   does I/O takes an optional `CosmosRequestOptions` (the query iterator through its `query` call),
   and the four batch operation shapes gain an optional `ifMatch`.

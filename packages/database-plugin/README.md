@@ -649,7 +649,8 @@ CREATE TABLE setu_idempotency (
 CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expiresAt);
 ```
 
-For MySQL, with the same expiry index:
+For MySQL (add an index on `(kind, role, expires_at)` for the purge query, as the other dialects
+do):
 
 ```sql
 CREATE TABLE `setu_idempotency` (
