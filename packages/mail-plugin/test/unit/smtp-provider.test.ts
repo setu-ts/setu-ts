@@ -63,6 +63,7 @@ describe('toNodemailerMessage', () => {
         encoding: 'base64',
         contentType: 'image/png',
         cid: 'image@x',
+        contentDisposition: 'inline',
       },
     ]);
     expect(toNodemailerMessage(envelope)).not.toHaveProperty('attachments');

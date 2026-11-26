@@ -259,8 +259,8 @@ export class HashiCorpVaultProvider implements SecretProvider {
    * @param name - The secret path (relative to the mount)
    * @returns The value, or `null` when absent
    * @throws {SecretProviderUnavailableError} When Vault cannot be reached or
-   *   does not answer within `requestTimeoutMs`
-   * @throws {Error} On a non-404 HTTP error or a body that is not JSON
+   *   answers HTTP 5xx or does not answer within `requestTimeoutMs`
+   * @throws {Error} On a non-404 4xx response or a body that is not JSON
    */
   async get(name: string): Promise<string | null> {
     const res = await this.#request(
@@ -273,6 +273,12 @@ export class HashiCorpVaultProvider implements SecretProvider {
     );
     if (res.status === HTTP_NOT_FOUND) {
       return null;
+    }
+    if (res.status >= 500) {
+      throw new SecretProviderUnavailableError(
+        PROVIDER_NAME,
+        new Error(`Vault read failed: HTTP ${res.status}`),
+      );
     }
     if (res.oversized) {
       throw new Error(
@@ -295,8 +301,8 @@ export class HashiCorpVaultProvider implements SecretProvider {
    * @param name - The secret path (relative to the mount)
    * @param value - The new value
    * @throws {SecretProviderUnavailableError} When Vault cannot be reached or
-   *   does not answer within `requestTimeoutMs`
-   * @throws {Error} On any HTTP error
+   *   answers HTTP 5xx or does not answer within `requestTimeoutMs`
+   * @throws {Error} On an HTTP 4xx response
    */
   async set(name: string, value: string): Promise<void> {
     const res = await this.#request(
@@ -311,6 +317,12 @@ export class HashiCorpVaultProvider implements SecretProvider {
       },
       false,
     );
+    if (res.status >= 500) {
+      throw new SecretProviderUnavailableError(
+        PROVIDER_NAME,
+        new Error(`Vault write failed: HTTP ${res.status}`),
+      );
+    }
     if (!res.ok) {
       throw new Error(`Vault write failed for ${printableSecretName(name)}: HTTP ${res.status}`);
     }

@@ -62,6 +62,9 @@ exactly; other values are reserved. The kernel does not remove the header from o
 application that sets it claims the request was not processed, and a client that honours the marker
 may send that request again.
 
+`uploadMetadataOf` treats throwing brand or metadata getters as absent and returns valid metadata by
+identity.
+
 ## Usage
 
 Since 0.13.0, standard tokens infer their interfaces from the augmentable `CapabilityServices` map.
@@ -387,6 +390,7 @@ package fits the plugin architecture.
 | `toBackendFault`                      | function  |
 | `unwrap`                              | function  |
 | `upgradeIntentOf`                     | function  |
+| `uploadMetadataOf`                    | function  |
 | `validatedStateKey`                   | function  |
 | `validationMetadataOf`                | function  |
 | `vectorRecordKey`                     | function  |
@@ -399,6 +403,7 @@ package fits the plugin architecture.
 | `withRateLimitMetadata`               | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
+| `withUploadMetadata`                  | function  |
 | `withValidationMetadata`              | function  |
 | `AgentRunApprovalError`               | class     |
 | `AgentRunDefinitionError`             | class     |
@@ -417,6 +422,7 @@ package fits the plugin architecture.
 | `ReconnectSupervisor`                 | class     |
 | `RequestServiceUnavailableError`      | class     |
 | `RouteRegistrationError`              | class     |
+| `StorageObjectNotFoundError`          | class     |
 | `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `VectorCollectionMismatchError`       | class     |
@@ -471,6 +477,7 @@ package fits the plugin architecture.
 | `UNPROCESSED_HEADER`                  | const     |
 | `UNPROCESSED_SHUTDOWN`                | const     |
 | `UPGRADE_INTENT`                      | const     |
+| `UPLOAD_METADATA`                     | const     |
 | `VALIDATION_METADATA`                 | const     |
 | `AddJobOptions`                       | interface |
 | `AgentRunApprovalRow`                 | interface |
@@ -795,6 +802,7 @@ package fits the plugin architecture.
 | `TransactionalIdempotencyClaim`       | interface |
 | `TransactionalIdempotencyRecord`      | interface |
 | `TransactionOptions`                  | interface |
+| `UploadMetadata`                      | interface |
 | `ValidationIssue`                     | interface |
 | `ValidationMiddlewareOptions`         | interface |
 | `ValueProvider`                       | interface |

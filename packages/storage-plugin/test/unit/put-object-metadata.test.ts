@@ -251,6 +251,7 @@ describe('AzureBlobProvider — content type inside blobHTTPHeaders (X8-6)', () 
     expect(uploads[0]).toEqual({
       blobHTTPHeaders: { blobContentType: 'image/png' },
       metadata: { owner: 'ada' },
+      abortSignal: expect.any(AbortSignal),
     });
   });
 
@@ -261,7 +262,7 @@ describe('AzureBlobProvider — content type inside blobHTTPHeaders (X8-6)', () 
 
     await provider.put('raw.bin', BYTES);
 
-    expect(uploads[0]).toEqual({});
+    expect(uploads[0]).toEqual({ abortSignal: expect.any(AbortSignal) });
   });
 });
 

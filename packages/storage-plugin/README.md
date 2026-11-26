@@ -21,6 +21,12 @@ Install the peers for the selected provider when using its built-in lazy loader:
 | `'azure'`             | `@azure/storage-blob`                                        |
 | `'memory'`, `'local'` | none                                                         |
 
+The `'gcs'` arm supports `@google-cloud/storage` 7.18+ within 7.x (the peer range is `^7.18.0`). It
+turns the SDK's own retry off: on 7.22.0 and 8.4.0 a retried download that receives a `502` or `503`
+ends the process, and 9.0.0 never settles on the same answer (both measured on Node 24). A fault
+therefore answers at once, as a named `503`; retry it in the caller, for example with
+`@setu-ts/resilience-plugin`.
+
 Both S3 packages are loaded at startup, even before requesting a signed URL. A missing peer makes
 startup reject with `OptionalDependencyUnavailableError` naming that package. Installing only
 `@aws-sdk/client-s3` is insufficient.
@@ -90,10 +96,10 @@ different point:
 Passing `contentType` is what makes a signed URL render the image rather than download it; the field
 on `UploadedFile` is `mimeType`.
 
-Size limits answer **413**; a malformed body, a disallowed MIME type and too many files answer
-**400**. That includes a body the runtime refused before this middleware ran: `maxBodyBytes` on
-`RuntimePlugin` rejects the read with a `413`-hinted error, and the middleware serves that hint
-rather than reporting a malformed multipart.
+Size limits answer **413**; a disallowed MIME type answers **415**; a malformed body and too many
+files answer **400**. That includes a body the runtime refused before this middleware ran:
+`maxBodyBytes` on `RuntimePlugin` rejects the read with a `413`-hinted error, and the middleware
+serves that hint rather than reporting a malformed multipart.
 
 The multipart parser is implemented in this package — no dependency.
 
@@ -103,14 +109,33 @@ The multipart parser is implemented in this package — no dependency.
 checked against that backend's own shape and an unknown key is reported by name. `provider` is
 optional only on the memory arm, which is the default.
 
-| `provider`      | `options`                     | Required fields |
-| --------------- | ----------------------------- | --------------- |
-| omitted         | —                             | —               |
-| `'memory'`      | —                             | —               |
-| `'local'`       | `LocalStorageProviderOptions` | —               |
-| `'s3'` / `'b2'` | `S3ProviderOptions`           | `bucket`        |
-| `'gcs'`         | `GcsProviderOptions`          | `bucket`        |
-| `'azure'`       | `AzureBlobProviderOptions`    | `containerName` |
+| `provider` | `options`                     | Required fields                      |
+| ---------- | ----------------------------- | ------------------------------------ |
+| omitted    | —                             | —                                    |
+| `'memory'` | —                             | —                                    |
+| `'local'`  | `LocalStorageProviderOptions` | —                                    |
+| `'s3'`     | `S3ProviderOptions`           | `bucket`                             |
+| `'b2'`     | `S3ProviderOptions`           | `bucket`, and `region` or `endpoint` |
+| `'gcs'`    | `GcsProviderOptions`          | `bucket`                             |
+| `'azure'`  | `AzureBlobProviderOptions`    | `containerName`                      |
+
+`'b2'` has no default region: Backblaze regions are named like `us-west-004`, and with only `bucket`
+set (and no injected `client`) the plugin refuses to start, naming both options. With `region` the
+endpoint is `https://s3.<region>.backblazeb2.com`.
+
+The cloud arms share one bound and take an endpoint:
+
+| Option             | Arms                       | Default                                       | Description                                                                                                                                                                                                                                                                                      |
+| ------------------ | -------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `requestTimeoutMs` | `s3`, `b2`, `gcs`, `azure` | `30000`                                       | Bound on each call, the SDK's own retries included. `0` disables it. Raise it for large `put`/`get`; `getStream` is bounded only until the stream is handed back.                                                                                                                                |
+| `endpoint`         | `s3`, `b2`                 | AWS                                           | S3-compatible endpoint (MinIO, R2, B2). Requests use path-style addressing.                                                                                                                                                                                                                      |
+| `endpoint`         | `gcs`                      | Google                                        | Passed to the SDK as `apiEndpoint`. Refused with `RangeError` while `STORAGE_EMULATOR_HOST` is set (the SDK sends JSON requests to the variable and uploads here); set one or the other. An injected `client` is not checked. Set `endpointAuth: false` with an emulator.                        |
+| `endpointAuth`     | `gcs`                      | `true`                                        | Send credentials to a custom `endpoint`. The SDK sends none to one unless told to; set `false` only for an emulator that checks none. With it on, `put` uploads in one multipart request: the SDK's resumable upload sends no credential to a host outside Google's domain (measured on 7.22.0). |
+| `endpoint`         | `azure`                    | `https://<accountName>.blob.core.windows.net` | Blob service URL for the `accountName` + `accountKey` form. A `connectionString` carries its own endpoint.                                                                                                                                                                                       |
+
+A `connectionString` is read with the SDK's `BlobServiceClient.fromConnectionString`, so both the
+portal form (`DefaultEndpointsProtocol=…;AccountName=…;AccountKey=…`) and Azurite's work. An SDK
+`BlobServiceClient` can be passed as `options.client` as it is.
 
 The `'local'` provider's `LocalStorageProviderOptions` has one optional field:
 
@@ -125,7 +150,7 @@ The `'local'` provider's `LocalStorageProviderOptions` has one optional field:
 | `fieldname`        | `string`   | `'file'`  | Form field to extract. Parts with other names are dropped. |
 | `maxSize`          | `number`   | 10 MB     | Per-file limit. Exceeding it answers `413`.                |
 | `maxBodyBytes`     | `number`   | 50 MB     | Ceiling on the body that will be PARSED; see below.        |
-| `allowedMimeTypes` | `string[]` | —         | Allow-list. A disallowed type answers `400`.               |
+| `allowedMimeTypes` | `string[]` | —         | Allow-list. A disallowed type answers `415`.               |
 | `maxFiles`         | `number`   | unlimited | File-count cap. Exceeding it answers `400`.                |
 
 The effective parse bound is `min(maxSize * 2 + framing, maxBodyBytes)`. It bounds parsing and the
@@ -163,6 +188,81 @@ rejects, and the memory provider's URL is synthetic, so nothing could read an at
 A presigned URL serves the object under whatever content type it was stored with, which is why `put`
 takes one — see [Object metadata](#object-metadata).
 
+`GcsProvider` and `AzureBlobProvider` read the clock the plugin hands them (`runtime.now()`). A
+direct GCS caller that sets `endpoint` without a `client` must pass the runtime environment as the
+fourth constructor argument (without it the constructor throws a `RangeError`), so a set
+`STORAGE_EMULATOR_HOST` beside `endpoint` is refused; the plugin supplies it automatically. A
+provider constructed directly needs `now` as its second argument; without one, `getSignedUrl`
+rejects by name (except an Azure client with its own `getSignedUrl`, which needs no clock). The
+Azure SAS URL comes from the SDK's `generateSasUrl`, which encodes the blob name and uses the
+client's own host; a client without an account key (a SAS connection string, managed identity) is
+refused. GCS signs with the credentials the SDK finds (`GOOGLE_APPLICATION_CREDENTIALS`).
+
+## Faults, `exists` and `delete`
+
+An outage is an error, never "not there". On every cloud arm:
+
+- `exists` resolves `false` only when the backend answers that the object is absent; `delete`
+  resolves `false` only when the provider knows no object was there. S3 and B2 cannot tell from
+  their delete answer, so they check with a `HEAD` first; an object removed between that check and
+  the delete still resolves `true`. A `403` on that check, whatever its cause, leaves presence
+  unknown, so the delete goes ahead: `true` when it succeeds, a rejection when it fails. A
+  credential without `s3:ListBucket` gets that `403` for an absent key, so `delete()` resolves
+  `true` there; grant `s3:ListBucket` for exact answers. Any other failure rejects. Every provider
+  gives the same `delete()` answer, except S3/B2 under such a credential. An S3/B2 `delete` is two
+  requests, each under its own `requestTimeoutMs`.
+- A key with a `.` or `..` path segment is refused with a `400` by every `StorageService` call, and
+  by the S3, B2, GCS and Azure providers used directly: on Azure the SDK resolves `..` in the blob
+  URL, so such a key could reach another container. An empty key or one of only `/`, or one that is
+  not a string (a `String` object included), is refused the same way.
+- `local` `get` resolves `null` (`404`) only for an absent file; a permission or I/O failure
+  rejects.
+- A refused connection, a lost connection, an expired `requestTimeoutMs`, or a `500`/`502`/`503`/
+  `504` from the backend rejects with `BackendUnavailableError` (`503`) for a read, and for `put` or
+  `delete` with `BackendUnavailableError` when the request was refused before it was sent or
+  answered `503` on the SDK's only attempt, and `BackendOutcomeUnknownError` (`504`) when it may
+  have been applied, including HTTP `500`/`502`/`504` and any refusal after the SDK retried, or from
+  an injected client whose attempts are unknown (the AWS SDK records its attempts), so an S3 or B2
+  write refused at connection time answers `504` under the SDK's default retries. The Azure client
+  the arm builds makes one attempt per call (the SDK's retry is off, as on GCS), so its `503` still
+  means not sent; an injected client keeps its own retries. A GCS upload past its bound answers
+  `504` while its request may still finish: the SDK offers no way to cancel an upload, so its
+  connection stays open until the backend answers or closes it.
+- Anything else — a refused credential, a missing bucket — rejects with an `Error` whose message
+  starts `storage-plugin (<provider>): <call> failed:`, so the masked `500` names the backend in the
+  log.
+- `get` and `getStream` of a missing object throw `StorageObjectNotFoundError` (`404`, from
+  `@setu-ts/common`); the key is in `message`, never in the response.
+
+| Provider | `exists` of an absent object | `delete` of an absent object |
+| -------- | ---------------------------- | ---------------------------- |
+| S3 / B2  | `false`                      | `false` (checked first)      |
+| GCS      | `false`                      | `false`                      |
+| Azure    | `false`                      | `false`                      |
+| Memory   | `false`                      | `false`                      |
+| Local    | `false`                      | `false`                      |
+
+The Azure client the arm builds makes one attempt per call, so a refused connection answers at once
+(an injected `BlobServiceClient` keeps its own retry policy).
+
+A miss reads as `null`/`false` only when the backend names a missing object. S3 `get`/`getStream`
+reject a `NoSuchBucket` answer and every Azure call rejects `ContainerNotFound`; a GCS error with
+code `ENOENT` (a local file error, such as a missing credential file) rejects too. Two answers
+cannot be told apart: an S3 `HEAD` (behind `exists` and `delete`) has no body, so a missing bucket
+reads as `NotFound`, and GCS answers `404` for a missing bucket as for a missing object; there
+`exists` and `delete` answer `false`. Azure downloads without a body reject unless
+`deleted === true`. Injected Azure operations receive `{ abortSignal }`; injected
+`IS3Backend.put(path, data, options?, signal?)`, `delete(path, signal?)` and `head(path, signal?)`
+receive the deadline signal. Buffered GCS downloads destroy their SDK stream on deadline; a failed
+first streaming read releases an iterator without waiting for `return()`. Omit a provider's
+`getStream` for the buffered fallback over `get`; an implemented `getStream` returning `null` makes
+the service throw `StorageObjectNotFoundError` with no fallback.
+
+The GCS, Azure and B2/S3 arms were run against local stand-ins (fake-gcs-server, Azurite, MinIO):
+upload, download, exists, delete, a signed URL fetched back, an outage and a refused credential. No
+live Google, Azure or Backblaze account was used, so behaviour that only the real services have
+(signature checks on a GCS URL, Azure's own retry timing) is unproven here.
+
 ## The `local` provider needs write permission
 
 `LocalStorageProvider` writes through `runtime.fs`, so on Deno the process must be started with
@@ -182,21 +282,23 @@ The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wir
 ### Backpressure — per provider
 
 Demand-driven streaming is **not** a property of `getStream?` in general. It holds for `S3Provider`
-and is measured there; the other providers reach the object differently, and two of them read as
-fast as the backend will send regardless of what the consumer is doing.
+and is measured there; the other providers reach the object differently: `AzureBlobProvider` reads
+as fast as the backend will send regardless of what the consumer is doing, and the memory and local
+providers buffer the whole object.
 
-| Provider                      | Streaming                | Bounded memory for a slow consumer                                      |
-| ----------------------------- | ------------------------ | ----------------------------------------------------------------------- |
-| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.        |
-| `GcsProvider`                 | Native, but eager        | **No** — enqueues eagerly; cancelling now releases the upstream stream. |
-| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling now releases the upstream stream.   |
-| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                         |
-| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.         |
+| Provider                      | Streaming                | Bounded memory for a slow consumer                                                                                 |
+| ----------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.                                                   |
+| `GcsProvider`                 | Native, pulled           | Not measured — read on demand after the first chunk; cancelling destroys the source and waits for its read to end. |
+| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling releases the upstream stream.                                                  |
+| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                                                                    |
+| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.                                                    |
 
-For the two eager providers and the two fallbacks, a large object is resident in memory regardless
-of how slowly the client reads. Cancelling a GCS or Azure download does now release the upstream
-stream, but it cannot undo the bytes already drained, and the two fallbacks have no upstream left to
-release. Only the S3 path should be relied on for a large-object relay today.
+`GcsProvider` waits for the first chunk before it answers, so a missing object is `null` and a
+refused credential or an outage rejects before a response begins; after that it reads the SDK stream
+on demand. For the Azure provider and the two fallbacks a large object is resident in memory
+regardless of how slowly the client reads; cancelling an Azure download releases the upstream stream
+but cannot undo the bytes already drained. Only the S3 path is measured for a large-object relay.
 
 Measured for `S3Provider` against real MinIO: it stays 2-3 MiB ahead of the reader — 3.1 MiB at 1
 MiB/s, 1.9-2.5 MiB at 2 MiB/s — and that figure is constant, moving by at most 0.30 MiB over an
@@ -223,7 +325,19 @@ lifecycle (`isReady()`) and its reachability (`isHealthy()`).
 | `down` | The provider is not connected, or is connected but unreachable.                            |
 
 `data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
-the provider has no liveness check.
+the provider has no liveness check. The probe is cached for 5 s and bounded at 2 s.
+
+| Provider | Probe                                            | Reachable when                                                                                     |
+| -------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| S3 / B2  | `HEAD` on the bucket                             | the bucket answers `200`; a refused credential reads **down**                                      |
+| GCS      | `bucket.exists()`                                | the backend answers at all (status below `500`); a refused credential or a missing bucket reads up |
+| Azure    | the container's `exists()`                       | the backend answers at all (status below `500`); a refused credential reads up                     |
+| Local    | `stat` of the root, after a write at `connect()` | the root still exists and proved writable at `connect()`                                           |
+| Memory   | none needed                                      | always                                                                                             |
+
+The GCS and Azure probes read reachability, not authorization, because a least-privilege credential
+may lack the bucket or container permission the probe needs; a revoked credential shows as failing
+calls, not as readiness `down`.
 
 ## Diagnostics (M98m)
 

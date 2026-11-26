@@ -152,6 +152,23 @@ export function assertTaskTimeout(value: unknown, name: string): void {
 }
 
 /**
+ * Refuses a per-call `signal` that is not an `AbortSignal` instance of this
+ * realm (a `null` from JavaScript, a cast or signal-shaped object, a signal
+ * another realm such as jsdom built). Checked before admission: the pool attaches
+ * its listener with the instance's own methods. The pool also guards its later
+ * reads, so even an `AbortSignal` Proxy whose accessors throw cannot escape a
+ * timer or listener callback.
+ *
+ * @param value - The per-call `signal`; `undefined` is allowed
+ * @throws {TypeError} Unless `value` is `undefined` or an `AbortSignal`
+ */
+export function assertAbortSignal(value: unknown): void {
+  if (value !== undefined && !(value instanceof AbortSignal)) {
+    throw new TypeError(`signal must be an AbortSignal; received ${describe(value)}`);
+  }
+}
+
+/**
  * Validates the sizing options at the plugin factory, so a bad value fails
  * when the plugin is constructed rather than at `start()`.
  *

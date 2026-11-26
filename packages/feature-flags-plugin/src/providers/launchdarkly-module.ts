@@ -63,10 +63,11 @@ export interface ILaunchDarklyClient {
   /**
    * Resolves once the client has connected, or rejects on permanent failure.
    *
-   * @param options - Initialization wait budget
+   * @param options - Initialization wait budget: `timeout` in seconds, the
+   *   SDK's own option name (`LDWaitForInitializationOptions.timeout`)
    * @returns A promise settling on initialization
    */
-  waitForInitialization(options?: { readonly timeoutSeconds?: number }): Promise<unknown>;
+  waitForInitialization(options?: { readonly timeout?: number }): Promise<unknown>;
   /**
    * Evaluates a boolean flag for a context.
    *

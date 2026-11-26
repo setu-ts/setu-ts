@@ -141,8 +141,9 @@ describe('notification-plugin integration (through a real kernel app)', () => {
     // Slack — incoming-webhook JSON POST.
     const slackCall = slackHttp.getLastCall();
     expect(slackCall?.url).toBe('https://hooks.slack.com/services/T/B/X');
+    // The subject leads the text in bold (V13-257).
     expect(JSON.parse(slackCall!.body)).toEqual({
-      text: 'Your order 42 has been confirmed.',
+      text: '*Order Confirmed*\nYour order 42 has been confirmed.',
       channel: '#orders',
     });
 

@@ -27,8 +27,8 @@ export class LocalStorageProvider implements StorageProvider {
   readonly #platform: (() => string) | undefined;
   /**
    * Whether the root proved writable at `connect()`. Read by
-   * {@linkcode isHealthy}, so a root that stops being writable later is
-   * reported rather than assumed good for the life of the process.
+   * {@linkcode isHealthy}; the probe itself only `stat`s the root, so a root
+   * that loses write permission after `connect()` still reads healthy.
    */
   #writable = false;
 
@@ -122,15 +122,18 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   /**
-   * M70c: `runtime.fs.stat(root)` succeeds — a disk that vanished or a
-   * permission change is a real, common failure.
+   * M70c: `runtime.fs.stat(root)` succeeds — a disk that vanished is a real,
+   * common failure. A permission change on the root itself after `connect()`
+   * is not detected; for a non-root process, losing search permission on a
+   * parent directory fails the `stat`.
    *
    * Also reports `false` when the root never proved WRITABLE at `connect()`.
    * A stat-only probe answered `up` for a root the process could read and not
    * write, which is exactly the state X8-9 found: uploads failing while health
    * said everything was fine.
    *
-   * @returns `true` when the root directory is reachable and writable
+   * @returns `true` when the root directory is reachable and proved writable
+   *   at `connect()`
    * @since 0.1.0
    */
   async isHealthy(): Promise<boolean> {
@@ -224,8 +227,11 @@ export class LocalStorageProvider implements StorageProvider {
     const resolved = await this.#resolvePath(path);
     try {
       return await this.#fs!.readFile(resolved);
-    } catch {
-      return null;
+    } catch (error) {
+      // Only an absent file is `null` (a 404); a permission or I/O failure
+      // rejects.
+      if (isFsNotFound(error)) return null;
+      throw error;
     }
   }
 
@@ -240,8 +246,11 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await this.#fs!.rm(resolved);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // Only an absent file is "not deleted"; a permission or I/O failure
+      // rejects, so a caller never mistakes it for an absent object.
+      if (isFsNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -256,8 +265,9 @@ export class LocalStorageProvider implements StorageProvider {
     try {
       await this.#fs!.stat(resolved);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isFsNotFound(error)) return false;
+      throw error;
     }
   }
 
@@ -284,4 +294,17 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   // No native getStream — service falls back to buffered wrapping.
+}
+
+/**
+ * Reports whether a file-system error means "no such file": Node's `ENOENT`
+ * code or Deno's `NotFound` error name.
+ *
+ * @param error - The rejection from `runtime.fs`
+ * @returns `true` for an absent file
+ */
+export function isFsNotFound(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, name } = error as { code?: unknown; name?: unknown };
+  return code === 'ENOENT' || name === 'NotFound';
 }

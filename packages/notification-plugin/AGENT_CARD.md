@@ -52,7 +52,8 @@ await notifier.send({
 ## Other options
 
 - `'twilio'` reads `to.phone` and requires `accountSid`, `authToken` and `from` in `options`.
-- `'slack'` requires `options.webhookUrl`; `'fcm'` reads `to.token` and uses `subject` as its title.
+- `'slack'` requires `options.webhookUrl` and bolds `subject` first; `'fcm'` reads `to.token` and
+  uses `subject` as its title.
 - FCM accepts `tokenSource` instead of service-account credentials; the default signer requires
   `CAPABILITIES.RUNTIME`.
 

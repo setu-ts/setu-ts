@@ -165,8 +165,22 @@ export interface S3ProviderOptions {
   accessKeyId?: string;
   /** AWS secret access key. */
   secretAccessKey?: string;
-  /** Custom S3-compatible endpoint (R2, MinIO, B2). */
+  /**
+   * Custom S3-compatible endpoint (R2, MinIO, B2). For `'b2'`, `region`,
+   * `endpoint` or an injected `client` is required.
+   */
   endpoint?: string;
+  /**
+   * Bound on each backend call, in milliseconds, including the SDK's own
+   * retries: a read that does not settle in time rejects with
+   * `BackendUnavailableError` (`503`), a write with `BackendOutcomeUnknownError`
+   * (`504`). `0` disables the bound; anything outside `0`–`2147483647` throws
+   * `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /**
    * An implementation of the S3 backend, bypassing the lazy SDK import.
    *
@@ -183,6 +197,34 @@ export interface GcsProviderOptions {
   projectId?: string;
   /** Bucket name. */
   bucket: string;
+  /**
+   * API endpoint, such as a private endpoint or an emulator
+   * (`http://127.0.0.1:4443`), passed to the SDK as `apiEndpoint`.
+   * Refused with `RangeError` while `STORAGE_EMULATOR_HOST` is set: the SDK
+   * sends JSON requests to the variable and uploads here. An injected `client`
+   * is not checked. Set `endpointAuth: false` with an emulator.
+   *
+   * @since 0.14.0
+   */
+  endpoint?: string;
+  /**
+   * Whether credentials are sent to a custom `endpoint` (the SDK sends none
+   * unless told to). Set `false` only for an emulator that checks none.
+   *
+   * @default true
+   * @since 0.14.0
+   */
+  endpointAuth?: boolean;
+  /**
+   * Bound on each backend call, in milliseconds: a read that does not settle
+   * in time rejects with `BackendUnavailableError` (`503`), a write with
+   * `BackendOutcomeUnknownError` (`504`). `0` disables the bound; anything
+   * outside `0`–`2147483647` throws `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /** Injected structural client (bypasses lazy import). */
   client?: IGcsClient;
 }
@@ -195,9 +237,30 @@ export interface AzureBlobProviderOptions {
   accountName?: string;
   /** Azure storage account key (required for SAS signing). */
   accountKey?: string;
+  /**
+   * Blob service URL for the `accountName` + `accountKey` form (a sovereign
+   * cloud, a private endpoint, Azurite).
+   *
+   * @default `https://<accountName>.blob.core.windows.net`
+   * @since 0.14.0
+   */
+  endpoint?: string;
+  /**
+   * Bound on each backend call, in milliseconds: a read that does not settle
+   * in time rejects with `BackendUnavailableError` (`503`), a write with
+   * `BackendOutcomeUnknownError` (`504`). `0` disables the bound; anything
+   * outside `0`–`2147483647` throws `RangeError` at construction.
+   *
+   * @default 30000
+   * @since 0.14.0
+   */
+  requestTimeoutMs?: number;
   /** Container name. */
   containerName: string;
-  /** Injected structural client (bypasses lazy import). */
+  /**
+   * Injected client — an SDK `BlobServiceClient` works as is (bypasses lazy
+   * import).
+   */
   client?: IAzureBlobClient;
 }
 
@@ -222,12 +285,22 @@ export interface AzureBlobProviderOptions {
  * @since 0.1.0
  */
 export interface IS3Backend {
-  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void>;
-  get(path: string): Promise<Uint8Array | null>;
-  delete(path: string): Promise<boolean>;
-  head(path: string): Promise<boolean>;
+  /** `signal` aborts the write when the provider's bound expires (since 0.14.0). */
+  put(
+    path: string,
+    data: Uint8Array,
+    options?: PutObjectOptions,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  /** `signal` (since 0.14.0) aborts the read when the provider's bound expires. */
+  get(path: string, signal?: AbortSignal): Promise<Uint8Array | null>;
+  /** `signal` aborts the delete when the provider's bound expires (since 0.14.0). */
+  delete(path: string, signal?: AbortSignal): Promise<boolean>;
+  /** `signal` aborts the presence check when the provider's bound expires (since 0.14.0). */
+  head(path: string, signal?: AbortSignal): Promise<boolean>;
   getSignedUrl(path: string, expiresIn: number): Promise<string>;
-  getStream(path: string): Promise<ReadableStream<Uint8Array> | null>;
+  /** `signal` (since 0.14.0) aborts obtaining the stream when the bound expires. */
+  getStream(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array> | null>;
 }
 
 /**
@@ -253,7 +326,10 @@ export interface IGcsClient {
  */
 export interface IAzureBlobClient {
   getContainerClient(_name: string): unknown;
-  /** Creates a SAS-signed URL. Added by adaptAzureModule internally. */
+  /**
+   * Creates a SAS-signed URL. Optional: without it the provider signs through
+   * the block blob client's `generateSasUrl`, which an SDK client has.
+   */
   getSignedUrl?(_path: string, _expiresIn: number): Promise<string>;
   /**
    * M70c: resolves when the container is reachable — the real adapter calls the
@@ -296,13 +372,13 @@ export interface UploadedFile {
  * @since 0.1.0
  */
 export interface UploadMiddlewareOptions {
-  /** Form field name to extract (default `'file'`). */
+  /** Form field name to extract (default `'file'`); a non-empty string. */
   fieldname?: string;
-  /** Maximum per-file size in bytes (default 10 MB). */
+  /** Maximum per-file size in bytes (default 10 MB); a whole number of at least 1. */
   maxSize?: number;
-  /** Allowed MIME-type allow-list (optional). */
+  /** Allowed MIME-type allow-list (optional); a disallowed type answers `415`. */
   allowedMimeTypes?: readonly string[];
-  /** Maximum number of files (default unlimited). */
+  /** Maximum number of files (default unlimited); a whole number of at least 1. */
   maxFiles?: number;
   /**
    * Hard ceiling, in bytes, on the request body this middleware will PARSE
@@ -363,7 +439,10 @@ export interface StorageProvider {
    * Deletes an object.
    *
    * @param path - Object path/key
-   * @returns `true` if an object was deleted
+   * @returns `false` only when the provider knows no object was there; `true`
+   *   otherwise (S3/B2 go ahead after any `403` on their `HEAD` check; without
+   *   `s3:ListBucket` that `403` comes for a missing key, so `delete()`
+   *   resolves `true` there; grant `s3:ListBucket` for exact answers)
    */
   delete(path: string): Promise<boolean>;
   /**
@@ -382,8 +461,10 @@ export interface StorageProvider {
    */
   getSignedUrl(path: string, options: { expiresIn: number }): Promise<string>;
   /**
-   * Native streaming download seam; `null` when the provider has no native
-   * stream support (the service falls back to buffering {@linkcode get}).
+   * Omit this member for the service's buffered fallback over {@linkcode get}.
+   * An implemented member returns `null` only for a missing object;
+   * `StorageService.getStream` then throws `StorageObjectNotFoundError`
+   * without falling back to `get`.
    *
    * @param path - Object path/key
    * @returns A `ReadableStream` of object bytes, or `null`

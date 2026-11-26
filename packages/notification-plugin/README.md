@@ -65,6 +65,11 @@ capability throws during `register()`. See [Channels](#channels) for what each o
 
 \* optional.
 
+On `slack` a non-empty `subject` leads the posted text in bold (`*subject*`, then the body on the
+next line); the subject is escaped (`&`, `<`, `>`), so it cannot mention a channel. The body is
+posted as given. The Slack wire shape is proved against an in-test capture server only; no live
+Slack workspace was used.
+
 ## Semantics
 
 - **`send` fans out with `Promise.allSettled`** — one failing channel never aborts the others.

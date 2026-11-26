@@ -18,6 +18,7 @@ import {
   httpStatusHintOf,
   parseFormBody,
   respondWithError,
+  withUploadMetadata,
 } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
 
@@ -92,6 +93,40 @@ function assertByteLimit(option: string, value: number): void {
 }
 
 /**
+ * Refuses options the upload brand cannot describe, each with its own message,
+ * so a documentation generator never silently loses the route's body. The
+ * rules are the ones `uploadMetadataOf` reads back by.
+ *
+ * @throws {RangeError} Naming the option that breaks its rule
+ */
+function assertUploadOptions(
+  fieldname: unknown,
+  maxSize: number,
+  maxFiles: number | undefined,
+  allowedMimeTypes: unknown,
+): void {
+  const refuse = (rule: string): never => {
+    throw new RangeError(`createUploadMiddleware: ${rule}`);
+  };
+  if (typeof fieldname !== 'string' || fieldname === '') {
+    refuse('fieldname must be a non-empty string');
+  }
+  if (!Number.isSafeInteger(maxSize) || maxSize < 1) {
+    refuse(`maxSize must be a whole number of bytes of at least 1 (received ${maxSize})`);
+  }
+  if (maxFiles !== undefined && (!Number.isSafeInteger(maxFiles) || maxFiles < 1)) {
+    refuse(`maxFiles must be a whole number of at least 1 (received ${maxFiles})`);
+  }
+  if (
+    allowedMimeTypes !== undefined &&
+    (!Array.isArray(allowedMimeTypes) ||
+      !allowedMimeTypes.every((type: unknown) => typeof type === 'string'))
+  ) {
+    refuse('allowedMimeTypes must be an array of strings');
+  }
+}
+
+/**
  * Creates an upload middleware factory.
  *
  * Checks the declared `Content-Length`, reads the body once through
@@ -115,7 +150,8 @@ function assertByteLimit(option: string, value: number): void {
  * Refusals are answered `413` when something was too large — the request body
  * against {@linkcode resolveMaxBodyBytes}, or one file against `maxSize` — and
  * `400` when the request was genuinely malformed or otherwise unacceptable
- * (too many files, a disallowed MIME type, an unparseable body). Both size
+ * (too many files, an unparseable body). A disallowed MIME type answers
+ * `415 Unsupported Media Type`. Both size
  * refusals previously answered `400`, which told a client it had sent
  * something malformed when it had only sent something big.
  *
@@ -128,8 +164,9 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
   const allowedMimeTypes = options?.allowedMimeTypes;
   const maxFiles = options?.maxFiles;
   const maxBodyBytes = resolveMaxBodyBytes(maxSize, options?.maxBodyBytes);
+  assertUploadOptions(fieldname, maxSize, maxFiles, allowedMimeTypes);
 
-  return async (ctx, next) => {
+  const middleware: MiddlewareFunction = async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
 
     // Only process multipart requests — the ONE classifier (M94b), which also
@@ -212,8 +249,8 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
         }
         if (allowedMimeTypes && !allowedMimeTypes.includes(file.mimeType)) {
           respondWithError(ctx, {
-            status: 400,
-            title: 'Invalid MIME type',
+            status: 415,
+            title: 'Unsupported Media Type',
             detail: `Type '${file.mimeType}' not allowed`,
           });
           return;
@@ -259,6 +296,16 @@ export function createUploadMiddleware(options?: UploadMiddlewareOptions): Middl
 
     await next();
   };
+  // The brand describes what this middleware accepts, so a documentation
+  // generator can show the route's multipart body; it changes no behaviour.
+  // Options the brand cannot describe are refused here, so a generator never
+  // silently loses the body.
+  return withUploadMetadata(middleware, {
+    fieldname,
+    maxBytes: maxSize,
+    ...(maxFiles === undefined ? {} : { maxFiles }),
+    ...(allowedMimeTypes === undefined ? {} : { mimeTypes: allowedMimeTypes }),
+  });
 }
 
 /**
