@@ -302,7 +302,8 @@ describe('messaging backplane independent delivery and frame age', () => {
       const opening = plane.connect();
       if (closed) await plane.close();
       const refusal = await opening.catch((error: unknown) => error);
-      if (closed) expect(refusal).toBe(cause);
+      if (closed)
+        expect(refusal).toMatchObject({ message: 'Messaging backplane closed while connecting' });
       else {
         expect(refusal).toBeInstanceOf(Error);
         expect((refusal as Error).name).toBe('BackplaneFanOutUnsupportedError');
@@ -392,12 +393,14 @@ describe('messaging backplane independent delivery and frame age', () => {
     vi.spyOn(broker, 'subscribe').mockReturnValueOnce(pending.promise);
     const backplane = new MessagingBackplane(broker, 'a', 'frames');
     const a = backplane.connect();
+    const refusal = a.catch((error: unknown) => error);
     const b = backplane.connect();
     expect(b).toBe(a);
     await backplane.close();
     const unsubscribe = vi.fn(() => Promise.resolve());
     pending.resolve({ fanOut: true, unsubscribe });
-    await a;
+    expect(await refusal).toMatchObject({ message: 'Messaging backplane closed while connecting' });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
     expect(unsubscribe).toHaveBeenCalledOnce();
     await backplane.connect();
     await backplane.close();
@@ -427,12 +430,12 @@ describe('messaging backplane independent delivery and frame age', () => {
     const stale = Promise.withResolvers<ISubscription>();
     const subscribe = vi.spyOn(broker, 'subscribe').mockReturnValueOnce(stale.promise);
     const backplane = new MessagingBackplane(broker, 'a', 'frames');
-    const first = backplane.connect();
+    const first = backplane.connect().catch((error: unknown) => error);
     await backplane.close();
     const second = backplane.connect();
     expect(second).not.toBe(first);
     stale.resolve({ fanOut: true, unsubscribe: vi.fn(() => Promise.resolve()) });
-    await first;
+    expect(await first).toMatchObject({ message: 'Messaging backplane closed while connecting' });
     await second;
     expect(subscribe).toHaveBeenCalledTimes(2);
     await backplane.close();

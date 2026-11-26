@@ -5414,6 +5414,14 @@ const app = createApplication({
 Its priority is `PLUGIN_PRIORITY.HIGH`, so the transport is connected before either consumer
 registers and subscribes.
 
+Since 0.14.0 its close hook is registered before connecting. Cancelling application start closes
+pending transport waits and registers no service, health indicator or diagnostics source afterwards.
+An injected Redis pair's connect and first subscribe share `commandTimeoutMs` (default 15000 ms, 0
+unbounded); expiry fails as `BackendUnavailableError` with source
+`realtime-backplane-plugin: redis transport`. Close cancels that wait even with a finite bound.
+Closing a messaging backplane during connect rejects the connect promise and cleans up a late
+subscription; the broker still owns its subscribe timeout.
+
 ### Options
 
 Discriminated on `transport`.
@@ -5438,7 +5446,7 @@ supplied and own their reporting.
 | `url`                     | `'redis'`                | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Also bounds an injected pair’s connect and first subscribe together (0.14.0)                                                    |
 | `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | 0.14.0 opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this by its own clock; `0` delivers every frame. Assumes the replicas' clocks agree. Outside `0`–`2147483647` throws `RangeError` at construction                                                                                                                                                                                                                                         |
 | `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
 | `instance`                | `'custom'`               | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -7017,6 +7025,53 @@ app.router.get('/users/:id', async (ctx) => {
 
 Provides message broker abstraction for cross-service integration events.
 
+### Broker bounds and custom transport contract (0.14.0)
+
+- `RequestTimeoutError(message?, details?: { topic: string; timeoutMs: number })` exposes readonly
+  `topic: string | undefined` and `timeoutMs: number | undefined`. The broker supplies both. Its
+  status hint is
+  `{ status: 504, title: 'Gateway Timeout', detail: 'No reply arrived in time; the request may have been handled.' }`.
+  `RemoteHandlerError` carries
+  `{ status: 502, title: 'Bad Gateway', detail: 'The service that handled the request failed.' }`;
+  its `remoteMessage` remains diagnostic only. `errorHandler` serves the hint, never remote text.
+- Both Service Bus plugin arms and `ServiceBusOptions` add `publishTimeoutMs?: number` (15000 ms, 0
+  unbounded, validated through `deadlineRangeError`) and `maxConcurrentCalls?: number` (integer
+  1–1000, default 1). Every application subscription, fan-out included, receives that concurrency;
+  reply inboxes remain at 1 and expire after 300000 idle ms. `IServiceBusTransport.send` adds a
+  fifth optional `{ abortSignal?: AbortSignal }`; `open` adds a fourth optional
+  `{ maxConcurrentCalls?: number; onReceiveError?: (error: unknown, errorSource: string) => void }`.
+  The SDK adapter forwards both, including `processError`. Publish expiry aborts and throws
+  `PublishTimeoutError`; outages throw `BackendOutcomeUnknownError`. Non-retryable refusals pass
+  through. Receive outages from `receive` feed negative reachability; deliveries feed positive
+  evidence.
+- Exported `PubSubTopicMissingError(topic, subscription, cause, possibleDeadLetterTopic?)` exposes
+  readonly `topic` and `subscription`, preserves `cause`, and advises creating the topic. Only a
+  create-path gRPC 5 is wrapped, after dead-letter inspection; a proven absent dead-letter topic
+  retains `PubSubDeadLetterTopicMissingError`. Inconclusive inspection names the possible target.
+  `IPubSubTransport.topicExists` keeps its signature and is bounded at 1500 ms; the SDK uses
+  `Topic.getMetadata({ timeout: 1500, retry: null })`, mapping code 5 to false. Other subscription
+  administration calls retain their SDK bounds.
+- Exported `ICustomMessageBroker extends IMessageBroker` adds optional methods:
+
+  ```typescript
+  interface ICustomMessageBroker extends IMessageBroker {
+    publishWithHeaders?<T>(topic: string, message: T, headers: Readonly<Record<string, string>>, options?: PublishOptions): Promise<void>;
+    requestWithHeaders?<TReq, TRes>(topic: string, request: TReq, headers: Readonly<Record<string, string>>, options?: RequestOptions): Promise<TRes>;
+  }
+  ```
+
+  `CustomMessagingOptions.instance` has this type. The wrapper always validates caller publish
+  options, then calls the header member when available; absence falls back with one warning.
+  Framework trace headers must arrive as `MessageMetadata.headers` from `subscribe`. RPC and
+  `fanOut` delivery/confirmation remain the instance's responsibility. Health derives from
+  `isHealthy`, not a private `reachability`; `subscribeWithHeaders` is not called.
+
+- A full outbox sweep (`endedBy: 'publish-limit'`, zero failures) starts one coalesced follow-up and
+  continues while full, including after `dispatch()` with scheduling off. Saturation warns once with
+  `publishLimit` and `intervalMs`, recovery logs at info after a failure-free completed lap.
+  Failures never start or clear an episode. Rows publish serially through claim/publish/mark; call
+  `dispatch()` after commit to avoid up to `intervalMs` (1000 ms default) of waiting.
+
 ### Registration
 
 ```typescript
@@ -7403,6 +7458,10 @@ type PubSubMessagingOptions = PubSubMessagingOptionsInjected | PubSubMessagingOp
 
 // ── Azure Service Bus — injected transport (client required; credentials optional) ───
 interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Whole publish bound, 15000 ms; 0 disables. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   broker: 'service-bus';
   /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
   client: IServiceBusTransport;
@@ -7424,6 +7483,10 @@ interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
 
 // ── Azure Service Bus — production (connectionString required; client must be omitted) ─
 interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Whole publish bound, 15000 ms; 0 disables. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   broker: 'service-bus';
   /** Connection string for the Service Bus namespace. Required for production. */
   connectionString: string;
@@ -7484,7 +7547,7 @@ type ServiceBusMessagingOptions =
 interface CustomMessagingOptions extends MessagingCommonOptions {
   broker: 'custom';
   /** Pre-built IMessageBroker instance. Required for this arm. */
-  instance: IMessageBroker;
+  instance: ICustomMessageBroker;
 }
 
 /** The factory's single options parameter. */
@@ -8552,6 +8615,48 @@ the store's.
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.
+
+### Queue bounds and polling options (0.14.0)
+
+`QueuePluginOptions.retryDelayMs?: number | ((attempts: number) => number)` applies to every
+adapter. A number must be finite and non-negative; the function receives the attempt that just
+failed (1 on first delivery). Absent retains exponential backoff. Results clamp to 0–2147483647; a
+throwing function or non-finite result warns once and retries without delay.
+`health?: { probeCacheMs?: number; probeTimeoutMs?: number }` configures the cached reachability
+probe: defaults 5000/2000 ms, integer ranges 0–2147483647 / 1–2147483647. TTL 0 probes every read;
+failures share the cache TTL. Invalid values throw `RangeError` at construction.
+
+`SqsQueueOptions.requestTimeoutMs` and `SnsPublisherOptions.requestTimeoutMs` default to 15000 ms; 0
+disables the whole-call bound (SDK retries included). `deadlineRangeError` validates the range. All
+SQS commands and both SNS publish methods use it and abort SDK calls on expiry. An expiry is
+`BackendOutcomeUnknownError` (504); refused network, HTTP 5xx and throttling answers are 503,
+upgraded to 504 after more than one SDK attempt. In-flight connection loss is 504; other refusals
+pass through unchanged. Redrive reads always use a finite bound: min(option, 10000 ms), 10000 at 0.
+SNS uses runtime timers when supplied and ambient deadline timers otherwise.
+
+`SqsQueueOptions.waitTimeSeconds?: number` defaults to 20, an integer 0–20, and reaches
+`ReceiveMessage.WaitTimeSeconds`. Receive's bound is `waitTimeSeconds * 1000 + requestTimeoutMs`
+(unbounded when requestTimeoutMs is 0). Each name reserves independently, at most one in flight per
+name. Disconnect aborts receives and drains reserve tasks; old generations dispatch and report
+nothing. An injected transport ignoring the abort signal may hold stop until its receive returns. At
+50 configured names with long polling the adapter warns about the SDK's default 50 HTTP sockets.
+
+`ISqsTransport.send`, `getQueueAttributes`, `getQueueUrl`, `delete` and `changeVisibility` gain
+optional trailing `options?: { abortSignal?: AbortSignal }`;
+`receive(queueUrl, max, visibilitySeconds, waitTimeSeconds?, options?)` gains the wait and the same
+signal options. `SqsSdkModule.SQSClient` config accepts `maxAttempts?: number`, and its `send`
+accepts signal options. The SDK probe uses its own `maxAttempts: 1` client. `SqsQueue.isHealthy`
+exists when `getQueueAttributes` exists and reads every distinct configured source URL with
+`['QueueArn']`, in parallel under individual 1500 ms bounds. Timeout, missing queue, network fault
+or HTTP 5xx reads false; another response below 500 proves reachability. It never rejects. Without
+the attribute method, an injected `isHealthy` is used if available; otherwise reachability is
+unknown. `ISnsTransport.publish(topicArn, body, options?)` and `SnsSdkModule`'s send forward the
+abort signal.
+
+Reserve failures warn once per name and episode and recover at info with `failures`; poll and
+recurring-enqueue failures follow the same rule. RabbitMQ enqueue throws `BackendUnavailableError`
+with source `queue-plugin: rabbitmq enqueue` for definite refusal, and `BackendOutcomeUnknownError`
+for expiry or close after writing but before confirmation. `QueueService.add` preserves both.
 
 ### Exports
 

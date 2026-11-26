@@ -266,11 +266,11 @@ describe('MessagingPlugin health indicator four arms (M70c)', () => {
         subscribeWithHeaders: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
         requestWithHeaders: () => Promise.resolve(null as never),
         isReady: () => true,
-        reachability: () => {
+        reachability: () => Promise.resolve(undefined),
+        isHealthy: () => {
           calls.count++;
           return Promise.resolve(true);
         },
-        isHealthy: () => Promise.resolve(true),
       };
       const { ctx, indicators } = makeContext(manual.runtime);
       await MessagingPlugin({ broker: 'custom', instance }).register(ctx);

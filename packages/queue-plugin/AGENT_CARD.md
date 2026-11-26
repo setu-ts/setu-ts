@@ -1,7 +1,6 @@
 # @setu-ts/queue-plugin — background jobs and retries
 
-**Add it:** `setu add queue` adds it and wires `QueuePlugin()` with its processors seam in a
-recognized functional config. It provides `CAPABILITIES.QUEUE` (`IQueue`).
+`setu add queue` wires `QueuePlugin()`; provides `CAPABILITIES.QUEUE` (`IQueue`).
 
 ## Enqueue work from a route
 
@@ -24,14 +23,13 @@ export function registerReceiptRoutes(router: IRouterApi): void {
 
 ## Process the job
 
-`setu g job receipt` writes `src/jobs/receipt.job.ts` and wires it into
-`QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; fill in its factory:
+`setu g job receipt` writes and wires `src/jobs/receipt.job.ts`; fill its factory:
 
 ```ts
 import type { IServiceRegistry } from '@setu-ts/common';
 import type { QueueProcessorDefinition } from '@setu-ts/queue-plugin';
 
-/** Shared with the routes that read it; both import this module. */
+/** Shared with read-back routes. */
 export const sentReceipts: string[] = [];
 
 export function createReceiptJobProcessor(
@@ -48,21 +46,21 @@ export function createReceiptJobProcessor(
 
 ## Behaviour the types do not show
 
-- `add` resolves to the job ID only; the job runs on a later poll (`pollIntervalMs`, default 1000
-  ms), so a test polls its read-back route until the result appears. `delayMs` is milliseconds.
-- Read-back state can live in a module both files import; the factory gets `services` to resolve
-  capabilities at `onInit` (a capability resolved there must be registered, e.g. `LoggerPlugin`).
-- `job.attempts` is 1 on first delivery. A throw fails an attempt; make effects repeat-safe.
-- `onFailed` runs after the last attempt, not retries; keep it idempotent.
-- Default concurrency is 1 per name.
-- The default memory adapter is process-local; shutdown stops polling and disconnects it.
+- `add` returns the ID; processing runs on a later poll (`pollIntervalMs`: 1000 ms). Read back
+  effects through a route. Memory is process-local; `delayMs` uses milliseconds.
+- Factories resolve capabilities at `onInit`. Default concurrency is 1 per name.
+- `job.attempts` starts at 1. Throws retry; `onFailed` runs only after the last attempt.
+- `retryDelayMs`: fixed milliseconds or a function of the failed attempt; absent keeps backoff.
+  Throwing/nonfinite results warn once and retry immediately.
+- `health.probeCacheMs`: 5000 (0 probes every read); `probeTimeoutMs`: 2000. Failures are cached.
+  Reserve outages warn once per name; recovery logs at info.
 
 ## Other options
 
-- `adapter: 'redis'` or `'rabbitmq'` uses `url` (node-redis: `client`); `'sqs'` uses `sqs`.
-- SQS: a consumed name needs `deadLetterQueues[name]` (URL or `false`) or a redrive policy, else a
-  declared processor fails `app.start()`.
-- `schedule` registers cron-recurring jobs.
-- `behaviors` wraps processors; `diagnostics` observes approved queue names only.
-
-<!-- card-allow: LoggerPlugin -->
+- `adapter`: memory, redis or rabbitmq (`url`), sqs (`sqs`); node-redis uses `client`.
+- SQS consumed names need `deadLetterQueues[name]` (URL or false) or a redrive policy.
+  `requestTimeoutMs`: 15000 (0 unbounded); `waitTimeSeconds`: 20 (0–20). Polls run independently per
+  name and abort on disconnect. The 1500 ms QueueArn probe reports missing queues and outages down.
+  `SnsPublisher` also accepts `requestTimeoutMs`.
+- `schedule` adds recurring jobs; `behaviors` wraps processors; `diagnostics` observes approved
+  names.

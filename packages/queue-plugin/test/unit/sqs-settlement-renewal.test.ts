@@ -67,7 +67,9 @@ describe('SQS settlement and renewal ordering', () => {
         await drain();
         await runtime.advanceMs(1000);
         expect(await queue.claimRenewal.extend('build', job!.id, job!.claimToken!)).toBe(true);
-        expect(visibility).toHaveBeenCalledExactlyOnceWith('source', 'rh-2', 3);
+        expect(visibility).toHaveBeenCalledExactlyOnceWith('source', 'rh-2', 3, {
+          abortSignal: expect.any(AbortSignal),
+        });
         expect(deleted).not.toHaveBeenCalled();
         work.resolve();
         await drain();
@@ -368,6 +370,7 @@ describe('SQS settlement and renewal ordering', () => {
     await drain();
     arrival.resolve();
     await runtime.advanceMs(100);
+    await drain();
     try {
       expect(
         logger.error.mock.calls.filter(([message]) => message === 'queue job claim renewal failed'),

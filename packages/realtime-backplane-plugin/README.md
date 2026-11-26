@@ -97,10 +97,10 @@ Connection errors of both built and injected Redis clients go to the application
 error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
 `ioredis` printing every reconnect failure to `console.error`. Both pairs get reporting watches,
 removed on close. Set `connectionErrorReporter` to route them elsewhere. After a successful open,
-`close()` QUITs an injected pair too. An open overtaken by `close()` leaves the injected pair with
-its caller and removes only its watches. Close stops the backplane waiting for an injected connect;
-the caller's client.connect() keeps running and the connection remains caller-owned. Retired owned
-clients keep a no-op error sink until their `end` event, when it is removed.
+`close()` QUITs an injected pair too. During an injected connect or first subscribe it cancels the
+wait and force-closes both clients when they expose `disconnect` (otherwise requests QUIT without
+waiting). It removes its watches. Retired owned clients keep a no-op error sink until their `end`
+event, when it is removed.
 
 **node-redis.** To use node-redis instead of ioredis, pass two adapters —
 `client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
@@ -112,20 +112,20 @@ from the start. See
 
 ## Options
 
-| Option                    | Applies to               | Default                  | Description                                                                                                                                                                               |
-| ------------------------- | ------------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                   | all but memory           | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                              |
-| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                       |
-| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                        |
-| `url`                     | `'redis'`                | —                        | Connection URL, used only on the lazy-load path                                                                                                                                           |
-| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair; required together                                                                                                                                                   |
-| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                           |
-| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations                         |
-| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | Opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this many milliseconds by the receiver's clock. `0` delivers every frame. Must be `0`–`2147483647`. See Limitations |
-| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                                           |
-| `instance`                | `'custom'`               | —                        | The transport to register, used as-is                                                                                                                                                     |
-| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                                            |
-| `diagnostics`             | all but `'custom'`       | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                                            |
+| Option                    | Applies to               | Default                  | Description                                                                                                                                                                                             |
+| ------------------------- | ------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                   | all but memory           | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                            |
+| `origin`                  | all                      | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                     |
+| `bus`                     | `'memory'`               | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                      |
+| `url`                     | `'redis'`                | —                        | Connection URL, used only on the lazy-load path                                                                                                                                                         |
+| `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair; required together                                                                                                                                                                 |
+| `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                         |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command timeout on built connections, and whole connect/first-subscribe bound on an injected pair; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
+| `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | Opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this many milliseconds by the receiver's clock. `0` delivers every frame. Must be `0`–`2147483647`. See Limitations               |
+| `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives built and injected connections' `'error'`/`'ready'` events (see above)                                                                                                                         |
+| `instance`                | `'custom'`               | —                        | The transport to register, used as-is                                                                                                                                                                   |
+| `localNotice`             | `'memory'`               | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                                                          |
+| `diagnostics`             | all but `'custom'`       | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                                                          |
 
 ## Diagnostics (M98l)
 
@@ -213,9 +213,9 @@ On `'redis'`, a frame published while a connection is down is lost:
 - **`close()` ends an open still waiting on SUBSCRIBE.** With `commandTimeoutMs: 0` nothing bounds a
   SUBSCRIBE to a server that never answers, so `close()` cancels that wait (and an open it overtakes
   later, during the publisher-ready wait, does not wait on UNSUBSCRIBE or QUIT) and force-closes the
-  connections the backplane built (an injected pair is left connected, and unsubscribed again if its
-  SUBSCRIBE answers later); `connect()` then resolves without a connection, as it does for any open
-  a `close()` overtakes.
+  connections, including an injected pair still opening (unsubscribed again if its SUBSCRIBE answers
+  later); Redis `connect()` then resolves without a connection, as it does for any open a `close()`
+  overtakes.
 - **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
   written to a connection that looked healthy, and can reach Redis afterward (measured against a
   paused server). A caller that retries a rejected publish may therefore deliver that frame twice;
@@ -223,11 +223,18 @@ On `'redis'`, a frame published while a connection is down is lost:
   the connection is down was never written.
 
 Frames are never persisted or replayed. `commandTimeoutMs` is the only ioredis setting reachable
-through this plugin's options, and applies only on the lazy path — an application that needs
-different behaviour, or injects its own `client`/`subscriber` pair, configures those clients
-directly. To keep a publish refused while the connection is down with an injected pair, create the
-ioredis publisher with `enableOfflineQueue: false`, or a node-redis client with
-`disableOfflineQueue: true`; a client that queues delivers late as described above.
+through this plugin's options. It sets per-command timeouts on the lazy path and, since 0.14.0,
+bounds an injected pair's connect and first subscribe together (default 15000 ms, 0 unbounded).
+Expiry fails start as `BackendUnavailableError`; connect the clients before `app.start()` or use
+`commandTimeoutMs: 0` to retain an unbounded wait. An application that needs different behaviour, or
+injects its own `client`/`subscriber` pair, configures those clients directly. To keep a publish
+refused while the connection is down with an injected pair, create the ioredis publisher with
+`enableOfflineQueue: false`, or a node-redis client with `disableOfflineQueue: true`; a client that
+queues delivers late as described above.
+
+On cancellation during application start, the plugin's early close hook ends pending connection
+waits. It registers no backplane service, health indicator or diagnostics source afterwards. The
+messaging transport rejects a connect overtaken by close, and retires a late subscription.
 
 ## Documentation
 

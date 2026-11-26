@@ -62,6 +62,15 @@ export type JobOutcome = 'completed' | 'retried' | 'dead_lettered' | 'discarded'
  * @since 0.3.0
  */
 export interface JobRunnerHooks<T> {
+  /** Configured delay; absent retains exponential backoff. @since 0.14.0 */
+  readonly retryDelayMs?: number | ((attempts: number) => number);
+  /**
+   * Reports a bad retry function through the service's once-only warning sink.
+   * @param message - Fixed warning without callback error text
+   * @returns Nothing
+   * @since 0.14.0
+   */
+  readonly warn?: (message: string) => void;
   /**
    * The application's `ProcessOptions.onFailed`, invoked once on the final
    * attempt, immediately before the job is dead-lettered.
@@ -159,7 +168,23 @@ export async function runJob<T>(
     // reason the job failed.
     if (storedJob.attempts < storedJob.maxAttempts) {
       const nextAttempts = storedJob.attempts + 1;
-      const backoffMs = computeBackoffMs(nextAttempts);
+      let backoffMs: number;
+      const delay = hooks?.retryDelayMs;
+      if (delay === undefined) backoffMs = computeBackoffMs(nextAttempts);
+      else {
+        let result: number | undefined;
+        try {
+          result = typeof delay === 'function' ? delay(storedJob.attempts) : delay;
+        } catch {
+          // Callback errors follow the same fixed warning path as bad results.
+        }
+        if (result === undefined || !Number.isFinite(result)) {
+          backoffMs = 0;
+          hooks?.warn?.(
+            'queue retryDelayMs function failed or returned a non-finite value; retrying without delay',
+          );
+        } else backoffMs = Math.max(0, Math.min(result, 2147483647));
+      }
       const availableAtMs = runtime.now() + backoffMs;
       report?.('queue job failed — retrying', error, {
         job: storedJob.id,

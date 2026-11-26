@@ -44,6 +44,7 @@ import {
   PubSubSubscriptionBoundElsewhereError,
   ReplyInboxUnavailableError,
   PublishTimeoutError,
+  PubSubTopicMissingError,
 } from '../errors.ts';
 import { PubSubDeadLetterTopicMissingError } from '../errors.ts';
 import { resolvePubSubRetry, type ResolvedConsumerRetry } from './consumer-retry.ts';
@@ -130,6 +131,7 @@ const MAX_SUBSCRIPTION_NAME_LENGTH = 255;
 
 /** gRPC `ALREADY_EXISTS`. */
 const GRPC_ALREADY_EXISTS = 6;
+const PUBSUB_ADMIN_READ_TIMEOUT_MS = 1500;
 
 /**
  * Derives the default subscription for a topic: `<defaultQueue>.<topic ID>`
@@ -199,6 +201,14 @@ export interface PubSubSdkModule {
        * @since 0.14.0
        */
       exists?(): Promise<[boolean, ...unknown[]]>;
+      /**
+       * Reads topic metadata under a finite admin-call bound.
+       * @param options - Timeout and disabled retry policy
+       * @returns SDK metadata tuple
+       * @throws On missing topic, authorization or transport failure
+       * @since 0.14.0
+       */
+      getMetadata?(options: { timeout: number; retry: null }): Promise<unknown[]>;
       /**
        * Lists at most one topic subscription.
        * @param options - Pagination bound
@@ -574,7 +584,7 @@ export function adaptPubSubModule(
         await pubsub.getTopics({
           pageSize: 1,
           autoPaginate: false,
-          gaxOpts: { timeout: 1500, retry: null },
+          gaxOpts: { timeout: PUBSUB_ADMIN_READ_TIMEOUT_MS, retry: null },
         });
         return true;
       } catch (error) {
@@ -728,9 +738,15 @@ export function adaptPubSubModule(
     },
     topicExists: async (topic) => {
       const handle = pubsub.topic(topic);
-      if (handle.exists === undefined) throw new TypeError('Pub/Sub topic.exists is unavailable');
-      const [exists] = await handle.exists();
-      return exists;
+      if (handle.getMetadata === undefined)
+        throw new TypeError('Pub/Sub topic.getMetadata is unavailable');
+      try {
+        await handle.getMetadata({ timeout: PUBSUB_ADMIN_READ_TIMEOUT_MS, retry: null });
+        return true;
+      } catch (error) {
+        if (errorCode(error) === '5') return false;
+        throw error;
+      }
     },
     topicHasSubscriptions: async (topic) => {
       const handle = pubsub.topic(topic);
@@ -1368,20 +1384,31 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     try {
       subscription = await transport.open(topic, queue, onMessage, context);
     } catch (error) {
+      let exists: boolean | undefined;
       if (
         target !== undefined &&
         !attachedFailure &&
         errorCode(error) !== '6' &&
         transport.topicExists !== undefined
       ) {
-        let exists: boolean | undefined;
         try {
-          exists = await transport.topicExists(target);
+          exists = await withDeadline(() => transport.topicExists!(target), {
+            timeoutMs: PUBSUB_ADMIN_READ_TIMEOUT_MS,
+            onTimeout: () => new Error('Pub/Sub dead-letter topic check timed out'),
+            timing,
+          });
         } catch {
           /* Preserve the create failure, never the inspection error. */
         }
         if (exists === false) throw new PubSubDeadLetterTopicMissingError(target, error);
       }
+      if (!attachedFailure && errorCode(error) === '5')
+        throw new PubSubTopicMissingError(
+          topic,
+          queue,
+          error,
+          exists === true ? undefined : target,
+        );
       throw error;
     }
     if (this.#retry.retry && subscription.created !== true) {
@@ -1419,7 +1446,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
       } else {
         try {
           const subscribed = await withDeadline(() => transport.topicHasSubscriptions!(target), {
-            timeoutMs: 1500,
+            timeoutMs: PUBSUB_ADMIN_READ_TIMEOUT_MS,
             onTimeout: () => new Error('Pub/Sub dead-letter subscription check timed out'),
             timing,
           });

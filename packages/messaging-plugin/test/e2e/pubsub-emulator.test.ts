@@ -30,10 +30,33 @@ import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { run as runProcess } from '../../../../test/node-helpers.ts';
 import { PubSubDeadLetterTopicMissingError } from '../../src/index.ts';
+import { PubSubTopicMissingError } from '../../src/index.ts';
 import { untilReal } from '../fixtures/real-fan-out.ts';
 
 const emulatorHost = process.env['PUBSUB_EMULATOR_HOST'];
 const projectId = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
+
+describe('Pub/Sub missing source topic on the real emulator', { skip: !emulatorHost }, () => {
+  it('names the missing topic and subscription without provisioning either', async () => {
+    const runtime = createNodeRuntimeServices();
+    const topic = 'm143m-' + runtime.uuid();
+    const subscription = topic + '-worker';
+    const broker = new GcpPubSubBroker(runtime, new JsonSerializer(), {
+      projectId,
+    });
+    await broker.connect();
+    try {
+      const error: unknown = await broker
+        .subscribe(topic, () => {}, { queue: subscription })
+        .catch((cause: unknown) => cause);
+      expect(error).toBeInstanceOf(PubSubTopicMissingError);
+      expect(error).toMatchObject({ topic, subscription, cause: { code: 5 } });
+      expect((error as Error).message).toContain('create the topic');
+    } finally {
+      await broker.disconnect();
+    }
+  });
+});
 
 describe('managed Pub/Sub consumer lifecycle', { skip: !emulatorHost }, () => {
   it(

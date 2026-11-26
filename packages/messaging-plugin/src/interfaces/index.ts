@@ -8,11 +8,13 @@ import type {
   ConnectionErrorReporter,
   IInboxStore,
   IIngressBehavior,
+  IMessageBroker,
   IOutboxStore,
   IOutboxWriteScope,
   MessageHandler,
   MessageMetadata,
   PublishOptions,
+  RequestOptions,
   RegistryFactory,
   SubscribeOptions,
 } from '@setu-ts/common';
@@ -795,6 +797,10 @@ export interface ServiceBusRetryOptions {
  * @since 0.1.0
  */
 export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Whole publish bound in ms, default 15000; 0 disables it. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   /**
    * Consumer retry policy, enabled by default; false restores immediate negative settlement.
    * @returns The configured handler retry policy
@@ -821,6 +827,10 @@ export interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptio
  * @since 0.1.0
  */
 export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Whole publish bound in ms, default 15000; 0 disables it. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   /**
    * Consumer retry policy, enabled by default; false restores immediate negative settlement.
    * @returns The configured handler retry policy
@@ -863,7 +873,43 @@ export type ServiceBusMessagingOptions =
  */
 export interface CustomMessagingOptions extends MessagingCommonOptions {
   broker: 'custom';
-  instance: import('@setu-ts/common').IMessageBroker;
+  instance: ICustomMessageBroker;
+}
+
+/** A custom broker with an optional framework trace-header channel. @since 0.14.0 */
+export interface ICustomMessageBroker extends IMessageBroker {
+  /**
+   * Carries framework headers to MessageMetadata.headers on delivery.
+   * @param topic - Destination topic
+   * @param message - Message payload
+   * @param headers - Framework-owned trace headers
+   * @param options - Validated caller options
+   * @returns Publish completion
+   * @throws On transport failure
+   * @since 0.14.0
+   */
+  publishWithHeaders?<T>(
+    topic: string,
+    message: T,
+    headers: Readonly<Record<string, string>>,
+    options?: PublishOptions,
+  ): Promise<void>;
+  /**
+   * Carries framework headers with a request.
+   * @param topic - Request topic
+   * @param request - Request payload
+   * @param headers - Framework-owned trace headers
+   * @param options - Reply timeout
+   * @returns The correlated reply
+   * @throws On timeout, responder failure or transport failure
+   * @since 0.14.0
+   */
+  requestWithHeaders?<TReq, TRes>(
+    topic: string,
+    request: TReq,
+    headers: Readonly<Record<string, string>>,
+    options?: RequestOptions,
+  ): Promise<TRes>;
 }
 
 /**

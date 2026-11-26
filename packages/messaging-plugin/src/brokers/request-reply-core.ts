@@ -184,7 +184,7 @@ export class RequestReplyCore {
     const reply = new Promise<TRes>((resolve, reject) => {
       const timer = this.#deps.setTimeout(() => {
         this.#pending.delete(correlationId);
-        reject(new RequestTimeoutError());
+        reject(new RequestTimeoutError(undefined, { topic, timeoutMs }));
       }, timeoutMs);
       this.#pending.set(correlationId, {
         resolve: resolve as (value: unknown) => void,

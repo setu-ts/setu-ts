@@ -31,7 +31,13 @@ describe('SQS dead-letter size refusal', () => {
       if (kind === 'terminal') await queue.deadLetter('build', 'large', 0, jobs[0]!.claimToken!);
       else for (let n = 0; n < 100; n++) await Promise.resolve();
       expect(forward).toHaveBeenCalledTimes(2);
-      expect(forward.mock.calls[1]).toEqual(['dead', body]);
+      expect(forward.mock.calls[1]).toEqual([
+        'dead',
+        body,
+        undefined,
+        undefined,
+        { abortSignal: expect.any(AbortSignal) },
+      ]);
       expect(transport.depth('source')).toBe(0);
       expect(transport.sent.at(-1)).toMatchObject({ queueUrl: 'dead', body });
       expect(transport.sent.at(-1)!.attributes).toBeUndefined();

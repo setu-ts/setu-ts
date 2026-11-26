@@ -223,6 +223,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/messaging-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/realtime-backplane-plugin`
+  (M143m).** RPC `RequestTimeoutError` now carries `topic`/`timeoutMs` and answers 504;
+  `RemoteHandlerError` answers 502 without serving remote text. RabbitMQ enqueue distinguishes 503
+  refusals from 504 uncertain confirms. Service Bus adds `publishTimeoutMs` (15000 ms, 0 unbounded),
+  `maxConcurrentCalls` (1, range 1–1000), five-minute idle reply-inbox cleanup, and receive-side
+  outage evidence; non-retryable send refusals no longer mark it down. Pub/Sub adds
+  `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms. The exported
+  `ICustomMessageBroker` documents optional trace-header members; every custom publish validates
+  options and consumers use `subscribe` metadata headers. Queue adds `retryDelayMs` and `health`
+  probe settings; reserve/poll/recurring failures warn once and recover at info. SQS's SDK path now
+  has the documented per-queue `GetQueueAttributes` probe, adds `requestTimeoutMs` (15000 ms, 0
+  unbounded) and `waitTimeSeconds` (20, range 0–20); SNS adds the same request bound. SDK abort
+  signals and 503/504 classification cover calls; redrive reads retain a finite 10 s ceiling at
+  disabled bounds. Per-name reserves run independently and disconnect fences late results. Full
+  failure-free outbox sweeps follow up immediately, warning once on saturation and logging catch-up;
+  call `dispatch()` after commit to avoid interval latency. Injected Redis backplane startup now
+  shares the 15000 ms command bound and close cancels pending starts before late registration. See
+  the
+  [upgrade guide](docs/upgrading.md#broker-and-queue-bounds-health-and-delivery-setu-tsmessaging-plugin-setu-tsqueue-plugin-setu-tsrealtime-backplane-plugin).
+
 - **`@setu-ts/runtime` (M143i, #611, security).** On Node, a client that resets its connection while
   a WebSocket upgrade is being decided, or after it was refused, no longer crashes the process with
   an unhandled `'error'` event (in 0.13.0 a reset mid-pipeline ended any Node application with a

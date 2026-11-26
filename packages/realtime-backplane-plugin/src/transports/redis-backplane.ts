@@ -91,6 +91,7 @@ export class RedisBackplane implements IRealtimeBackplane {
    * whichever is in flight.
    */
   #openWait: AbortController | undefined;
+  #pendingInjected: readonly IRedisBackplaneClient[] | undefined;
 
   /**
    * M70c: present only when both connections expose `status` and `ping`; the
@@ -188,7 +189,21 @@ export class RedisBackplane implements IRealtimeBackplane {
     let attempt = this.#opening;
     if (attempt === undefined) {
       const generation = this.#generation;
-      attempt = this.#open();
+      const pending = this.#open();
+      attempt =
+        this.#options.client === undefined
+          ? pending
+          : withDeadline(() => pending, {
+              timeoutMs: this.#commandTimeoutMs,
+              onTimeout: () => {
+                if (generation === this.#generation) this.#openWait?.abort();
+                return new BackendUnavailableError('realtime-backplane-plugin: redis transport', {
+                  cause: new Error(
+                    `the injected client pair did not connect and subscribe within ${this.#commandTimeoutMs} ms`,
+                  ),
+                });
+              },
+            });
       // #open() runs client calls before it first yields, and an injected
       // client can call close() from inside one. That close() found no memo to
       // clear, so memoizing the retired attempt now would make every later
@@ -242,6 +257,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
+      this.#pendingInjected = [subscriber, publisher];
       // One reporter for both: the pair fails together, so an outage's
       // identical errors from the two connections de-duplicate into one warn.
       // (M131a X88-3) an injected client's outages must be as visible as a
@@ -377,6 +393,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#owned = owned;
     this.#listener = listener;
     this.#watches = watches;
+    if (!owned) this.#pendingInjected = undefined;
     this.#installProbe(publisher, subscriber);
   }
 
@@ -400,10 +417,6 @@ export class RedisBackplane implements IRealtimeBackplane {
     generation: number,
     owned: boolean,
   ): Promise<boolean> {
-    if (this.#commandTimeoutMs !== 0) {
-      await subscriber.subscribe(this.#topic);
-      return true;
-    }
     if (generation !== this.#generation) return false;
     const subscribeWait = new AbortController();
     this.#openWait = subscribeWait;
@@ -563,6 +576,9 @@ export class RedisBackplane implements IRealtimeBackplane {
     // has not published its connections yet, so this is what tells it to retire
     // them rather than arrive after the shutdown.
     this.#generation++;
+    const pendingInjected = this.#pendingInjected;
+    this.#pendingInjected = undefined;
+    if (pendingInjected !== undefined) forceClose(pendingInjected);
     // A pending SUBSCRIBE or publisher-ready wait ends now, so the open retires
     // the pair — even with `commandTimeoutMs: 0` (V12-53, M139f audit L1).
     this.#openWait?.abort();

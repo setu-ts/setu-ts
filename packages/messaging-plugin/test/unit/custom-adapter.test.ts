@@ -15,7 +15,7 @@ describe('asBrokerAdapter', () => {
     };
   }
 
-  it('returns instance unchanged when the full internal seam is present', () => {
+  it('wraps the full internal seam so caller validation cannot be bypassed', () => {
     const broker = createMinimalBroker({
       isReady: () => true,
       reachability: () => Promise.resolve(true),
@@ -25,7 +25,7 @@ describe('asBrokerAdapter', () => {
       requestWithHeaders: () => Promise.resolve(null),
     });
     const adapter = asBrokerAdapter(broker);
-    expect(adapter).toBe(broker);
+    expect(adapter).not.toBe(broker);
     expect(adapter.isReady()).toBe(true);
   });
 

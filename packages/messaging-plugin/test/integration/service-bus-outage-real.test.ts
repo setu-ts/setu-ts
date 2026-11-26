@@ -46,9 +46,112 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { MessagingPlugin } from '../../src/index.ts';
+import { ServiceBusBroker, JsonSerializer } from '../../src/index.ts';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 
 const connectionString = process.env['SERVICEBUS_CONNECTION_STRING'];
 const skipReal = connectionString === undefined;
+
+describe(
+  'Service Bus idle lifetime SDK control',
+  { skip: skipReal || !process.env['SERVICEBUS_ADMIN_CONNECTION_STRING'] },
+  () => {
+    it('reads back a direct SDK five-minute subscription lifetime', async () => {
+      const { ServiceBusAdministrationClient } = await import('@azure/service-bus');
+      const admin = new ServiceBusAdministrationClient(
+        process.env['SERVICEBUS_ADMIN_CONNECTION_STRING']!,
+      );
+      const topic = 'm143m-' + createNodeRuntimeServices().uuid();
+      const subscription = 'm143m-idle-control';
+      await admin.createTopic(topic);
+      try {
+        await admin.createSubscription(topic, subscription, { autoDeleteOnIdle: 'PT5M' });
+        expect((await admin.getSubscription(topic, subscription)).autoDeleteOnIdle).toBe('PT5M');
+      } finally {
+        await admin.deleteTopic(topic);
+      }
+    });
+  },
+);
+
+describe(
+  'Service Bus bounded consumer operations',
+  { skip: skipReal || !process.env['SERVICEBUS_ADMIN_CONNECTION_STRING'] },
+  () => {
+    it.each(['consumer concurrency', 'reply inbox idle deletion'] as const)(
+      'proves %s through the SDK',
+      { timeout: 60000 },
+      async (proof) => {
+        const { ServiceBusAdministrationClient } = await import('@azure/service-bus');
+        const runtime = createNodeRuntimeServices();
+        const adminConnectionString = process.env['SERVICEBUS_ADMIN_CONNECTION_STRING']!;
+        const admin = new ServiceBusAdministrationClient(adminConnectionString);
+        const topic = 'm143m-' + runtime.uuid();
+        const replies = topic + '-reply';
+        const subscription = 'm143m-worker';
+        const broker = new ServiceBusBroker(runtime, new JsonSerializer(), {
+          connectionString: connectionString!,
+          adminConnectionString,
+          replyTopic: replies,
+          maxConcurrentCalls: 4,
+          publishTimeoutMs: 2000,
+          consumerRetry: false,
+          retryOptions: { maxRetries: 0, timeoutInMs: 2000 },
+        });
+        const release = Promise.withResolvers<void>();
+        let entered = 0;
+        let completed = 0;
+        const topics: string[] = [];
+        const until = async (predicate: () => boolean): Promise<void> => {
+          const end = runtime.hrtime() + 15000;
+          while (!predicate() && runtime.hrtime() < end)
+            await new Promise<void>((resolve) => runtime.setTimeout(resolve, 20));
+          expect(predicate()).toBe(true);
+        };
+        try {
+          await admin.createTopic(topic);
+          topics.push(topic);
+          await admin.createTopic(replies);
+          topics.push(replies);
+          await admin.createSubscription(topic, subscription);
+          await broker.connect();
+          if (proof === 'consumer concurrency') {
+            await broker.subscribe(
+              topic,
+              async () => {
+                entered++;
+                await release.promise;
+                completed++;
+              },
+              { queue: subscription },
+            );
+            for (let n = 0; n < 4; n++) await broker.publish(topic, { n });
+            await until(() => entered === 4);
+            expect(completed).toBe(0);
+            release.resolve();
+            await until(() => completed === 4);
+          } else {
+            // The missing request channel is never provisioned; opening the inbox happens first.
+            await broker.request(topic, {}, { timeoutMs: 1000 }).catch(() => {});
+            const inboxes = [];
+            for await (const entry of admin.listSubscriptions(replies)) inboxes.push(entry);
+            expect(inboxes).toHaveLength(1);
+            const inbox = await admin.getSubscription(replies, inboxes[0]!.subscriptionName);
+            expect(inbox.autoDeleteOnIdle).toMatch(/^PT(5M|300S)$/);
+            await broker.disconnect();
+            const remaining = [];
+            for await (const entry of admin.listSubscriptions(replies)) remaining.push(entry);
+            expect(remaining).toHaveLength(0);
+          }
+        } finally {
+          release.resolve();
+          await broker.disconnect();
+          for (const name of topics.reverse()) await admin.deleteTopic(name);
+        }
+      },
+    );
+  },
+);
 
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });

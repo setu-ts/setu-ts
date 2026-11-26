@@ -24,7 +24,13 @@ import type {
   StoredRecurring,
 } from '../interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { deadlineRangeError, ReconnectSupervisor, withDeadline } from '@setu-ts/common';
+import {
+  BackendOutcomeUnknownError,
+  BackendUnavailableError,
+  deadlineRangeError,
+  ReconnectSupervisor,
+  withDeadline,
+} from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 /**
@@ -148,6 +154,7 @@ function parseStoredJob<T>(payload: string): StoredJob<T> | null {
 
 /** Bound on one whole connection attempt, TCP and AMQP handshake together, in ms. */
 const CONNECT_TIMEOUT_MS = 10_000;
+const ENQUEUE_SOURCE = 'queue-plugin: rabbitmq enqueue';
 
 /** Default bound on one job publish, including its confirm, in ms. */
 export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
@@ -240,21 +247,33 @@ function publishConfirmed(
         resolve();
         return;
       }
-      const detail = err instanceof Error ? err.message : String(err);
+      // amqplib's first close listener drains confirm callbacks before ours.
+      // Its close failure is not the broker's explicit `message nacked` refusal.
+      const Fault =
+        err instanceof Error && err.message === 'channel closed'
+          ? BackendOutcomeUnknownError
+          : BackendUnavailableError;
+      reject(new Fault(ENQUEUE_SOURCE, { cause: err }));
+    };
+    const onClose = (): void => {
+      if (settled) return;
+      settled = true;
+      observable?.off('close', onClose);
       reject(
-        new Error(`RabbitMQ did not confirm the job published to queue "${queue}": ${detail}`, {
-          cause: err,
+        new BackendOutcomeUnknownError(ENQUEUE_SOURCE, {
+          cause: new Error(
+            `RabbitMQ channel closed before the confirm for queue "${queue}" arrived`,
+          ),
         }),
       );
     };
-    const onClose = (): void => settle(new Error('channel closed before the confirm arrived'));
     observable?.on('close', onClose);
     try {
       channel.publish('', queue, content, options, settle);
     } catch (error) {
       settled = true;
       observable?.off('close', onClose);
-      reject(error);
+      reject(new BackendUnavailableError(ENQUEUE_SOURCE, { cause: error }));
     }
   });
 }
@@ -546,10 +565,12 @@ export class RabbitMqQueue implements QueueAdapter {
     await withDeadline(run, {
       timeoutMs,
       onTimeout: () =>
-        new Error(
-          `RabbitMQ did not accept the job published to queue "${queue}" within ` +
-            `${timeoutMs} ms (publishTimeoutMs); it may still be accepted`,
-        ),
+        new BackendOutcomeUnknownError(ENQUEUE_SOURCE, {
+          cause: new Error(
+            `RabbitMQ did not accept the job published to queue "${queue}" within ` +
+              `${timeoutMs} ms (publishTimeoutMs); it may still be accepted`,
+          ),
+        }),
       timing: {
         setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
         clearTimer: (handle) => this.#runtime.clearTimeout(handle),
@@ -684,9 +705,14 @@ export class RabbitMqQueue implements QueueAdapter {
   }
 
   async enqueue<T>(job: StoredJob<T>): Promise<void> {
-    if (!this.#channel) {
-      throw new Error('RabbitMqQueue is not connected');
+    if (!this.#channel || this.#supervisor.faulted) {
+      throw new BackendUnavailableError(ENQUEUE_SOURCE, {
+        cause: new Error('RabbitMqQueue is not connected or its channel is faulted'),
+      });
     }
+
+    const problem = this.jobNameProblem(job.name);
+    if (problem !== null) throw new RangeError(problem);
 
     const channel = this.#channel;
     const content = Buffer.from(JSON.stringify(job), 'utf8');
@@ -697,14 +723,22 @@ export class RabbitMqQueue implements QueueAdapter {
     const now = this.#runtime.now();
     const delayed = job.availableAtMs > now;
     await this.#bounded(delayed ? delayQ : readyQ, async () => {
-      await this.#assertQueues(job.name);
-      if (!delayed) {
-        // No delay: publish directly to ready queue
-        await this.#publish(channel, readyQ, content);
-      } else {
-        // Delayed: publish to delay queue with TTL
-        const expiration = job.availableAtMs - now;
-        await this.#publish(channel, delayQ, content, { expiration });
+      try {
+        await this.#assertQueues(job.name);
+      } catch (cause) {
+        throw new BackendUnavailableError(ENQUEUE_SOURCE, { cause });
+      }
+      try {
+        await this.#publish(
+          channel,
+          delayed ? delayQ : readyQ,
+          content,
+          delayed ? { expiration: job.availableAtMs - now } : {},
+        );
+      } catch (error) {
+        if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError)
+          throw error;
+        throw new BackendUnavailableError(ENQUEUE_SOURCE, { cause: error });
       }
     });
   }

@@ -10,9 +10,7 @@ cloud client is an **optional** dependency, lazily imported or injected.
 
 ## Installation
 
-```typescript
-import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-```
+Install with `pnpm add @setu-ts/messaging-plugin`. Import `MessagingPlugin` as shown below.
 
 ## Usage
 
@@ -542,7 +540,28 @@ after 1, 2, 5, 10 and then every 30 seconds until it succeeds or the broker disc
 subscription is closed, the broker reports unreachable, so the messaging health indicator is `down`.
 The closure and the recovery are each logged once.
 
+On Pub/Sub, a subscription create failing with gRPC code 5 throws `PubSubTopicMissingError` naming
+the source topic and subscription and advising creation of the topic. The original error is on
+`cause`. A configured missing dead-letter topic still takes precedence as
+`PubSubDeadLetterTopicMissingError`; an inconclusive check names that topic as another possible
+cause. Topic inspection uses a 1500 ms bound with SDK retries disabled; attachment failures keep
+their original error.
+
 ### Service Bus retries
+
+| Service Bus option   | Default | Meaning                                                                                                              |
+| -------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `publishTimeoutMs`   | `15000` | Whole send, including SDK retries; `0` disables. Expiry aborts the SDK signal and throws `PublishTimeoutError` (504) |
+| `maxConcurrentCalls` | `1`     | Integer 1–1000 on application subscriptions, including realtime fan-out; reply inboxes stay at 1                     |
+
+A receive-side transport outage makes a consume-only service not-ready. Only errors from `receive`
+count; authorization, missing-entity refusals and settlement errors do not. A delivery or positive
+management probe restores reachability. To keep this dependency out of readiness, use
+`HealthPlugin({ readiness: { exclude: ['messaging'] } })`.
+
+Send outages throw `BackendOutcomeUnknownError` (504), because a retried send may already have
+arrived. Non-retryable entity, authorization, size and quota refusals retain their original SDK
+error.
 
 Since 0.14.0 a failing Service Bus handler is retried with a delay by default. The broker holds the
 message for the delay while the SDK renews its lock, then abandons it; on the final attempt, or when
@@ -558,17 +577,18 @@ message for the delay while the SDK renews its lock, then abandons it; on the fi
 The attempt number is the message's `deliveryCount` plus one (the count starts at 0). A hold never
 outlives the lock budget: when less than the delay remains of 300 s minus a 60 s margin, the message
 is abandoned at once with one warning. `unsubscribe()` and `disconnect()` abandon held messages at
-once. The receiver handles one message at a time, so a failing message holds its subscription for
-the sum of its delays (about 156 s at the defaults). Reading `maxDeliveryCount` needs the admin
-connection.
+once. At `maxConcurrentCalls: 1` a failing message holds its subscription for the sum of its delays
+(about 156 s at the defaults). A retry hold occupies one slot: set concurrency above 1 for
+throughput, allowing later messages (including realtime frames) to run first. Reading
+`maxDeliveryCount` needs the admin connection.
 
 ### Publish bounds
 
-Every broker arm — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams and NATS — bounds each transport
-publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC requests/replies and
-outbox relay publishes. The Pub/Sub terminal dead-letter forward is always bounded at 15,000 ms,
-even with `0`. A value outside 0–2147483647, `NaN` or Infinity throws `RangeError` at plugin and
-broker construction.
+The network broker arms — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams, NATS and Service Bus — bound
+each transport publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC
+requests/replies and outbox relay publishes. The Pub/Sub terminal dead-letter forward is always
+bounded at 15,000 ms, even with `0`. A value outside 0–2147483647, `NaN` or Infinity throws
+`RangeError` at plugin and broker construction.
 
 An expired publish rejects with the exported `PublishTimeoutError`, which carries the published
 topic and the configured bound as the readonly fields `topic` and `timeoutMs`:
@@ -776,9 +796,44 @@ const app = createApplication({
 Every instance reads every reply on that topic and discards the ones it did not originate, so give a
 high-traffic service its own `replyTopic` to bound the fan-out.
 
-`RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling.
-`MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
-broker's former refusal and no broker throws it now.
+`RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling. With
+`errorHandler`, they answer 504 (`Gateway Timeout`) and 502 (`Bad Gateway`) respectively.
+`RequestTimeoutError.topic` and `.timeoutMs` name the request and its reply bound when created by
+the broker. The fixed timeout detail says the request may have been handled; the remote error text
+stays on `remoteMessage` and is never served in the response body.
+
+Service Bus reply subscriptions use `autoDeleteOnIdleMs: 300000` (five idle minutes) so a crashed
+requester leaves no permanent inbox. A live receiver keeps it active; clean shutdown still deletes
+it. `MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the
+Kafka broker's former refusal and no broker throws it now.
+
+## Writing a custom broker
+
+`CustomMessagingOptions.instance` accepts `ICustomMessageBroker`, extending `IMessageBroker` with
+optional `publishWithHeaders(topic, message, headers, options?)` and
+`requestWithHeaders(topic, request, headers, options?)`. These are framework-owned trace headers,
+including `traceparent` and `tracestate`; deliver them through `MessageMetadata.headers` on
+`subscribe`, so the consumer span joins the producer's trace. Caller options are always validated
+first, including reserved-header refusal, even if the instance implements the internal adapter
+members. Without a header member the wrapper calls `publish` or `request` and warns once that traces
+will not cross the broker.
+
+```typescript
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { ICustomMessageBroker } from '@setu-ts/messaging-plugin';
+import type { IPlugin } from '@setu-ts/common';
+
+export function messagingFor(instance: ICustomMessageBroker): IPlugin {
+  return MessagingPlugin({ broker: 'custom', instance });
+}
+```
+
+The instance owns RPC correlation and reply cleanup, and must implement `request` and `respond`. An
+optional `isHealthy()` feeds the wrapper's boolean reachability; without it health is unknown. The
+wrapper tracks connection lifecycle (or calls an existing `isReady` through its owner). `subscribe`
+receives every option, including `fanOut`: return `ISubscription.fanOut: true` only when every
+subscribing instance receives a copy. The wrapper calls `subscribe`, not an internal
+`subscribeWithHeaders`; it derives health from `isHealthy`, not an internal `reachability`.
 
 ## Trace propagation
 
@@ -1196,7 +1251,7 @@ await db.transaction(async (uow) => {
     },
   );
 });
-// Optional: request a sweep now instead of waiting for the next interval.
+// Request a sweep after the transaction commits, avoiding up to intervalMs of waiting.
 outbox.dispatch();
 ```
 
@@ -1430,6 +1485,18 @@ large after conversion, so the relay still refuses it as `invalid-row` in `claim
 `leaseUntil`. The Prisma path is not driven in this repository.
 
 ### The relay
+
+Without `outbox.dispatch()` after the transaction resolves, a committed row waits up to
+`relay.intervalMs` (default 1000 ms) for a scheduled sweep. Every sweep is limited by `publishLimit`
+(default 100), and rows run serially: claim, publish, then mark. A full sweep with no publish
+failures starts a follow-up immediately, including with `relay.schedule: false` after `dispatch()`.
+Backlog throughput is therefore bounded by the serial cost of a row rather than `intervalMs`. Failed
+sweeps retain the retry backoff and do not start an automatic follow-up. Closing stops the chain.
+
+The first full sweep warns `outbox relay is at its sweep budget` with `publishLimit` and
+`intervalMs`; the first failure-free completed lap logs `outbox relay caught up` at info. A sweep
+with failures neither starts nor clears that warning episode. During a backlog the store sees
+back-to-back reads until the relay catches up.
 
 The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
 failed row, a row in retry backoff, a row held by another relay, or a row whose status write failed
@@ -2068,6 +2135,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `PublishTimeoutError`                   | class     |
 | `PubSubDeadLetterTopicMissingError`     | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
+| `PubSubTopicMissingError`               | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |
 | `RemoteHandlerError`                    | class     |
@@ -2078,6 +2146,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `ConsumerRetryOptions`                  | interface |
 | `CustomMessagingOptions`                | interface |
 | `EventsMessagingBridgeOptions`          | interface |
+| `ICustomMessageBroker`                  | interface |
 | `IInbox`                                | interface |
 | `IMessageBroker`                        | interface |
 | `INatsHeaders`                          | interface |

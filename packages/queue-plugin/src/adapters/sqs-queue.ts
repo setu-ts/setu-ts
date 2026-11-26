@@ -12,7 +12,13 @@
  */
 
 import type { IRuntimeServices } from '@setu-ts/common';
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import {
+  BackendOutcomeUnknownError,
+  OptionalDependencyUnavailableError,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
+import { resolveSqsRequestTimeout, toSqsFault } from './sqs-faults.ts';
 import { decodeSqsEnvelope, encodeSqsEnvelope } from './sqs-envelope.ts';
 import { SqsRedrive } from './sqs-redrive.ts';
 import type { ISqsRedriveTarget } from './sqs-redrive.ts';
@@ -34,6 +40,7 @@ const SQS_MAX_RECEIVE = 10;
 
 /** Default visibility timeout in seconds. */
 const DEFAULT_VISIBILITY_TIMEOUT = 30;
+const SQS_PROBE_CALL_TIMEOUT_MS = 1500;
 
 /**
  * Declares the constructors used from the real AWS SQS SDK v3.
@@ -43,8 +50,9 @@ export interface SqsSdkModule {
     region?: string | undefined;
     credentials?: unknown;
     endpoint?: string | undefined;
+    maxAttempts?: number;
   }) => {
-    send(command: unknown): Promise<unknown>;
+    send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
     destroy(): Promise<void>;
   };
   SendMessageCommand: new (input: Record<string, unknown>) => unknown;
@@ -100,6 +108,7 @@ export interface ISqsTransport {
     body: string,
     delaySeconds?: number,
     attributes?: Readonly<Record<string, { DataType: 'String' | 'Number'; StringValue: string }>>,
+    options?: { abortSignal?: AbortSignal },
   ): Promise<void>;
   /**
    * Reads named queue attributes.
@@ -112,6 +121,7 @@ export interface ISqsTransport {
   getQueueAttributes?(
     queueUrl: string,
     names: readonly string[],
+    options?: { abortSignal?: AbortSignal },
   ): Promise<Readonly<Record<string, string>>>;
   /**
    * Resolves a dead-letter queue in its owner's account.
@@ -121,20 +131,35 @@ export interface ISqsTransport {
    * @throws {Error} On transport rejection
    * @since 0.14.0
    */
-  getQueueUrl?(queueName: string, ownerAccountId: string): Promise<string>;
+  getQueueUrl?(
+    queueName: string,
+    ownerAccountId: string,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<string>;
   /** Receive messages from a queue. */
   receive(
     queueUrl: string,
     max: number,
     visibilitySeconds: number,
+    waitTimeSeconds?: number,
+    options?: { abortSignal?: AbortSignal },
   ): Promise<readonly SqsReceivedMessage[]>;
   /** Delete a message (ack). */
-  delete(queueUrl: string, receiptHandle: string): Promise<void>;
+  delete(
+    queueUrl: string,
+    receiptHandle: string,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<void>;
   /** Change visibility timeout (requeue). */
-  changeVisibility(queueUrl: string, receiptHandle: string, seconds: number): Promise<void>;
+  changeVisibility(
+    queueUrl: string,
+    receiptHandle: string,
+    seconds: number,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<void>;
   /**
-   * Reports whether the queue is reachable when an injected transport supplies
-   * a probe. The SDK adapter has no reachability probe. Optional so a minimal fake still
+   * Optional custom reachability probe. SqsQueue probes configured queue URLs
+   * through getQueueAttributes when available (including the SDK path). A minimal fake still
    * type-checks; a transport that omits it is *unknown*, not `false`.
    *
    * @returns `true` when the queue is reachable
@@ -149,6 +174,10 @@ export interface ISqsTransport {
  * Options for SQS queue adapter.
  */
 export interface SqsQueueOptions {
+  /** Whole-call bound in ms, default 15000; 0 disables it. Redrive reads stay finite. @since 0.14.0 */
+  requestTimeoutMs?: number;
+  /** SQS long poll duration, integer 0–20, default 20. @since 0.14.0 */
+  waitTimeSeconds?: number;
   /** Job name → queue URL mapping. */
   queues: Record<string, string>;
   /**
@@ -199,9 +228,10 @@ export function adaptSqsModule(
   if (options.credentials !== undefined) clientConfig.credentials = options.credentials;
   if (options.endpoint !== undefined) clientConfig.endpoint = options.endpoint;
   const client = new mod.SQSClient(clientConfig);
+  const probeClient = new mod.SQSClient({ ...clientConfig, maxAttempts: 1 });
 
   return {
-    send: async (queueUrl, body, delaySeconds, attributes): Promise<void> => {
+    send: async (queueUrl, body, delaySeconds, attributes, callOptions): Promise<void> => {
       const input: Record<string, unknown> = {
         QueueUrl: queueUrl,
         MessageBody: body,
@@ -210,21 +240,25 @@ export function adaptSqsModule(
         input.DelaySeconds = delaySeconds;
       }
       if (attributes !== undefined) input.MessageAttributes = attributes;
-      await client.send(new mod.SendMessageCommand(input));
+      await client.send(new mod.SendMessageCommand(input), callOptions);
     },
     receive: async (
       queueUrl: string,
       max: number,
       visibilitySeconds: number,
+      waitTimeSeconds?: number,
+      callOptions?: { abortSignal?: AbortSignal },
     ): Promise<readonly SqsReceivedMessage[]> => {
       const result = await client.send(
         new mod.ReceiveMessageCommand({
           QueueUrl: queueUrl,
           MaxNumberOfMessages: max,
           VisibilityTimeout: visibilitySeconds,
+          ...(waitTimeSeconds === undefined ? {} : { WaitTimeSeconds: waitTimeSeconds }),
           MessageAttributeNames: [],
           MessageSystemAttributeNames: ['ApproximateReceiveCount'],
         }),
+        callOptions,
       );
 
       const messages = (result as { Messages?: unknown[] }).Messages ?? [];
@@ -245,18 +279,24 @@ export function adaptSqsModule(
         };
       });
     },
-    delete: async (queueUrl: string, receiptHandle: string): Promise<void> => {
+    delete: async (
+      queueUrl: string,
+      receiptHandle: string,
+      callOptions?: { abortSignal?: AbortSignal },
+    ): Promise<void> => {
       await client.send(
         new mod.DeleteMessageCommand({
           QueueUrl: queueUrl,
           ReceiptHandle: receiptHandle,
         }),
+        callOptions,
       );
     },
     changeVisibility: async (
       queueUrl: string,
       receiptHandle: string,
       seconds: number,
+      callOptions?: { abortSignal?: AbortSignal },
     ): Promise<void> => {
       await client.send(
         new mod.ChangeMessageVisibilityCommand({
@@ -264,23 +304,27 @@ export function adaptSqsModule(
           ReceiptHandle: receiptHandle,
           VisibilityTimeout: seconds,
         }),
+        callOptions,
       );
     },
-    getQueueAttributes: async (queueUrl, names) => {
-      const result = await client.send(
+    getQueueAttributes: async (queueUrl, names, callOptions) => {
+      const reader = names.length === 1 && names[0] === 'QueueArn' ? probeClient : client;
+      const result = await reader.send(
         new mod.GetQueueAttributesCommand({
           QueueUrl: queueUrl,
           AttributeNames: names,
         }),
+        callOptions,
       );
       return (result as { Attributes?: Record<string, string> }).Attributes ?? {};
     },
-    getQueueUrl: async (queueName, ownerAccountId) => {
+    getQueueUrl: async (queueName, ownerAccountId, callOptions) => {
       const result = await client.send(
         new mod.GetQueueUrlCommand({
           QueueName: queueName,
           QueueOwnerAWSAccountId: ownerAccountId,
         }),
+        callOptions,
       );
       const url = (result as { QueueUrl?: string }).QueueUrl;
       if (!url) throw new Error('SQS GetQueueUrl returned no QueueUrl');
@@ -288,6 +332,7 @@ export function adaptSqsModule(
     },
     close: async () => {
       await client.destroy();
+      await probeClient.destroy();
     },
   };
 }
@@ -328,10 +373,12 @@ export class SqsQueue implements QueueAdapter {
   #injectedClient: ISqsTransport | undefined;
   #transport: ISqsTransport | null = null;
   #ready = false;
+  readonly #requestTimeoutMs: number;
+  readonly #waitTimeSeconds: number;
+  readonly #receives = new Set<AbortController>();
   /**
-   * Present only when an injected transport exposes `isHealthy?()`;
-   * the SDK adapter has no probe. Its absence is *unknown* reachability,
-   * not `false`.
+   * Probes every distinct configured queue URL when getQueueAttributes exists;
+   * otherwise delegates to an injected isHealthy or stays absent (unknown).
    *
    * @since 0.1.0
    */
@@ -384,6 +431,14 @@ export class SqsQueue implements QueueAdapter {
     defaults?: { maxAttempts?: number },
   ) {
     this.#runtime = runtime;
+    this.#requestTimeoutMs = resolveSqsRequestTimeout(options.requestTimeoutMs);
+    this.#waitTimeSeconds = options.waitTimeSeconds ?? 20;
+    if (
+      !Number.isInteger(this.#waitTimeSeconds) ||
+      this.#waitTimeSeconds < 0 ||
+      this.#waitTimeSeconds > 20
+    )
+      throw new RangeError('waitTimeSeconds must be an integer from 0 to 20');
     this.#queues = options.queues;
     this.#deadLetterQueues = options.deadLetterQueues ?? {};
     this.#visibilityTimeoutSeconds = options.visibilityTimeoutSeconds ?? DEFAULT_VISIBILITY_TIMEOUT;
@@ -448,6 +503,10 @@ export class SqsQueue implements QueueAdapter {
     this.#redrive = new SqsRedrive();
     this.#ready = true;
     this.#installProbe();
+    if (this.#waitTimeSeconds > 0 && Object.keys(this.#queues).length >= 50)
+      this.#logger?.warn(
+        'SQS long polling at 50 or more configured names can exhaust the SDK default 50 HTTP sockets; sends may wait behind receives',
+      );
   }
 
   /**
@@ -456,9 +515,39 @@ export class SqsQueue implements QueueAdapter {
    */
   #installProbe(): void {
     const transport = this.#transport;
-    if (transport !== null && typeof transport.isHealthy === 'function') {
+    if (transport !== null && transport.getQueueAttributes !== undefined) {
+      this.isHealthy = async (): Promise<boolean> => {
+        const outcomes = await Promise.all(
+          [...new Set(Object.values(this.#queues))].map(async (url) => {
+            try {
+              // No abort signal: each probe owns its own finite race, independent of request options.
+              await withDeadline(() => transport.getQueueAttributes!(url, ['QueueArn']), {
+                timeoutMs: SQS_PROBE_CALL_TIMEOUT_MS,
+                onTimeout: () => new Error('SQS probe timed out'),
+                timing: resolveProbeTiming(this.#runtime),
+              });
+              return true;
+            } catch (error) {
+              const value = error as {
+                name?: string;
+                $metadata?: { httpStatusCode?: number };
+              } | null;
+              const status = value?.$metadata?.httpStatusCode;
+              return (
+                typeof status === 'number' &&
+                status < 500 &&
+                !['QueueDoesNotExist', 'AWS.SimpleQueueService.NonExistentQueue'].includes(
+                  value?.name ?? '',
+                )
+              );
+            }
+          }),
+        );
+        return outcomes.every(Boolean);
+      };
+    } else if (transport !== null && typeof transport.isHealthy === 'function') {
       const probe = transport.isHealthy;
-      this.isHealthy = (): Promise<boolean> => probe();
+      this.isHealthy = (): Promise<boolean> => probe.call(transport);
     } else {
       delete this.isHealthy;
     }
@@ -467,6 +556,8 @@ export class SqsQueue implements QueueAdapter {
   async disconnect(): Promise<void> {
     this.#connection++;
     this.#ready = false;
+    for (const controller of this.#receives)
+      controller.abort(new Error('SqsQueue is disconnecting'));
     this.#redrive.close();
     await Promise.allSettled(this.#preparations.values());
     await Promise.allSettled(this.#retirements);
@@ -511,7 +602,10 @@ export class SqsQueue implements QueueAdapter {
       ...(job.headers === undefined ? {} : { headers: job.headers }),
     });
 
-    await this.#transport.send(queueUrl, body, delaySeconds);
+    const transport = this.#transport;
+    await this.#call('send', (abortSignal) =>
+      transport.send(queueUrl, body, delaySeconds, undefined, { abortSignal }),
+    );
   }
 
   /**
@@ -537,6 +631,7 @@ export class SqsQueue implements QueueAdapter {
           this.#getQueueUrl(name),
           Object.hasOwn(this.#deadLetterQueues, name) ? this.#deadLetterQueues[name] : undefined,
           (message) => this.#logger?.warn(message),
+          this.#requestTimeoutMs,
         )
         .then((target) => {
           if (!this.#ready || this.#connection !== connection)
@@ -568,11 +663,27 @@ export class SqsQueue implements QueueAdapter {
     const queueUrl = this.#getQueueUrl(name);
     const target = this.#targets.get(name)!;
     const receivedAtMs = this.#runtime.now();
-    const messages = await transport.receive(
-      queueUrl,
-      Math.min(limit, SQS_MAX_RECEIVE),
-      this.#visibilityTimeoutSeconds,
-    );
+    const controller = new AbortController();
+    this.#receives.add(controller);
+    let messages: readonly SqsReceivedMessage[];
+    try {
+      messages = await this.#call(
+        'receive',
+        (abortSignal) => {
+          const signal = AbortSignal.any([abortSignal, controller.signal]);
+          return transport.receive(
+            queueUrl,
+            Math.min(limit, SQS_MAX_RECEIVE),
+            this.#visibilityTimeoutSeconds,
+            this.#waitTimeSeconds,
+            { abortSignal: signal },
+          );
+        },
+        this.#requestTimeoutMs === 0 ? 0 : this.#waitTimeSeconds * 1000 + this.#requestTimeoutMs,
+      );
+    } finally {
+      this.#receives.delete(controller);
+    }
     if (!this.#ready || this.#connection !== connection)
       throw new Error('SqsQueue is not connected');
     // Waiting for a long poll is not time spent handling its returned delivery.
@@ -642,6 +753,9 @@ export class SqsQueue implements QueueAdapter {
         ...(headers === undefined ? {} : { headers }),
       });
     }
+    // A bounded retirement enters its transport in a microtask; let that entry
+    // run before exposing claims, then recheck the connection generation.
+    await Promise.resolve();
     if (!this.#ready || this.#connection !== connection)
       throw new Error('SqsQueue is not connected');
     return jobs;
@@ -650,7 +764,9 @@ export class SqsQueue implements QueueAdapter {
   ack(name: string, id: string, claimToken: string): Promise<void> {
     return this.#settle(name, id, claimToken, async (entry, fence, transport) => {
       await fence();
-      await transport.delete(this.#getQueueUrl(name), entry.receiptHandle);
+      await this.#call('delete', (abortSignal) =>
+        transport.delete(this.#getQueueUrl(name), entry.receiptHandle, { abortSignal }),
+      );
     });
   }
 
@@ -666,10 +782,13 @@ export class SqsQueue implements QueueAdapter {
       const seconds = Math.ceil(Math.max(0, availableAtMs - this.#runtime.now()) / 1000);
       const remaining = this.#remainingVisibility(entry);
       if (remaining >= 1)
-        await transport.changeVisibility(
-          this.#getQueueUrl(name),
-          entry.receiptHandle,
-          Math.min(seconds, remaining),
+        await this.#call('change visibility', (abortSignal) =>
+          transport.changeVisibility(
+            this.#getQueueUrl(name),
+            entry.receiptHandle,
+            Math.min(seconds, remaining),
+            { abortSignal },
+          ),
         );
     });
   }
@@ -769,7 +888,9 @@ export class SqsQueue implements QueueAdapter {
     const target = this.#targets.get(name)!;
     if (target.url === false) {
       if (fence !== undefined) await fence();
-      await transport.delete(this.#getQueueUrl(name), receiptHandle);
+      await this.#call('delete', (abortSignal) =>
+        transport.delete(this.#getQueueUrl(name), receiptHandle, { abortSignal }),
+      );
       if (reason !== 'unreadable') {
         this.#logger?.warn(
           `SQS "${name}" job ${logId(id)} discarded after ${attempts} attempts; deadLetterQueues[name] is false`,
@@ -778,11 +899,20 @@ export class SqsQueue implements QueueAdapter {
       return 'discarded';
     }
     try {
-      await transport.send(target.url, body, undefined, {
-        'setu-dead-letter-reason': { DataType: 'String', StringValue: reason },
-        'setu-attempts': { DataType: 'Number', StringValue: String(attempts) },
-        'setu-source-message-id': { DataType: 'String', StringValue: messageId },
-      });
+      const targetUrl = target.url;
+      await this.#call('send', (abortSignal) =>
+        transport.send(
+          targetUrl,
+          body,
+          undefined,
+          {
+            'setu-dead-letter-reason': { DataType: 'String', StringValue: reason },
+            'setu-attempts': { DataType: 'Number', StringValue: String(attempts) },
+            'setu-source-message-id': { DataType: 'String', StringValue: messageId },
+          },
+          { abortSignal },
+        ),
+      );
     } catch (error) {
       // SendMessage size refusal confirmed with the installed SDK against
       // LocalStack. Attributes count towards the limit; never match error text.
@@ -796,11 +926,16 @@ export class SqsQueue implements QueueAdapter {
       this.#logger?.warn(
         `SQS deadLetter: forwarding "${name}" without setu- attributes after InvalidParameterValue; dead-letter metadata omitted`,
       );
-      await transport.send(target.url, body);
+      const targetUrl = target.url;
+      await this.#call('send', (abortSignal) =>
+        transport.send(targetUrl, body, undefined, undefined, { abortSignal }),
+      );
     }
     try {
       const owned = fence === undefined ? true : await fence(false);
-      await transport.delete(this.#getQueueUrl(name), receiptHandle);
+      await this.#call('delete', (abortSignal) =>
+        transport.delete(this.#getQueueUrl(name), receiptHandle, { abortSignal }),
+      );
       if (!owned) {
         this.#logger?.warn(
           `SQS deadLetter: the claim on "${name}" job ${logId(id)} lapsed during the forward; the source may be delivered and dead-lettered again`,
@@ -884,7 +1019,11 @@ export class SqsQueue implements QueueAdapter {
     if (remaining <= 0) return false;
     const seconds = Math.min(this.#visibilityTimeoutSeconds, remaining);
     try {
-      await transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds);
+      await this.#call('change visibility', (abortSignal) =>
+        transport.changeVisibility(this.#getQueueUrl(name), entry.receiptHandle, seconds, {
+          abortSignal,
+        }),
+      );
     } catch {
       return false;
     }
@@ -899,6 +1038,26 @@ export class SqsQueue implements QueueAdapter {
     const entry = this.findReceiptEntry(id);
     if (!entry || entry.name !== name || entry.claimToken !== token) throw new StaleClaimError();
     return entry;
+  }
+
+  async #call<T>(
+    operation: string,
+    run: (signal: AbortSignal) => Promise<T>,
+    timeoutMs = this.#requestTimeoutMs,
+  ): Promise<T> {
+    const source = `queue-plugin: sqs ${operation}`;
+    try {
+      return await withDeadline(run, {
+        timeoutMs,
+        onTimeout: () =>
+          new BackendOutcomeUnknownError(source, {
+            cause: new Error(`SQS ${operation} exceeded requestTimeoutMs (${timeoutMs}ms)`),
+          }),
+        timing: resolveProbeTiming(this.#runtime),
+      });
+    } catch (error) {
+      throw toSqsFault(error, source);
+    }
   }
 
   #forget(id: string, entry: ReceiptEntry): void {

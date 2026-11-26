@@ -16,6 +16,8 @@
 
 import {
   createCachedProbe,
+  BackendOutcomeUnknownError,
+  resolveProbeTiming,
   withDeadline,
   type ISubscription,
   type MessageHandler,
@@ -36,7 +38,13 @@ import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
-import { ReplyInboxUnavailableError } from '../errors.ts';
+import { PublishTimeoutError, ReplyInboxUnavailableError } from '../errors.ts';
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
+import {
+  isServiceBusOutage,
+  serviceBusPublishCause,
+  resolveServiceBusConcurrency,
+} from './service-bus-faults.ts';
 import type { ConsumerRetryOptions } from '../interfaces/index.ts';
 import { resolveServiceBusRetry, type ResolvedConsumerRetry } from './consumer-retry.ts';
 import { fanOutName, markFanOut, SubscriptionNameExistsError, wantsFanOut } from './fan-out.ts';
@@ -46,6 +54,8 @@ const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 
 /** Default subscription name. */
 const DEFAULT_QUEUE = 'messaging-consumers';
+
+const SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS = 300000;
 
 /** Reachability outcome cache lifetime for the broker probe (M90b), in ms. */
 const PROBE_TTL_MS = 5000;
@@ -122,11 +132,14 @@ export interface ServiceBusSdkModule {
     options?: { retryOptions?: Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } },
   ) => {
     createSender(queueOrTopicName: string): {
-      sendMessages(messages: {
-        body: unknown;
-        applicationProperties?: unknown;
-        messageId?: string;
-      }): Promise<void>;
+      sendMessages(
+        messages: {
+          body: unknown;
+          applicationProperties?: unknown;
+          messageId?: string;
+        },
+        options?: { abortSignal?: AbortSignal },
+      ): Promise<void>;
       close(): Promise<void>;
     };
     createReceiver(queueName: string, options?: unknown): IServiceBusReceiver;
@@ -188,6 +201,7 @@ export interface IServiceBusTransport {
     body: string,
     applicationProperties?: Readonly<Record<string, string>>,
     messageId?: string,
+    options?: { abortSignal?: AbortSignal },
   ): Promise<void>;
   /**
    * Open a receiver on a topic subscription.
@@ -216,6 +230,10 @@ export interface IServiceBusTransport {
        */
       deadLetter?(reason: string): Promise<void>;
     }) => void | Promise<void>,
+    options?: {
+      maxConcurrentCalls?: number;
+      onReceiveError?: (error: unknown, errorSource: string) => void;
+    },
   ): Promise<IServiceBusSubscription>;
   /**
    * Creates a per-instance RPC or fan-out subscription; requires Manage rights.
@@ -270,6 +288,10 @@ export interface IServiceBusSubscription {
  * Options for Azure Service Bus broker.
  */
 export interface ServiceBusOptions {
+  /** Whole publish bound in ms; 15000 by default, 0 disables it. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. RPC inbox stays at 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   /** Held consumer retries; false restores immediate abandon. @since 0.14.0 */
   consumerRetry?: false | ConsumerRetryOptions;
   /** Connection string for the Service Bus namespace. Required unless {@link client} is injected. */
@@ -415,29 +437,6 @@ function classifyProbeFailure(error: unknown): boolean | undefined {
 }
 
 /**
- * Decides whether a failed publish is EVIDENCE about the data plane (M95b).
- *
- * Deliberately NOT {@linkcode classifyProbeFailure}: that one maps a
- * 404/410 to "positively absent", which is right for a management probe and
- * wrong here — a publish rejected because the topic was deleted is an
- * application-level fact, not a network outage, and must never mark the
- * broker down. This predicate is narrowed twice, and the narrowing is the
- * design:
- *
- * - **By origin** — the only rejections passed here are the ones thrown by
- *   `transport.send` inside `publishWithHeaders`; the not-connected guard
- *   and `serializer.serialize` throw before the transport is reached and
- *   say nothing about the network.
- * - **By shape** — of those, only a rejection carrying no numeric
- *   `statusCode` is evidence (the network-layer signature: ECONNRESET, a
- *   DNS failure, a timeout). A rejected topic (404), a quota error (429)
- *   and an auth failure all carry a status and leave the indicator
- *   untouched.
- *
- * @param error - The caught send error
- * @returns `true` when the failure is data-plane evidence
- */
-/**
  * Validates {@linkcode ServiceBusOptions.dataPlaneEvidenceMs} at construction
  * (M95b review), refusing a value outside its domain rather than reading as
  * configured while the window silently misbehaves.
@@ -468,14 +467,6 @@ function resolveEvidenceMs(value: number | undefined): number {
     );
   }
   return value;
-}
-
-function isDataPlaneNetworkFailure(error: unknown): boolean {
-  if (typeof error === 'object' && error !== null) {
-    const statusCode = (error as { statusCode?: unknown }).statusCode;
-    return typeof statusCode !== 'number';
-  }
-  return true;
 }
 
 /**
@@ -581,6 +572,7 @@ export function adaptServiceBusModule(
       body: string,
       applicationProperties?: Readonly<Record<string, string>>,
       messageId?: string,
+      sendOptions?: { abortSignal?: AbortSignal },
     ): Promise<void> => {
       let sender = senders.get(topic);
       if (!sender) {
@@ -592,7 +584,7 @@ export function adaptServiceBusModule(
         ...(applicationProperties !== undefined ? { applicationProperties } : {}),
         ...(messageId !== undefined ? { messageId } : {}),
       };
-      await sender.sendMessages(message);
+      await sender.sendMessages(message, sendOptions);
     },
     open: async (
       topic: string,
@@ -605,6 +597,10 @@ export function adaptServiceBusModule(
         messageId?: string;
         timestamp?: Date;
       }) => void | Promise<void>,
+      receiveOptions?: {
+        maxConcurrentCalls?: number;
+        onReceiveError?: (error: unknown, errorSource: string) => void;
+      },
     ): Promise<IServiceBusSubscription> => {
       // Explicit renewal budget protects held consumer retries.
       const receiver = client.createReceiver(topic, subscription, {
@@ -655,11 +651,17 @@ export function adaptServiceBusModule(
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
-            Promise.resolve(
-              options.logger?.error(`Service Bus receiver error: ${describeError(args.error)}`),
-            ),
+            Promise.resolve().then(() => {
+              receiveOptions?.onReceiveError?.(args.error, args.errorSource);
+              options.logger?.error(`Service Bus receiver error: ${describeError(args.error)}`);
+            }),
         },
-        { autoCompleteMessages: false },
+        {
+          autoCompleteMessages: false,
+          ...(receiveOptions?.maxConcurrentCalls === undefined
+            ? {}
+            : { maxConcurrentCalls: receiveOptions.maxConcurrentCalls }),
+        },
       );
 
       const key = `${topic}/${subscription}`;
@@ -787,6 +789,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #subscriptions: Map<string, IServiceBusSubscription>;
   #rr: RequestReplyCore;
   #retryOptions: ServiceBusRetryOptions | undefined;
+  readonly #publishTimeoutMs: number;
+  readonly #maxConcurrentCalls: number;
   /**
    * Cached, bounded reachability probe (M90b), built once at `connect()`
    * over the resolved transport's `isHealthy`. The broker — not the health
@@ -820,6 +824,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: ServiceBusOptions) {
     this.#retry = resolveServiceBusRetry(options?.consumerRetry);
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
+    this.#maxConcurrentCalls = resolveServiceBusConcurrency(options?.maxConcurrentCalls);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#connectionString = options?.connectionString ?? '';
@@ -854,31 +860,44 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       throw new Error('ServiceBusBroker is not connected');
     }
 
+    const generation = this.#generation;
     const inboxSub = `rr-inbox-${this.#runtime.uuid()}`;
 
     try {
-      await this.#transport.createSubscription(this.#replyTopic, inboxSub);
+      await this.#transport.createSubscription(this.#replyTopic, inboxSub, {
+        autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
+      });
     } catch {
       throw new ReplyInboxUnavailableError(this.#replyTopic);
     }
 
     let closed = false;
     try {
-      const sub = await this.#transport.open(this.#replyTopic, inboxSub, async (msg) => {
-        if (closed) return;
-        try {
-          const deserialized = this.#serializer.deserialize(msg.payload);
-          onReply(deserialized);
-          // Await settlement so the delivery callback does not resolve
-          // before ack/nack completes.
-          await msg.ack();
-        } catch (err) {
-          if (this.#logger) {
-            this.#logger.error(`Service Bus reply deserialization error: ${describeError(err)}`);
+      const sub = await this.#transport.open(
+        this.#replyTopic,
+        inboxSub,
+        async (msg) => {
+          if (closed || generation !== this.#generation) return;
+          this.#recordDataPlaneOutcome(true);
+          try {
+            const deserialized = this.#serializer.deserialize(msg.payload);
+            onReply(deserialized);
+            // Await settlement so the delivery callback does not resolve
+            // before ack/nack completes.
+            await msg.ack();
+          } catch (err) {
+            if (this.#logger) {
+              this.#logger.error(`Service Bus reply deserialization error: ${describeError(err)}`);
+            }
+            await msg.nack();
           }
-          await msg.nack();
-        }
-      });
+        },
+        {
+          onReceiveError: (error, source) => {
+            if (!closed && generation === this.#generation) this.#onReceiveError(error, source);
+          },
+        },
+      );
 
       return {
         address: this.#replyTopic,
@@ -1079,10 +1098,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Records a data-plane outcome (M95b): the success or network-layer
-   * failure of a real publish. Called only for outcomes of
-   * `transport.send` itself — never for a publish that failed before
-   * reaching the transport.
+   * Records a send outcome, a receive outage or a delivered message. Publish
+   * failures before entering the transport carry no data-plane evidence.
    */
   #recordDataPlaneOutcome(reachable: boolean): void {
     this.#evidence = { at: this.#runtime.hrtime(), reachable };
@@ -1124,13 +1141,31 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const wireHeaders = buildTransportHeaders(validated, headers);
     const serialized = this.#serializer.serialize(message);
     try {
-      await this.#transport.send(topic, serialized, wireHeaders, validated.deduplicationId);
+      await withDeadline(
+        (signal) =>
+          this.#transport!.send(topic, serialized, wireHeaders, validated.deduplicationId, {
+            abortSignal: signal,
+          }),
+        {
+          timeoutMs: this.#publishTimeoutMs,
+          onTimeout: () =>
+            new PublishTimeoutError(
+              `Service Bus publish to ${JSON.stringify(topic)} exceeded ${this.#publishTimeoutMs}ms`,
+              { topic, timeoutMs: this.#publishTimeoutMs },
+            ),
+          timing: resolveProbeTiming(this.#runtime),
+        },
+      );
     } catch (error) {
       // M95b: narrowed by ORIGIN — the guard and the serializer above threw
       // before the transport was reached and say nothing about the network;
       // only a send rejection is offered to the evidence predicate.
-      if (isDataPlaneNetworkFailure(error)) {
+      if (error instanceof PublishTimeoutError || isServiceBusOutage(error)) {
         this.#recordDataPlaneOutcome(false);
+        if (!(error instanceof PublishTimeoutError))
+          throw new BackendOutcomeUnknownError('messaging-plugin: service-bus publish', {
+            cause: serviceBusPublishCause(error),
+          });
       }
       throw error;
     }
@@ -1196,13 +1231,17 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     try {
       if (independent) {
         try {
-          await transport.createSubscription(topic, queue, { autoDeleteOnIdleMs: 300000 });
+          await transport.createSubscription(topic, queue, {
+            autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
+          });
         } catch (error) {
           if (!(error instanceof SubscriptionNameExistsError)) throw error;
           if (ended || generation !== this.#generation)
             throw new Error('ServiceBusBroker disconnected while subscribing', { cause: error });
           queue = fanOutName(this.#defaultQueue, this.#runtime.uuid(), true);
-          await transport.createSubscription(topic, queue, { autoDeleteOnIdleMs: 300000 });
+          await transport.createSubscription(topic, queue, {
+            autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
+          });
         }
         created = true;
       }
@@ -1250,77 +1289,89 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       }
       if (ended || generation !== this.#generation)
         throw new Error('ServiceBusBroker disconnected while subscribing');
-      const sub = await transport.open(topic, queue, async (msg) => {
-        if (ended) return;
-        const receivedAt = this.#runtime.hrtime();
-        let failed = false;
-        let failure: unknown;
-        try {
-          await handler(this.#serializer.deserialize<T>(msg.payload), {
-            topic,
-            headers: msg.applicationProperties ?? {},
-            ...(msg.messageId === undefined ? {} : { messageId: msg.messageId }),
-            ...(msg.timestamp === undefined ? {} : { timestamp: msg.timestamp }),
-          });
-        } catch (error) {
-          failed = true;
-          failure = error;
-        }
-        if (ended) return;
-        if (!failed) return msg.ack();
-        this.#write('Service Bus handler failed', 'error');
-        if (!this.#retry.retry) return msg.nack();
-        const count = msg.deliveryCount;
-        if (
-          count === undefined ||
-          !Number.isSafeInteger(count) ||
-          count < 0 ||
-          msg.deadLetter === undefined
-        ) {
-          warnOnce(
-            'legacy',
-            'Service Bus deliveryCount or deadLetter unavailable; abandoning without consumer retry policy',
-          );
-          return msg.nack();
-        }
-        let retryable = true;
-        if (this.#retry.isRetryable !== undefined) {
+      const sub = await transport.open(
+        topic,
+        queue,
+        async (msg) => {
+          if (ended) return;
+          this.#recordDataPlaneOutcome(true);
+          const receivedAt = this.#runtime.hrtime();
+          let failed = false;
+          let failure: unknown;
           try {
-            retryable = this.#retry.isRetryable(failure);
-          } catch {
-            this.#write('Service Bus retry classifier failed', 'error');
+            await handler(this.#serializer.deserialize<T>(msg.payload), {
+              topic,
+              headers: msg.applicationProperties ?? {},
+              ...(msg.messageId === undefined ? {} : { messageId: msg.messageId }),
+              ...(msg.timestamp === undefined ? {} : { timestamp: msg.timestamp }),
+            });
+          } catch (error) {
+            failed = true;
+            failure = error;
           }
-        }
-        const attempt = count + 1;
-        if (!retryable || attempt >= budget)
-          return msg.deadLetter(retryable ? 'setu-attempts-exhausted' : 'setu-not-retryable');
-        const delay = this.#retry.delaysMs[Math.min(attempt - 1, this.#retry.delaysMs.length - 1)]!;
-        if (300000 - (this.#runtime.hrtime() - receivedAt) - 60000 < delay) {
-          warnOnce(
-            'lock',
-            'Service Bus retry delay exceeds remaining lock renewal budget; abandoning immediately',
-          );
-          return msg.nack();
-        }
-        const wait = new Promise<boolean>((resolve) => {
-          const cancel = async (): Promise<void> => {
-            this.#runtime.clearTimeout(timer);
-            holds.delete(cancel);
-            resolve(false);
+          if (ended) return;
+          if (!failed) return msg.ack();
+          this.#write('Service Bus handler failed', 'error');
+          if (!this.#retry.retry) return msg.nack();
+          const count = msg.deliveryCount;
+          if (
+            count === undefined ||
+            !Number.isSafeInteger(count) ||
+            count < 0 ||
+            msg.deadLetter === undefined
+          ) {
+            warnOnce(
+              'legacy',
+              'Service Bus deliveryCount or deadLetter unavailable; abandoning without consumer retry policy',
+            );
+            return msg.nack();
+          }
+          let retryable = true;
+          if (this.#retry.isRetryable !== undefined) {
             try {
-              await msg.nack();
+              retryable = this.#retry.isRetryable(failure);
             } catch {
-              /* Teardown abandons best effort before closing. */
+              this.#write('Service Bus retry classifier failed', 'error');
             }
-          };
-          const timer: TimerHandle = this.#runtime.setTimeout(() => {
-            holds.delete(cancel);
-            resolve(true);
-          }, delay);
-          holds.add(cancel);
-        });
-        if (await wait) return msg.nack();
-      });
+          }
+          const attempt = count + 1;
+          if (!retryable || attempt >= budget)
+            return msg.deadLetter(retryable ? 'setu-attempts-exhausted' : 'setu-not-retryable');
+          const delay =
+            this.#retry.delaysMs[Math.min(attempt - 1, this.#retry.delaysMs.length - 1)]!;
+          if (300000 - (this.#runtime.hrtime() - receivedAt) - 60000 < delay) {
+            warnOnce(
+              'lock',
+              'Service Bus retry delay exceeds remaining lock renewal budget; abandoning immediately',
+            );
+            return msg.nack();
+          }
+          const wait = new Promise<boolean>((resolve) => {
+            const cancel = async (): Promise<void> => {
+              this.#runtime.clearTimeout(timer);
+              holds.delete(cancel);
+              resolve(false);
+              try {
+                await msg.nack();
+              } catch {
+                /* Teardown abandons best effort before closing. */
+              }
+            };
+            const timer: TimerHandle = this.#runtime.setTimeout(() => {
+              holds.delete(cancel);
+              resolve(true);
+            }, delay);
+            holds.add(cancel);
+          });
+          if (await wait) return msg.nack();
+        },
+        {
+          maxConcurrentCalls: this.#maxConcurrentCalls,
+          onReceiveError: (error, source) => {
+            if (!ended && generation === this.#generation) this.#onReceiveError(error, source);
+          },
+        },
+      );
       if (ended || generation !== this.#generation) {
         await sub.close();
         throw new Error('ServiceBusBroker disconnected while subscribing');
@@ -1337,6 +1388,10 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       throw error;
     }
     return markFanOut({ unsubscribe: close }, independent);
+  }
+
+  #onReceiveError(error: unknown, source: string): void {
+    if (source === 'receive' && isServiceBusOutage(error)) this.#recordDataPlaneOutcome(false);
   }
 
   #write(message: string, level: 'warn' | 'error' = 'warn'): void {

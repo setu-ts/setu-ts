@@ -5,8 +5,6 @@ Provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`); replicas need
 
 ## Connect replicas through Redis
 
-In `setu.config.ts`:
-
 ```ts
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
 
@@ -17,7 +15,7 @@ export const backplane = RealtimeBackplanePlugin({
 
 ## Broadcast through the existing SSE service
 
-With SSE registered, use its channel API; it publishes through the backplane automatically:
+With SSE registered:
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -40,13 +38,14 @@ export function registerDeployRoutes(router: IRouterApi): void {
 - Redis needs two connections: injected `client` and `subscriber` must be supplied together
   (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
   `ioredis` and builds both.
-- Built/injected pairs get error/ready watches, detached on close. Successful injected opens QUIT on
-  close. An overtaken open only stops waiting: the caller's connect keeps running and remains
-  caller-owned. Retired owned clients keep an error sink until end.
+- Pairs get error/ready watches, detached on close. Injected opens QUIT on close; opening pairs are
+  cancelled and disconnected. Retired owned clients keep an error sink until end.
 - Replicas share `topic` (default `setu-ts.realtime`); generated `origin` prevents self-replay.
 - WebSocket/SSE broadcasts fan out automatically. Membership counts stay local.
 - Outages keep health up and local delivery working; inspect `data.reachable`.
 - Built Redis commands default to 15000 ms. A timed-out publish can still arrive later.
+- `commandTimeoutMs` also bounds an injected pair's connect and first subscribe together (15000 ms,
+  0 unbounded). A cancelled application start closes it before registering services or health.
 
 ## Other options
 

@@ -66,9 +66,30 @@ export class PubSubDeadLetterTopicMissingError extends Error {
  * @since 0.1.0
  */
 export class RequestTimeoutError extends Error {
-  constructor(message = 'Request timed out waiting for a reply') {
+  /** The requested topic, when supplied by the broker. @since 0.14.0 */
+  readonly topic: string | undefined;
+  /** The reply wait bound in milliseconds. @since 0.14.0 */
+  readonly timeoutMs: number | undefined;
+
+  /**
+   * @param message - Diagnostic message
+   * @param details - Requested topic and reply wait bound
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor(
+    message = 'Request timed out waiting for a reply',
+    details?: { topic: string; timeoutMs: number },
+  ) {
     super(message);
     this.name = 'RequestTimeoutError';
+    this.topic = details?.topic;
+    this.timeoutMs = details?.timeoutMs;
+    withHttpStatusHint(this, {
+      status: 504,
+      title: 'Gateway Timeout',
+      detail: 'No reply arrived in time; the request may have been handled.',
+    });
   }
 }
 
@@ -117,6 +138,45 @@ export class RemoteHandlerError extends Error {
     super(`Remote responder failed: ${remoteMessage}`);
     this.name = 'RemoteHandlerError';
     this.remoteMessage = remoteMessage;
+    withHttpStatusHint(this, {
+      status: 502,
+      title: 'Bad Gateway',
+      detail: 'The service that handled the request failed.',
+    });
+  }
+}
+
+/** A subscription could not be created because its topic is missing. @since 0.14.0 */
+export class PubSubTopicMissingError extends Error {
+  /** Requested topic. @since 0.14.0 */
+  readonly topic: string;
+  /** Requested subscription. @since 0.14.0 */
+  readonly subscription: string;
+
+  /**
+   * @param topic - Missing source topic
+   * @param subscription - Subscription being created
+   * @param cause - Original gRPC creation failure
+   * @param possibleDeadLetterTopic - Unverified dead-letter topic that may also be missing
+   * @throws Never
+   * @since 0.14.0
+   */
+  constructor(
+    topic: string,
+    subscription: string,
+    cause: unknown,
+    possibleDeadLetterTopic?: string,
+  ) {
+    super(
+      `Pub/Sub topic ${JSON.stringify(topic)} is missing while creating subscription ${JSON.stringify(subscription)}; create the topic before consuming` +
+        (possibleDeadLetterTopic === undefined
+          ? ''
+          : `; dead-letter topic ${JSON.stringify(possibleDeadLetterTopic)} may also be missing`),
+      { cause },
+    );
+    this.name = 'PubSubTopicMissingError';
+    this.topic = topic;
+    this.subscription = subscription;
   }
 }
 

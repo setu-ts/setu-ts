@@ -36,6 +36,7 @@ import { NatsBroker, resolveNatsReconnect } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
 import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
+import { resolveServiceBusConcurrency } from '../brokers/service-bus-faults.ts';
 import type { MessageBrokerAdapter } from '../brokers/message-broker.ts';
 import { asBrokerAdapter } from '../brokers/custom-adapter.ts';
 import { TracedBroker } from '../tracing/traced-broker.ts';
@@ -55,6 +56,7 @@ import type { ResolvedInboxOptions } from '../inbox/options.ts';
 import { resolveInboxOptions } from '../inbox/options.ts';
 import type {
   IInbox,
+  ICustomMessageBroker,
   IKafkaFactory,
   INatsConnection,
   IOutbox,
@@ -172,16 +174,21 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
     brokerType === 'pubsub' ||
     brokerType === 'rabbitmq' ||
     brokerType === 'redis-streams' ||
-    brokerType === 'nats'
+    brokerType === 'nats' ||
+    brokerType === 'service-bus'
   ) {
     resolvePublishTimeoutMs((options as { publishTimeoutMs?: number }).publishTimeoutMs);
   }
   if (brokerType === 'pubsub')
     resolvePubSubRetry(options as import('../brokers/pubsub-broker.ts').PubSubOptions);
-  if (brokerType === 'service-bus')
+  if (brokerType === 'service-bus') {
+    resolveServiceBusConcurrency(
+      (options as import('../brokers/service-bus-broker.ts').ServiceBusOptions).maxConcurrentCalls,
+    );
     resolveServiceBusRetry(
       (options as import('../brokers/service-bus-broker.ts').ServiceBusOptions).consumerRetry,
     );
+  }
   if (brokerType === 'nats') resolveNatsReconnect(options as NatsOptions);
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
@@ -488,6 +495,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         broker = new GcpPubSubBroker(ctx.runtime, serializer, pubSubOptions);
       } else if (brokerType === 'service-bus') {
         const serviceBusOpts = options as {
+          publishTimeoutMs?: number;
+          maxConcurrentCalls?: number;
           consumerRetry?: false | import('../interfaces/index.ts').ConsumerRetryOptions;
           connectionString?: string;
           adminConnectionString?: string;
@@ -497,6 +506,10 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           retryOptions?: import('../interfaces/index.ts').ServiceBusRetryOptions;
         };
         const serviceBusOptions: import('../brokers/service-bus-broker.ts').ServiceBusOptions = {};
+        if (serviceBusOpts.publishTimeoutMs !== undefined)
+          serviceBusOptions.publishTimeoutMs = serviceBusOpts.publishTimeoutMs;
+        if (serviceBusOpts.maxConcurrentCalls !== undefined)
+          serviceBusOptions.maxConcurrentCalls = serviceBusOpts.maxConcurrentCalls;
         if (serviceBusOpts.consumerRetry !== undefined)
           serviceBusOptions.consumerRetry = serviceBusOpts.consumerRetry;
         if (serviceBusOpts.connectionString !== undefined) {
@@ -518,8 +531,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         if (logger !== undefined) serviceBusOptions.logger = logger;
         broker = new ServiceBusBroker(ctx.runtime, serializer, serviceBusOptions);
       } else if (brokerType === 'custom') {
-        const opts = options as { instance: IMessageBroker };
-        broker = asBrokerAdapter(opts.instance);
+        const opts = options as { instance: ICustomMessageBroker };
+        broker = asBrokerAdapter(opts.instance, (message) => ctx.logger?.warn(message));
       } else {
         throw new Error(`Unknown broker type: ${brokerType}`);
       }

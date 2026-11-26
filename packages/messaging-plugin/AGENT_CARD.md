@@ -1,9 +1,9 @@
-# @setu-ts/messaging-plugin — publish and consume broker messages
+# @setu-ts/messaging-plugin — broker messages
 
-**Add it:** `setu add messaging` adds it and wires `MessagingPlugin()` in a recognized functional
-config. It provides `CAPABILITIES.MESSAGING` (`IMessageBroker`).
+`setu add messaging` wires `MessagingPlugin()`; provides `CAPABILITIES.MESSAGING`
+(`IMessageBroker`).
 
-## Publish an order from a route
+## Publish
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -20,7 +20,7 @@ export function registerOrderRoutes(router: IRouterApi): void {
 }
 ```
 
-## Subscribe in setu.config.ts
+## Subscribe
 
 ```ts
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
@@ -38,26 +38,27 @@ export const messaging = MessagingPlugin({
 });
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
-- Memory is the default broker: messages and subscriptions do not survive a restart.
-- In memory, subscribers without a queue all receive a copy; subscribers sharing a queue receive one
-  copy per group, selected round-robin.
-- Memory `publish` resolves on dispatch hand-off, before handlers finish. Handler failures go to the
-  logger when available and never reject that publish. Make consumers idempotent.
-- Subscription factories resolve at `onInit`. The example's `CAPABILITIES.LOGGER` needs
-  `LoggerPlugin` (every template registers it).
-- `name` registers a named capability such as `messaging.orders`, replacing the bare token for that
-  instance.
+- Memory is process-local. Queue-less subscribers each get a copy; shared queues compete. `publish`
+  resolves before handlers finish; make consumers idempotent.
+- Factories resolve at `onInit`; this example needs `LoggerPlugin`.
+- `name` provides `messaging.<name>` instead of the bare token.
 - Pub/Sub and Service Bus retry by default; `consumerRetry: false` disables.
-- `{ fanOut: true }`: each instance gets every message; check `subscription.fanOut`.
+- `{ fanOut: true }` requests one copy per instance; verify `subscription.fanOut`.
+- Service Bus `publishTimeoutMs`: 15000, 0 unbounded. `maxConcurrentCalls`: 1, integer 1–1000; above
+  1 delivery can reorder. Reply inboxes expire after 5 idle minutes; receive outages affect
+  readiness.
+- RPC timeout answers 504, remote handler failure 502 through `errorHandler`, without remote text.
+- Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` latency. Full successful
+  sweeps continue immediately; saturation warns once, recovery logs at info.
 
 ## Other options
 
-- `broker` also selects `'redis-streams'`, `'rabbitmq'`, `'nats'`, `'kafka'`, `'pubsub'`,
-  `'service-bus'` or `'custom'` with `instance`.
-- `request` and `respond` provide request/reply; `behaviors` wraps incoming handlers.
-- `defineIntegrationEvent`, `publishIntegrationEvent` and `onIntegrationEvent` add versioned
-  contracts; `outbox` and `inbox` configure durable publication and consumer deduplication.
+- `broker`: memory, redis-streams, rabbitmq, nats, kafka, pubsub, service-bus or custom.
+- Custom `instance: ICustomMessageBroker`: optional `publishWithHeaders`/`requestWithHeaders` carry
+  tracing; `subscribe` fills `MessageMetadata.headers` and confirms `fanOut`. Missing headers warn
+  once. `isHealthy` feeds reachability.
+- `request`/`respond`: RPC; `behaviors`: consumers; `outbox`/`inbox`: durability.
 
 <!-- card-allow: LoggerPlugin -->

@@ -92,6 +92,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
   #subscription: ISubscription | undefined;
   #opening: Promise<void> | undefined;
   #generation = 0;
+  #cancelOpen: (() => void) | undefined;
 
   /**
    * M70c: delegates to the resolved broker's `isHealthy?()` — the only way the
@@ -154,7 +155,10 @@ export class MessagingBackplane implements IRealtimeBackplane {
     if (this.#subscription !== undefined) return Promise.resolve();
     if (this.#opening !== undefined) return this.#opening;
     const generation = this.#generation;
-    const opening = Promise.resolve()
+    const cancelled = Promise.withResolvers<never>();
+    this.#cancelOpen = () =>
+      cancelled.reject(new Error('Messaging backplane closed while connecting'));
+    const pending = Promise.resolve()
       .then(() =>
         this.#broker.subscribe<unknown>(
           this.#topic,
@@ -183,13 +187,16 @@ export class MessagingBackplane implements IRealtimeBackplane {
             throw error;
           }
           if (generation === this.#generation) throw new BackplaneFanOutUnsupportedError();
-          return;
+          throw new Error('Messaging backplane closed while connecting');
         }
         this.#subscription = subscription;
-      })
-      .finally(() => {
-        if (this.#opening === opening) this.#opening = undefined;
       });
+    const opening = Promise.race([pending, cancelled.promise]).finally(() => {
+      if (this.#opening === opening) {
+        this.#opening = undefined;
+        this.#cancelOpen = undefined;
+      }
+    });
     this.#opening = opening;
     return opening;
   }
@@ -227,6 +234,8 @@ export class MessagingBackplane implements IRealtimeBackplane {
 
   async close(): Promise<void> {
     this.#generation++;
+    this.#cancelOpen?.();
+    this.#cancelOpen = undefined;
     // A stale open must not be handed to a later connect().
     this.#opening = undefined;
     this.#handlers.clear();
