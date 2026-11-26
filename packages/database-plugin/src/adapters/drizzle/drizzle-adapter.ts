@@ -1582,8 +1582,14 @@ function containsExpression(
   // mysql2 escapes a quote as \', which does not parse under that mode, so
   // the adapter refuses the mode on mysql2 (`mysql2-escape-guard.ts`).
   const segments = pattern.split('\\');
-  let expression: unknown = segments[0];
-  for (const segment of segments.slice(1))
-    expression = sql`concat(${expression}, char(92), ${segment})`;
+  if (segments.length === 1) return sql`${column} like ${pattern} escape '!'`;
+  // One flat `concat(seg, char(92), seg, …)` with every segment bound. Nesting
+  // one `concat` per backslash made the SQL builder recurse once per backslash,
+  // so a search value of a few thousand backslashes overflowed the stack.
+  const strings = ['concat(', ...segments.slice(1).map(() => ', char(92), '), ')'];
+  const expression = sql(
+    Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray,
+    ...segments,
+  );
   return sql`${column} like ${expression} escape '!'`;
 }

@@ -432,6 +432,11 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   carry('provider');
   carry('drizzleInstance');
   carry('drizzleTables');
+  // The Drizzle arm's explicit SQL dialect. Without this carry the option was
+  // dropped at the plugin boundary and the class-name detection decided alone,
+  // so `dialect: 'mysql'` on an undetectable instance never selected the MySQL
+  // `contains` escape or the offset-only `LIMIT`.
+  carry('dialect');
   // The Drizzle arm's per-entity key bag (T5). Without this carry a
   // `DatabasePlugin({ type: 'drizzle', options: { entities } })` silently lost
   // the composite-key mapping at the plugin boundary — the adapter kept its

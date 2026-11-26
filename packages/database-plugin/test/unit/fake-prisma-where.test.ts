@@ -176,3 +176,27 @@ describe("the adapter's own NOT-emitting path evaluates through the fixture", ()
     expect(one.map((r) => r.id)).toEqual(['u1']);
   });
 });
+
+describe('Prisma fixture $transaction rollback', () => {
+  it('undoes only the failed transaction’s writes, keeping an overlapping commit', async () => {
+    const client = createFakePrismaClient();
+    await client.user.create({ data: { id: 'kept', name: 'before' } });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const failing = client.$transaction(async (tx) => {
+      await tx.user.create({ data: { id: 'failed', name: 'x' } });
+      await tx.user.update({ where: { id: 'kept' }, data: { name: 'failed-edit' } });
+      await gate;
+      throw new Error('rolled back');
+    });
+    await client.$transaction(async (tx) => {
+      await tx.user.create({ data: { id: 'committed', name: 'y' } });
+    });
+    release();
+    await expect(failing).rejects.toThrow('rolled back');
+    expect([...client.stores.user!.records.keys()].sort()).toEqual(['committed', 'kept']);
+    expect(client.stores.user!.records.get('kept')).toEqual({ id: 'kept', name: 'before' });
+  });
+});

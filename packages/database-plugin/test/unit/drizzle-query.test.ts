@@ -93,6 +93,47 @@ describe('MySQL portable query SQL', () => {
       await adapter.disconnect();
     }
   });
+
+  it('renders a contains value of many backslashes as one flat concat', async () => {
+    const calls: { text: string; params: unknown[] }[] = [];
+    const db = mysqlProxy(async (text, params) => {
+      calls.push({ text, params });
+      return { rows: [] };
+    });
+    const table = mysqlTable('rows', {
+      id: varchar('id', { length: 191 }).primaryKey(),
+      name: varchar('name', { length: 191 }),
+    });
+    const adapter = new DrizzleAdapter(
+      {
+        drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+        drizzleTables: { Row: table },
+        dialect: 'mysql',
+      },
+      () => {},
+    );
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('Row');
+      const value = `a${'\\'.repeat(5000)}b`;
+      await source.findAll({
+        where: {},
+        orderBy: {},
+        limit: 0,
+        offset: 0,
+        select: [],
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value },
+      });
+      const call = calls.at(-1)!;
+      expect(call.text.match(/concat\(/g)).toHaveLength(1);
+      expect(call.text.match(/char\(92\)/g)).toHaveLength(5000);
+      expect(call.params.slice(0, 2)).toEqual(['%a', '']);
+      expect(call.params.at(-1)).toBe('b%');
+      expect(call.params.some((p) => typeof p === 'string' && p.includes('\\'))).toBe(false);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
 });
 
 function adapterService(adapter: IDatabaseAdapter, type: DatabaseAdapterType): DatabaseService {

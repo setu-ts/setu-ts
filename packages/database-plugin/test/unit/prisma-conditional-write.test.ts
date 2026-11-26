@@ -62,6 +62,26 @@ describe('Prisma conditional translation', () => {
     expect(transactions).toBe(2);
     await adapter.disconnect();
   });
+  it('reads back the row the write matched, even if the caller changes its key object meanwhile', async () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const source = adapter.createDataSource('User');
+    await source.create({ id: 'a', name: 'old' });
+    await source.create({ id: 'b', name: 'other' });
+    const key: Record<string, string> = { id: 'a' };
+    const updateMany = client.user.updateMany;
+    client.user.updateMany = async (args) => {
+      const result = await updateMany(args);
+      key['id'] = 'b';
+      return result;
+    };
+    expect(await source.updateWhere!(key, { name: 'old' }, { name: 'new' })).toEqual({
+      id: 'a',
+      name: 'new',
+    });
+    await adapter.disconnect();
+  });
   for (const operation of ['updateWhere', 'deleteWhere'] as const) {
     it(`rolls back ${operation} if configured key columns match multiple rows`, async () => {
       const client = createFakePrismaClient({ activeProvider: 'mysql' });

@@ -477,14 +477,53 @@ export function createFakePrismaClient(options: { activeProvider?: string } = {}
       options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
       transactionOptions = options;
-      const snapshots = Object.fromEntries(
-        Object.entries(stores).map(([name, store]) => [name, new Map(store.records)]),
-      );
+      // A failed callback undoes only the rows IT wrote: each write through
+      // the transaction client records the touched keys' prior values, so a
+      // transaction that committed meanwhile keeps its rows. Restoring whole
+      // store snapshots instead erased an overlapping transaction's commit.
+      const undo = new Map<string, Map<string, Record<string, unknown> | undefined>>();
+      const journal = (name: string, write: () => unknown): unknown => {
+        const records = stores[name]!.records;
+        const before = new Map(records);
+        // The fake delegates' bodies run synchronously up to their first
+        // await, so the diff taken right after the call is this write's alone.
+        const result = write();
+        const prior = undo.get(name) ?? new Map<string, Record<string, unknown> | undefined>();
+        for (const key of new Set([...before.keys(), ...records.keys()])) {
+          if (before.get(key) !== records.get(key) && !prior.has(key)) {
+            prior.set(key, before.get(key));
+          }
+        }
+        undo.set(name, prior);
+        return result;
+      };
+      const writes = new Set(['create', 'update', 'delete', 'updateMany', 'deleteMany']);
+      const tx = new Proxy(client, {
+        get(target, property, receiver) {
+          const value: unknown = Reflect.get(target, property, receiver);
+          if (typeof property !== 'string' || !(property in stores)) return value;
+          const delegate = value as Record<string, (...args: unknown[]) => unknown>;
+          return new Proxy(delegate, {
+            get(model, method) {
+              const member: unknown = Reflect.get(model, method);
+              if (typeof method !== 'string' || !writes.has(method)) return member;
+              return (...args: unknown[]) =>
+                journal(property, () =>
+                  (member as (...a: unknown[]) => unknown).apply(model, args),
+                );
+            },
+          });
+        },
+      });
       try {
-        return await fn(client);
+        return await fn(tx);
       } catch (error) {
-        for (const [name, records] of Object.entries(snapshots)) {
-          stores[name]!.records = records;
+        for (const [name, prior] of undo) {
+          const records = stores[name]!.records;
+          for (const [key, row] of prior) {
+            if (row === undefined) records.delete(key);
+            else records.set(key, row);
+          }
         }
         throw error;
       }

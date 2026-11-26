@@ -35,6 +35,7 @@ import {
   startFrozenRelay,
   timed,
 } from '../fixtures/frozen-relay.ts';
+import { cleanupAll } from '../fixtures/cleanup-all.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import type {
@@ -743,9 +744,9 @@ describe('CosmosAdapter behind a frozen relay (guarded)', () => {
         requestTimeoutMs: OUTAGE_BOUND_MS,
         containers: { Outage: { container, partitionKey: 'id' } },
       });
-      await adapter.connect();
       const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'cosmos');
       try {
+        await adapter.connect();
         const repository = service.getRepository<{ id: string; value: number }>('Outage');
         await repository.create({ id: 'before', value: 1 });
         // The first point read resolves and caches the container's partition
@@ -786,8 +787,7 @@ describe('CosmosAdapter behind a frozen relay (guarded)', () => {
         await expect(adapter.isHealthy()).resolves.toBe(true);
       } finally {
         relay.thaw();
-        await service.close();
-        await relay.close();
+        await cleanupAll([() => service.close(), () => relay.close()]);
       }
     },
   );

@@ -376,9 +376,25 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     return payload;
   };
 
-  const assertScope = (id: EntityKey, conditional = false): void => {
+  /**
+   * Refuses a write the unit of work's buffer cannot take for this row, before
+   * any committed read. The row is the id AND its partition-key value: two
+   * partitions can each hold the id. The partition key is compared whenever the
+   * key alone names it (a composite key carrying it, or a container
+   * partitioned by the id); otherwise the id alone decides, which is stricter.
+   */
+  const assertScope = async (id: EntityKey, conditional = false): Promise<void> => {
+    if (buffer === undefined) return;
     const value = typeof id === 'object' ? id[target.primaryKey] : id;
-    buffer?.assertWrite(target.container, String(value), conditional);
+    const resolved = await partitionKeys.resolve(target);
+    let partitionKey: CosmosPartitionKeyValue | undefined;
+    if (typeof id === 'object') {
+      const read = partitionKeyOf(id as Record<string, unknown>, resolved, 'key');
+      if (read.missing.length === 0) partitionKey = read.value;
+    } else if (partitionsByPrimaryKey(resolved, target)) {
+      partitionKey = String(id);
+    }
+    buffer.assertWrite(target.container, String(value), conditional, partitionKey);
   };
 
   /** Re-check after contention, guarding every write against the exact version read. */
@@ -387,7 +403,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     where: WritePrecondition,
     data?: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown> | null> => {
-    assertScope(id, true);
+    await assertScope(id, true);
     for (let round = 0; round < 3; round += 1) {
       const address = await addressOf(id, 'conditional-write');
       if (address === null) return null;
@@ -482,7 +498,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     ): Promise<Record<string, unknown>> => {
       data = { ...data };
       assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
-      assertScope(id);
+      await assertScope(id);
       const address = await addressOf(id, 'update');
       if (address === null) throw missingRow(target, id);
       const resolved = await partitionKeys.resolve(target);
@@ -571,7 +587,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     },
 
     delete: async (id: EntityKey): Promise<boolean> => {
-      assertScope(id);
+      await assertScope(id);
       const address = await addressOf(id, 'delete');
       if (address === null) return false;
       if (buffer !== undefined) {

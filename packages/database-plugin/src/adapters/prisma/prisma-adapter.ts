@@ -855,6 +855,13 @@ function createPrismaDataSourceInner(
       keyColumns.map((column, index) => [column, values[index]]),
     );
     const args = { where: { ...columnsWhere, AND: [where] } };
+    // Built before the write from the same call-time key, so a caller that
+    // changes its key object while the write is in flight cannot make the
+    // read-back address a different row than the one the write matched.
+    const readBack =
+      operation === 'updateWhere'
+        ? buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation)
+        : undefined;
     const run = async (tx: PrismaClient): Promise<Record<string, unknown> | null | boolean> => {
       const model = (tx as unknown as Record<string, ModelDelegate>)[delegateKey]!;
       const { count } =
@@ -868,9 +875,7 @@ function createPrismaDataSourceInner(
       }
       if (operation === 'deleteWhere') return count === 1;
       if (count === 0) return null;
-      return await model.findUnique({
-        where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation),
-      });
+      return await model.findUnique({ where: readBack! });
     };
     return scope === 'transaction'
       ? await run(client)

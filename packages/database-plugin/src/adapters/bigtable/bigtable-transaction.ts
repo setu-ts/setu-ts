@@ -284,7 +284,25 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
     if (Object.keys(state.cells).length > 0) {
       mutations.push({ method: 'insert', data: state.cells });
     }
-    if (mutations.length === 0) return;
+    if (mutations.length === 0) {
+      // A conditional update whose payload produced no cell writes nothing,
+      // but it reported a match at the call, so its predicate is still checked
+      // here. With no mutation to guard, the check is a read through the same
+      // predicate: a row comes back only when it matched. Nothing else of this
+      // row is buffered, so a read gives the same answer as CheckAndMutateRow.
+      if (state.condition !== null) {
+        const rows = await this.#instance
+          .table(state.table)
+          .readRows({ keys: [state.rowKey], filter: { chain: state.condition } });
+        if (rows.length === 0) {
+          throw new SerializationConflictError(
+            'Bigtable transaction lost a write precondition; all writes were rolled back.',
+            { cause: new Error('The predicate no longer matched the row at commit') },
+          );
+        }
+      }
+      return;
+    }
 
     const row = this.#instance.table(state.table).row(state.rowKey);
     if (state.condition !== null) {

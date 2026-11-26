@@ -120,11 +120,23 @@ export async function startFrozenRelay(target: {
 /**
  * Splits a `host:port` or URL endpoint into the relay's target.
  *
+ * The relay forwards plaintext bytes and the outage cells reach it over
+ * `http://`, so only a plaintext emulator endpoint is supported. An `https://`
+ * endpoint (a real account) is refused here, before the relay starts, rather
+ * than failing later as an unexplained connection error mid-setup.
+ *
  * @param endpoint - `127.0.0.1:8086` or `http://127.0.0.1:8000/`
  * @returns The host and numeric port
+ * @throws {Error} For any scheme other than `http:` (or a bare `host:port`)
  */
 export function relayTarget(endpoint: string): { readonly host: string; readonly port: number } {
   const url = new URL(endpoint.includes('://') ? endpoint : `tcp://${endpoint}`);
+  if (url.protocol !== 'http:' && url.protocol !== 'tcp:') {
+    throw new Error(
+      `The frozen relay forwards plaintext only; the relay target '${endpoint}' uses ` +
+        `'${url.protocol}'. Point the suite at the emulator's http:// endpoint.`,
+    );
+  }
   const port = Number(url.port);
   if (!Number.isInteger(port) || port <= 0) {
     throw new Error(`The relay target '${endpoint}' names no port.`);

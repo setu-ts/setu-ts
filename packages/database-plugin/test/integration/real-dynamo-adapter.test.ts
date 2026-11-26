@@ -41,6 +41,7 @@ import {
   startFrozenRelay,
   timed,
 } from '../fixtures/frozen-relay.ts';
+import { cleanupAll } from '../fixtures/cleanup-all.ts';
 
 const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
 const skipReal = dynamoEndpoint === undefined;
@@ -760,9 +761,9 @@ describe('DynamoAdapter behind a frozen relay (guarded)', () => {
         requestTimeoutMs: OUTAGE_BOUND_MS,
         entities: { Outage: mapping(outageTables.outage, 'id') },
       });
-      await adapter.connect();
       const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
       try {
+        await adapter.connect();
         const repository = service.getRepository<{ id: string; value: number }>('Outage');
         await repository.create({ id: 'before', value: 1 });
         await expect(adapter.isHealthy!()).resolves.toBe(true);
@@ -800,8 +801,7 @@ describe('DynamoAdapter behind a frozen relay (guarded)', () => {
         await expect(adapter.isHealthy!()).resolves.toBe(true);
       } finally {
         relay.thaw();
-        await service.close();
-        await relay.close();
+        await cleanupAll([() => service.close(), () => relay.close()]);
       }
     },
   );

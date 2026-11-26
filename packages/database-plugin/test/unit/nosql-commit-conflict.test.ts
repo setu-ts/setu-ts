@@ -398,3 +398,32 @@ for (const backend of scopeBackends) {
     }
   });
 }
+
+describe('Cosmos same-row scope names the row by id and partition key', () => {
+  it('treats one id in another partition as another row', async () => {
+    const fake = createFakeCosmosClient({
+      containers: { Row: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const adapter = new CosmosAdapter({ database: 'db', client: fake.client });
+    await adapter.connect();
+    try {
+      const root = adapter.createDataSource('Row');
+      await root.create({ id: 'a', tenantId: 'A', version: 1 });
+      const tx = await adapter.beginTransaction();
+      const source = tx.createDataSource('Row');
+      expect(
+        await source.updateWhere!({ id: 'a', tenantId: 'A' }, { version: 1 }, { version: 2 }),
+      ).toMatchObject({ version: 2 });
+      // Partition B holds no 'a': the answer is a miss, not a scope refusal.
+      expect(await source.deleteWhere!({ id: 'a', tenantId: 'B' }, { version: 1 })).toBe(false);
+      // The same row is still refused before any read.
+      await expect(
+        source.deleteWhere!({ id: 'a', tenantId: 'A' }, { version: 2 }),
+      ).rejects.toBeInstanceOf(CosmosTransactionScopeError);
+      await tx.commit();
+      expect(await root.findById({ id: 'a', tenantId: 'A' })).toMatchObject({ version: 2 });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+});

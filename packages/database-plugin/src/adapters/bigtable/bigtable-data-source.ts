@@ -181,6 +181,34 @@ function writtenFields(data: Readonly<Record<string, unknown>>): Record<string, 
 }
 
 /**
+ * Whether a committed row satisfies a write precondition, compared exactly as
+ * the commit-time predicate compares it: by the encoded cell text.
+ *
+ * The predicate built by `preconditionTest` matches the stored cell's bytes,
+ * so `-0` and `0` are different values there (tagged `n:-0` against `n:0`) and
+ * a raw-mode `'5'` cell equals the number `5`. Comparing decoded values with
+ * `!==` instead let a buffered pre-read accept a row the commit then refused,
+ * or refuse one the direct path would have written.
+ *
+ * @param target - The resolved entity target
+ * @param row - The committed row, decoded
+ * @param where - The precondition
+ * @returns `true` when every field encodes to the predicate's cell text
+ */
+function matchesEncoded(
+  target: BigtableTarget,
+  row: Readonly<Record<string, unknown>>,
+  where: Readonly<Record<string, string | number>>,
+): boolean {
+  return Object.entries(where).every(
+    ([field, value]) =>
+      row[field] !== undefined &&
+      encodeCellValue(row[field], target.valueEncoding) ===
+        encodeCellValue(value, target.valueEncoding),
+  );
+}
+
+/**
  * Expands an entity key into its named key fields.
  *
  * @param target - The resolved entity target
@@ -395,7 +423,7 @@ export function createBigtableDataSource(
         const cells = buildCells(target, index, data, 'update');
         if (buffer !== undefined) {
           const committed = await readOne(rowKey);
-          if (committed === null || !matchesWhere(committed, where)) return null;
+          if (committed === null || !matchesEncoded(target, committed, where)) return null;
           buffer.insert(cells, false, test);
           return { ...committed, ...writtenFields(data) };
         }
@@ -420,7 +448,7 @@ export function createBigtableDataSource(
         if (test === null) return false;
         if (buffer !== undefined) {
           const committed = await readOne(rowKey);
-          if (committed === null || !matchesWhere(committed, where)) return false;
+          if (committed === null || !matchesEncoded(target, committed, where)) return false;
           buffer.remove(test);
           return true;
         }

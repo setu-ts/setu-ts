@@ -10,6 +10,7 @@ import {
   PrismaAdapter,
 } from '../../src/index.ts';
 import { mysqlTables } from './mysql-tables.ts';
+import { cleanupAfter, cleanupAll } from './cleanup-all.ts';
 
 /** Each harness owns an explicitly-created database; no existing table is adopted or dropped. */
 export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110) {
@@ -22,8 +23,18 @@ export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110
     password: decodeURIComponent(endpoint.password),
   };
   const admin = await createConnection(options);
-  await admin.query(`CREATE DATABASE \`${name}\``);
+  // Every resource is owned from the moment it exists: the steps run newest
+  // first, each attempted even if an earlier one fails, and the database is
+  // dropped only once CREATE DATABASE has succeeded.
+  const owned: (() => unknown)[] = [() => admin.end()];
+  try {
+    await admin.query(`CREATE DATABASE \`${name}\``);
+  } catch (error) {
+    return await cleanupAfter(error, owned);
+  }
+  owned.unshift(() => admin.query(`DROP DATABASE \`${name}\``));
   const pool = createPool({ ...options, database: name, connectionLimit: connections });
+  owned.unshift(() => pool.end());
   let adapter: IDatabaseAdapter | undefined;
   try {
     for (const fixture of [
@@ -63,6 +74,8 @@ export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110
         entities: { Compound: { keyColumns: ['tenantId', 'id'], compositeKeyName: 'tenantId_id' } },
       });
     }
+    const built = adapter;
+    owned.unshift(() => built.disconnect());
     await adapter.connect();
     const connected = adapter;
     const database = new DatabaseService(
@@ -75,18 +88,10 @@ export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110
       pool,
       adapter: connected,
       database,
-      dispose: async () => {
-        await database.close();
-        await pool.end();
-        await admin.query(`DROP DATABASE \`${name}\``);
-        await admin.end();
-      },
+      // The service's close disconnects the adapter, so it replaces that step.
+      dispose: () => cleanupAll([() => database.close(), ...owned.slice(1)]),
     };
   } catch (error) {
-    await adapter?.disconnect();
-    await pool.end();
-    await admin.query(`DROP DATABASE \`${name}\``);
-    await admin.end();
-    throw error;
+    return await cleanupAfter(error, owned);
   }
 }

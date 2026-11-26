@@ -116,3 +116,73 @@ for (const backend of transactionalNoSql)
       }
     });
   });
+
+describe('bigtable transactional conditionals agree with the commit predicate', () => {
+  const make = (valueEncoding?: 'raw'): BigtableAdapter =>
+    new BigtableAdapter({
+      instance: 'i',
+      client: createFakeBigtableClient(new FakeBigtableStore()),
+      tables: { Row: valueEncoding === undefined ? {} : { valueEncoding } },
+    });
+
+  it('compares a precondition by its cell text at the call, as the direct path does', async () => {
+    for (const valueEncoding of [undefined, 'raw'] as const) {
+      const adapter = make(valueEncoding);
+      await adapter.connect();
+      try {
+        const root = adapter.createDataSource('Row');
+        await root.create({ id: 'neg', n: -0 });
+        await root.create({ id: 'pos', n: 0 });
+        // Tagged cells store -0 and 0 as different text; raw cells store 0 for both.
+        const tagged = valueEncoding === undefined;
+        const direct = {
+          update: await root.updateWhere!('neg', { n: 0 }, { name: 'direct' }),
+          delete: await root.deleteWhere!('pos', { n: -0 }),
+        };
+        expect({ update: direct.update !== null, delete: direct.delete }).toEqual({
+          update: !tagged,
+          delete: !tagged,
+        });
+        if (!tagged) await root.create({ id: 'pos', n: 0 });
+        const tx = await adapter.beginTransaction();
+        const update = await tx.createDataSource('Row').updateWhere!('neg', { n: 0 }, { m: 1 });
+        expect(update !== null).toBe(!tagged);
+        await tx.commit();
+        const next = await adapter.beginTransaction();
+        expect(await next.createDataSource('Row').deleteWhere!('pos', { n: -0 })).toBe(!tagged);
+        await next.commit();
+      } finally {
+        await adapter.disconnect();
+      }
+    }
+  });
+
+  it('checks the predicate of an update that writes no cell at commit', async () => {
+    const adapter = make();
+    await adapter.connect();
+    try {
+      const root = adapter.createDataSource('Row');
+      await root.create({ id: 'a', name: 'y' });
+      const tx = await adapter.beginTransaction();
+      expect(
+        await tx.createDataSource('Row').updateWhere!('a', { name: 'y' }, { note: undefined }),
+      ).toEqual({ id: 'a', name: 'y' });
+      await root.update('a', { name: 'changed' });
+      const error: unknown = await tx.commit().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SerializationConflictError);
+
+      const kept = await adapter.beginTransaction();
+      expect(
+        await kept.createDataSource('Row').updateWhere!(
+          'a',
+          { name: 'changed' },
+          { note: undefined },
+        ),
+      ).toEqual({ id: 'a', name: 'changed' });
+      await kept.commit();
+      expect(await root.findById('a')).toEqual({ id: 'a', name: 'changed' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+});
