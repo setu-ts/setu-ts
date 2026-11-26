@@ -12,8 +12,8 @@ export function requestTimeout(value: number | undefined): number {
 
 /**
  * Bounds one driver call: passes cancellation to the driver AND rejects at the
- * deadline itself, preserving the driver's error (or the signal's reason) as
- * the timeout cause.
+ * deadline itself. The timeout's `cause` is the driver's error when the driver
+ * answers the abort, else the signal's `TimeoutError`.
  *
  * The signal alone is not a bound: a driver may wait without observing it
  * (`@azure/cosmos` 4.10.2 sleeps through a throttle retry-after with a bare
@@ -32,11 +32,13 @@ export async function requestBound<T>(
   let onAbort: (() => void) | undefined;
   try {
     if (signal === undefined) return await run({});
+    const call = run({ abortSignal: signal });
+    // Registered after `run`, and settling one macrotask later, so a driver
+    // that answers the abort rejects first and its error becomes the cause.
     const deadline = new Promise<never>((_, reject) => {
-      onAbort = () => reject(signal.reason);
+      onAbort = () => setTimeout(() => reject(signal.reason), 0);
       signal.addEventListener('abort', onAbort, { once: true });
     });
-    const call = run({ abortSignal: signal });
     // The call may settle after the deadline won; its outcome is then unread.
     call.catch(() => {});
     return await Promise.race([call, deadline]);

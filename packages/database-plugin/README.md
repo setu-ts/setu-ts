@@ -1771,16 +1771,18 @@ database is paused. It is a bound on each statement, not a deadline on the trans
 
 **`requestTimeoutMs` (DynamoDB, Cosmos DB, Bigtable, since 0.14.0)** bounds the whole call, retries
 included, and applies by default: a call still running after 15 000 ms rejects with
-`DatabaseTimeoutError` (`504`, outcome unknown), with the driver's error as `cause`. It is a
-cancelling deadline, not a race: DynamoDB and Cosmos DB receive an `AbortSignal`, and Bigtable a
-gRPC deadline. Bigtable's SDK gives each attempt of a streaming read its own deadline and retries a
+`DatabaseTimeoutError` (`504`, outcome unknown). It cancels and also rejects: DynamoDB and Cosmos DB
+receive an `AbortSignal` and Bigtable a gRPC deadline, and the call rejects at the deadline even
+when the SDK keeps waiting (the Cosmos SDK sleeps through a throttle retry-after without observing
+the signal). The `cause` is the driver's error when the driver answers the abort, else the signal's
+`TimeoutError`. Bigtable's SDK gives each attempt of a streaming read its own deadline and retries a
 failed attempt, so the lazy arm also ends the read as a whole when `requestTimeoutMs` passes; its
 conditional write is not retried by the SDK, so its gRPC deadline already bounds the whole call.
 Inside a unit of work the bound applies to each call, the commit's single batch included. `0`
 disables it on calls, leaving the SDK's own defaults (the readiness probe keeps its 2000 ms bound);
 a non-finite or negative value, or one above 2147483647, is refused when the adapter is constructed.
 An injected facade receives the signal (DynamoDB, Cosmos DB) or `{ timeoutMs }` (Bigtable); one that
-ignores it is unbounded.
+ignores it is still rejected at the deadline, but its own work runs on.
 
 This is not the SDKs' own per-request setting, which `clientOptions` can still carry — a DynamoDB
 `requestHandler` with its `requestTimeout`, a Cosmos `connectionPolicy` with its `requestTimeout`.

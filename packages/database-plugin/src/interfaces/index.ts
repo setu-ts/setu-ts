@@ -676,7 +676,7 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * new PrismaAdapter({
    *   prismaClient,
    *   entities: {
-   *     Enrollment: { compositeKeyName: 'enrollmentKey' },
+   *     Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
    *   },
    * });
    * ```
@@ -979,9 +979,10 @@ export interface DynamoAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
   /**
    * A bound on every call this adapter makes to DynamoDB: the whole call,
    * retries included, unlike the SDK's own per-HTTP-request
-   * `requestTimeout`. It is passed to `send` as an `abortSignal`, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
-   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * `requestTimeout`. It is passed to `send` as an `abortSignal`, and the call also rejects at the deadline, so an injected facade that ignores the signal is still bounded (its own work runs on). A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
    * when it is non-zero and smaller.
    *
    * `0` disables the bound on calls, leaving the SDK's own defaults; the
@@ -1190,9 +1191,10 @@ export interface CosmosAdapterOptionsBase extends Pick<DatabaseAdapterOptions, '
   /**
    * A bound on every call this adapter makes to Cosmos DB: the whole call,
    * retries included, unlike the SDK's own per-HTTP-request
-   * `requestTimeout`. It is passed as an `abortSignal` in the request options of every call, so an injected facade that ignores the signal is unbounded. A call that exceeds it rejects with
-   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * `requestTimeout`. It is passed as an `abortSignal` in the request options of every call, and the call also rejects at the deadline, so an injected facade that ignores the signal is still bounded (its own work runs on). A call that exceeds it rejects with
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
    * when it is non-zero and smaller.
    *
    * `0` disables the bound on calls, leaving the SDK's own defaults; the
@@ -1342,8 +1344,9 @@ export interface BigtableAdapterOptionsBase extends Pick<DatabaseAdapterOptions,
    * A bound on every call this adapter makes to Bigtable: the whole call,
    * retries included, where the SDK's own gax `timeout` bounds one attempt.
    * It is mapped to `gaxOptions.timeout` on each read and conditional write, and a read is also ended at the deadline as a whole, since the SDK retries a streaming read with a fresh deadline per attempt; an injected facade receives it as `{ timeoutMs }`. A call that exceeds it rejects with
-   * `DatabaseTimeoutError` (`504`, outcome unknown) carrying the driver error
-   * as `cause`. The readiness probe is bounded by 2000 ms, or by this value
+   * `DatabaseTimeoutError` (`504`, outcome unknown); its `cause` is the
+   * driver's error when the driver answers the deadline, else the signal's
+   * `TimeoutError`. The readiness probe is bounded by 2000 ms, or by this value
    * when it is non-zero and smaller.
    *
    * `0` disables the bound on calls, leaving the SDK's own defaults; the

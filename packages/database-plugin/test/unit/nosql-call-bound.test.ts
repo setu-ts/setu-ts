@@ -157,6 +157,19 @@ describe('isDatabaseTimeout', () => {
   });
 });
 
+describe('the timeout cause', () => {
+  it("is the driver's own error when the driver answers the abort", async () => {
+    const driverError = new Error('driver aborted the request');
+    const answering = ({ abortSignal }: { abortSignal?: AbortSignal }) =>
+      new Promise<never>((_, reject) => {
+        abortSignal?.addEventListener('abort', () => reject(driverError), { once: true });
+      });
+    const error: unknown = await requestBound(20, answering).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(DatabaseTimeoutError);
+    expect((error as Error).cause).toBe(driverError);
+  });
+});
+
 describe('a driver wait that ignores the signal', () => {
   it('still ends the call at the bound with a 504, and 0 still waits it out', async () => {
     const ignoring = (ms: number) => () =>

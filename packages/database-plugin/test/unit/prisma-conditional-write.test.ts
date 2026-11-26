@@ -83,6 +83,13 @@ describe('Prisma conditional translation', () => {
     });
     await adapter.disconnect();
   });
+  it('refuses an empty keyColumns at construction, with or without compositeKeyName', () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const make = (): PrismaAdapter =>
+      new PrismaAdapter({ prismaClient: client, entities: { User: { keyColumns: [] } } });
+    expect(make).toThrow(UnsupportedQueryFeatureError);
+    expect(make).toThrow(/'User'.*entities\.User\.keyColumns/);
+  });
   it('refuses compositeKeyName without keyColumns at construction, naming the fix', () => {
     const client = createFakePrismaClient({ activeProvider: 'mysql' });
     for (const keyColumns of [undefined, []]) {

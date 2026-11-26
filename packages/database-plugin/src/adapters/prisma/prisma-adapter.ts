@@ -250,6 +250,14 @@ export class PrismaAdapter implements IDatabaseAdapter {
   constructor(options?: DatabaseAdapterOptions | PrismaAdapterOptions) {
     const entities = (options as PrismaAdapterOptions | undefined)?.entities ?? {};
     for (const [entity, key] of Object.entries(entities)) {
+      if (key.keyColumns !== undefined && key.keyColumns.length === 0) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `Prisma entity '${entity}' sets an empty entities.${entity}.keyColumns: a conditional write would match ` +
+            `rows by its predicate alone. Name the key columns, or omit keyColumns for an 'id' key.`,
+        );
+      }
       if (key.compositeKeyName !== undefined && (key.keyColumns?.length ?? 0) === 0) {
         throw new UnsupportedQueryFeatureError(
           'composite-key',
