@@ -804,6 +804,13 @@ record for the PR body.
 
 ## 12. Open decisions for the maintainer
 
+**Out-of-lane additions approved by the maintainer, 2026-11-26** (two PR #614 review leftovers, each
+its own commit, made by Claude, not Codex): (A1) `AI_GUIDELINES.md` §6.7 names the practice the
+repository follows: a real-backend test is skipped unless that backend's own connection variable is
+set, replacing the unused `RUN_INTEGRATION` switch; (A2)
+`packages/storage-plugin/test/unit/storage-review-fixes.test.ts` gives each test its own server
+state instead of a shared `beforeAll`/`afterAll` (test only).
+
 **Code-review items, DECIDED by the maintainer, 2026-11-26** (from `m143m-review-decisions-2.md`,
 each as recommended): R1 the Service Bus outage predicate checks a refusal code set first
 (`UnauthorizedAccess`, `MessagingEntityNotFound`, `MessagingEntityDisabled`, `MessageSizeExceeded`,
