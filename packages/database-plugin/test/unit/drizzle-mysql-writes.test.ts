@@ -32,6 +32,19 @@ describe('Drizzle MySQL affected-row writes', () => {
       expect(fixture.transactions).toBe(5);
     });
   }
+  it('names the MySQL read-back when a create finds no row after its insert', async () => {
+    const fixture = mysqlDrizzle();
+    // A read-back that finds nothing: the row vanished between the insert and the read.
+    const db = {
+      ...fixture.db,
+      select: () => ({ from: () => ({ where: () => Promise.resolve([]) }) }),
+    } as unknown as typeof fixture.db;
+    db.transaction = async (run) => await run(db);
+    const source = createDrizzleDataSource(db, 'user', { user: fixture.table }, operators);
+    await expect(source.create({ id: 'a', name: 'old' })).rejects.toThrow(
+      /returned no row: RETURNING produced none, or on MySQL the read-back by key found none/,
+    );
+  });
   it('reads a plain no-op update back even when the driver reports changed rows', async () => {
     const fixture = mysqlDrizzle();
     const source = createDrizzleDataSource(fixture.db, 'user', { user: fixture.table }, operators);

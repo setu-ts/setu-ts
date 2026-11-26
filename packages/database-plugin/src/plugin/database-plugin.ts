@@ -250,9 +250,10 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         // M95b §3.5 row (d) — the deliberate no-change row: an adapter with
         // no probe is evidence of nothing. Byte-identical to 0.6.0 — status
         // from the lifecycle read alone and `reachable` OMITTED — so a
-        // healthy probe-less application (a DynamoDB or Bigtable adapter
-        // with no entity mapped, a minimal injected client) never leaves
-        // rotation on upgrade.
+        // healthy probe-less application (for example D1, a Drizzle
+        // instance without `execute()`, a DynamoDB or Bigtable adapter with
+        // no entity mapped, a minimal injected client) never leaves rotation
+        // on upgrade.
         // Mapping a MISSING probe to `degraded` would fail `/ready` for
         // every one of them: a guaranteed outage, strictly worse than the
         // finding.
@@ -272,8 +273,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         // The LIFECYCLE read still gates the probe. It is free — it reaches
         // no adapter — and dropping it would mean an adapter whose own probe
         // does not re-derive `isReady()` reports `up` for a connection it
-        // has already torn down. Most bundled probes happen to re-derive
-        // it; the contract does not require an implementor to, so
+        // has already torn down. Every bundled probe re-derives it; the
+        // contract does not require that of an implementor, so
         // the gate belongs here where it holds for every adapter.
         const healthy = await probe();
         if (!healthy) {
