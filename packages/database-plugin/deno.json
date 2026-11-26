@@ -31,6 +31,7 @@
     "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
     "@azure/cosmos": "npm:@azure/cosmos@^4",
     "@google-cloud/bigtable": "npm:@google-cloud/bigtable@^6",
+    "@google-cloud/bigtable/build/src/filter.js": "npm:@google-cloud/bigtable@^6/build/src/filter.js",
     "@prisma/adapter-mariadb": "npm:@prisma/adapter-mariadb@^7.10.1",
     "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.0",
     "@prisma/client": "npm:@prisma/client@^7.10.0",
