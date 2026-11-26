@@ -18,7 +18,6 @@ describe('Prisma conditional translation', () => {
     'sqlserver',
     'cockroachdb',
     'sqlite',
-    'mongodb',
     'unknown',
   ] as const) {
     it(`selects the conditional strategy once for ${provider}`, async () => {

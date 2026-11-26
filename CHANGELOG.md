@@ -363,7 +363,10 @@ All notable changes to this project are documented here. The format follows
   `relationMode = "foreignKeys"` (the default), or wait for prisma/orm#30758 (fix
   prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is not refused: Prisma keeps
   the predicate there, though an emulated `onUpdate: Cascade` can still have run for a write that
-  loses its race.
+  loses its race. On a MongoDB connector, where Prisma allows only `"prisma"`, the four writes are
+  always refused (no assertion lifts it); the way out is Setu's native MongoDB backend,
+  `DatabasePlugin({ type: 'mongodb', … })`. No application meets this today: Prisma 7 has no MongoDB
+  adapter.
 
 ### Fixed
 

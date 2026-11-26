@@ -954,6 +954,11 @@ missing sort key.
   refused. The warn-only fallback could pass silently, because the adapter's `warn` callback is
   optional and the direct factory has none. Sibling precedent: the Drizzle mysql2 guard (§3.17) also
   refuses a `sql_mode` it cannot read.
+- **MongoDB (maintainer decision, 2026-11-27, review of PR #617).** Prisma on MongoDB allows only
+  `relationMode = "prisma"`, so a `mongodb` connector reads as `"prisma"` and the four writes are
+  always refused; the `'foreignKeys'` assertion cannot lift it (it is impossible there). The way out
+  the message names is Setu's native MongoDB backend, `DatabasePlugin({ type: 'mongodb', … })`.
+  Developer impact: none today, since Prisma 7 has no MongoDB adapter.
 - **Comparison.** Every compared tool keeps a bulk conditional update to one statement: Rails
   `update_all` (no callbacks; `delete_all` ignores `:dependent`), Django `update()` ("applied
   instantly"), TypeORM (`createForeignKeyConstraints: false` documents no emulation). Prisma's

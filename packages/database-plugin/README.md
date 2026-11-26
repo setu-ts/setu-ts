@@ -315,7 +315,10 @@ export async function editArticle(
   prisma/orm#30758 is fixed. The mode is read at `connect()` from the generated client; when it
   cannot be read, one `warn` is logged and the same writes are refused until the options assert
   `relationMode: 'foreignKeys'` (pass it once you have confirmed the schema uses that mode; it does
-  not lift the refusal of a schema read as `"prisma"`).
+  not lift the refusal of a schema read as `"prisma"`). On MongoDB, where Prisma allows only
+  `\"prisma\"`, they are always refused, whatever the options; use Setu's native MongoDB backend
+  (`DatabasePlugin({ type: 'mongodb', … })`) instead. No application meets this today: Prisma 7 has
+  no MongoDB adapter.
 - **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
   committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
   the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos

@@ -448,7 +448,10 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   prisma-engines#5868) and a Setu release that accepts it. If `connect()` logs that it could not
   read the client's relationMode, the same writes are refused: confirm the schema uses
   `relationMode = "foreignKeys"`, then add `relationMode: 'foreignKeys'` to the Prisma adapter
-  options (the last argument of `createPrismaDataSource` takes it too).
+  options (the last argument of `createPrismaDataSource` takes it too). On MongoDB, which allows
+  only `\"prisma\"`, they are always refused: use Setu's native MongoDB backend
+  (`DatabasePlugin({ type: 'mongodb', … })`). No application meets this today, since Prisma 7 has no
+  MongoDB adapter.
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.

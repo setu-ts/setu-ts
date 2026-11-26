@@ -95,7 +95,7 @@ function conditionalPathFor(provider: PrismaSqlProvider | undefined): 'single' |
  * `relationMode = "prisma"`, or the mode could not be read and the application
  * did not assert `relationMode: 'foreignKeys'`. `undefined` means allowed.
  */
-type RelationModeRefusal = 'prisma' | 'unread' | undefined;
+type RelationModeRefusal = 'prisma' | 'unread' | 'mongodb' | undefined;
 
 /**
  * Decides the refusal for one client. The single-statement path is never
@@ -112,8 +112,11 @@ function relationModeRefusalFor(
   conditionalPath: 'single' | 'count',
   client: unknown,
   asserted: 'foreignKeys' | undefined,
+  provider?: string,
 ): RelationModeRefusal {
   if (conditionalPath === 'single') return undefined;
+  // Prisma on MongoDB allows only emulated relations, so no assertion can lift it.
+  if (provider === 'mongodb') return 'mongodb';
   const mode = relationModeOf(client);
   if (mode === 'prisma') return 'prisma';
   if (mode === undefined && asserted !== 'foreignKeys') return 'unread';
@@ -148,6 +151,7 @@ export function relationModeOf(client: unknown): string | undefined {
   let inDatasource = false;
   let found = false;
   let mode: string | undefined;
+  let provider: string | undefined;
   for (const raw of schema.split('\n')) {
     // A trailing `//` comment is not part of the setting.
     const line = raw.replace(/\/\/.*$/, '').trim();
@@ -164,6 +168,7 @@ export function relationModeOf(client: unknown): string | undefined {
     const setting = /^(\w+)\s*=\s*(.*)$/.exec(line);
     // An unreadable line or an unknown key fails toward the warning, never a guess.
     if (setting === null || !DATASOURCE_KEYS.has(setting[1]!)) return undefined;
+    if (setting[1] === 'provider') provider = /^"(\w+)"$/.exec(setting[2]!.trim())?.[1];
     if (setting[1] === 'relationMode' || setting[1] === 'referentialIntegrity') {
       const value = /^"(\w+)"$/.exec(setting[2]!.trim())?.[1];
       if (value === undefined) return undefined;
@@ -171,7 +176,8 @@ export function relationModeOf(client: unknown): string | undefined {
     }
   }
   if (!found) return undefined;
-  return mode ?? 'foreignKeys';
+  // On MongoDB Prisma allows only "prisma" emulation, so that is its default.
+  return mode ?? (provider === 'mongodb' ? 'prisma' : 'foreignKeys');
 }
 
 /**
@@ -402,6 +408,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
       this._conditionalPath,
       this._client,
       asserted,
+      this._provider,
     );
     if (
       this._conditionalPath === 'count' &&
@@ -965,7 +972,7 @@ export function createPrismaDataSource(
     'root',
     conditionalPath,
     30_000,
-    relationModeRefusalFor(conditionalPath, client, options?.relationMode),
+    relationModeRefusalFor(conditionalPath, client, options?.relationMode, provider),
   );
 }
 

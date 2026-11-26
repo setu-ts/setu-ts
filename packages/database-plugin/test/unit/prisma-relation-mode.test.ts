@@ -286,6 +286,47 @@ describe('Prisma conditional writes under relationMode "prisma"', () => {
   });
 });
 
+describe('Prisma conditional writes on MongoDB', () => {
+  it('refuses them: MongoDB allows only "prisma", which no assertion lifts', async () => {
+    for (const relationMode of [undefined, 'foreignKeys'] as const) {
+      const client = clientWith('mongodb', schemaWith(['  provider = "mongodb"']));
+      const adapter = new PrismaAdapter({
+        prismaClient: client,
+        ...(relationMode === undefined ? {} : { relationMode }),
+      });
+      await adapter.connect();
+      const source = adapter.createDataSource('User');
+      const error: unknown = await source.updateWhere!('a', { name: 'x' }, { name: 'y' }).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(UnsupportedRelationModeError);
+      expect((error as UnsupportedRelationModeError).relationMode).toBe('prisma');
+      expect((error as Error).message).toContain("DatabasePlugin({ type: 'mongodb'");
+      await expect(source.deleteWhere!('a', { name: 'x' })).rejects.toBeInstanceOf(
+        UnsupportedRelationModeError,
+      );
+      await adapter.disconnect();
+    }
+    const factory = createPrismaDataSource(
+      clientWith('mongodb', schemaWith(['  provider = "mongodb"'])),
+      'User',
+      'mongodb',
+      undefined,
+      undefined,
+      { relationMode: 'foreignKeys' },
+    );
+    await expect(factory.deleteWhere!('a', { name: 'x' })).rejects.toThrow(
+      "DatabasePlugin({ type: 'mongodb'",
+    );
+  });
+
+  it('reads a MongoDB datasource without the setting as "prisma"', () => {
+    expect(
+      relationModeOf({ _engineConfig: { inlineSchema: schemaWith(['  provider = "mongodb"']) } }),
+    ).toBe('prisma');
+  });
+});
+
 describe('Prisma conditional writes under the default relationMode', () => {
   for (const lines of [
     ['  provider = "mysql"'],

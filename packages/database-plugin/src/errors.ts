@@ -830,8 +830,9 @@ export class UnsupportedRelationModeError extends Error {
   /** Stable error discriminant. */
   override readonly name = 'UnsupportedRelationModeError';
   /**
-   * The refused Prisma `relationMode`: `'prisma'` when the schema reads so,
-   * `undefined` when the mode could not be read.
+   * The refused Prisma `relationMode`: `'prisma'` when the schema reads so or
+   * the connector is MongoDB (which allows only that), `undefined` when the
+   * mode could not be read.
    */
   readonly relationMode: 'prisma' | undefined;
   /**
@@ -840,27 +841,32 @@ export class UnsupportedRelationModeError extends Error {
    * @param entity - The entity name
    * @param provider - The resolved connector, or `undefined` when undetermined
    * @param reason - `'prisma'` for a schema read as `"prisma"`, `'unread'` for
-   *   a mode that could not be read
+   *   a mode that could not be read, `'mongodb'` for Prisma on MongoDB, which
+   *   allows only `"prisma"`
    */
   constructor(
     operation: 'updateWhere' | 'deleteWhere',
     entity: string,
     provider: string | undefined,
-    reason: 'prisma' | 'unread' = 'prisma',
+    reason: 'prisma' | 'unread' | 'mongodb' = 'prisma',
   ) {
     super(
       `Prisma ${operation} on '${entity}' is refused: ` +
         (reason === 'prisma'
           ? 'the client\'s schema sets relationMode = "prisma"'
-          : "the client's relationMode could not be read (client._engineConfig.inlineSchema)") +
+          : reason === 'mongodb'
+            ? 'Prisma on MongoDB allows only relationMode = "prisma" (emulated relations)'
+            : "the client's relationMode could not be read (client._engineConfig.inlineSchema)") +
         ` on connector '${provider ?? 'undetermined'}', and under relationMode = "prisma" Prisma's relation emulation drops the write's predicate ` +
         '(updateMany updates the selected ids without it; the emulated cascade of deleteMany runs before it is checked), ' +
         'so a lost race would read as success. ' +
-        (reason === 'prisma'
-          ? 'Set relationMode = "foreignKeys" in the datasource block, or wait for prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.'
-          : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options (or to createPrismaDataSource's options argument); " +
-            'or set relationMode = "foreignKeys" in a schema the adapter can read.'),
+        (reason === 'mongodb'
+          ? "Use Setu's native MongoDB backend instead, DatabasePlugin({ type: 'mongodb', options: { … } }), whose conditional writes are single-statement; no Prisma setting lifts this."
+          : reason === 'prisma'
+            ? 'Set relationMode = "foreignKeys" in the datasource block, or wait for prisma/orm#30758 (fix prisma-engines#5868) and a Setu release that accepts it.'
+            : "Once you have confirmed the schema's datasource block uses relationMode = \"foreignKeys\" (the default), add relationMode: 'foreignKeys' to the Prisma adapter options (or to createPrismaDataSource's options argument); " +
+              'or set relationMode = "foreignKeys" in a schema the adapter can read.'),
     );
-    this.relationMode = reason === 'prisma' ? 'prisma' : undefined;
+    this.relationMode = reason === 'unread' ? undefined : 'prisma';
   }
 }
