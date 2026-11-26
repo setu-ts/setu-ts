@@ -140,15 +140,15 @@ source and nothing was found. The surveys' condensed sources are in the shared n
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                          | Resolution (picked side)                                                                                          | Doc deliverable (same PR)                                                 |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| C1  | `docs/health-indicators.md:48` claims the queue probe issues `GetQueueAttributes`; the SDK path has no probe                                                      | The code changes (§3.11) so the row becomes true; the row names the call and the down rule                        | Row 5 of `docs/health-indicators.md` (only this row: #614 edits rows 3-4) |
-| C2  | `CHANGELOG.md:8582-8583` (M70c, released) lists a `GetQueueAttributes` probe                                                                                      | A released entry is history and is not edited; the `0.14.0` Fixed entry says the probe now exists on the SDK path | `CHANGELOG.md` `[Unreleased]` Fixed                                       |
-| C3  | `ISqsTransport.isHealthy` JSDoc says "the SDK adapter has no reachability probe" (`sqs-queue.ts:135-143`, `:331-338`)                                             | The code changes; both comments are rewritten                                                                     | JSDoc in `sqs-queue.ts`                                                   |
-| C4  | `messaging-plugin/README.md:87` describes Service Bus at `maxConcurrentCalls: 2`, which no application could set                                                  | The option now exists (§3.4); the row stays and names the option                                                  | README ordering table and "Service Bus retries" section                   |
-| C5  | `README.md:1199` "Optional: request a sweep now" vs the measured cost (up to `intervalMs` of latency)                                                             | The README states the cost and calls `dispatch()` after the transaction in every example (§3.16)                  | README "Transactional outbox", "The relay"                                |
-| C6  | `realtime-backplane-plugin` `commandTimeoutMs` JSDoc and README (`interfaces/index.ts:257-262`, `README.md:123`, `:225-228`) say it applies only on the lazy path | The code changes (§3.17) so it also bounds the injected pair's connect wait; the text is rewritten                | JSDoc, README options table                                               |
-| C7  | `ReplyInboxUnavailableError` JSDoc and the README say a reply subscription lasts until a clean stop; the new auto-delete changes that                             | Code changes (§3.5); the README states the 5-minute crash cleanup                                                 | README request-reply section                                              |
+| #   | Conflict                                                                                                                                                                                      | Resolution (picked side)                                                                                          | Doc deliverable (same PR)                                                 |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| C1  | `docs/health-indicators.md:48` claims the queue probe issues `GetQueueAttributes`; the SDK path has no probe                                                                                  | The code changes (§3.11) so the row becomes true; the row names the call and the down rule                        | Row 5 of `docs/health-indicators.md` (only this row: #614 edits rows 3-4) |
+| C2  | `CHANGELOG.md:8582-8583` (M70c, released) lists a `GetQueueAttributes` probe                                                                                                                  | A released entry is history and is not edited; the `0.14.0` Fixed entry says the probe now exists on the SDK path | `CHANGELOG.md` `[Unreleased]` Fixed                                       |
+| C3  | `ISqsTransport.isHealthy` JSDoc says "the SDK adapter has no reachability probe" (`sqs-queue.ts:135-143`, `:331-338`)                                                                         | The code changes; both comments are rewritten                                                                     | JSDoc in `sqs-queue.ts`                                                   |
+| C4  | `messaging-plugin/README.md:87` describes Service Bus at `maxConcurrentCalls: 2`, which no application could set                                                                              | The option now exists (§3.4); the row stays and names the option                                                  | README ordering table and "Service Bus retries" section                   |
+| C5  | `README.md:1199` "Optional: request a sweep now" vs the measured cost (up to `intervalMs` of latency)                                                                                         | The README states the cost and calls `dispatch()` after the transaction in every example (§3.16)                  | README "Transactional outbox", "The relay"                                |
+| C6  | `realtime-backplane-plugin` `commandTimeoutMs` JSDoc and README (`interfaces/index.ts:257-262`, `README.md:123`, `:225-228`) say it applies only on the lazy path                             | The code changes (§3.17) so it also bounds the injected pair's connect wait; the text is rewritten                | JSDoc, README options table                                               |
+| C7  | The README says a reply subscription lasts until a clean stop; the new auto-delete changes that (`ReplyInboxUnavailableError`'s JSDoc describes only a creation failure and is unchanged, C6) | Code changes (§3.5); the README states the 5-minute crash cleanup                                                 | README request-reply section                                              |
 
 ## 3. Design decisions
 
@@ -242,7 +242,7 @@ and are listed in §12 for confirmation only.
   the bound, signal aborted, `0` waits; the predicate's table as data, built from real
   `ServiceBusError` instances of the installed SDK: each outage shape → 504 with the inner message,
   each refusal code unchanged and recording no evidence; range refusal at construction for both
-  arms); `service-bus-outage-real.test.ts` (guarded: a paused emulator gives `PublishTimeoutError`
+  arms); `service-bus-outage-control.test.ts` (§3.19: a paused emulator gives `PublishTimeoutError`
   within the bound).
 
 ### 3.4 Service Bus consumer concurrency (V13-262, open D3)
@@ -278,8 +278,11 @@ and are listed in §12 for confirmation only.
 - **Impact on upgrade:** none for a running requester. A crashed one's subscription is gone within 5
   idle minutes.
 - **Test home:** `service-bus-reply-inbox.test.ts` (the option on the create call; delete on close
-  unchanged); `service-bus-outage-real.test.ts` (guarded: the created subscription reads back
-  `autoDeleteOnIdle` PT5M; expiry itself is not waited for, §8).
+  unchanged); `service-bus-outage-real.test.ts` (guarded, M143p's capability-probe rule, C3: the
+  test first creates a probe subscription with `PT5M` and reads it back; when the backend returns
+  the maximum timespan, as the emulator does, the test records "autoDeleteOnIdle not honoured by
+  this backend" and asserts only that the request carried `PT300S`; where it is honoured, the read
+  back must be five minutes. Expiry itself is not waited for, §8).
 
 ### 3.6 A consume-only Service Bus service reports a dead broker (V13-267, open D4)
 
@@ -300,7 +303,8 @@ and are listed in §12 for confirmation only.
 - **Test home:** `service-bus-receiver-health.test.ts` (an outage-shaped `ServiceBusError` from a
   receive makes `reachability()` false; a refusal code and a `'complete'` or `'renewLock'` source do
   not; a delivery clears it; the adapter forwards `processError` to `onReceiveError`);
-  `service-bus-outage-real.test.ts` (guarded: emulator stopped, `/ready` 503 within one probe TTL).
+  `service-bus-outage-control.test.ts` (§3.19: emulator stopped, `/ready` 503 within one probe
+  period).
 
 ### 3.7 A missing Pub/Sub topic is named, and the dead-letter check is bounded (V13-268, V13-271, open D5)
 
@@ -426,14 +430,14 @@ and are listed in §12 for confirmation only.
   default `15000`, `0` disables, `RangeError` through `deadlineRangeError`, M143r's name and
   semantics: the whole call including SDK retries, `withDeadline` with the runtime's timers plus
   `client.send(command, { abortSignal })`. It bounds every command: send, receive (whose bound is
-  `waitTimeSeconds × 1000 + requestTimeoutMs`, §3.14), delete, change visibility and SNS publish.
-  The redrive reads use it too, but they run inside `app.start()` (M143p D9), so they keep a finite
-  floor: `min(requestTimeoutMs, 10000)`, and `10000` when `requestTimeoutMs` is `0`, the M143p
-  decision-7 rule that a start-path or terminal call keeps a finite bound even when the option is
-  disabled; at the default the read bound stays 10 s. An injected `ISqsTransport` is bounded by the
-  race alone, and its methods gain an optional trailing `{ abortSignal }`. When
-  `SnsPublisherOptions.runtime` is absent (it is optional, `sns-publisher.ts:49-50`), `withDeadline`
-  uses the ambient timers (`deadline.ts:51-58`).
+  `waitTimeSeconds × 1000 + requestTimeoutMs`, capped at 2,147,483,647, §3.14; C4), delete, change
+  visibility and SNS publish. The redrive reads use it too, but they run inside `app.start()` (M143p
+  D9), so they keep a finite floor: `min(requestTimeoutMs, 10000)`, and `10000` when
+  `requestTimeoutMs` is `0`, the M143p decision-7 rule that a start-path or terminal call keeps a
+  finite bound even when the option is disabled; at the default the read bound stays 10 s. An
+  injected `ISqsTransport` is bounded by the race alone, and its methods gain an optional trailing
+  `{ abortSignal }`. When `SnsPublisherOptions.runtime` is absent (it is optional,
+  `sns-publisher.ts:49-50`), `withDeadline` uses the ambient timers (`deadline.ts:51-58`).
 
   Faults, an internal `toSqsFault(error, source)` in `sqs-faults.ts`, M143r's `toMailError` ordering
   verbatim: (1) an expired bound → `BackendOutcomeUnknownError`; (2) `toBackendFault(error)` (its
@@ -524,9 +528,10 @@ and are listed in §12 for confirmation only.
 - **Why:** Compared with, row 15: MassTransit loops with no delay while rows remain; no surveyed
   framework warns on a backlog, so step 2 has no analogue (it is one log line on a state change, the
   queue loop's rule).
-- **Impact on upgrade:** during a backlog the relay runs back to back, so the outbox store sees more
-  reads until it drains. Way out: a smaller `publishLimit` or a longer `intervalMs` (each sweep is
-  still budgeted).
+- **Impact on upgrade:** during a backlog the relay runs back to back until it drains. The extra
+  store work is one claim and one mark per delivered row, the cost of delivering the backlog; a
+  sweep with any failure is never followed up. There is no switch, as MassTransit's delivery loop
+  has none (C5).
 - **Test home:** `outbox/outbox-relay-saturation.test.ts` (150 rows with `publishLimit` 100 drain in
   two sweeps without a second tick; one warn and one info; a rejecting broker ends each sweep on
   `publish-limit` with failures and starts no follow-up and no warning; `schedule: false` with
@@ -591,6 +596,21 @@ and are listed in §12 for confirmation only.
 - **Why:** CLAUDE.md: an export change updates `PUBLIC_API.md` in the same change.
 - **Test home:** `pnpm run check:docs`, the fence gate, and the agent-card option test.
 
+### 3.19 The two Service Bus outage tests (C2)
+
+- **Decision:** the §3.3 paused-publish test and the §3.6 consume-only `/ready` test live in one new
+  guarded suite, `service-bus-outage-control.test.ts`, which runs only when
+  `SERVICE_BUS_EMULATOR_CONTAINER` names the emulator container (otherwise it skips, so CI and every
+  other run never touch a container). The test pauses (§3.3) or stops (§3.6) that container through
+  `docker` in a child process and, in a `finally`, unpauses or starts it again and waits until the
+  emulator answers. The reviewer runs it alone, through `setu-suite-queue`, inside a shell `trap`
+  that runs `docker unpause he-sb; docker start he-sb` on every exit, so the emulator comes back
+  even when the test process is killed (maintainer decision C2, 2026-11-26).
+- **Why:** the milestone gate proves a Part 26 row on the stand-in it was found on.
+- **Test home:** that suite: a publish during the pause rejects with `PublishTimeoutError` within
+  `publishTimeoutMs` (set to 3,000 ms); with the emulator stopped, a consume-only application's
+  `/ready` answers 503 within one probe cache period, and 200 again after the restart.
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** an `ICustomMessageBroker` that relied on the six-member bypass now
@@ -620,16 +640,16 @@ No other export changes. The status hints are not exports (a non-enumerable symb
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                      | Consumer                                                    | Behavior (per implementation)                                                                   |
-| ----------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Service Bus `publishTimeoutMs`                              | `ServiceBusBroker.publishWithHeaders`                       | 15,000 default, `0` unbounded, both arms; the injected arm's own client is bounded the same way |
-| Service Bus `maxConcurrentCalls`                            | `ServiceBusBroker` application `subscribe`                  | 1 default, 1-1,000; not the reply inbox                                                         |
-| SQS `requestTimeoutMs`                                      | every `adaptSqsModule` command, `sqs-redrive.ts`, the probe | 15,000 default, `0` unbounded; race only on an injected transport                               |
-| SQS `waitTimeSeconds`                                       | `adaptSqsModule.receive`                                    | 20 default, 0-20; an injected transport may ignore it                                           |
-| SNS `requestTimeoutMs`                                      | `adaptSnsModule` publish                                    | as SQS                                                                                          |
-| `QueuePluginOptions.health.probeCacheMs`, `.probeTimeoutMs` | `QueueService#buildProbe`                                   | 5,000 and 2,000; every adapter with a probe                                                     |
-| `QueuePluginOptions.retryDelayMs`                           | `job-processor.ts` retry path                               | every adapter; absent → `computeBackoffMs`                                                      |
-| Backplane `commandTimeoutMs` (widened)                      | `RedisBackplane.connect` on both paths                      | 15,000 default, `0` unbounded                                                                   |
+| Option                                                      | Consumer                                                                                          | Behavior (per implementation)                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Service Bus `publishTimeoutMs`                              | `ServiceBusBroker.publishWithHeaders`                                                             | 15,000 default, `0` unbounded, both arms; the injected arm's own client is bounded the same way |
+| Service Bus `maxConcurrentCalls`                            | `ServiceBusBroker` application `subscribe`                                                        | 1 default, 1-1,000; not the reply inbox                                                         |
+| SQS `requestTimeoutMs`                                      | every `adaptSqsModule` command, `sqs-redrive.ts` (the probe has its own 1,500 ms per call, §3.11) | 15,000 default, `0` unbounded; race only on an injected transport                               |
+| SQS `waitTimeSeconds`                                       | `adaptSqsModule.receive`                                                                          | 20 default, 0-20; an injected transport may ignore it                                           |
+| SNS `requestTimeoutMs`                                      | `adaptSnsModule` publish                                                                          | as SQS                                                                                          |
+| `QueuePluginOptions.health.probeCacheMs`, `.probeTimeoutMs` | `QueueService#buildProbe`                                                                         | 5,000 and 2,000; every adapter with a probe                                                     |
+| `QueuePluginOptions.retryDelayMs`                           | `job-processor.ts` retry path                                                                     | every adapter; absent → `computeBackoffMs`                                                      |
+| Backplane `commandTimeoutMs` (widened)                      | `RedisBackplane.connect` on both paths                                                            | 15,000 default, `0` unbounded                                                                   |
 
 ## 5. Implementation files
 
@@ -760,7 +780,8 @@ an application wrote.
 - **Validation cannot be skipped:** every custom-broker publish is validated (§3.8); the test drives
   a reserved header through both member shapes.
 - **Bounds cannot be disabled by accident:** `0` is the only way to disable, each is documented, and
-  a negative or non-integer value is refused.
+  a negative or non-finite value is refused (integers are required only for `maxConcurrentCalls`,
+  the queue health options and `waitTimeSeconds`).
 
 The committed tree is security-audited by a freshly spawned agent before the PR, with an audit
 record for the PR body.
@@ -782,6 +803,13 @@ record for the PR body.
 - **M143n:** re-checks the README text this letter writes.
 
 ## 12. Open decisions for the maintainer
+
+**Implementation review items, DECIDED by the maintainer, 2026-11-26** (from
+`m143m-review-decisions-1.md` in the shared notes): C2 (a) this session may pause or stop and then
+restart the `he-sb` Service Bus emulator, only for the §3.3 paused-publish and §3.6 consume-only
+`/ready` tests, only inside its own queued run, restarted by a trap even when the test fails; C3
+M143p's capability-probe rule for `autoDeleteOnIdle`; C4 the composed SQS receive bound capped at
+2,147,483,647; C5 the relay impact text corrected, no option added; C6 the three wording fixes.
 
 **DECIDED by the maintainer, 2026-11-25:** every decision below as recommended, (a) in each of D1 to
 D11; every "for confirmation" item confirmed; both declared departures from M143p accepted. L1: the
