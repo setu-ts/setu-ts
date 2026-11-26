@@ -67,6 +67,7 @@
     "@aws-sdk/client-dynamodb": "^3",
     "@azure/cosmos": "^4",
     "@google-cloud/bigtable": "^6",
+    "@prisma/adapter-mariadb": "^7.10.1",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@setu-ts/exceptions": "workspace:^",
@@ -80,7 +81,9 @@
     "@types/pg": "^8.23.1",
     "drizzle-orm": "0.45.2",
     "mongodb": "^6.21.0",
+    "mysql2": "^3.24.4",
     "pg": "^8.0.0",
+    "prisma": "7.10.1",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

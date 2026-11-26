@@ -30,6 +30,8 @@ import {
   createFakeDrizzleTable,
 } from '../fixtures/fake-drizzle-instance.ts';
 import { FakeMongoClient, fakeObjectIdCtor } from '../fixtures/fake-mongo-client.ts';
+import { drizzle as mysqlProxy } from 'drizzle-orm/mysql-proxy';
+import { mysqlTable, varchar } from 'drizzle-orm/mysql-core';
 
 function createFakeConfig(): IConfig {
   return {
@@ -320,6 +322,40 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       await plugin.register!(ctx);
       const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
       expect(db).toBeDefined();
+    });
+
+    it('passes an explicit dialect through, overriding the detected one', async () => {
+      // A MySQL instance is detected as 'mysql' (`escape '!'`); the explicit
+      // option must reach the adapter and win, so the rendered clause is the
+      // PostgreSQL/SQLite backslash form. Dropped at the plugin boundary, the
+      // detected dialect would decide instead.
+      const ctx = createFakeContext();
+      const texts: string[] = [];
+      const instance = mysqlProxy(async (text) => {
+        texts.push(text);
+        return { rows: [] };
+      });
+      const table = mysqlTable('rows', {
+        id: varchar('id', { length: 191 }).primaryKey(),
+        name: varchar('name', { length: 191 }),
+      });
+      const plugin = DatabasePlugin({
+        type: 'drizzle',
+        options: {
+          drizzleInstance: createDrizzleDatabase(instance, (database, work) =>
+            database.transaction(work),
+          ),
+          drizzleTables: { Row: table },
+          dialect: 'postgresql',
+        },
+      });
+      await plugin.register!(ctx);
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await db.getRepository('Row').findAll({
+        filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'a' },
+      });
+      expect(texts.at(-1)).toContain("escape '\\'");
+      expect(texts.at(-1)).not.toContain("escape '!'");
     });
   });
 

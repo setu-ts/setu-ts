@@ -9,7 +9,7 @@ import type { IAdapterTransaction, IDataSource } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
 import { BigtableTransaction } from '../../src/adapters/bigtable/bigtable-transaction.ts';
-import { BigtableTransactionScopeError } from '../../src/errors.ts';
+import { BigtableTransactionScopeError, SerializationConflictError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 import type { BigtableEntityMapping } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 
@@ -146,6 +146,70 @@ describe('BigtableTransaction', () => {
     await expect(users.create({ id: 'u2' })).rejects.toThrow(BigtableTransactionScopeError);
   });
 
+  it('keeps a pending claim on its row when a concurrent write claims another row', async () => {
+    const { store, tx, committed } = setup();
+    store.seed('User', 'a', { cf: { id: 's:a', name: 's:A' } });
+    store.seed('User', 'b', { cf: { id: 's:b', name: 's:B' } });
+    const users = tx.createDataSource('User');
+    // Both calls claim before either finishes its pre-read: the second claim
+    // must not re-target the first call's pending write onto row b.
+    const [first, second] = await Promise.allSettled([
+      users.update('a', { name: 'A2' }),
+      users.update('b', { role: 'admin' }),
+    ]);
+    expect(first.status).toBe('fulfilled');
+    expect(second.status).toBe('rejected');
+    expect((second as PromiseRejectedResult).reason).toBeInstanceOf(BigtableTransactionScopeError);
+    await tx.commit();
+    expect(await committed().findById('a')).toEqual({ id: 'a', name: 'A2' });
+    expect(await committed().findById('b')).toEqual({ id: 'b', name: 'B' });
+  });
+
+  it('frees a row whose only claims ended in a miss, so a later write may target another', async () => {
+    const { store, tx, committed } = setup();
+    store.seed('User', 'b', { cf: { id: 's:b', name: 's:B', version: 'n:1' } });
+    const users = tx.createDataSource('User');
+    expect(await users.updateWhere!('a', { version: 1 }, { name: 'x' })).toBeNull();
+    expect(await users.deleteWhere!('a', { version: 1 })).toBe(false);
+    await users.updateWhere!('b', { version: 1 }, { version: 2 });
+    // The conditional write holds row b once buffered: a miss elsewhere is refused.
+    await expect(users.deleteWhere!('a', { version: 1 })).rejects.toBeInstanceOf(
+      BigtableTransactionScopeError,
+    );
+    await tx.commit();
+    expect(await committed().findById('b')).toEqual({ id: 'b', name: 'B', version: 2 });
+  });
+
+  for (const order of ['plain first', 'conditional first'] as const) {
+    it(`refuses a plain write that interleaves with a conditional write on one row (${order})`, async () => {
+      const { store, tx, committed } = setup();
+      store.seed('User', 'a', { cf: { id: 's:a', name: 's:A', version: 'n:1' } });
+      const users = tx.createDataSource('User');
+      const plain = (): Promise<unknown> => users.update('a', { name: 'A2' });
+      const conditional = (): Promise<unknown> =>
+        users.updateWhere!('a', { version: 1 }, { version: 2 });
+      const settled =
+        order === 'plain first'
+          ? await Promise.allSettled([plain(), conditional()])
+          : await Promise.allSettled([conditional(), plain()]);
+      const rejected = settled.filter((result) => result.status === 'rejected');
+      expect(rejected).toHaveLength(1);
+      expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(
+        BigtableTransactionScopeError,
+      );
+      expect(((rejected[0] as PromiseRejectedResult).reason as Error).message).toMatch(
+        /only write/,
+      );
+      await tx.commit();
+      // Exactly one of the two writes landed, never both under one predicate.
+      const row = await committed().findById('a');
+      expect([
+        { id: 'a', name: 'A2', version: 1 },
+        { id: 'a', name: 'A', version: 2 },
+      ]).toContainEqual(row);
+    });
+  }
+
   it('refuses a second TABLE even at the same row key', async () => {
     const { tx } = setup({ Order: { table: 'orders' } });
     await tx.createDataSource('User').create({ id: 'k' });
@@ -241,12 +305,20 @@ describe('BigtableTransaction', () => {
     expect(() => tx.remove()).toThrow(/before any row was claimed/);
   });
 
-  it('sends nothing when the only buffered write carries no cell', async () => {
+  it('writes nothing for a buffered update with no cell, but checks the row still exists', async () => {
     const { store, tx } = setup();
+    store.seed('User', 'u1', { cf: { name: 's:Ada' } });
+    const before = store.snapshot('User', 'u1');
     tx.claim('User', 'u1', 'update');
     tx.insert({}, false);
     await tx.commit();
-    expect(store.snapshot('User', 'u1')).toBeUndefined();
+    expect(store.snapshot('User', 'u1')).toEqual(before);
+
+    const gone = setup();
+    gone.tx.claim('User', 'u1', 'update');
+    gone.tx.insert({}, false);
+    await expect(gone.tx.commit()).rejects.toBeInstanceOf(SerializationConflictError);
+    expect(gone.store.snapshot('User', 'u1')).toBeUndefined();
   });
 
   it('satisfies IAdapterTransaction structurally', () => {

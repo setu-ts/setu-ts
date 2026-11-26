@@ -326,7 +326,9 @@ describe('count', () => {
     await source.create({ id: 'u2' });
     store.reads.length = 0;
     expect(await source.count({})).toBe(2);
-    expect(store.reads[0].options.filter).toEqual({ value: { strip: true } });
+    expect(store.reads[0].options.filter).toEqual({
+      chain: [{ column: { cellLimit: 1 } }, { value: { strip: true } }],
+    });
   });
 
   it('reads only the columns its predicate needs, never every column', async () => {
@@ -339,7 +341,7 @@ describe('count', () => {
     ).toBe(1);
     // On a wide-column store, shipping every column to answer a number IS the
     // cost of the operation.
-    const filter = store.reads[0].options.filter as {
+    const filter = (store.reads[0].options.filter as { chain: unknown[] }).chain[1] as {
       interleave: readonly (readonly { column?: readonly string[] }[])[];
     };
     expect([...(filter.interleave[0][0].column as readonly string[])].sort()).toEqual([

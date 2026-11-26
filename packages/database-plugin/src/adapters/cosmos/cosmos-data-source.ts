@@ -1,3 +1,4 @@
+import { SerializationConflictError } from '../../errors.ts';
 /**
  * Data-source factory and transaction handle for the Cosmos adapter.
  *
@@ -375,12 +376,34 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     return payload;
   };
 
+  /**
+   * Refuses a write the unit of work's buffer cannot take for this row, before
+   * any committed read. The row is the id AND its partition-key value: two
+   * partitions can each hold the id. The partition key is compared whenever the
+   * key alone names it (a composite key carrying it, or a container
+   * partitioned by the id); otherwise the id alone decides, which is stricter.
+   */
+  const assertScope = async (id: EntityKey, conditional = false): Promise<void> => {
+    if (buffer === undefined) return;
+    const value = typeof id === 'object' ? id[target.primaryKey] : id;
+    const resolved = await partitionKeys.resolve(target);
+    let partitionKey: CosmosPartitionKeyValue | undefined;
+    if (typeof id === 'object') {
+      const read = partitionKeyOf(id as Record<string, unknown>, resolved, 'key');
+      if (read.missing.length === 0) partitionKey = read.value;
+    } else if (partitionsByPrimaryKey(resolved, target)) {
+      partitionKey = String(id);
+    }
+    buffer.assertWrite(target.container, String(value), conditional, partitionKey);
+  };
+
   /** Re-check after contention, guarding every write against the exact version read. */
   const guardedWrite = async (
     id: EntityKey,
     where: WritePrecondition,
     data?: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown> | null> => {
+    await assertScope(id, true);
     for (let round = 0; round < 3; round += 1) {
       const address = await addressOf(id, 'conditional-write');
       if (address === null) return null;
@@ -391,6 +414,29 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         throw new Error(
           `Cosmos conditional write on '${target.container}' requires the read document's _etag.`,
         );
+      }
+      if (buffer !== undefined) {
+        if (data === undefined) {
+          buffer.add({
+            container: target.container,
+            partitionKey: address.partitionKey,
+            operation: { operationType: 'Delete', id: address.id, ifMatch: etag },
+          });
+          return fromDocument(existing, target);
+        }
+        const resolved = await partitionKeys.resolve(target);
+        const merged = { ...existing, ...updatePayload(address, resolved, data) };
+        buffer.add({
+          container: target.container,
+          partitionKey: address.partitionKey,
+          operation: {
+            operationType: 'Replace',
+            id: address.id,
+            resourceBody: merged,
+            ifMatch: etag,
+          },
+        });
+        return fromDocument(merged, target);
       }
       const item = container().item(address.id, address.partitionKey);
       const options = { accessCondition: { type: 'IfMatch' as const, condition: etag } };
@@ -452,6 +498,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     ): Promise<Record<string, unknown>> => {
       data = { ...data };
       assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
+      await assertScope(id);
       const address = await addressOf(id, 'update');
       if (address === null) throw missingRow(target, id);
       const resolved = await partitionKeys.resolve(target);
@@ -540,6 +587,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     },
 
     delete: async (id: EntityKey): Promise<boolean> => {
+      await assertScope(id);
       const address = await addressOf(id, 'delete');
       if (address === null) return false;
       if (buffer !== undefined) {
@@ -565,36 +613,25 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
     },
 
-    ...(buffer !== undefined
-      ? {}
-      : ({
-          async updateWhere(id, where, data) {
-            const checked = checkWritePrecondition(where, data);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                'cosmos',
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            data = checked.data;
-            assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
-            return await guardedWrite(id, where, data);
-          },
-          async deleteWhere(id, where) {
-            const checked = checkWritePrecondition(where);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                'cosmos',
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            return (await guardedWrite(id, where)) !== null;
-          },
-        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
+      return await guardedWrite(id, where, data);
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
+      }
+      where = checked.where;
+      return (await guardedWrite(id, where)) !== null;
+    },
+
     count: async (where: Record<string, unknown>, filter?: FilterExpression): Promise<number> => {
       const spec = buildCountQuery(where, filter, target);
       const response = await container().items.query(spec).fetchAll();
@@ -917,14 +954,31 @@ export class CosmosTransaction implements IAdapterTransaction {
       const operationStatuses = (response.result ?? []).map((entry) => entry.statusCode);
       // A 207 batch lists the actual refusal beside the dependent 424s. Keep
       // that root status rather than losing it to the aggregate response.
-      const failureCode =
-        operationStatuses.find((status) => status >= 300 && status !== 424) ?? code;
+      const failureIndex = operationStatuses.findIndex((status) => status >= 300 && status !== 424);
+      const failureCode = operationStatuses[failureIndex] ?? code;
       const statuses = operationStatuses.join(', ');
-      throw new CosmosTransactionBatchError(
+      const error = new CosmosTransactionBatchError(
         failureCode,
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
           `(per-operation: ${statuses}). The batch is atomic, so no operation was applied.`,
       );
+      // A buffered write loses its row two ways. Measured on the emulator, the
+      // service checks existence before the ETag: a stale `ifMatch` on a row
+      // still present answers 412, and a conditional or plain Replace/Patch of
+      // a row deleted since the call answers 404. Each is the same lost race
+      // (the call read the row; another writer changed it before commit).
+      const failed = operations[failureIndex];
+      const lostRow =
+        failed !== undefined &&
+        (failed.ifMatch !== undefined ||
+          failed.operationType === 'Replace' ||
+          failed.operationType === 'Patch');
+      if (failureCode === 412 || (failureCode === 404 && lostRow))
+        throw new SerializationConflictError(
+          'Cosmos transaction lost a write precondition; all writes were rolled back.',
+          { cause: error },
+        );
+      throw error;
     }
   }
 

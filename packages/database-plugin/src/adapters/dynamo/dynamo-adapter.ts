@@ -33,8 +33,16 @@ import type {
   TransactionOptions,
 } from '@setu-ts/common';
 import { DuplicateKeyError } from '@setu-ts/common';
+import { requestTimeout } from '../request-bound.ts';
+import { boundDynamoClient } from './dynamo-client.ts';
+import { resolveDynamoTarget } from './dynamo-mapping.ts';
+import { classifyDriverError } from '../../errors/classify.ts';
 import type { DynamoAdapterOptions } from '../../interfaces/index.ts';
-import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
+import {
+  SerializationConflictError,
+  UnsupportedIsolationLevelError,
+  UnsupportedRawQueryError,
+} from '../../errors.ts';
 import { createInjectedDynamoLoader, createLazyDynamoLoader } from './dynamo-client.ts';
 import type { DynamoClientConfiguration } from './dynamo-client.ts';
 import type { DynamoTransactWriteItem, IDynamoClient } from './dynamo-client-types.ts';
@@ -88,6 +96,12 @@ export class DynamoAdapter implements IDatabaseAdapter {
    */
   #generation = 0;
   readonly #options: DynamoAdapterOptions;
+  readonly #timeout: number;
+  readonly #warn: ((message: string) => void) | undefined;
+  #warned = false;
+  #rawClient: IDynamoClient | null = null;
+  /** A bounded point read of the readiness table, when one is configured. */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * Creates the adapter.
@@ -111,7 +125,7 @@ export class DynamoAdapter implements IDatabaseAdapter {
    *   to a single server page. Both fail at construction rather than
    *   degrading a later page silently.
    */
-  constructor(options: DynamoAdapterOptions) {
+  constructor(options: DynamoAdapterOptions, warn?: (message: string) => void) {
     if (options.client === undefined && options.region === undefined) {
       throw new Error('DynamoAdapter requires either options.client or options.region');
     }
@@ -120,6 +134,39 @@ export class DynamoAdapter implements IDatabaseAdapter {
     }
     assertPageFetchBound(options.maxPageFetches);
     this.#options = options;
+    this.#timeout = requestTimeout(options.requestTimeoutMs);
+    this.#warn = warn;
+    const entity = options.readinessEntity ?? Object.keys(options.entities ?? {})[0];
+    if (entity !== undefined) {
+      this.isHealthy = async () => {
+        if (!this.#connected) return false;
+        const client = boundDynamoClient(this.#rawClient!, Math.min(this.#timeout || 2000, 2000));
+        try {
+          // Resolved per probe: a mapping error is the probe's, never the constructor's.
+          const target = resolveDynamoTarget(entity, options.entities);
+          await client.getItem({
+            TableName: target.table,
+            Key: Object.fromEntries(
+              target.keyColumns.map((column) => [column, { S: '__setu_readiness__' }]),
+            ),
+          });
+          return true;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'ValidationException') return true;
+          if (
+            error instanceof Error &&
+            [
+              'ResourceNotFoundException',
+              'AccessDeniedException',
+              'UnrecognizedClientException',
+            ].includes(error.name)
+          )
+            return false;
+          if (classifyDriverError(error, 'dynamodb') === 'unavailable') return false;
+          throw error;
+        }
+      };
+    }
   }
 
   /**
@@ -132,6 +179,12 @@ export class DynamoAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   async connect(): Promise<void> {
+    if (this.isHealthy === undefined && !this.#warned) {
+      this.#warned = true;
+      this.#warn?.(
+        'DynamoDB readiness has no table to read; configure readinessEntity or entities.',
+      );
+    }
     if (this.#client !== null) return;
     // Concurrent callers share one attempt rather than each importing the SDK
     // and constructing a client, all but the last of which leaks. The attempt
@@ -170,7 +223,8 @@ export class DynamoAdapter implements IDatabaseAdapter {
       if (!injected) client.destroy();
       return;
     }
-    this.#client = client;
+    this.#rawClient = client;
+    this.#client = boundDynamoClient(client, this.#timeout);
     this.#owned = !injected;
     this.#connected = true;
   }
@@ -189,6 +243,9 @@ export class DynamoAdapter implements IDatabaseAdapter {
       ...(this.#options.credentials === undefined
         ? {}
         : { credentials: this.#options.credentials }),
+      ...(this.#options.clientOptions === undefined
+        ? {}
+        : { clientOptions: this.#options.clientOptions }),
     };
   }
 
@@ -212,6 +269,7 @@ export class DynamoAdapter implements IDatabaseAdapter {
       this.#client = null;
     }
     this.#connected = false;
+    this.#rawClient = null;
     return Promise.resolve();
   }
 
@@ -380,12 +438,31 @@ class DynamoTransaction implements IAdapterTransaction {
       try {
         await this.#client.transactWriteItems({ TransactItems: writes });
       } catch (error) {
-        throw failedCreateGuard(error, writes)
-          ? new DuplicateKeyError(
-              'DynamoDB transaction was cancelled: a create in it would duplicate an existing key.',
-              { cause: error },
-            )
-          : error;
+        if (failedCreateGuard(error, writes))
+          throw new DuplicateKeyError(
+            'DynamoDB transaction was cancelled: a create in it would duplicate an existing key.',
+            { cause: error },
+          );
+        const reasons =
+          error instanceof Error && error.name === 'TransactionCanceledException'
+            ? (error as Error & { CancellationReasons?: unknown }).CancellationReasons
+            : undefined;
+        if (
+          Array.isArray(reasons) &&
+          reasons.some((reason, index) => {
+            const code = (reason as { Code?: unknown } | null)?.Code;
+            return (
+              code === 'TransactionConflict' ||
+              (code === 'ConditionalCheckFailed' &&
+                (writes[index]?.Update !== undefined || writes[index]?.Delete !== undefined))
+            );
+          })
+        )
+          throw new SerializationConflictError(
+            'DynamoDB transaction lost a write precondition; all writes were rolled back.',
+            { cause: error },
+          );
+        throw error;
       }
     }
   }

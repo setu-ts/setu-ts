@@ -34,6 +34,7 @@ import {
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { matchesFilter, matchesWhere, projectFields } from '../../query/query-builder.ts';
 import type {
+  BigtableFilter,
   BigtableReadOptions,
   BigtableReadRow,
   IBigtableTable,
@@ -216,6 +217,21 @@ export function createBigtableDataSource(
   target: BigtableTarget,
   options: BigtableDataSourceOptions = {},
 ): IDataSource {
+  const nativeTable = table;
+  table = {
+    readRows: (read, callOptions) =>
+      nativeTable.readRows(
+        {
+          ...read,
+          filter:
+            read.filter === undefined
+              ? { column: { cellLimit: 1 } }
+              : { chain: [{ column: { cellLimit: 1 } }, read.filter] },
+        },
+        callOptions,
+      ),
+    row: (key) => nativeTable.row(key),
+  };
   const index = buildFieldIndex(target);
   const maxPageFetches = options.maxPageFetches ?? DEFAULT_MAX_PAGE_FETCHES;
   const buffer = options.buffer;
@@ -246,6 +262,21 @@ export function createBigtableDataSource(
     return rows.length === 0 ? null : decodeRow(target, index, rows[0]);
   };
 
+  /**
+   * Reads a row only if it satisfies a write precondition, through the very
+   * predicate the commit sends (`preconditionTest`), so the call and the
+   * commit cannot disagree: both compare the stored cell's own text. Decoding
+   * the cell and re-encoding it instead turned a foreign `active` cell into
+   * `s:active`, which matched at the call and then failed every commit.
+   */
+  const readMatching = async (
+    rowKey: string,
+    test: readonly BigtableFilter[],
+  ): Promise<Record<string, unknown> | null> => {
+    const rows = await table.readRows({ keys: [rowKey], filter: { chain: test } });
+    return rows.length === 0 ? null : decodeRow(target, index, rows[0]);
+  };
+
   return {
     async findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]> {
       const plan = planBigtableScan(target, query);
@@ -270,7 +301,11 @@ export function createBigtableDataSource(
       const persisted = { ...data } as Record<string, unknown>;
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'create');
-        buffer.insert(cells, true);
+        try {
+          buffer.insert(cells, true);
+        } finally {
+          buffer.release();
+        }
         return persisted;
       }
       const existed = await table.row(rowKey).conditionalMutate([{ all: true }], {
@@ -298,21 +333,27 @@ export function createBigtableDataSource(
 
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'update');
-        // A deferred write still has to REPORT the updated row, and the write
-        // lands at commit, so the committed row is read and merged here.
-        const committed = await readOne(rowKey);
-        if (committed === null) {
-          throw new Error(
-            `Bigtable entity '${target.entity}' has no row keyed '${rowKey}' to update.`,
-          );
+        try {
+          // A deferred write still has to REPORT the updated row, and the write
+          // lands at commit, so the committed row is read and merged here.
+          const committed = await readOne(rowKey);
+          if (committed === null) {
+            throw new Error(
+              `Bigtable entity '${target.entity}' has no row keyed '${rowKey}' to update.`,
+            );
+          }
+          // Buffered even with no cell, so the commit still checks that the row
+          // exists: a row deleted meanwhile answers 409, as with cells.
+          buffer.insert(cells, false);
+          // Only the fields that produced a CELL are merged. An `undefined`
+          // payload field writes nothing, so spreading `data` wholesale made the
+          // buffered path answer `undefined` where the direct path — which
+          // re-reads the row — answers the stored value: two entry points
+          // disagreeing about one call.
+          return { ...committed, ...writtenFields(data) } as Record<string, unknown>;
+        } finally {
+          buffer.release();
         }
-        if (hasCells) buffer.insert(cells, false);
-        // Only the fields that produced a CELL are merged. An `undefined`
-        // payload field writes nothing, so spreading `data` wholesale made the
-        // buffered path answer `undefined` where the direct path — which
-        // re-reads the row — answers the stored value: two entry points
-        // disagreeing about one call.
-        return { ...committed, ...writtenFields(data) } as Record<string, unknown>;
       }
 
       if (!hasCells) {
@@ -343,57 +384,71 @@ export function createBigtableDataSource(
       const rowKey = composeRowKey(target, id, 'delete');
       if (buffer !== undefined) {
         buffer.claim(target.table, rowKey, 'delete');
-        const committed = await readOne(rowKey);
-        buffer.remove();
-        return committed !== null;
+        try {
+          const committed = await readOne(rowKey);
+          buffer.remove();
+          return committed !== null;
+        } finally {
+          buffer.release();
+        }
       }
       return await table.row(rowKey).conditionalMutate([{ all: true }], {
         onMatch: [{ method: 'delete' }],
       });
     },
 
-    ...(buffer !== undefined
-      ? {}
-      : ({
-          async updateWhere(id, where, data) {
-            const checked = checkWritePrecondition(where, data);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                ADAPTER,
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            data = checked.data;
-            assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
-            const rowKey = composeRowKey(target, id, 'updateWhere');
-            const test = preconditionTest(target, where);
-            if (test === null) return null;
-            const cells = buildCells(target, index, data, 'update');
-            const matched = await table.row(rowKey).conditionalMutate(test, {
-              onMatch: [{ method: 'insert', data: cells }],
-            });
-            return matched ? await readOne(rowKey) : null;
-          },
-          async deleteWhere(id, where) {
-            const checked = checkWritePrecondition(where);
-            if (!checked.ok) {
-              throw new UnsupportedQueryFeatureError(
-                'write-precondition',
-                ADAPTER,
-                checked.problem,
-              );
-            }
-            where = checked.where;
-            const rowKey = composeRowKey(target, id, 'deleteWhere');
-            const test = preconditionTest(target, where);
-            if (test === null) return false;
-            return await table
-              .row(rowKey)
-              .conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
-          },
-        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
+    async updateWhere(id, where, data) {
+      const checked = checkWritePrecondition(where, data);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
+      }
+      where = checked.where;
+      data = checked.data;
+      assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
+      const rowKey = composeRowKey(target, id, 'updateWhere');
+      buffer?.claim(target.table, rowKey, 'updateWhere');
+      try {
+        const test = preconditionTest(target, where);
+        if (test === null) return null;
+        const cells = buildCells(target, index, data, 'update');
+        if (buffer !== undefined) {
+          const committed = await readMatching(rowKey, test);
+          if (committed === null) return null;
+          buffer.insert(cells, false, test);
+          return { ...committed, ...writtenFields(data) };
+        }
+        const matched = await table.row(rowKey).conditionalMutate(test, {
+          onMatch: [{ method: 'insert', data: cells }],
+        });
+        return matched ? await readOne(rowKey) : null;
+      } finally {
+        buffer?.release();
+      }
+    },
+    async deleteWhere(id, where) {
+      const checked = checkWritePrecondition(where);
+      if (!checked.ok) {
+        throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
+      }
+      where = checked.where;
+      const rowKey = composeRowKey(target, id, 'deleteWhere');
+      buffer?.claim(target.table, rowKey, 'deleteWhere');
+      try {
+        const test = preconditionTest(target, where);
+        if (test === null) return false;
+        if (buffer !== undefined) {
+          const committed = await readMatching(rowKey, test);
+          if (committed === null) return false;
+          buffer.remove(test);
+          return true;
+        }
+        return await table.row(rowKey).conditionalMutate(test, {
+          onMatch: [{ method: 'delete' }],
+        });
+      } finally {
+        buffer?.release();
+      }
+    },
 
     async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       const needsValues = Object.keys(where).length > 0 || filter !== undefined;

@@ -278,9 +278,60 @@ export async function editArticle(
   not set it, the expected version must be a non-negative safe integer, and both are refused before
   any I/O. `create` does not stamp a first version — include `version: 1` yourself.
 - It works with any repository that has `updateWhere` — an outer repository, `uow.getRepository()`
-  and a tenant repository. Inside a transaction it applies on Drizzle, Prisma and MongoDB; the
-  buffered transaction sources (memory, D1, DynamoDB, Cosmos, Bigtable) answer
+  and a tenant repository. Inside a transaction it applies on Drizzle, Prisma, MongoDB, DynamoDB,
+  Cosmos DB and Bigtable; the memory and D1 transaction sources answer
   `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write.
+- **The outcome is decided by the write itself.** On PostgreSQL the conditional `UPDATE`/`DELETE`
+  reports which row it changed; on MySQL, where there is no `RETURNING`, the adapters read the
+  statement's affected-row count. A lost race therefore answers `409` on every SQL cell, MySQL
+  included (except where Prisma's `relationMode = "prisma"`, or an unreadable mode, refuses the
+  write, below): on MySQL 8.4 through `@prisma/adapter-mariadb`, 200 of 200 two-writer races (100 of
+  `updateMany`, 100 of `deleteMany`) gave exactly one winner, with the predicate carried by the
+  `UPDATE`/`DELETE` whose count Prisma reported.
+- **Prisma uses two statements, chosen once at `connect()` by connector.** On `postgresql` /
+  `postgres` a conditional write stays one `update`/`delete` with the predicate in `where`, and
+  Prisma's `P2025` is the miss. Every other connector, and one that cannot be determined, takes the
+  count path: `updateMany`/`deleteMany` with the key and the predicate, where `count: 0` is the
+  miss, followed for `updateWhere` by a `findUnique` read-back of the key on the same transaction
+  client (`deleteWhere` decides from the count alone). Outside a unit of work the write, with its
+  read-back, runs in a short `$transaction` with the unit of work's own
+  `{ maxWait: 2000, timeout: transactionTimeout }`, so it holds a pool connection while it runs and
+  a pool that cannot supply one within 2 s answers `503` (`P2028`); inside a unit of work it runs on
+  that transaction's client. A `count` above 1 means `keyColumns` do not name the table's key: it
+  throws; on the root client its short transaction rolls back, and inside a unit of work the unit of
+  work rolls back when the throw reaches it, so a caller that catches a refusal inside a unit of
+  work must rethrow it to roll the unit of work back (returning normally commits what ran). On MySQL
+  the count is matched rows only while the driver keeps `foundRows` on, which is the default in both
+  `mariadb` (Prisma's `@prisma/adapter-mariadb`) and mysql2: keep it on. With it off, an update
+  whose values equal the stored ones counts zero and reads as a miss. An entity naming
+  `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`, is refused when the
+  adapter is constructed: set `keyColumns` to the `@@id` columns (or omit it for an `id` key). A
+  client extension (`$extends` query hook) or middleware written for `update`/`delete` does not see
+  these writes on the count path; hook `updateMany` / `deleteMany` too. A client whose datasource
+  block sets `relationMode = "prisma"` has every conditional write on the count path refused with
+  `UnsupportedRelationModeError`: Prisma's emulation drops the predicate (`updateMany` updates the
+  selected ids without it, and the emulated cascade of `deleteMany` runs before it is checked), so a
+  lost race would read as success. Use `relationMode = "foreignKeys"` (the default) until
+  prisma/orm#30758 is fixed. The mode is read at `connect()` from the generated client; when it
+  cannot be read, one `warn` is logged and the same writes are refused until the options assert
+  `relationMode: 'foreignKeys'` (pass it once you have confirmed the schema uses that mode; it does
+  not lift the refusal of a schema read as `"prisma"`). On MongoDB, where Prisma allows only
+  `\"prisma\"`, they are always refused, whatever the options; use Setu's native MongoDB backend
+  (`DatabasePlugin({ type: 'mongodb', … })`) instead. No application meets this today: Prisma 7 has
+  no MongoDB adapter.
+- **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
+  committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
+  the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos
+  `ifMatch` on the row's `_etag`, the Bigtable CheckAndMutateRow test). If another writer changed
+  the row before the commit, nothing is applied and the commit throws `SerializationConflictError`
+  (`409`, rolled back, safe to retry), with the driver's failure as `cause`; so `updateVersioned` in
+  a unit of work returns the row at the call, and the unit of work fails at commit when it lost. A
+  conditional write must be the row's only write in that unit of work: a conditional write to a row
+  already written there, or any write to the row after one, is refused before it is buffered (before
+  any read when the calls run one after another; two concurrent calls on one row may both read, and
+  the second is refused when it buffers) (`CosmosTransactionScopeError`,
+  `BigtableTransactionScopeError`, and on DynamoDB the existing one-write-per-key refusal). A
+  Bigtable conditional write must be the unit of work's only write.
 - On a miss the record is read once to choose the error, so a delete that lands in between is
   reported as not found.
 - An invalid expected version (a missing `?version` read with `Number(...)` is `NaN`) or a payload
@@ -486,10 +537,36 @@ CREATE INDEX setu_outbox_relay ON setu_outbox (kind, status, position);
 CREATE INDEX setu_outbox_purge ON setu_outbox (kind, status, settled_at);
 ```
 
+For MySQL, on Prisma or Drizzle (`BIGINT` holds the 64-bit version; add the two indexes above as
+well):
+
+```sql
+CREATE TABLE `setu_outbox` (
+  `id` VARCHAR(191) PRIMARY KEY,
+  `kind` VARCHAR(191) NOT NULL,
+  `topic` VARCHAR(191) NOT NULL,
+  `envelope` LONGTEXT NOT NULL,
+  `options` LONGTEXT NOT NULL,
+  `ordering_key` VARCHAR(191),
+  `tenant_id` VARCHAR(191),
+  `traceparent` VARCHAR(191),
+  `position` VARCHAR(191) NOT NULL,
+  `created_at` BIGINT NOT NULL,
+  `status` VARCHAR(191) NOT NULL,
+  `attempts` INT NOT NULL,
+  `available_at` BIGINT NOT NULL,
+  `claim_version` BIGINT NOT NULL,
+  `lease_until` BIGINT NOT NULL,
+  `last_error` LONGTEXT,
+  `settled_at` BIGINT,
+  `sent_by` VARCHAR(191)
+);
+```
+
 Map it with `drizzleTables: { Outbox: pgTable('setu_outbox', { … }) }` (JS keys `orderingKey`,
 `tenantId`, `createdAt`, `availableAt`, `claimVersion`, `leaseUntil`, `lastError`, `settledAt`,
 `sentBy` over the snake_case columns; `claim_version` and `lease_until` must be 64-bit; the `bigint`
-columns in `{ mode: 'number' }`).
+columns in `{ mode: 'number' }`), or `mysqlTable` with the same keys on MySQL.
 
 ## Consumer inbox store
 
@@ -537,6 +614,23 @@ CREATE TABLE setu_inbox (
 CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
 ```
 
+For MySQL, with the same index:
+
+```sql
+CREATE TABLE `setu_inbox` (
+  `id` VARCHAR(191) PRIMARY KEY,
+  `kind` VARCHAR(191) NOT NULL,
+  `consumer` VARCHAR(191) NOT NULL,
+  `topic` VARCHAR(191) NOT NULL,
+  `envelope_id` VARCHAR(191),
+  `status` VARCHAR(191) NOT NULL,
+  `attempts` INT NOT NULL,
+  `updated_at` BIGINT NOT NULL,
+  `last_error` LONGTEXT,
+  `envelope` LONGTEXT
+);
+```
+
 Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
 `updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
 
@@ -571,6 +665,21 @@ CREATE TABLE setu_idempotency (
   result      TEXT
 );
 CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expiresAt);
+```
+
+For MySQL (add an index on `(kind, role, expires_at)` for the purge query, as the other dialects
+do):
+
+```sql
+CREATE TABLE `setu_idempotency` (
+  `id` VARCHAR(191) PRIMARY KEY,
+  `kind` VARCHAR(191) NOT NULL,
+  `role` VARCHAR(191) NOT NULL,
+  `fingerprint` VARCHAR(191) NOT NULL,
+  `created_at` BIGINT NOT NULL,
+  `expires_at` BIGINT NOT NULL,
+  `result` LONGTEXT
+);
 ```
 
 The expiry index serves the purge query over `kind`, `role`, and expiry time. For Drizzle on
@@ -762,7 +871,8 @@ use `setu g migration` and `src/migrations/run.ts`. The schema files remain appl
 scripts are written to `package.json` on Node and Bun; on Deno the command prints them instead, to
 add as `deno.json` tasks yourself; a Cloudflare Workers project gets neither scripts nor a schema
 config (D1 migrates with `wrangler d1 migrations`). Drizzle's `--dialect` is `postgresql` (the
-default) or `sqlite`: the adapter writes through `RETURNING`, which MySQL lacks.
+default) or `sqlite`; the CLI does not scaffold MySQL yet, though the adapter serves it (see
+[Drizzle on MySQL](#drizzle-on-mysql)).
 
 ### Prisma 7 setup
 
@@ -784,8 +894,9 @@ prerequisites are easy to miss, and none of them is this package's to supply:
 For Drizzle, wrap a configured Promise-aware driver and explicit transaction bridge with
 `createDrizzleDatabase()` and pass that opaque configuration beside a table registry. Every field
 supplied to repository `where`, `orderBy`, or `select` must be a real column on that table. Its
-`create`, `update`, and `delete` operations require a dialect that supports `RETURNING`, so the
-adapter can return the actual persisted row instead of guessing:
+`create`, `update`, and `delete` operations return the row as the database stored it: through
+`RETURNING` where the driver offers it, and otherwise (MySQL) by reading the row back, see
+[Drizzle on MySQL](#drizzle-on-mysql):
 
 ```typescript
 const drizzleDatabase = createDrizzleDatabase(db, (database, work) => database.transaction(work));
@@ -808,6 +919,106 @@ name before any I/O, instead of being dropped by Drizzle and surfacing as the dr
 fixed detail `The request names a field this resource does not have.` — a body passed straight to
 `repo.update(id, body)` carries the client's fields, so an extra one is the caller's error. The
 message names the entity and the field for the log; the served detail names neither.
+
+### Drizzle on MySQL
+
+A MySQL Drizzle instance (`drizzle-orm/mysql2`) writes through the repository like any other. Give
+it a pool and the explicit transaction bridge, and set `dialect: 'mysql'`:
+
+```typescript
+import { createPool } from 'mysql2/promise';
+import { drizzle } from 'drizzle-orm/mysql2';
+import { int, mysqlTable, varchar } from 'drizzle-orm/mysql-core';
+import { createDrizzleDatabase, DatabasePlugin } from '@setu-ts/database-plugin';
+
+const accounts = mysqlTable('accounts', {
+  id: varchar('id', { length: 191 }).primaryKey(),
+  email: varchar('email', { length: 191 }).notNull(),
+  version: int('version').notNull(),
+});
+// Keep mysql2's default flags: FOUND_ROWS makes affectedRows count matched rows.
+const pool = createPool({ uri: process.env['DATABASE_URL']!, connectionLimit: 10 });
+
+export const database = DatabasePlugin({
+  type: 'drizzle',
+  options: {
+    drizzleInstance: createDrizzleDatabase(drizzle(pool), (db, work) => db.transaction(work)),
+    drizzleTables: { Account: accounts },
+    dialect: 'mysql',
+  },
+});
+```
+
+MySQL has no `RETURNING`, so a write builder without `returning()` takes the affected-row path:
+
+- `update` runs `UPDATE … WHERE key`, then reads the row back by key; it rejects as not found only
+  when the read-back finds no row. `updateWhere` runs `UPDATE … WHERE key AND predicate`: an
+  affected count of 0 is the miss (`null`), otherwise the row is read back. `delete` and
+  `deleteWhere` answer `affectedRows > 0`.
+- `create` takes the key from the payload when it holds every key column. Otherwise it reads it from
+  `$returningId()`, which needs exactly one missing key column, declared `.primaryKey()` on the
+  column and `.autoincrement()` or `.$defaultFn(…)`. Any other shape is refused before anything is
+  sent, with `UnsupportedQueryFeatureError('create')`: the database fills the key and the driver
+  cannot report it.
+- The write and its read-back run in one Drizzle `transaction()` on one connection (directly on the
+  transaction inside a unit of work), so the row read back is the one this write produced.
+- The count is read from mysql2's `[ResultSetHeader, FieldPacket[]]` result, or a bare
+  `{ affectedRows }`. A driver reporting anything else is refused by name with
+  `UnsupportedQueryFeatureError('write')`, never guessed.
+
+**`FOUND_ROWS`.** mysql2 sets `FOUND_ROWS` by default, so `affectedRows` counts the rows the `WHERE`
+matched. A pool created with `flags: ['-FOUND_ROWS']` counts only rows whose values changed: an
+`updateWhere` whose data equals the stored values then reads as a miss. The adapter cannot see the
+pool's flags, so keep the default.
+
+**`dialect: 'mysql'`** also selects two MySQL forms. A `contains` filter is `LIKE … ESCAPE '!'` with
+`!`, `%` and `_` in the value escaped by `!`, and a backslash in the value sent as `char(92)` rather
+than inside a string. A `findAll` with an `offset` and no `limit` carries
+`LIMIT 18446744073709551615`, MySQL's documented "to the end" value, because MySQL has no `OFFSET`
+outside `LIMIT`. The adapter detects MySQL from the instance's class name; pass `dialect` when that
+cannot name it, or a `contains` keeps the backslash form and an `offset` with no `limit` sends
+invalid MySQL.
+
+**`NO_BACKSLASH_ESCAPES` is refused on mysql2.** Drizzle on mysql2 does not support it for bound
+values: mysql2 writes each bound string into the query text, escaping `'` as `\'`, and under that
+mode the quote ends the literal, so a value such as `' OR 1=1 -- ` changes the statement. Since
+0.14.0 the adapter refuses it. `connect()` reads `@@SESSION.sql_mode`, on the primary and on every
+replica of a `withReplicas()` instance, and throws `UnsupportedSqlModeError` when any of them
+reports the mode. It also throws `UnsupportedSqlModeError` when a read fails or gets no answer
+within a fixed 2000 ms (the readiness probe's default bound; `requestTimeoutMs` does not change it),
+with the driver error or the expiry as its `cause`. So `connect()` now fails when MySQL is
+unreachable or stalls. A result with no `sql_mode`, or a `withReplicas()` wrapper whose members
+cannot all be read, is refused the same way, with no `cause`: a configuration fault a retry does not
+fix. Every such unread case sets the error's `unreadReason`; a session that reported the mode does
+not. A `withReplicas()` wrapper is recognised by its `$primary`/`$replicas` shape, nested wrappers
+are walked, and every mysql2 member is checked, even behind a primary on another driver.
+
+On a mysql2 pool the adapter also strips `NO_BACKSLASH_ESCAPES` from the session mode of every
+connection the pool opens later, then refuses. Each new connection first reads its mode, then sets
+its session `sql_mode` without the flag. The strip is there because mysql2 has already formatted the
+statement the pool opened the connection for. Reading the mode and closing the connection would be
+too late for that statement, while the server runs the strip before it. If a new connection reported
+the flag, every later adapter call throws `UnsupportedSqlModeError` and the adapter logs one `warn`.
+
+Three cases are not covered:
+
+- A session the application itself switches with `SET SESSION` after the check. mysql2 reports the
+  server's flag on no `SELECT` result, so a per-statement check would cost a round trip per
+  statement.
+- Connections the pool opened before `connect()`, beyond the one `connect()` reads.
+- The mysql-proxy driver. Its callback decides how a statement reaches the server, and the adapter
+  holds no connection to read the mode from.
+
+Turn `NO_BACKSLASH_ESCAPES` off for the application's sessions (the global `sql_mode`,
+`init_connect`, the application's own `SET SESSION`). A mysql2 release containing
+sidorares/node-mysql2#4684 fixes the escaping once it is stable, but this refusal does not read the
+mysql2 version.
+
+**mysql-proxy.** Drizzle's `drizzle-orm/mysql-proxy` driver refuses `transaction()`, so on it the
+write and its read-back run unwrapped. The outcome is still decided by the write's count, but the
+read-back sees committed data, which a later writer may already have changed. The adapter logs one
+`warn` per adapter at `connect()` saying so. A `create` that needs `$returningId()` is refused
+there, since an empty result could not be rolled back.
 
 ### Nested JSON path filters
 
@@ -999,14 +1210,16 @@ app.register(
 );
 ```
 
-| `options` field | Type                                  | Default | Read by                                                                                                                          |
-| --------------- | ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
-| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
-| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.   |
-| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to. |
-| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                        |
-| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                            |
+| `options` field    | Type                                  | Default | Read by                                                                                                                                              |
+| ------------------ | ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`         | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                                          |
+| `key`              | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                                          |
+| `client`           | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.                       |
+| `database`         | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to.                     |
+| `containers`       | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                                            |
+| `requestTimeoutMs` | `number` (ms)                         | `15000` | Every call, the commit's batch and the readiness probe; `0` disables it on calls (the probe keeps 2000 ms). See [Bounding a call](#bounding-a-call). |
+| `clientOptions`    | `Record<string, unknown>`             | —       | The lazy client path: spread into `new CosmosClient(…)` first; `endpoint` and `key` win. Unread with `client`.                                       |
+| `logQueries`       | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                                                |
 
 **Containers must already exist.** The adapter creates no database and no container: throughput,
 partition-key and indexing choices belong to the application's provisioning. A missing container is
@@ -1141,22 +1354,52 @@ app.register(
 );
 ```
 
-| `options` field  | Type                                    | Default | Read by                                                                                                                             |
-| ---------------- | --------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `projectId`      | `string`                                | —       | The lazy client path. Required unless `client` is supplied.                                                                         |
-| `instance`       | `string`                                | —       | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.         |
-| `apiEndpoint`    | `string`                                | —       | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                            |
-| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                   |
-| `tables`         | `Record<string, BigtableEntityMapping>` | `{}`    | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`. |
-| `maxPageFetches` | `number`                                | `10`    | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                        |
-| `logQueries`     | `boolean`                               | `false` | The database service, exactly as for every other arm.                                                                               |
+| `options` field    | Type                                    | Default           | Read by                                                                                                                              |
+| ------------------ | --------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `projectId`        | `string`                                | —                 | The lazy client path. Required unless `client` is supplied.                                                                          |
+| `instance`         | `string`                                | —                 | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.          |
+| `apiEndpoint`      | `string`                                | —                 | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                             |
+| `client`           | `IBigtableClient`                       | —                 | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                    |
+| `tables`           | `Record<string, BigtableEntityMapping>` | `{}`              | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`.  |
+| `maxPageFetches`   | `number`                                | `10`              | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                         |
+| `requestTimeoutMs` | `number` (ms)                           | `15000`           | Every read and conditional write, and the readiness probe; `0` disables the bound on calls. See [Bounding a call](#bounding-a-call). |
+| `clientOptions`    | `Record<string, unknown>`               | —                 | The lazy client path: spread into `new Bigtable(…)` first; `projectId` and `apiEndpoint` win. Unread with `client`.                  |
+| `readinessEntity`  | `string`                                | first of `tables` | The table the readiness probe reads. See [Health reporting](#health-reporting).                                                      |
+| `logQueries`       | `boolean`                               | `false`           | The database service, exactly as for every other arm.                                                                                |
 
 **Tables must already exist.** The adapter creates no instance and no table: column families,
 garbage-collection policies and split points belong to the application's provisioning. A missing
-table is reported by the service as `5 NOT_FOUND` quoting the full resource path, which is also why
-`connect()` issues **no RPC at all** — an `instance.getTables()` probe is a table-ADMIN call a
-data-plane service account commonly cannot make, so probing would refuse a working configuration.
-Configuration mistakes are caught at construction instead, by name.
+table is reported by the service as `5 NOT_FOUND` quoting the full resource path. `connect()` makes
+no admin call — an `instance.getTables()` probe is a table-ADMIN call a data-plane service account
+commonly cannot make, so probing would refuse a working configuration. Configuration mistakes are
+caught at construction instead, by name.
+
+**The emulator's first call does not wait on a credentials lookup (since 0.14.0).** Without a
+universe domain the SDK looks one up from Google credentials on its first call, which on a host
+outside Google Cloud cost about 3 s. Against an emulator — `BIGTABLE_EMULATOR_HOST` set, or an
+endpoint with no `sslCreds` in `clientOptions` — the lazy arm passes
+`universeDomain: 'googleapis.com'`, unless a universe is configured in `clientOptions`
+(`universeDomain` or `universe_domain`, passed unchanged) or in `GOOGLE_CLOUD_UNIVERSE_DOMAIN`. The
+plugin reads both environment variables through the runtime; an adapter built directly, outside the
+plugin, decides from its options alone. `connect()` sends no request: a store that is down at boot
+is reported by `/ready`, not by a failed start.
+
+**Client-side metrics are off on an emulator (since 0.14.0).** `@google-cloud/bigtable` 6 exports
+client-side metrics unless `metricsEnabled: false`, and its exporter needs Google credentials: on a
+host without them it throws `Could not load the default credentials` every 60 s, outside any
+request, and ends the process. The lazy arm therefore passes `metricsEnabled: false` whenever an
+endpoint is set — `apiEndpoint`, `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST` in the
+environment, which the plugin reads at registration — unless `clientOptions` sets `metricsEnabled`
+itself. That includes a real private endpoint set through `apiEndpoint`: pass
+`clientOptions: { metricsEnabled: true }` to keep metrics there. An adapter constructed directly,
+outside the plugin, decides from `apiEndpoint` and `clientOptions` alone. Without an endpoint,
+Google's default stays.
+
+**With `@setu-ts/telemetry-plugin`.** `@google-cloud/bigtable` 6 depends on
+`@opentelemetry/resources` 1, while the telemetry plugin needs `@opentelemetry/resources@^2.9.0`. No
+range in this package can reconcile the two, so an application that uses both lists
+`@opentelemetry/resources@^2.9.0` and the telemetry plugin's other OpenTelemetry peers in its own
+`package.json`; `setu new --template microservice` and `setu add` write them.
 
 **The row key is composed from logical fields.** `rowKey: { fields, separator?, prefix? }` maps the
 repository's `EntityKey` onto the single string Bigtable addresses a row by. A single-field key
@@ -1208,6 +1451,12 @@ than chained directly, because a bare chain STRIPS every non-matching cell, so t
 back carrying only the cell that matched. An ordered comparison on a key field is **not** pushed
 down either: the composed key is a string, so a numeric key field does not sort numerically inside
 it — zero-pad a numeric key field if you need its lexicographic order to match.
+
+**Every read asks for the latest cell only (since 0.14.0).** An update writes a new cell version,
+and a read without a cell limit returns every stored version, so a row's read cost grew with its
+update count. Each data read (`findById`, `findAll`, `count`, `findPage`) begins its filter with a
+one-cell-per-column limit, so reads stay flat as a row is updated. Stored versions still grow until
+the column family's garbage-collection rule removes them: give the family a max-versions-1 rule.
 
 **Pagination is a start-key cursor** over the framework's portable keyset codec, which is exactly
 what Bigtable's continuation mechanism is. `nextCursor` is non-`null` if and only if the page is
@@ -1301,9 +1550,10 @@ backend follows the column's collation, which is case-sensitive on PostgreSQL an
 on SQLite and most MySQL collations.
 
 **`%` and `_` in the searched value are data, never wildcards — and on the Prisma adapter the
-connector decides how that is achieved.** Memory (`includes`), Drizzle (`LIKE … ESCAPE '\'`) and D1
-(`instr`) honour it unconditionally. Prisma emits a bare `LIKE` with no `ESCAPE` clause, so the
-effective escape character is the connector's own default:
+connector decides how that is achieved.** Memory (`includes`), Drizzle (`LIKE … ESCAPE '\'`, and
+`LIKE … ESCAPE '!'` on MySQL, see [Drizzle on MySQL](#drizzle-on-mysql)) and D1 (`instr`) honour it
+unconditionally. Prisma emits a bare `LIKE` with no `ESCAPE` clause, so the effective escape
+character is the connector's own default:
 
 | Prisma connector                                               | `contains` behaviour                                                                                                                                                                                                                                   |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1375,10 +1625,10 @@ answered as typed errors, so a caller can `instanceof` them instead of matching 
 
 | Condition                                                                                                                                                                                                                                                                                                                                                                  | Thrown as                    | Served status |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
-| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                                                                                                                                                 | `SerializationConflictError` | `409`         |
+| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, mysql2 `ER_LOCK_DEADLOCK`, a Prisma driver-adapter cause of kind `TransactionWriteConflict`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                                                    | `SerializationConflictError` | `409`         |
 | The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, both node-postgres connect-timeout messages (`timeout exceeded when trying to connect`, `Connection terminated due to connection timeout`), `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
 | node-postgres's `query_timeout` fired on a query (the driver's `Query read timeout` rejection)                                                                                                                                                                                                                                                                             | `DatabaseTimeoutError`       | `504`         |
-| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                                                                                                                                                | `DuplicateKeyError`          | `409`         |
+| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, a Prisma driver-adapter cause of kind `UniqueConstraintViolation`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                                                                             | `DuplicateKeyError`          | `409`         |
 
 `DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
 package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
@@ -1386,8 +1636,18 @@ records "already processed" with a unique insert). Unlike a serialization confli
 retryable: the same write fails the same way. The memory, DynamoDB and Bigtable adapters raise it
 themselves, and it carries the targeted `entity` when the failing call names one. A duplicate found
 at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWriteItems` cancelled
-by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
-rejection is still rethrown unchanged, because its outcome can be unknown.
+by a create's guard, a buffered memory or Bigtable create) is mapped too. Since 0.14.0 a DynamoDB,
+Cosmos DB or Bigtable commit whose precondition failed (a conditional write, or a buffered plain
+update of a row deleted meanwhile) or that DynamoDB cancelled with a `TransactionConflict` reason is
+`SerializationConflictError` (`409`): each of those primitives applies nothing when it refuses.
+Every other commit rejection is still rethrown unchanged, because its outcome can be unknown.
+
+**Through `query()` on MySQL (since 0.14.0).** Prisma reports a raw statement's failure as `P2010`,
+with the driver error under `meta.driverAdapterError.cause`. Its `kind` is read on every connector:
+`UniqueConstraintViolation` answers `409` as `DuplicateKeyError` and `TransactionWriteConflict`
+answers `409` as `SerializationConflictError`, so a MySQL duplicate key (1062) or deadlock (1213)
+through `query()` answers as it does on PostgreSQL. mysql2 reports a deadlock as `ER_LOCK_DEADLOCK`,
+also `409`; InnoDB rolls the victim's whole transaction back, so a retry is safe.
 
 <!-- version:history -->
 
@@ -1401,7 +1661,7 @@ connection dropped under a statement in flight, with no answer, it is `DatabaseT
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
 | node-postgres | SQLSTATE `57P01`; `Client has encountered a connection error and is not queryable`; `Client was closed and is not queryable` | `Connection terminated unexpectedly`     |
 | Prisma 7      | `P1001`, `P2028`; under `P2039`/`P2010`, the adapter's `originalCode` `57P01` (pg) or `45028`, `45013`, `1053` (mariadb)     | adapter `originalCode` `45009` (mariadb) |
-| mysql2        | `ER_SERVER_SHUTDOWN`                                                                                                         | `PROTOCOL_CONNECTION_LOST`               |
+| mysql2        | `ER_SERVER_SHUTDOWN`; `Can't add new command when connection is in closed state` (since 0.14.0)                              | `PROTOCOL_CONNECTION_LOST`               |
 | libsql        | `SQLITE_BUSY`                                                                                                                | —                                        |
 | MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107`                                                          | —                                        |
 
@@ -1491,32 +1751,63 @@ transient rather than permanent. Branch on them with `instanceof` — every one 
 
 ## Bounding a call
 
-The plugin adds no call deadline of its own. A JavaScript deadline cannot cancel the statement — the
-connection stays occupied, so a deadline only moves the hang from the caller to pool exhaustion —
-and inside a transaction it rejects while the statement may still commit. The bound is the driver's
-own, enforced by the driver that owns the connection; on node-postgres a query that hits
-`query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
-with the error and removed from the pool, so the bound does not leak a connection. A call that hits
-the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
-so a write's outcome is unknown and a retry of a write must be idempotent. A connection lost under a
-statement is answered the same way for the same reason, but its message says the connection closed
-before the call completed, so the log does not claim a bound fired (since 0.13.0).
+On a SQL call the plugin adds no JavaScript race. (On SQL its one race is outside any call: the
+bounded `sql_mode` read at `connect()` on Drizzle over mysql2, which fails start rather than a
+request.) The DynamoDB, Cosmos DB and Bigtable calls differ: they pass the driver a cancelling
+signal or deadline AND reject the caller at `requestTimeoutMs` (below), since an SDK can keep
+waiting without observing the signal; the driver's own work may then run on. On SQL, a JavaScript
+deadline cannot cancel the statement — the connection stays occupied, so a deadline only moves the
+hang from the caller to pool exhaustion — and inside a transaction it rejects while the statement
+may still commit. The bound is the driver's own, enforced by the driver that owns the connection.
+For a SQL pool the application builds, the application sets it; for the DynamoDB, Cosmos DB and
+Bigtable clients, which the plugin can build itself, the plugin sets the driver's own cancelling
+deadline by default (`requestTimeoutMs`, below); on node-postgres a query that hits `query_timeout`
+rejects with the driver's `Query read timeout`, and the timed-out client is released with the error
+and removed from the pool, so the bound does not leak a connection. A call that hits the bound is
+answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run, so a write's
+outcome is unknown and a retry of a write must be idempotent. A connection lost under a statement is
+answered the same way for the same reason, but its message says the connection closed before the
+call completed, so the log does not claim a bound fired (since 0.13.0).
 
-| Adapter                  | The driver's own call bound                                                                                                                  | Status               |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| Drizzle on node-postgres | Set `query_timeout` and `connectionTimeoutMillis` on the `Pool` you pass Drizzle                                                             | **verified** (M113g) |
-| Prisma                   | no per-call option; Prisma 7 runs over a driver adapter, so set that driver's bound (for `@prisma/adapter-pg`, the same `pg` `Pool` options) | **unverified**       |
-| MongoDB                  | `MongoClient`'s `timeoutMS` (client-side operation timeout), or a per-operation `maxTimeMS`                                                  | **unverified**       |
-| DynamoDB                 | the AWS SDK v3 `NodeHttpHandler` `requestTimeout`                                                                                            | **unverified**       |
-| Cosmos DB                | `connectionPolicy.requestTimeout` on the `CosmosClient` options                                                                              | **unverified**       |
-| Bigtable                 | the gRPC call deadline (`timeout` in google-gax call options)                                                                                | **unverified**       |
-| D1                       | none the binding exposes; only the platform's own query limits apply                                                                         | **unverified**       |
+| Adapter                  | The driver's own call bound                                                                                                                  | Status                         |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Drizzle on node-postgres | Set `query_timeout` and `connectionTimeoutMillis` on the `Pool` you pass Drizzle                                                             | **verified** (M113g)           |
+| Prisma                   | no per-call option; Prisma 7 runs over a driver adapter, so set that driver's bound (for `@prisma/adapter-pg`, the same `pg` `Pool` options) | **unverified**                 |
+| MongoDB                  | `MongoClient`'s `timeoutMS` (client-side operation timeout), or a per-operation `maxTimeMS`                                                  | **unverified**                 |
+| DynamoDB                 | `requestTimeoutMs`, default 15 000 ms: an `abortSignal` on every `send`                                                                      | **set by the plugin** (0.14.0) |
+| Cosmos DB                | `requestTimeoutMs`, default 15 000 ms: an `abortSignal` in the request options of every call                                                 | **set by the plugin** (0.14.0) |
+| Bigtable                 | `requestTimeoutMs`, default 15 000 ms: `gaxOptions.timeout` on every read and conditional write, and a whole-read deadline                   | **set by the plugin** (0.14.0) |
+| D1                       | none the binding exposes; only the platform's own query limits apply                                                                         | **unverified**                 |
 
 Inside `service.transaction(...)` the bound applies twice. The timed-out statement rejects after
 `query_timeout`, and the `ROLLBACK` that follows waits behind it on the same connection until its
 own bound expires, so the caller receives `DatabaseTimeoutError` after about twice `query_timeout`
 (measured: about 2.03 s with `query_timeout: 1000` against a paused PostgreSQL 16), still while the
 database is paused. It is a bound on each statement, not a deadline on the transaction.
+
+**`requestTimeoutMs` (DynamoDB, Cosmos DB, Bigtable, since 0.14.0)** bounds the whole call, retries
+included, and applies by default: a call still running after 15 000 ms rejects with
+`DatabaseTimeoutError` (`504`, outcome unknown). It cancels and also rejects: DynamoDB and Cosmos DB
+receive an `AbortSignal` and Bigtable a gRPC deadline, and the call rejects at the deadline even
+when the SDK keeps waiting (the Cosmos SDK sleeps through a throttle retry-after without observing
+the signal). The `cause` is the driver's error when the driver answers the abort, else the signal's
+`TimeoutError`. Bigtable's SDK gives each attempt of a streaming read its own deadline and retries a
+failed attempt, so the lazy arm also ends the read as a whole when `requestTimeoutMs` passes; its
+conditional write is not retried by the SDK, so its gRPC deadline already bounds the whole call.
+Inside a unit of work the bound applies to each call, the commit's single batch included. `0`
+disables it on calls, leaving the SDK's own defaults (the readiness probe keeps its 2000 ms bound);
+a non-finite or negative value, or one above 2147483647, is refused when the adapter is constructed.
+An injected facade receives the signal (DynamoDB, Cosmos DB) or `{ timeoutMs }` (Bigtable); one that
+ignores it is still rejected at the deadline, but its own work runs on.
+
+This is not the SDKs' own per-request setting, which `clientOptions` can still carry — a DynamoDB
+`requestHandler` with its `requestTimeout`, a Cosmos `connectionPolicy` with its `requestTimeout`.
+Those bound one HTTP request; `requestTimeoutMs` bounds the call above them. `clientOptions` is
+spread first into the SDK constructor the lazy arm builds, the arm's own options win over the same
+keys (`region`, `endpoint` and `credentials` on DynamoDB, `endpoint` and `key` on Cosmos DB,
+`projectId` and `apiEndpoint` on Bigtable), and it is unread when `client` is injected. For example,
+`requestTimeoutMs: 5000` with `clientOptions: { maxAttempts: 2 }` on the DynamoDB arm bounds each
+call at 5 s across at most two SDK attempts.
 
 ## Health reporting
 
@@ -1560,19 +1851,36 @@ answer** inside the 2-second bound is evidence of trouble and reports `degraded`
 is the claim that let a stopped database keep taking traffic (X51-1: the indicator used to read the
 lifecycle `isReady()`, which only says `connect()` once succeeded). An adapter that ships **no
 probe** is the opposite case: a probe that was never written is evidence of nothing, so the payload
-omits `reachable` and the status is today's — mapping a missing probe to `degraded` would fail
-`/ready` for every healthy Cosmos, Bigtable and DynamoDB application on upgrade.
+omits `reachable` and the status is today's: a probe that was never written says nothing about the
+backend.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
-`execute()`), memory (its own connection state — the process is the backend). Cosmos, Bigtable and
-DynamoDB omit the probe until each gains one optional member on its own client facade; their
-payloads are unchanged. A custom adapter opts in by declaring `isHealthy?(): Promise<boolean>` on
-the adapter — `true` when the backend answered, `false` when it refused, or omit the member rather
-than inventing an answer. The lifecycle read still gates the probe, so an adapter whose probe
-forgets to re-derive `isReady()` cannot report `up` for a connection it has already dropped; a probe
-SHOULD still answer `false` once disconnected, because `DatabaseService.reachability()` is also read
-directly.
+`execute()`), memory (its own connection state — the process is the backend), and since 0.14.0
+Cosmos DB, DynamoDB and Bigtable. Each of the three is bounded by 2000 ms, or by `requestTimeoutMs`
+when that is non-zero and smaller (`0` does not lift the 2000 ms probe bound), so it settles before
+the service stops waiting; a probe that expires rejects, which the indicator reports as `degraded`:
+
+| Adapter   | Probe                                                                               | `false` (`down`) on                                                                                            |
+| --------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Cosmos DB | `database.read()`, the call `connect()` already requires                            | `401`, `403`, `404`, or an unreachable service                                                                 |
+| DynamoDB  | `GetItem` of the absent key `'__setu_readiness__'` on the `readinessEntity`'s table | `ResourceNotFoundException`, `AccessDeniedException`, `UnrecognizedClientException`, or an unreachable service |
+| Bigtable  | a read of the absent row `'__setu_readiness__'` on the `readinessEntity`'s table    | gRPC `NOT_FOUND`, `PERMISSION_DENIED`, `UNAVAILABLE`, `UNAUTHENTICATED`                                        |
+
+`readinessEntity` (DynamoDB and Bigtable) names the entity whose mapped table the probe reads, so
+the probe needs only the read permission the application already holds. It defaults to the first
+entity in `entities` / `tables`. With no entity mapped and no option, the adapter has no probe, as
+before 0.14.0, and logs one `warn` at `connect()` naming `readinessEntity`. The DynamoDB key is
+built from the table's own key attribute names, as strings; a `ValidationException` (a table whose
+key is not a string) still means the service answered, so it counts as reachable. An answer of any
+kind, a found or an absent row, is `true`. The probe is cached for 5 seconds, so a connection costs
+at most one such read per 5 seconds, billed by the provider (a point read for DynamoDB and Bigtable,
+`database.read()` for Cosmos DB); poll `/ready` less often to read less. A custom adapter opts in by
+declaring `isHealthy?(): Promise<boolean>` on the adapter — `true` when the backend answered,
+`false` when it refused, or omit the member rather than inventing an answer. The lifecycle read
+still gates the probe, so an adapter whose probe forgets to re-derive `isReady()` cannot report `up`
+for a connection it has already dropped; a probe SHOULD still answer `false` once disconnected,
+because `DatabaseService.reachability()` is also read directly.
 
 ## Transactions
 
@@ -1644,6 +1952,8 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `UnsupportedSqlModeError`                 | class     |
+| `UnsupportedRelationModeError`            | class     |
 | `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
