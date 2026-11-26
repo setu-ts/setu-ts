@@ -100,6 +100,14 @@ export interface DynamoGetItemCommandInput extends DynamoExpressionAttributes {
   readonly Key: DynamoAttributeMap;
   /** A projection expression for selected attributes. */
   readonly ProjectionExpression?: string;
+  /**
+   * A strongly consistent read. The adapter sets it on the pre-read of a
+   * conditional write inside a unit of work, whose answer decides whether the
+   * write is buffered. An injected facade passes it through to `GetItem`.
+   *
+   * @since 0.14.0
+   */
+  readonly ConsistentRead?: boolean;
 }
 
 /** Output from DynamoDB `GetItem`. */

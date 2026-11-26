@@ -8,6 +8,7 @@ import {
   InvalidFieldValueError,
   UnknownPayloadFieldError,
 } from '@setu-ts/common';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
 describe('Prisma conditional translation', () => {
   for (const provider of [
@@ -75,6 +76,52 @@ describe('Prisma conditional translation', () => {
       const result = await updateMany(args);
       key['id'] = 'b';
       return result;
+    };
+    expect(await source.updateWhere!(key, { name: 'old' }, { name: 'new' })).toEqual({
+      id: 'a',
+      name: 'new',
+    });
+    await adapter.disconnect();
+  });
+  it('refuses compositeKeyName without keyColumns at construction, naming the fix', () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    for (const keyColumns of [undefined, []]) {
+      const make = (): PrismaAdapter =>
+        new PrismaAdapter({
+          prismaClient: client,
+          entities: {
+            Compound: {
+              compositeKeyName: 'tenantId_id',
+              ...(keyColumns === undefined ? {} : { keyColumns }),
+            },
+          },
+        });
+      expect(make).toThrow(UnsupportedQueryFeatureError);
+      expect(make).toThrow(/'Compound'.*entities\.Compound\.keyColumns/);
+    }
+    expect(
+      () =>
+        new PrismaAdapter({
+          prismaClient: client,
+          entities: {
+            Compound: { compositeKeyName: 'tenantId_id', keyColumns: ['tenantId', 'id'] },
+          },
+        }),
+    ).not.toThrow();
+  });
+  it('reads the key once, so a getter cannot steer the read-back to another row', async () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const source = adapter.createDataSource('User');
+    await source.create({ id: 'a', name: 'old' });
+    await source.create({ id: 'b', name: 'other' });
+    let reads = 0;
+    const key = {
+      get id(): string {
+        reads += 1;
+        return reads === 1 ? 'a' : 'b';
+      },
     };
     expect(await source.updateWhere!(key, { name: 'old' }, { name: 'new' })).toEqual({
       id: 'a',

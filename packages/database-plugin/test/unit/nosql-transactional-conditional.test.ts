@@ -118,12 +118,81 @@ for (const backend of transactionalNoSql)
   });
 
 describe('bigtable transactional conditionals agree with the commit predicate', () => {
-  const make = (valueEncoding?: 'raw'): BigtableAdapter =>
+  const make = (valueEncoding?: 'raw', store = new FakeBigtableStore()): BigtableAdapter =>
     new BigtableAdapter({
       instance: 'i',
-      client: createFakeBigtableClient(new FakeBigtableStore()),
+      client: createFakeBigtableClient(store),
       tables: { Row: valueEncoding === undefined ? {} : { valueEncoding } },
     });
+
+  it('agrees with the direct path on a cell another writer stored untagged', async () => {
+    const store = new FakeBigtableStore();
+    store.seed('Row', 'a', { cf: { id: 's:a', status: 'active' } });
+    const adapter = make(undefined, store);
+    await adapter.connect();
+    try {
+      const root = adapter.createDataSource('Row');
+      // The decoder reads the untagged cell back as 'active' ...
+      expect(await root.findById('a')).toMatchObject({ status: 'active' });
+      // ... but its text is not the tagged 's:active' the predicate compares.
+      expect(await root.updateWhere!('a', { status: 'active' }, { note: 'x' })).toBeNull();
+      expect(await root.deleteWhere!('a', { status: 'active' })).toBe(false);
+      const tx = await adapter.beginTransaction();
+      const source = tx.createDataSource('Row');
+      expect(await source.updateWhere!('a', { status: 'active' }, { note: 'x' })).toBeNull();
+      expect(await source.deleteWhere!('a', { status: 'active' })).toBe(false);
+      await tx.commit();
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('answers a miss at the call for a predicated key field with no stored cell', async () => {
+    const store = new FakeBigtableStore();
+    // Written by another writer: no cell for the key field, only the row key.
+    store.seed('Row', 'a', { cf: { version: 'n:1' } });
+    const adapter = make(undefined, store);
+    await adapter.connect();
+    try {
+      const root = adapter.createDataSource('Row');
+      expect(await root.findById('a')).toMatchObject({ id: 'a', version: 1 });
+      expect(await root.updateWhere!('a', { id: 'a' }, { version: 2 })).toBeNull();
+      expect(await root.deleteWhere!('a', { id: 'a' })).toBe(false);
+      const tx = await adapter.beginTransaction();
+      const source = tx.createDataSource('Row');
+      expect(await source.updateWhere!('a', { id: 'a' }, { version: 2 })).toBeNull();
+      expect(await source.deleteWhere!('a', { id: 'a' })).toBe(false);
+      await tx.commit();
+      expect(await root.findById('a')).toMatchObject({ version: 1 });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
+  it('checks at commit that a row a cell-less plain update reported still exists', async () => {
+    const adapter = make();
+    await adapter.connect();
+    try {
+      const root = adapter.createDataSource('Row');
+      await root.create({ id: 'a', name: 'y' });
+      const tx = await adapter.beginTransaction();
+      expect(await tx.createDataSource('Row').update('a', { note: undefined })).toEqual({
+        id: 'a',
+        name: 'y',
+      });
+      await root.delete('a');
+      const error: unknown = await tx.commit().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(SerializationConflictError);
+
+      await root.create({ id: 'a', name: 'y' });
+      const kept = await adapter.beginTransaction();
+      await kept.createDataSource('Row').update('a', {});
+      await kept.commit();
+      expect(await root.findById('a')).toEqual({ id: 'a', name: 'y' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
 
   it('compares a precondition by its cell text at the call, as the direct path does', async () => {
     for (const valueEncoding of [undefined, 'raw'] as const) {
@@ -181,6 +250,42 @@ describe('bigtable transactional conditionals agree with the commit predicate', 
       ).toEqual({ id: 'a', name: 'changed' });
       await kept.commit();
       expect(await root.findById('a')).toEqual({ id: 'a', name: 'changed' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+});
+
+describe('dynamodb transactional conditional pre-reads', () => {
+  it('read strongly consistently, since their answer decides whether the write is buffered', async () => {
+    const { client } = dynamoFixture();
+    const inputs: unknown[] = [];
+    const recording = {
+      ...client,
+      getItem: (
+        input: Parameters<typeof client.getItem>[0],
+        options?: Parameters<typeof client.getItem>[1],
+      ) => {
+        inputs.push(input);
+        return client.getItem(input, options);
+      },
+    };
+    const adapter = new DynamoAdapter({
+      client: recording,
+      entities: { Row: { partitionKey: 'id' } },
+    });
+    await adapter.connect();
+    try {
+      await adapter.createDataSource('Row').create({ id: 'a', version: 1 });
+      for (const write of ['update', 'delete'] as const) {
+        inputs.length = 0;
+        const tx = await adapter.beginTransaction();
+        const source = tx.createDataSource('Row');
+        if (write === 'update') await source.updateWhere!('a', { version: 1 }, { version: 2 });
+        else await source.deleteWhere!('a', { version: 1 });
+        await tx.rollback();
+        expect(inputs, write).toEqual([expect.objectContaining({ ConsistentRead: true })]);
+      }
     } finally {
       await adapter.disconnect();
     }

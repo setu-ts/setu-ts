@@ -365,7 +365,13 @@ export function createDynamoDataSource(
         ...builder.expressionAttributes(),
       };
       if (transactionBuffer !== undefined) {
-        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        // Strongly consistent: an eventually consistent read can return the
+        // version before an acknowledged write and report a false miss.
+        const existing = await client.getItem({
+          TableName: target.table,
+          Key: identifier,
+          ConsistentRead: true,
+        });
         if (existing.Item === undefined) return null;
         const row = unmarshalDynamoItem(existing.Item);
         if (!matchesWhere(row, where)) return null;
@@ -411,7 +417,11 @@ export function createDynamoDataSource(
         ...builder.expressionAttributes(),
       };
       if (transactionBuffer !== undefined) {
-        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        const existing = await client.getItem({
+          TableName: target.table,
+          Key: identifier,
+          ConsistentRead: true,
+        });
         if (existing.Item === undefined || !matchesWhere(unmarshalDynamoItem(existing.Item), where))
           return false;
         transactionBuffer.add({ Delete: removal }, identifier);

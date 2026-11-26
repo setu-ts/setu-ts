@@ -239,8 +239,27 @@ export class PrismaAdapter implements IDatabaseAdapter {
     return PRISMA_ALL_ISOLATION_LEVELS;
   }
 
-  /** Creates an adapter over the application's generated client and entity key mappings. */
+  /**
+   * Creates an adapter over the application's generated client and entity key mappings.
+   *
+   * @throws {UnsupportedQueryFeatureError} When an entity names a
+   *   `compositeKeyName` without its `keyColumns`: the key would default to
+   *   `['id']`, so a conditional write on the affected-row count would address
+   *   every row sharing that `id` (another tenant's row, for one).
+   */
   constructor(options?: DatabaseAdapterOptions | PrismaAdapterOptions) {
+    const entities = (options as PrismaAdapterOptions | undefined)?.entities ?? {};
+    for (const [entity, key] of Object.entries(entities)) {
+      if (key.compositeKeyName !== undefined && (key.keyColumns?.length ?? 0) === 0) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `Prisma entity '${entity}' names compositeKeyName '${key.compositeKeyName}' without ` +
+            `keyColumns. Set entities.${entity}.keyColumns to the @@id columns in schema ` +
+            `declaration order (for example ['tenantId', 'id']).`,
+        );
+      }
+    }
     this._options = options ?? undefined;
   }
 
@@ -855,13 +874,14 @@ function createPrismaDataSourceInner(
       keyColumns.map((column, index) => [column, values[index]]),
     );
     const args = { where: { ...columnsWhere, AND: [where] } };
-    // Built before the write from the same call-time key, so a caller that
-    // changes its key object while the write is in flight cannot make the
+    // Built from the SAME values the write filter uses, read from the key once:
+    // a caller that changes its key object while the write is in flight, or a
+    // getter that answers differently on a second read, cannot make the
     // read-back address a different row than the one the write matched.
     const readBack =
-      operation === 'updateWhere'
-        ? buildKeyWhere(id, entity, keyColumns, compoundKeyField, operation)
-        : undefined;
+      compoundKeyField === undefined
+        ? { [keyColumns[0]]: values[0] }
+        : { [compoundKeyField]: columnsWhere };
     const run = async (tx: PrismaClient): Promise<Record<string, unknown> | null | boolean> => {
       const model = (tx as unknown as Record<string, ModelDelegate>)[delegateKey]!;
       const { count } =
@@ -875,7 +895,7 @@ function createPrismaDataSourceInner(
       }
       if (operation === 'deleteWhere') return count === 1;
       if (count === 0) return null;
-      return await model.findUnique({ where: readBack! });
+      return await model.findUnique({ where: readBack });
     };
     return scope === 'transaction'
       ? await run(client)

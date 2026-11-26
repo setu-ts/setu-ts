@@ -156,3 +156,46 @@ describe('isDatabaseTimeout', () => {
     expect(isDatabaseTimeout(new DatabaseTimeoutError('x'))).toBe(true);
   });
 });
+
+describe('a driver wait that ignores the signal', () => {
+  it('still ends the call at the bound with a 504, and 0 still waits it out', async () => {
+    const ignoring = (ms: number) => () =>
+      new Promise<string>((resolve) => setTimeout(() => resolve('late'), ms));
+    const started = performance.now();
+    const error: unknown = await requestBound(30, ignoring(500)).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(DatabaseTimeoutError);
+    expect(((error as Error).cause as Error).name).toBe('TimeoutError');
+    expect(performance.now() - started).toBeLessThan(300);
+    expect(await requestBound(0, ignoring(20))).toBe('late');
+  });
+
+  it('bounds the Cosmos readiness read through a throttle retry-after the SDK sleeps through', async () => {
+    const fake = createFakeCosmosClient({ containers: { Row: { partitionKeyPaths: ['/id'] } } });
+    let throttled = false;
+    const client = {
+      ...fake.client,
+      database: (name: string) => {
+        const database = fake.client.database(name);
+        return Object.assign(Object.create(database) as typeof database, {
+          // The SDK's retry sleep: a bare timer that never reads the signal.
+          read: (options?: Parameters<typeof database.read>[0]) =>
+            throttled
+              ? new Promise<Awaited<ReturnType<typeof database.read>>>((resolve) =>
+                  setTimeout(() => resolve(database.read(options)), 1000),
+                )
+              : database.read(options),
+        });
+      },
+    };
+    const adapter = new CosmosAdapter({ database: 'db', client, requestTimeoutMs: 50 });
+    await adapter.connect();
+    try {
+      throttled = true;
+      const started = performance.now();
+      await expect(adapter.isHealthy()).rejects.toBeInstanceOf(DatabaseTimeoutError);
+      expect(performance.now() - started).toBeLessThan(500);
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+});

@@ -34,6 +34,7 @@ import {
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
 import { matchesFilter, matchesWhere, projectFields } from '../../query/query-builder.ts';
 import type {
+  BigtableFilter,
   BigtableReadOptions,
   BigtableReadRow,
   IBigtableTable,
@@ -181,34 +182,6 @@ function writtenFields(data: Readonly<Record<string, unknown>>): Record<string, 
 }
 
 /**
- * Whether a committed row satisfies a write precondition, compared exactly as
- * the commit-time predicate compares it: by the encoded cell text.
- *
- * The predicate built by `preconditionTest` matches the stored cell's bytes,
- * so `-0` and `0` are different values there (tagged `n:-0` against `n:0`) and
- * a raw-mode `'5'` cell equals the number `5`. Comparing decoded values with
- * `!==` instead let a buffered pre-read accept a row the commit then refused,
- * or refuse one the direct path would have written.
- *
- * @param target - The resolved entity target
- * @param row - The committed row, decoded
- * @param where - The precondition
- * @returns `true` when every field encodes to the predicate's cell text
- */
-function matchesEncoded(
-  target: BigtableTarget,
-  row: Readonly<Record<string, unknown>>,
-  where: Readonly<Record<string, string | number>>,
-): boolean {
-  return Object.entries(where).every(
-    ([field, value]) =>
-      row[field] !== undefined &&
-      encodeCellValue(row[field], target.valueEncoding) ===
-        encodeCellValue(value, target.valueEncoding),
-  );
-}
-
-/**
  * Expands an entity key into its named key fields.
  *
  * @param target - The resolved entity target
@@ -289,6 +262,21 @@ export function createBigtableDataSource(
     return rows.length === 0 ? null : decodeRow(target, index, rows[0]);
   };
 
+  /**
+   * Reads a row only if it satisfies a write precondition, through the very
+   * predicate the commit sends (`preconditionTest`), so the call and the
+   * commit cannot disagree: both compare the stored cell's own text. Decoding
+   * the cell and re-encoding it instead turned a foreign `active` cell into
+   * `s:active`, which matched at the call and then failed every commit.
+   */
+  const readMatching = async (
+    rowKey: string,
+    test: readonly BigtableFilter[],
+  ): Promise<Record<string, unknown> | null> => {
+    const rows = await table.readRows({ keys: [rowKey], filter: { chain: test } });
+    return rows.length === 0 ? null : decodeRow(target, index, rows[0]);
+  };
+
   return {
     async findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]> {
       const plan = planBigtableScan(target, query);
@@ -354,7 +342,9 @@ export function createBigtableDataSource(
               `Bigtable entity '${target.entity}' has no row keyed '${rowKey}' to update.`,
             );
           }
-          if (hasCells) buffer.insert(cells, false);
+          // Buffered even with no cell, so the commit still checks that the row
+          // exists: a row deleted meanwhile answers 409, as with cells.
+          buffer.insert(cells, false);
           // Only the fields that produced a CELL are merged. An `undefined`
           // payload field writes nothing, so spreading `data` wholesale made the
           // buffered path answer `undefined` where the direct path — which
@@ -422,8 +412,8 @@ export function createBigtableDataSource(
         if (test === null) return null;
         const cells = buildCells(target, index, data, 'update');
         if (buffer !== undefined) {
-          const committed = await readOne(rowKey);
-          if (committed === null || !matchesEncoded(target, committed, where)) return null;
+          const committed = await readMatching(rowKey, test);
+          if (committed === null) return null;
           buffer.insert(cells, false, test);
           return { ...committed, ...writtenFields(data) };
         }
@@ -447,8 +437,8 @@ export function createBigtableDataSource(
         const test = preconditionTest(target, where);
         if (test === null) return false;
         if (buffer !== undefined) {
-          const committed = await readOne(rowKey);
-          if (committed === null || !matchesEncoded(target, committed, where)) return false;
+          const committed = await readMatching(rowKey, test);
+          if (committed === null) return false;
           buffer.remove(test);
           return true;
         }

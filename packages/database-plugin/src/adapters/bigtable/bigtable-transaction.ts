@@ -285,19 +285,30 @@ export class BigtableTransaction implements IAdapterTransaction, IBigtableWriteB
       mutations.push({ method: 'insert', data: state.cells });
     }
     if (mutations.length === 0) {
-      // A conditional update whose payload produced no cell writes nothing,
-      // but it reported a match at the call, so its predicate is still checked
-      // here. With no mutation to guard, the check is a read through the same
-      // predicate: a row comes back only when it matched. Nothing else of this
-      // row is buffered, so a read gives the same answer as CheckAndMutateRow.
-      if (state.condition !== null) {
-        const rows = await this.#instance
-          .table(state.table)
-          .readRows({ keys: [state.rowKey], filter: { chain: state.condition } });
+      // An update whose payload produced no cell writes nothing, but it
+      // reported the row at the call, so its precondition is still checked
+      // here: a conditional update's predicate, or a plain update's "the row
+      // still exists". With no mutation to guard, the check is a read: a row
+      // comes back only when it matches. Nothing else of this row is
+      // buffered, so a read gives the same answer as CheckAndMutateRow.
+      if (state.condition !== null || state.expects === 'present') {
+        const rows = await this.#instance.table(state.table).readRows({
+          keys: [state.rowKey],
+          ...(state.condition === null ? {} : { filter: { chain: state.condition } }),
+        });
         if (rows.length === 0) {
           throw new SerializationConflictError(
-            'Bigtable transaction lost a write precondition; all writes were rolled back.',
-            { cause: new Error('The predicate no longer matched the row at commit') },
+            state.condition === null
+              ? `Bigtable row '${state.table}'/'${state.rowKey}' no longer exists; the ` +
+                  `transaction's update was not applied.`
+              : 'Bigtable transaction lost a write precondition; all writes were rolled back.',
+            {
+              cause: new Error(
+                state.condition === null
+                  ? 'The row was absent at commit'
+                  : 'The predicate no longer matched the row at commit',
+              ),
+            },
           );
         }
       }

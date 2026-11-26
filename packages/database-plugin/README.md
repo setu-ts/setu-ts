@@ -298,9 +298,15 @@ export async function editArticle(
   a pool that cannot supply one within 2 s answers `503` (`P2028`); inside a unit of work it runs on
   that transaction's client. A `count` above 1 means `keyColumns` do not name the table's key: it
   throws; on the root client its short transaction rolls back, and inside a unit of work the unit of
-  work rolls back when the throw reaches it. A client extension (`$extends` query hook) or
-  middleware written for `update`/`delete` does not see these writes on the count path; hook
-  `updateMany` / `deleteMany` too.
+  work rolls back when the throw reaches it, so a caller that catches a refusal inside a unit of
+  work must rethrow it to roll the unit of work back (returning normally commits what ran). On MySQL
+  the count is matched rows only while the driver keeps `foundRows` on, which is the default in both
+  `mariadb` (Prisma's `@prisma/adapter-mariadb`) and mysql2: keep it on. With it off, an update
+  whose values equal the stored ones counts zero and reads as a miss. An entity naming
+  `compositeKeyName` without `keyColumns` is refused when the adapter is constructed: set
+  `keyColumns` to the `@@id` columns. A client extension (`$extends` query hook) or middleware
+  written for `update`/`delete` does not see these writes on the count path; hook `updateMany` /
+  `deleteMany` too.
 - **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
   committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
   the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos

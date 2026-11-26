@@ -9,7 +9,7 @@ import type { IAdapterTransaction, IDataSource } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
 import { BigtableTransaction } from '../../src/adapters/bigtable/bigtable-transaction.ts';
-import { BigtableTransactionScopeError } from '../../src/errors.ts';
+import { BigtableTransactionScopeError, SerializationConflictError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 import type { BigtableEntityMapping } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 
@@ -305,12 +305,20 @@ describe('BigtableTransaction', () => {
     expect(() => tx.remove()).toThrow(/before any row was claimed/);
   });
 
-  it('sends nothing when the only buffered write carries no cell', async () => {
+  it('writes nothing for a buffered update with no cell, but checks the row still exists', async () => {
     const { store, tx } = setup();
+    store.seed('User', 'u1', { cf: { name: 's:Ada' } });
+    const before = store.snapshot('User', 'u1');
     tx.claim('User', 'u1', 'update');
     tx.insert({}, false);
     await tx.commit();
-    expect(store.snapshot('User', 'u1')).toBeUndefined();
+    expect(store.snapshot('User', 'u1')).toEqual(before);
+
+    const gone = setup();
+    gone.tx.claim('User', 'u1', 'update');
+    gone.tx.insert({}, false);
+    await expect(gone.tx.commit()).rejects.toBeInstanceOf(SerializationConflictError);
+    expect(gone.store.snapshot('User', 'u1')).toBeUndefined();
   });
 
   it('satisfies IAdapterTransaction structurally', () => {

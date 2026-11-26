@@ -313,27 +313,31 @@ All notable changes to this project are documented here. The format follows
   Existing modules are untouched.
 - **BREAKING — `@setu-ts/database-plugin` (M143q, #617).** What an existing application meets, each
   with its way out (`docs/upgrading.md` has the detail). DynamoDB, Cosmos DB and Bigtable calls end
-  at 15 s with 504 (`DatabaseTimeoutError`) where they waited: raise `requestTimeoutMs`, or set `0`.
-  Bigtable client-side metrics are off whenever an endpoint is set (`apiEndpoint`, a private one
-  included, or `BIGTABLE_EMULATOR_HOST`): `clientOptions: { metricsEnabled: true }` keeps them. A
-  NoSQL unit of work whose commit loses a precondition, or a buffered plain update of a row deleted
-  meanwhile, or a DynamoDB commit cancelled with `TransactionConflict`, answers 409
-  (`SerializationConflictError`) where it was a masked 500, so a retry loop keyed on 409 now retries
-  it. A conditional write to a row a NoSQL unit of work already wrote, or any write after one, is
-  refused by name: write the row once per unit of work. `/ready` can report the three stores down:
-  set `readinessEntity` to a table the application's role can read; with no entity mapped the
-  adapter logs one `warn` and has no probe. Each uncached health check adds one read billed by the
-  provider (the probe is cached 5 s). An injected `IBigtableClient` must accept the new
-  `{ column: { cellLimit } }` filter variant and the optional `{ timeoutMs }` argument; every read
-  asks for the latest cell only. Prisma conditional and versioned writes on a connector other than
-  PostgreSQL run `updateMany` and a `findUnique` read-back, or `deleteMany` decided by its count, in
-  a short transaction holding a pool connection (`maxWait` 2 s, so pool exhaustion answers 503,
-  `P2028`: size the pool for it); a lost race on MySQL answers 409/404 instead of success; a
-  `keyColumns` that matches several rows throws (the root client's short transaction rolls back; a
-  unit of work rolls back when the throw reaches it); a client extension or middleware for
-  `update`/`delete` no longer sees them: hook `updateMany`/`deleteMany` too. Drizzle with MySQL
-  writes through the repository (it was a masked 500); its `contains` escapes with `!`; on
-  mysql-proxy a write's read-back runs outside a transaction, with one `warn`. A Prisma `P2010`
+  at 15 s with 504 (`DatabaseTimeoutError`) where they waited, even where the SDK itself waits
+  without observing cancellation (a Cosmos throttle retry-after under sustained 429s): raise
+  `requestTimeoutMs`, or set `0`. Bigtable client-side metrics are off whenever an endpoint is set
+  (`apiEndpoint`, a private one included, or `BIGTABLE_EMULATOR_HOST`):
+  `clientOptions: { metricsEnabled: true }` keeps them. A NoSQL unit of work whose commit loses a
+  precondition, or a buffered plain update of a row deleted meanwhile, or a DynamoDB commit
+  cancelled with `TransactionConflict`, answers 409 (`SerializationConflictError`) where it was a
+  masked 500, so a retry loop keyed on 409 now retries it. A conditional write to a row a NoSQL unit
+  of work already wrote, or any write after one, is refused by name: write the row once per unit of
+  work. `/ready` can report the three stores down: set `readinessEntity` to a table the
+  application's role can read; with no entity mapped the adapter logs one `warn` and has no probe.
+  Each uncached health check adds one read billed by the provider (the probe is cached 5 s). An
+  injected `IBigtableClient` must accept the new `{ column: { cellLimit } }` filter variant and the
+  optional `{ timeoutMs }` argument; every read asks for the latest cell only. Prisma conditional
+  and versioned writes on a connector other than PostgreSQL run `updateMany` and a `findUnique`
+  read-back, or `deleteMany` decided by its count, in a short transaction holding a pool connection
+  (`maxWait` 2 s, so pool exhaustion answers 503, `P2028`: size the pool for it); a lost race on
+  MySQL answers 409/404 instead of success; a `keyColumns` that matches several rows throws (the
+  root client's short transaction rolls back; a unit of work rolls back when the throw reaches it);
+  a Prisma entity naming `compositeKeyName` without `keyColumns` stops the application at boot
+  (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before, it could look as if it worked
+  while its conditional deletes hit another tenant's row sharing the `id`; a client extension or
+  middleware for `update`/`delete` no longer sees them: hook `updateMany`/`deleteMany` too. Drizzle
+  with MySQL writes through the repository (it was a masked 500); its `contains` escapes with `!`;
+  on mysql-proxy a write's read-back runs outside a transaction, with one `warn`. A Prisma `P2010`
   carrying a duplicate key or a write conflict through `query()` answers 409 where it was 500;
   mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed mysql2 connection answers 503. Drizzle on mysql2
   refuses a session whose `sql_mode` includes `NO_BACKSLASH_ESCAPES`: `connect()` throws
@@ -360,6 +364,10 @@ All notable changes to this project are documented here. The format follows
   first call on an emulator skips the SDK's credentials lookup (`universeDomain` defaulted when none
   is configured, V13-240). The agent-run store's `verify()` on DynamoDB or Bigtable carries a cause
   naming why it refuses and which backends serve it (V13-249).
+- **`@setu-ts/database-plugin` (M143q, #617).** `DatabasePlugin` passes the Drizzle arm's `dialect`
+  option to the adapter. Since 0.2.0 the plugin dropped it, so the dialect was always detected from
+  the Drizzle instance: an explicit `dialect` never overrode detection, and a nested-path filter on
+  an instance whose dialect could not be detected was refused.
 - **Provider arms (#614).** Storage writes answered 502 now reject with `BackendOutcomeUnknownError`
   (504); reads remain 503. S3 `get`/`getStream` `NoSuchBucket`, Azure `ContainerNotFound` and a GCS
   `ENOENT` (a local file error) reject instead of signalling an absent object. Azure rejects

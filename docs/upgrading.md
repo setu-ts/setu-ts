@@ -383,7 +383,9 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
 - **A bound on every DynamoDB, Cosmos DB and Bigtable call.** A call still running after 15 s now
   rejects with `DatabaseTimeoutError` (`504`, outcome unknown) where it used to wait. A long scan or
   a large Bigtable read needs more: raise `requestTimeoutMs` on that arm, or set `0` to restore the
-  SDK's own behaviour.
+  SDK's own behaviour. The bound holds even where the SDK waits without observing cancellation:
+  under sustained `429`s a throttled Cosmos call used to wait out the SDK's retry-after (up to 30 s)
+  and now ends at the bound. If those waits should run to completion, raise `requestTimeoutMs`.
 - **Bigtable client-side metrics are off whenever an endpoint is set**: `apiEndpoint` (a real
   private endpoint included), `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST`. To keep
   them, pass `clientOptions: { metricsEnabled: true }`.
@@ -426,8 +428,14 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   `findUnique` read-back; `deleteWhere` and `deleteVersioned` run `deleteMany` and decide from its
   count. A lost race on MySQL now answers `409` / `404` instead of reporting success. A `keyColumns`
   that matches several rows throws, rolling back the root client's short transaction (inside a unit
-  of work, the unit of work rolls back when the throw reaches it): make `keyColumns` name the
-  table's key.
+  of work, the unit of work rolls back when the throw reaches it, so rethrow it if you catch it
+  there): make `keyColumns` name the table's key.
+- **A Prisma entity with `compositeKeyName` and no `keyColumns` stops the application at boot.**
+  Constructing the adapter now throws `UnsupportedQueryFeatureError` (`'composite-key'`) naming the
+  entity and the fix. Before, such an application could look as if it worked, but its key fell back
+  to `['id']`: a conditional delete on MySQL addressed every row sharing that `id` and could delete
+  another tenant's row while answering `true`. Set `entities.<Entity>.keyColumns` to the `@@id`
+  columns in schema declaration order (for example `['tenantId', 'id']`).
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.
