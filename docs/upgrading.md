@@ -438,6 +438,15 @@ UI's Try-it-out calls read; an application route at that path now conflicts with
   columns in schema declaration order (for example `['tenantId', 'id']`). An empty `keyColumns` is
   refused the same way, since a conditional write would then match rows by its predicate alone: name
   the columns, or omit `keyColumns` for an `id` key.
+- **Prisma conditional writes refuse `relationMode = "prisma"` off PostgreSQL.** On every connector
+  except `postgresql` / `postgres`, `updateWhere`, `deleteWhere`, `updateVersioned` and
+  `deleteVersioned` throw `UnsupportedRelationModeError` when the client's schema sets
+  `relationMode = "prisma"`: Prisma's emulation drops the write's predicate (`updateMany` updates
+  the selected ids without it; the emulated cascade of `deleteMany` runs before it is checked), so a
+  lost race reported success. Set `relationMode = "foreignKeys"` (the default) in the datasource
+  block and regenerate the client, or keep the mode and wait for prisma/orm#30758 (fix
+  prisma-engines#5868) and a Setu release that accepts it. If `connect()` logs that it could not
+  read the client's relationMode, nothing is refused: check the schema yourself.
 - **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
   query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
   conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.

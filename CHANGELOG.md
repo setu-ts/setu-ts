@@ -347,6 +347,17 @@ All notable changes to this project are documented here. The format follows
   every `withReplicas()` replica), so start fails when MySQL is unreachable or stalls past 2 s,
   where it used to come up. Turn the mode off for the application's sessions (global `sql_mode`,
   `init_connect`, the application's own `SET SESSION`).
+- **BREAKING — `@setu-ts/database-plugin` (M143q, #617).** Prisma `updateWhere`, `deleteWhere`,
+  `updateVersioned` and `deleteVersioned` on a connector other than PostgreSQL throw
+  `UnsupportedRelationModeError` (new, no HTTP hint, so a masked 500) at the call when the client's
+  schema sets `relationMode = "prisma"`. Prisma's relation emulation drops the predicate there:
+  `updateMany` selects the matching ids and then updates them by id alone, and the emulated cascade
+  of `deleteMany` deletes children before the parent's predicate is checked, so a lost race read as
+  success (on MySQL 8.4, both of two concurrent conditional updates reported a win in 100 of 100
+  trials). The mode is read at `connect()` from the datasource block of the generated client; when
+  it cannot be read, `connect()` logs one `warn` and conditional writes run. Way out: set
+  `relationMode = "foreignKeys"` (the default), or wait for prisma/orm#30758 (fix
+  prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is unaffected.
 
 ### Fixed
 

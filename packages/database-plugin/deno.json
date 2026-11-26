@@ -5,7 +5,8 @@
   "exports": "./src/index.ts",
   "exclude": [
     "test/fixtures/prisma-client-generated",
-    "test/fixtures/prisma-client-generated-mysql"
+    "test/fixtures/prisma-client-generated-mysql",
+    "test/fixtures/prisma-client-generated-mysql-relation-prisma"
   ],
   "test": {
     "permissions": {

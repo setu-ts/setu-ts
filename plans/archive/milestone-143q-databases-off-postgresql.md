@@ -929,6 +929,33 @@ missing sort key.
   the strip on a new pooled connection with the queued-INSERT control and the refusal plus one
   `warn` after.
 
+### 3.18 Prisma `relationMode = "prisma"` refuses the count path (maintainer decision, 2026-11-26)
+
+- **Found in review (PR #617), measured.** On Prisma 7.10.1 with MySQL 8.4,
+  `relationMode = "prisma"` turns `updateMany({ where: { id, version: 1 } })` into a `SELECT` of the
+  ids and `UPDATE … WHERE id IN (…) AND 1=1`: the predicate is dropped, on every model, with or
+  without relations. In the M-1 race both writers reported `count: 1` in 100 of 100 trials, and a
+  forced interleaving overwrote a committed change. `deleteMany` keeps its predicate (100/100), but
+  its emulated cascade deletes children before the parent's predicate is checked. The default
+  relationMode sends one predicated statement (100/100 for both). Upstream: prisma/orm#30758 and
+  prisma-engines#5868, both open. Evidence: the maintainer's notes (`relmode-probe/REPORT.md`).
+- **Decision (option 1).** On a connector that takes the count path (§3.1.4), `connect()` reads the
+  relationMode from the datasource block of the generated client's `_engineConfig.inlineSchema`
+  (reachable from the transaction and `$extends` clients); when it is `"prisma"`, `updateWhere`,
+  `deleteWhere`, `updateVersioned` and `deleteVersioned` refuse at the call with a named error
+  naming the ways out: relationMode `"foreignKeys"`, or Prisma's fix landing and a Setu release that
+  accepts it. A client whose field is absent gets one `warn` at connect and no refusal. The
+  single-statement PostgreSQL path is unaffected. BREAKING entry, upgrade note and README line.
+- **Comparison.** Every compared tool keeps a bulk conditional update to one statement: Rails
+  `update_all` (no callbacks; `delete_all` ignores `:dependent`), Django `update()` ("applied
+  instantly"), TypeORM (`createForeignKeyConstraints: false` documents no emulation). Prisma's
+  relation-mode docs say emulation uses "some additional database queries and logic" and state
+  nothing about atomicity.
+- **Test home.** Unit tests on the fake client (both modes, absent field, transaction and `$extends`
+  clients, PostgreSQL unaffected); a detection pin against the real generated client in both modes;
+  a guarded MySQL negative control (refused by name; with the guard bypassed both writers report
+  success).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** an injected `IBigtableClient` must accept the new filter variant

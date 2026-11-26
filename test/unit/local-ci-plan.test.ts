@@ -305,7 +305,7 @@ describe('local CI plan', () => {
     ]);
     expect(shardCommands(workflow, 'packages')).toEqual([
       {
-        run: 'cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts',
+        run: 'cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts && cd ../prisma-mysql-relation-prisma && pnpm exec prisma generate --config prisma.config.ts',
         env: {},
       },
       { run: 'pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin', env: {} },

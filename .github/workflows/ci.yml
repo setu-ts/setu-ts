@@ -489,7 +489,7 @@ jobs:
         if: matrix.shard == 'packages'
         # The directory change is in the command, not `working-directory`, so the local
         # runner (scripts/lib/local-ci-plan.ts), which copies only `run`, runs it in place.
-        run: cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts
+        run: cd packages/database-plugin/test/fixtures/prisma-mysql && pnpm exec prisma generate --config prisma.config.ts && cd ../prisma-mysql-relation-prisma && pnpm exec prisma generate --config prisma.config.ts
 
       - name: Format check
         if: matrix.shard == 'static'

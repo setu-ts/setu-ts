@@ -12,8 +12,15 @@ import {
 import { mysqlTables } from './mysql-tables.ts';
 import { cleanupAfter, cleanupAll } from './cleanup-all.ts';
 
-/** Each harness owns an explicitly-created database; no existing table is adopted or dropped. */
-export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110) {
+/**
+ * Each harness owns an explicitly-created database; no existing table is adopted or dropped.
+ * `prismaClient` names the generated client folder beside this file the Prisma arm loads.
+ */
+export async function mysqlHarness(
+  type: 'prisma' | 'drizzle',
+  connections = 110,
+  prismaClient = 'prisma-client-generated-mysql',
+) {
   const endpoint = new URL(process.env['MYSQL_URL']!);
   const name = `setu_mysql_${crypto.randomUUID().replaceAll('-', '')}`;
   const options = {
@@ -58,7 +65,7 @@ export async function mysqlHarness(type: 'prisma' | 'drizzle', connections = 110
         entities: { Compound: { primaryKey: ['tenantId', 'id'] } },
       });
     } else {
-      const generated = new URL('./prisma-client-generated-mysql/client.ts', import.meta.url).href;
+      const generated = new URL(`./${prismaClient}/client.ts`, import.meta.url).href;
       const { PrismaClient } = await import(generated);
       const client: unknown = new PrismaClient({
         adapter: new PrismaMariaDb({

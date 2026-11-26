@@ -74,6 +74,7 @@ compat/bun.lockb
 # `npx prisma@7.10.0 generate` from packages/database-plugin/test/fixtures.
 packages/database-plugin/test/fixtures/prisma-client-generated/
 packages/database-plugin/test/fixtures/prisma-client-generated-mysql/
+packages/database-plugin/test/fixtures/prisma-client-generated-mysql-relation-prisma/
 
 # Website build output and Astro generated types (see website/README.md).
 # node_modules/ is already ignored above. Legacy per-directory Deno lockfiles

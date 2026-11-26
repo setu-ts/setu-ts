@@ -2479,6 +2479,20 @@ count path. On the root client the count path runs in
 runs directly. A `count` above 1 throws an `Error` naming the entity and `keyColumns`, which rolls
 the write back.
 
+Since 0.14.0 the count path refuses a client whose schema sets `relationMode = "prisma"`:
+`updateWhere` and `deleteWhere` (so `updateVersioned` and `deleteVersioned`), on the root client, in
+a unit of work and through `createPrismaDataSource`, throw `UnsupportedRelationModeError` (`name`
+`'UnsupportedRelationModeError'`, `relationMode` `'prisma'`, no HTTP hint, so a masked `500`) before
+any I/O. Prisma's emulation drops the predicate there (prisma/orm#30758, fix prisma-engines#5868):
+`updateMany` selects the ids, then updates by id alone, and the emulated cascade of `deleteMany`
+runs before the parent's predicate is checked, so a lost race would read as success. The mode is
+read at `connect()` from the datasource block of the client's `_engineConfig.inlineSchema` (the
+root, transaction and `$extends` clients share it); a block without the setting is Prisma's default,
+`foreignKeys`. When the field is absent or unreadable, `connect()` logs one `warn` and nothing is
+refused. The message names the mode, the hazard and the ways out: `relationMode = "foreignKeys"`, or
+wait for the upstream fix and a Setu release that accepts it. `postgresql` / `postgres` keep the
+single statement and are unaffected.
+
 The memory overlay and D1 batch transaction sources omit both members: the result is unknown until
 commit, so the repository refuses `'conditional-write'`. Prisma, Drizzle and MongoDB transaction
 sources carry them, and since 0.14.0 so do the DynamoDB, Cosmos DB and Bigtable buffers: the
@@ -3212,7 +3226,7 @@ bound:
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
-| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`                                                                                                                                  | classes                              |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`, `UnsupportedRelationModeError`                                                                                                  | classes                              |
 | `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |

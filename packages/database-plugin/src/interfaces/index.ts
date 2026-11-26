@@ -555,6 +555,16 @@ export interface DatabaseAdapterOptions {
    * throws `UnsupportedFilterOperatorError` naming this option as the fix.
    * Pass it explicitly when the adapter cannot detect the connector.
    *
+   * The connector also picks the conditional-write path: `postgresql` /
+   * `postgres` keep one `update` / `delete`; every other connector (and an
+   * undetermined one) takes the `updateMany` / `deleteMany` count path, on
+   * which a client whose datasource block sets `relationMode = "prisma"` has
+   * every `updateWhere` / `deleteWhere` (so `updateVersioned` /
+   * `deleteVersioned`) refused with `UnsupportedRelationModeError`: Prisma's
+   * relation emulation drops the write's predicate there (prisma/orm#30758).
+   * Use `relationMode = "foreignKeys"` (the default). When the mode cannot be
+   * read from the client, `connect()` logs one `warn` and does not refuse.
+   *
    * @since 0.2.0
    */
   readonly provider?: PrismaSqlProvider;
@@ -659,6 +669,10 @@ export interface PrismaAdapterOptions extends DatabaseAdapterOptions {
    * The application-generated Prisma v7 client. Required — a framework package
    * cannot locate an application-selected generated-client output path, and
    * `PrismaAdapter.connect()` rejects without it.
+   *
+   * Its schema's `relationMode` is read at `connect()` (see `provider`): off
+   * PostgreSQL, `"prisma"` refuses conditional writes with
+   * `UnsupportedRelationModeError`.
    *
    * @since 0.2.0
    */

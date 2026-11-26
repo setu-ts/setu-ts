@@ -306,7 +306,13 @@ export async function editArticle(
   `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`, is refused when the
   adapter is constructed: set `keyColumns` to the `@@id` columns (or omit it for an `id` key). A
   client extension (`$extends` query hook) or middleware written for `update`/`delete` does not see
-  these writes on the count path; hook `updateMany` / `deleteMany` too.
+  these writes on the count path; hook `updateMany` / `deleteMany` too. A client whose datasource
+  block sets `relationMode = "prisma"` has every conditional write on the count path refused with
+  `UnsupportedRelationModeError`: Prisma's emulation drops the predicate (`updateMany` updates the
+  selected ids without it, and the emulated cascade of `deleteMany` runs before it is checked), so a
+  lost race would read as success. Use `relationMode = "foreignKeys"` (the default) until
+  prisma/orm#30758 is fixed. The mode is read at `connect()` from the generated client; when it
+  cannot be read, one `warn` is logged and nothing is refused.
 - **Inside a DynamoDB, Cosmos DB or Bigtable unit of work** the predicate is checked against the
   committed row at the call: a miss returns `null` / `false` and buffers nothing. A match buffers
   the write with its precondition carried to the commit (a DynamoDB `ConditionExpression`, a Cosmos
@@ -1940,6 +1946,7 @@ imperative begin/commit.
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
 | `UnsupportedSqlModeError`                 | class     |
+| `UnsupportedRelationModeError`            | class     |
 | `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
