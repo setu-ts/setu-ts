@@ -780,8 +780,11 @@ an application wrote.
   failing broker, emulator or SDK (Service Bus, Pub/Sub, SQS/SNS, RabbitMQ, Redis); a custom-broker
   author whose instance skips header validation; and operator misconfiguration (a bound read from an
   env file as a string, `NaN`, a negative or `Infinity`).
-- **Budgets:** every new bound is finite by default and disabled only by `0`; no remote text, no
-  request body and no credential reaches a response or a log line.
+- **Budgets:** every new bound is finite by default and disabled only by `0`; no remote text and no
+  request body reaches a response; the new log lines carry names, counts and bounds, and an error
+  they carry is rendered through `describeError`, which masks URL userinfo only (a remote message
+  stays on the error object and reaches server-side logs through `cause`, as the first obligation
+  allows; a credential an SDK quotes in another form is not masked).
 
 - **No remote text in a response:** `RemoteHandlerError`'s hint detail is fixed; the remote message
   stays on the object. Test asserts its absence from the body.
