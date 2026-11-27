@@ -773,6 +773,16 @@ agent (§10).
 The diff crosses trust boundaries: error bodies that reach clients, logs, and messages from a broker
 an application wrote.
 
+- **Assets:** the response body a client reads, the application's logs (which an operator ships
+  elsewhere), credentials inside broker and SDK connection strings or URLs, and the process's
+  availability.
+- **Attackers and faults:** a remote RPC responder that returns hostile error text; a hung, slow or
+  failing broker, emulator or SDK (Service Bus, Pub/Sub, SQS/SNS, RabbitMQ, Redis); a custom-broker
+  author whose instance skips header validation; and operator misconfiguration (a bound read from an
+  env file as a string, `NaN`, a negative or `Infinity`).
+- **Budgets:** every new bound is finite by default and disabled only by `0`; no remote text, no
+  request body and no credential reaches a response or a log line.
+
 - **No remote text in a response:** `RemoteHandlerError`'s hint detail is fixed; the remote message
   stays on the object. Test asserts its absence from the body.
 - **No secrets in logs:** the new warn lines carry names, counts and bounds only; an SQS or Service
