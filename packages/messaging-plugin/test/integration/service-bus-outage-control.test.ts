@@ -191,7 +191,9 @@ describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
           restore = 'start';
           await docker('stop');
           const cachePeriodMs = 5000;
-          const deadline = runtime.hrtime() + cachePeriodMs;
+          const probeBoundMs = 2000;
+          const marginMs = 500;
+          const deadline = runtime.hrtime() + cachePeriodMs + probeBoundMs + marginMs;
           let stopped = await status();
           while (stopped !== 503 && runtime.hrtime() < deadline) {
             await wait(50);
