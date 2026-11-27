@@ -9,11 +9,16 @@ describe('InvalidFieldValueError', () => {
       status: 400,
       title: 'Bad Request',
       detail: 'A supplied value does not fit the type of its field.',
+      problem: {
+        type: 'https://setu-ts.dev/errors/invalid-field-value',
+        title: 'Invalid Field Value',
+      },
     });
     expect(error.message).toBe(
       "Entity 'User': the database refused a supplied value for its field type.",
     );
     expect(error.message).not.toContain('\n');
+    expect(httpStatusHintOf(error)).not.toHaveProperty('message');
     expect(error.message).not.toContain('x'.repeat(80));
   });
 });

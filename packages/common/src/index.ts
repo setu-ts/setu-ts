@@ -883,3 +883,5 @@ export {
 } from './errors/agent-runs.ts';
 
 export type { CapabilityServices, UnboundCapability } from './capability-services.ts';
+/** Stable database problem identities. @since 0.14.0 */
+export { ERROR_TYPE_BASE, DATABASE_PROBLEM_TYPES } from './errors/problem-types.ts';

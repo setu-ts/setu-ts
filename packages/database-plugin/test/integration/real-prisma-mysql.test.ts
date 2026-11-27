@@ -3,6 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { EntityKey } from '@setu-ts/common';
 import { mysqlHarness } from '../fixtures/mysql-harness.ts';
+import { mysqlConditionCells } from '../fixtures/mysql-condition-cells.ts';
+
+it(
+  'mariadb serves FK, NOT NULL, length and lock timeout with rollback',
+  { skip: !process.env['MYSQL_URL'] },
+  async () => {
+    await mysqlConditionCells('prisma');
+  },
+);
 
 describe('Prisma real MySQL repository', { skip: !process.env['MYSQL_URL'] }, () => {
   it('conjoins composite keys and tenant predicates on root and transaction clients', async () => {

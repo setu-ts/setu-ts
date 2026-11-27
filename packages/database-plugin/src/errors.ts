@@ -31,7 +31,7 @@
  *
  * @module
  */
-import { withHttpStatusHint } from '@setu-ts/common';
+import { withHttpStatusHint, DATABASE_PROBLEM_TYPES } from '@setu-ts/common';
 import { renderDiagnosticName } from './errors/diagnostic-name.ts';
 
 /** Portable refusal, shared with D1. @since 0.11.0 */
@@ -542,6 +542,9 @@ export class SerializationConflictError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */
   override readonly name = 'SerializationConflictError';
 
+  /** The server's refusal condition. See docs/problem-types.md. @since 0.14.0 */
+  readonly reason: 'write-conflict' | 'lock-timeout';
+
   /**
    * Creates the error. The `message` is the full diagnostic — safe to log,
    * never to serve.
@@ -549,10 +552,15 @@ export class SerializationConflictError extends Error {
    * @param message - The full diagnostic, safe to log
    * @param options - The original driver error, preserved as `cause`
    */
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(
+    message: string,
+    options?: { cause?: unknown; reason?: 'write-conflict' | 'lock-timeout' },
+  ) {
     super(message, options);
+    this.reason = options?.reason ?? 'write-conflict';
     withHttpStatusHint(this, {
       ...CONFLICT,
+      problem: DATABASE_PROBLEM_TYPES[this.reason],
       detail:
         'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
     });
@@ -589,6 +597,9 @@ export class DatabaseUnavailableError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */
   override readonly name = 'DatabaseUnavailableError';
 
+  /** Whether acquisition was refused by saturation or unreachability. See docs/problem-types.md. @since 0.14.0 */
+  readonly reason: 'unreachable' | 'pool-saturated';
+
   /**
    * Creates the error. The `message` is the full diagnostic — safe to log,
    * never to serve.
@@ -596,11 +607,22 @@ export class DatabaseUnavailableError extends Error {
    * @param message - The full diagnostic, safe to log
    * @param options - The original driver error, preserved as `cause`
    */
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(
+    message: string,
+    options?: { cause?: unknown; reason?: 'unreachable' | 'pool-saturated' },
+  ) {
     super(message, options);
+    this.reason = options?.reason ?? 'unreachable';
     withHttpStatusHint(this, {
       ...UNAVAILABLE,
-      detail: 'The database is temporarily unavailable. The request was not applied.',
+      problem:
+        DATABASE_PROBLEM_TYPES[
+          this.reason === 'pool-saturated' ? 'database-pool-saturated' : 'database-unavailable'
+        ],
+      detail:
+        this.reason === 'pool-saturated'
+          ? 'The database connection pool is busy. The request was not applied.'
+          : 'The database is temporarily unavailable. The request was not applied.',
     });
   }
 }
@@ -622,15 +644,26 @@ export class DatabaseTimeoutError extends Error {
   /** Stable error discriminant. */
   override readonly name = 'DatabaseTimeoutError';
 
+  /** The unanswered-call condition. See docs/problem-types.md. @since 0.14.0 */
+  readonly reason: 'bound' | 'connection-lost';
+
   /**
    * @param message - The diagnostic, never served
    * @param options - The scrubbed driver error as cause
    */
-  constructor(message: string, options?: { cause?: unknown }) {
+  constructor(
+    message: string,
+    options?: { cause?: unknown; reason?: 'bound' | 'connection-lost' },
+  ) {
     super(message, options);
+    this.reason = options?.reason ?? 'bound';
     withHttpStatusHint(this, {
       status: 504,
       title: 'Gateway Timeout',
+      problem:
+        DATABASE_PROBLEM_TYPES[
+          this.reason === 'connection-lost' ? 'database-connection-lost' : 'database-timeout'
+        ],
       detail: 'The database did not answer in time.',
     });
   }
@@ -645,6 +678,7 @@ export class DatabaseTimeoutError extends Error {
  * a fixed sentence; the entity, when the caller named it, is on
  * {@linkcode VersionConflictError.entity} and in the logged `message`, and no
  * id or version value appears in either.
+ * Problem identity and client action: docs/problem-types.md.
  *
  * @example
  * ```typescript
@@ -676,6 +710,58 @@ export class VersionConflictError extends Error {
     withHttpStatusHint(this, {
       ...CONFLICT,
       detail: 'The record was changed after it was read. Reload it and try again.',
+      problem: DATABASE_PROBLEM_TYPES['version-conflict'],
+    });
+  }
+}
+
+/**
+ * The write refers to a missing record or removes a referenced record.
+ * The server refused the write; changing the input is required.
+ * Problem identity and client action: docs/problem-types.md.
+ * @since 0.14.0
+ */
+export class ForeignKeyViolationError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'ForeignKeyViolationError';
+  /** The addressed entity, when known. */
+  readonly entity: string | undefined;
+
+  /** @param message - Diagnostic, never served
+   * @param options - Addressed entity and scrubbed driver cause */
+  constructor(message: string, options?: { entity?: string; cause?: unknown }) {
+    super(message, options);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      ...CONFLICT,
+      detail:
+        'The write refers to a record that does not exist, or would remove one that others refer to.',
+      problem: DATABASE_PROBLEM_TYPES['foreign-key-violation'],
+    });
+  }
+}
+
+/**
+ * A required field has no value and the server refused the write.
+ * Problem identity and client action: docs/problem-types.md.
+ * @since 0.14.0
+ */
+export class NotNullViolationError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'NotNullViolationError';
+  /** The addressed entity, when known. */
+  readonly entity: string | undefined;
+
+  /** @param message - Diagnostic, never served
+   * @param options - Addressed entity and scrubbed driver cause */
+  constructor(message: string, options?: { entity?: string; cause?: unknown }) {
+    super(message, options);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      status: 400,
+      title: 'Bad Request',
+      detail: 'A required field has no value.',
+      problem: DATABASE_PROBLEM_TYPES['not-null-violation'],
     });
   }
 }

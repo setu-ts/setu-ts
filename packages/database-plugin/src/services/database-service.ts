@@ -37,11 +37,19 @@ import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
   SerializationConflictError,
+  ForeignKeyViolationError,
+  NotNullViolationError,
   UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
   UnsupportedRawQueryError,
 } from '../errors.ts';
-import { classifyDriverError, isConnectionLostMidCall } from '../errors/classify.ts';
+import {
+  classifyDriverError,
+  isConnectionLostMidCall,
+  isLockTimeout,
+  isPoolAcquireTimeout,
+  hasUnknownCommitResult,
+} from '../errors/classify.ts';
 import { refusalErrorOf } from '../errors/refusal.ts';
 import { scrubDriverError } from '../errors/scrub.ts';
 
@@ -94,19 +102,30 @@ function classifiedOrOriginal(
   error: unknown,
   adapterType: DatabaseAdapterType,
   entity?: string,
+  site?: 'transaction-work',
 ): unknown {
   if (httpStatusHintOf(error) !== undefined) return error;
-  const kind = classifyDriverError(error, adapterType);
+  const kind = classifyDriverError(error, adapterType, site);
   const refused = entity === undefined ? undefined : refusalErrorOf(error, entity);
+  const lost = kind === 'timeout' && isConnectionLostMidCall(error, adapterType, site);
+  const lock = kind === 'conflict' && isLockTimeout(error, adapterType, site);
+  const saturated = kind === 'unavailable' && isPoolAcquireTimeout(error, site);
   error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
+  if (kind === 'foreign-key' || kind === 'not-null') {
+    const ErrorClass = kind === 'foreign-key' ? ForeignKeyViolationError : NotNullViolationError;
+    return new ErrorClass('The database refused a constraint-violating write.', {
+      cause: error,
+      ...(entity === undefined ? {} : { entity }),
+    });
+  }
   if (kind === 'timeout') {
     // M139f V12-50: a connection lost under a statement is also outcome-unknown
     // (504), but no bound fired, so the log must not say one did.
-    if (isConnectionLostMidCall(error, adapterType)) {
+    if (lost) {
       return new DatabaseTimeoutError(
         'The database connection closed before the call completed; the outcome is unknown.',
-        { cause: error },
+        { cause: error, reason: 'connection-lost' },
       );
     }
     return new DatabaseTimeoutError('The database did not answer within the driver call bound.', {
@@ -116,13 +135,13 @@ function classifiedOrOriginal(
   if (kind === 'conflict') {
     return new SerializationConflictError(
       'The database rejected the write because a concurrent transaction changed the same data.',
-      { cause: error },
+      { cause: error, reason: lock ? 'lock-timeout' : 'write-conflict' },
     );
   }
   if (kind === 'unavailable') {
     return new DatabaseUnavailableError(
       'The database or its connection pool is temporarily unavailable.',
-      { cause: error },
+      { cause: error, reason: saturated ? 'pool-saturated' : 'unreachable' },
     );
   }
   return refused ?? error;
@@ -172,23 +191,27 @@ function duplicateKeyError(cause: unknown, entity: string | undefined): Duplicat
 }
 
 /**
- * Classifies a rejection raised by `commit()`, where only a duplicate key is
- * mapped.
+ * Classifies only server verdicts raised by `commit()`.
  *
  * A commit rejection is otherwise rethrown, scrubbed but unclassified, because its outcome can
  * be unknown: a lost acknowledgement may follow a write the server applied,
  * so the retry-safe `409`/`503` contracts are not advertised there. A
- * duplicate key is different. It is the server's own refusal of the write,
+ * duplicate key, conflict, FK or NOT NULL verdict is the server's own refusal,
  * and the backends that detect it at commit (D1's atomic `batch()`, a Cosmos
  * transactional batch, the memory and Bigtable deferred writes) apply nothing
  * when they refuse.
  */
-function duplicateAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+function verdictAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
   // Classify the raw driver error, then scrub it: a commit rejection can
   // carry a Drizzle statement's bound values just as a repository call can.
-  const isDuplicate = classifyDriverError(error, adapterType) === 'duplicate';
-  const scrubbed = scrubDriverError(error);
-  return isDuplicate ? duplicateKeyError(scrubbed, undefined) : scrubbed;
+  const kind = classifyDriverError(error, adapterType);
+  if (
+    !hasUnknownCommitResult(error) &&
+    (kind === 'duplicate' || kind === 'conflict' || kind === 'foreign-key' || kind === 'not-null')
+  ) {
+    return classifiedOrOriginal(error, adapterType);
+  }
+  return scrubDriverError(error);
 }
 
 // ---------------------------------------------------------------------------
@@ -346,15 +369,11 @@ export class DatabaseService implements IDatabaseService {
       // A commit rejection can mean the server applied the write before its
       // acknowledgement was lost. Its outcome is unknown, so never advertise
       // the retry-safe contract reserved for definitely rejected operations.
-      if (committing) throw duplicateAtCommitOrOriginal(error, this._adapterType);
-      // V11-5 (M128): an error the WORK raised is never classified. Every
-      // database call the work makes through a repository was already
-      // classified by `wrapDataSource`, so what reaches here unclassified is
-      // the caller's own failure — an HTTP call refused with ECONNREFUSED
-      // read as "database unavailable" before this. Scrubbing still applies
-      // (a native Drizzle handle's error carries bound values), and returns a
-      // foreign error unchanged, so the caller gets its own error back.
-      throw scrubDriverError(error);
+      if (committing) throw verdictAtCommitOrOriginal(error, this._adapterType);
+      // Native database handles cross this boundary too. Only the thrown
+      // driver's own database-specific signals grant classification; a foreign
+      // call or an application's wrapped cause still reaches its caller as itself.
+      throw classifiedOrOriginal(error, this._adapterType, undefined, 'transaction-work');
     }
   }
 

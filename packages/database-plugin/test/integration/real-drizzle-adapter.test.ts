@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
+import { postgresConditionCells } from '../fixtures/postgres-condition-cells.ts';
 import { drizzle } from 'drizzle-orm/pg-proxy';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle as nodePostgresDrizzle } from 'drizzle-orm/node-postgres';
@@ -822,6 +823,132 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
 
 const livePgUrl = process.env['POSTGRES_URL'];
 const skipLivePg = livePgUrl === undefined;
+
+it(
+  'PostgreSQL native SERIALIZABLE work serves one 200 and one 409; FK, NOT NULL, length and lock timeout are classified',
+  { skip: skipLivePg },
+  async () => {
+    const { varchar } = await import('drizzle-orm/pg-core');
+    const { getDrizzleTransaction } = await import('../../src/index.ts');
+    const { errorHandler } = await import('@setu-ts/exceptions');
+    const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
+    const name = `condition_${crypto.randomUUID().replaceAll('-', '')}`;
+    const parent = `${name}_parent`;
+    const table = pgTable(name, {
+      id: text('id').primaryKey(),
+      parentId: text('parent_id'),
+      label: varchar('label', { length: 8 }).notNull(),
+    });
+    const native = nodePostgresDrizzle(pool);
+    const configured = createDrizzleDatabase(native, (db, work) =>
+      db.transaction(work, { isolationLevel: 'serializable' }),
+    );
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: { drizzleInstance: configured, drizzleTables: { Record: table } },
+        }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }));
+    const bothRead = Promise.withResolvers<void>();
+    let readers = 0;
+    app.router.post('/serial', async (ctx) => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await db.transaction(async (uow) => {
+        const tx = getDrizzleTransaction(uow, configured);
+        await tx.select().from(table).where(eq(table.id, 'lock'));
+        if (++readers === 2) bothRead.resolve();
+        await bothRead.promise;
+        await tx.update(table).set({ label: 'serial' }).where(eq(table.id, 'lock'));
+      });
+      return ctx.response.json({ applied: true });
+    });
+    try {
+      await pool.query(`CREATE TABLE "${parent}" (id text PRIMARY KEY)`);
+      await pool.query(
+        `CREATE TABLE "${name}" (id text PRIMARY KEY, parent_id text REFERENCES "${parent}"(id), label varchar(8) NOT NULL)`,
+      );
+      await app.start();
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await postgresConditionCells(
+        db,
+        pool,
+        `"${name}"`,
+        'Record',
+        { id: 'lock', label: 'before' },
+        { id: 'long', label: '1234567890123456' },
+        () =>
+          db.transaction(async (uow) => {
+            const tx = getDrizzleTransaction(uow, configured);
+            await tx.execute(sql`SET LOCAL lock_timeout = '100ms'`);
+            await tx.insert(table).values({ id: 'rolled', label: 'before' });
+            await tx.update(table).set({ label: 'after' }).where(eq(table.id, 'lock'));
+          }),
+      );
+      const responses = await Promise.all([
+        app.inject({ method: 'POST', url: '/serial' }),
+        app.inject({ method: 'POST', url: '/serial' }),
+      ]);
+      expect(responses.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+      expect(responses.find((r) => r.statusCode === 409)!.json()).toMatchObject({
+        type: 'https://setu-ts.dev/errors/write-conflict',
+      });
+      expect(await db.getRepository('Record').findById('lock')).toMatchObject({ label: 'serial' });
+    } finally {
+      await app.stop();
+      await pool.query(`DROP TABLE IF EXISTS "${name}"`);
+      await pool.query(`DROP TABLE IF EXISTS "${parent}"`);
+      await pool.end();
+    }
+  },
+);
+
+it('node:sqlite FK and NOT NULL anchors reach 409 and 400', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec(
+    'PRAGMA foreign_keys = ON; CREATE TABLE parent (id text PRIMARY KEY); CREATE TABLE child (id text PRIMARY KEY, parent_id text REFERENCES parent(id), label text NOT NULL)',
+  );
+  const adapter = {
+    connect: () => Promise.resolve(),
+    disconnect: () => Promise.resolve(),
+    isReady: () => true,
+    beginTransaction: () => Promise.reject(new Error('unused')),
+    createDataSource: () => {
+      throw new Error('unused');
+    },
+    rawQuery: <T>(query: string): Promise<T[]> => {
+      try {
+        sqlite.exec(query);
+        return Promise.resolve([]);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    },
+  };
+  const db = new DatabaseService(
+    adapter,
+    () => {
+      throw new Error('unused');
+    },
+    'drizzle',
+  );
+  try {
+    for (const [query, status, slug] of [
+      ["INSERT INTO child VALUES ('fk', 'missing', 'ok')", 409, 'foreign-key-violation'],
+      ["INSERT INTO child VALUES ('null', NULL, NULL)", 400, 'not-null-violation'],
+    ] as const) {
+      const error = await db.query(query).catch((value: unknown) => value);
+      expect(httpStatusHintOf(error)?.status).toBe(status);
+      expect(httpStatusHintOf(error)?.problem?.type).toBe(`https://setu-ts.dev/errors/${slug}`);
+    }
+    expect(sqlite.prepare('SELECT count(*) AS count FROM child').get()).toMatchObject({ count: 0 });
+  } finally {
+    sqlite.close();
+  }
+});
 
 /** The one-row table the two live cases drive. Dropped on teardown. */
 const pgAccounts = pgTable('x90f_classified_accounts', {
@@ -1655,8 +1782,8 @@ it(
         const response = await app.inject({ method, url });
         expect(response.statusCode).toBe(400);
         expect(response.json()).toEqual({
-          type: 'about:blank',
-          title: 'Bad Request',
+          type: 'https://setu-ts.dev/errors/invalid-field-value',
+          title: 'Invalid Field Value',
           status: 400,
           detail: 'A supplied value does not fit the type of its field.',
           instance: url,

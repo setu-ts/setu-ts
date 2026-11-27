@@ -11,6 +11,23 @@
  */
 import { describe, expect, it } from 'vitest';
 import { httpStatusHintOf } from '@setu-ts/common';
+import { errorProblems } from '../fixtures/error-problems.ts';
+
+describe('database problem hints', () => {
+  for (const [error, status, title, slug, problemTitle, detail] of errorProblems) {
+    it(`serves ${slug} field by field`, () => {
+      const hint = httpStatusHintOf(error);
+      expect(hint?.status).toBe(status);
+      expect(hint?.title).toBe(title);
+      expect(hint?.detail).toBe(detail);
+      expect(hint?.problem?.type).toBe(`https://setu-ts.dev/errors/${slug}`);
+      expect(hint?.problem?.title).toBe(problemTitle);
+      expect(hint).not.toHaveProperty('message');
+      expect(hint?.problem).not.toHaveProperty('message');
+      expect(JSON.stringify(hint)).not.toContain('private');
+    });
+  }
+});
 
 import {
   BigtableTransactionScopeError,

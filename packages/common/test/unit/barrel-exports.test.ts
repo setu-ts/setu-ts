@@ -15,6 +15,13 @@ it('exports the route middleware scanner', async () => {
 });
 import * as common from '../../src/index.ts';
 
+it('exports the database problem identities and portable errors', () => {
+  expect(common.ERROR_TYPE_BASE).toBe('https://setu-ts.dev/errors');
+  expect(Object.keys(common.DATABASE_PROBLEM_TYPES)).toHaveLength(11);
+  expect(new common.DuplicateKeyError('duplicate')).toBeInstanceOf(Error);
+  expect(new common.InvalidFieldValueError('Account')).toBeInstanceOf(Error);
+});
+
 it('exports the request-bound token constructor', () => {
   expect(common.requestServiceToken('module.counter')).toBe('module.counter');
 });
@@ -537,6 +544,7 @@ describe('@setu-ts/common barrel — duplicate key', () => {
       title: 'Conflict',
       detail:
         'A record with the same unique key already exists. The conflicting write was rejected.',
+      problem: { type: 'https://setu-ts.dev/errors/duplicate-key', title: 'Duplicate Key' },
     });
     // The served detail never quotes the driver's text, which carries the value.
     expect(common.httpStatusHintOf(error)?.detail).not.toContain('ada@example.com');

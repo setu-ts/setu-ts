@@ -25,6 +25,8 @@ import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
   SerializationConflictError,
+  ForeignKeyViolationError,
+  NotNullViolationError,
 } from '../errors.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
@@ -41,10 +43,14 @@ import type { DatabaseAdapterType } from '../interfaces/index.ts';
  * - `'timeout'` — the driver call bound elapsed, or the connection was lost
  *   while a statement was in flight; either way a write's outcome is unknown
  *   and retries must be idempotent (`504`).
+ * - `'foreign-key'` — the write refers to a missing record or removes a
+ *   referenced record; the caller must change the write (`409`).
+ * - `'not-null'` — a required field has no value (`400`).
  *
  * @since 0.5.0
  */
-export type DriverErrorClass = 'conflict' | 'unavailable' | 'duplicate' | 'timeout';
+export type DriverErrorClass =
+  'conflict' | 'unavailable' | 'duplicate' | 'timeout' | 'foreign-key' | 'not-null';
 
 /**
  * The maximum number of `cause` hops the walk performs.
@@ -130,6 +136,10 @@ const UNAVAILABLE_CODES: ReadonlySet<string> = new Set([
   'P2028',
   'ER_SERVER_SHUTDOWN',
   'SQLITE_BUSY',
+  'P2037',
+  '53300',
+  'ER_CON_COUNT_ERROR',
+  'ER_TOO_MANY_USER_CONNECTIONS',
 ]);
 
 /** mysql2's code for a connection lost mid-statement — no verdict, so outcome unknown. */
@@ -192,27 +202,35 @@ const PRISMA_WRITE_CONFLICT = 'P2034';
  * rather than the driver error the contract promises.
  *
  * @param error - The thrown value to classify
+ * @param adapterType - Bound database namespace
+ * @param site - Restrict transaction work to its own database-specific signals
  * @returns The class, or `null` when no signal in the table matches
  * @since 0.5.0
  */
 export function classifyDriverError(
   error: unknown,
   adapterType?: DatabaseAdapterType,
+  site?: 'transaction-work',
 ): DriverErrorClass | null {
   // Errors this milestone already classified are final. Only the TOP-LEVEL
   // value is checked: walking INTO a classified error's cause could
   // re-classify from the driver error it wraps, which is exactly the
   // double-wrap the pass-through exists to prevent.
-  if (
-    error instanceof SerializationConflictError ||
-    error instanceof DatabaseUnavailableError ||
-    error instanceof DatabaseTimeoutError ||
-    error instanceof DuplicateKeyError
-  ) {
+  try {
+    if (
+      error instanceof SerializationConflictError ||
+      error instanceof DatabaseUnavailableError ||
+      error instanceof DatabaseTimeoutError ||
+      error instanceof DuplicateKeyError ||
+      error instanceof ForeignKeyViolationError ||
+      error instanceof NotNullViolationError
+    ) {
+      return null;
+    }
+  } catch {
     return null;
   }
-
-  const candidates = classificationMembers(error);
+  const candidates = membersAtSite(error, site);
 
   // A code or label supplied by a driver is more authoritative than a
   // generic wrapper name or message. Search every cause first: an ORM may
@@ -245,6 +263,8 @@ export function classifyDriverError(
  * adapter-mariadb (`'45009'`, `'45028'`). That code is the backend's
  * classifier, so it joins the chain as one more member, after the error that
  * carries it.
+ * Portable adapter kinds also join without `originalCode`, as socket failures
+ * carry only `ConnectionClosed`, `SocketTimeout` or `DatabaseNotReachable`.
  */
 function classificationMembers(error: unknown): DriverErrorMembers[] {
   const members: DriverErrorMembers[] = [];
@@ -272,7 +292,7 @@ function prismaAdapterCause(node: object): DriverErrorMembers | undefined {
       originalMessage?: unknown;
       kind?: unknown;
     };
-    if (typeof originalCode !== 'string') return undefined;
+    if (typeof originalCode !== 'string' && typeof kind !== 'string') return undefined;
     return {
       code: originalCode,
       name: undefined,
@@ -317,8 +337,8 @@ export function isUnansweredConnect(error: unknown): boolean {
  * @param error - The thrown value
  * @returns `true` when a chain with no string code carries the pool anchor
  */
-export function isPoolAcquireTimeout(error: unknown): boolean {
-  const candidates = causeChainMembers(error);
+export function isPoolAcquireTimeout(error: unknown, site?: 'transaction-work'): boolean {
+  const candidates = membersAtSite(error, site);
   if (candidates.some(({ code }) => typeof code === 'string')) return false;
   return candidates.some(({ message }) => message === PG_POOL_TIMEOUT_ANCHOR);
 }
@@ -339,28 +359,72 @@ export function isPoolAcquireTimeout(error: unknown): boolean {
 export function isConnectionLostMidCall(
   error: unknown,
   adapterType?: DatabaseAdapterType,
+  site?: 'transaction-work',
 ): boolean {
-  if (classifyDriverError(error, adapterType) !== 'timeout') return false;
-  const candidates = classificationMembers(error);
+  if (classifyDriverError(error, adapterType, site) !== 'timeout') return false;
+  const candidates = membersAtSite(error, site);
   const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   return candidates.some(
-    ({ code, namespace, message }) =>
+    ({ code, namespace, message, name, kind }) =>
       code === MYSQL_CONNECTION_LOST ||
+      code === 'P1017' ||
+      kind === 'ConnectionClosed' ||
+      (name === 'TimeoutError' && (code === 'ECONNRESET' || code === 'EPIPE')) ||
       (namespace === 'mysql-adapter' && code === MARIADB_SOCKET_CLOSED) ||
       classifyPgConnectionLoss(message, hasStringCode) === 'timeout',
   );
 }
 
 /** The class 22 codes a supplied value can cause; see {@linkcode isValueTypeRefusal}. */
-const VALUE_REFUSAL_CODES: ReadonlySet<string> = new Set(['22P02', '22003', '22007', '22008']);
+const VALUE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  '22P02',
+  '22001',
+  '22003',
+  '22007',
+  '22008',
+  'ER_DATA_TOO_LONG',
+  'ER_WARN_DATA_OUT_OF_RANGE',
+]);
+
+/** One value-refusal vocabulary for repositories and keyset cursors. */
+function isValueRefusal({ code, name, kind }: DriverErrorMembers): boolean {
+  return (
+    (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
+    name === 'PrismaClientValidationError' ||
+    (name === 'PrismaClientKnownRequestError' &&
+      (code === 'P2000' || code === 'P2020' || code === 'P2007')) ||
+    kind === 'LengthMismatch' ||
+    kind === 'ValueOutOfRange'
+  );
+}
+
+/**
+ * Whether a classified conflict is a lock acquisition timeout.
+ * @param error - Driver rejection
+ * @param adapterType - The driver namespace
+ * @returns Whether a lock timeout refused the write
+ */
+export function isLockTimeout(
+  error: unknown,
+  adapterType?: DatabaseAdapterType,
+  site?: 'transaction-work',
+): boolean {
+  if (classifyDriverError(error, adapterType, site) !== 'conflict') return false;
+  return membersAtSite(error, site).some(
+    ({ code, namespace }) =>
+      code === '55P03' ||
+      code === 'ER_LOCK_WAIT_TIMEOUT' ||
+      (namespace === 'mysql-adapter' && code === '1205'),
+  );
+}
 
 /**
  * Whether the database refused a supplied value as the wrong type for its
- * column: one of the four SQLSTATE class 22 codes a supplied value can cause
- * (`22P02` invalid text representation, `22003` numeric value out of range,
+ * column: a SQLSTATE input refusal (`22001` too long,
+ * `22P02` invalid text representation, `22003` numeric value out of range,
  * `22007` invalid datetime format, `22008` datetime field overflow) anywhere
- * in the cause chain, or Prisma's client-side `PrismaClientValidationError`,
- * which Prisma raises before any SQL for a value its schema does not accept.
+ * in the cause chain, Prisma's input errors and adapter kinds, or mysql2's
+ * length/range codes. Prisma client validation runs before any SQL.
  * Other class 22 codes (division by zero, `22012`) are data faults the server
  * computes, not a refused input (M113g audit round 3, L5).
  *
@@ -373,11 +437,7 @@ const VALUE_REFUSAL_CODES: ReadonlySet<string> = new Set(['22P02', '22003', '220
  * @returns `true` when the backend rejected a value's type
  */
 export function isValueTypeRefusal(error: unknown): boolean {
-  return causeChainMembers(error).some(
-    ({ code, name }) =>
-      (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
-      name === 'PrismaClientValidationError',
-  );
+  return classificationMembers(error).some(isValueRefusal);
 }
 
 /**
@@ -389,7 +449,7 @@ export function isValueTypeRefusal(error: unknown): boolean {
 export function refusedInputOf(
   error: unknown,
 ): { kind: 'unknown-field'; field: string } | { kind: 'value' } | null {
-  const candidates = causeChainMembers(error);
+  const candidates = classificationMembers(error);
   for (const { name, message } of candidates) {
     if (name === 'PrismaClientValidationError' && typeof message === 'string') {
       // Prisma renders the whole invocation, payload values included, above
@@ -400,17 +460,7 @@ export function refusedInputOf(
       if (field !== undefined) return { kind: 'unknown-field', field };
     }
   }
-  return candidates.some(
-    ({ code, name }) =>
-      (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
-      name === 'PrismaClientValidationError' ||
-      // P2007 is the measured code for a value the database refused (Prisma
-      // 7.10.1, malformed uuid). P2023 is not mapped: Prisma also raises it for
-      // stored data it cannot read, which is a server fault, not caller input.
-      (name === 'PrismaClientKnownRequestError' && code === 'P2007'),
-  )
-    ? { kind: 'value' }
-    : null;
+  return candidates.some(isValueRefusal) ? { kind: 'value' } : null;
 }
 
 /**
@@ -500,6 +550,7 @@ function causeChainMembers(error: unknown): DriverErrorMembers[] {
 type DriverErrorMembers = {
   code: unknown;
   name: unknown;
+  names?: readonly string[];
   labels: readonly unknown[] | undefined;
   message: unknown;
   /** Set when the code comes from Prisma's MySQL adapter, whose codes are numeric strings. */
@@ -515,11 +566,16 @@ type DriverErrorMembers = {
  * and messages from wrappers elsewhere in the cause chain.
  */
 function classifyStructured(
-  { code, labels, namespace, kind }: DriverErrorMembers,
+  { code, labels, namespace, kind, name }: DriverErrorMembers,
   adapterType: DatabaseAdapterType | undefined,
 ): DriverErrorClass | null {
   if (kind === 'UniqueConstraintViolation') return 'duplicate';
   if (kind === 'TransactionWriteConflict') return 'conflict';
+  if (kind === 'ForeignKeyConstraintViolation' || kind === 'RestrictViolation')
+    return 'foreign-key';
+  if (kind === 'NullConstraintViolation') return 'not-null';
+  if (kind === 'ConnectionClosed' || kind === 'SocketTimeout') return 'timeout';
+  if (kind === 'DatabaseNotReachable' || kind === 'TooManyConnections') return 'unavailable';
   // 1. Numeric codes have backend-local namespaces: Mongo's `10` means
   //    CannotMutateObject while Bigtable's gRPC `10` means ABORTED. Only read
   //    them when the active adapter identifies the namespace. An unmatched
@@ -528,6 +584,7 @@ function classifyStructured(
     if (adapterType === 'mongodb' && code === MONGO_DUPLICATE_KEY) return 'duplicate';
     if (adapterType === 'mongodb' && code === MONGO_NOT_WRITABLE_PRIMARY) return 'unavailable';
     if (adapterType === 'bigtable') {
+      if (code === 4) return 'timeout';
       if (code === GRPC_ABORTED) return 'conflict';
       if (code === GRPC_UNAVAILABLE) return 'unavailable';
     }
@@ -548,9 +605,27 @@ function classifyStructured(
   if (typeof code === 'string' && namespace === 'mysql-adapter') {
     if (MARIADB_UNAVAILABLE_CODES.has(code)) return 'unavailable';
     if (code === MARIADB_SOCKET_CLOSED) return 'timeout';
+    if (code === '1205') return 'conflict';
   }
   if (typeof code === 'string') {
     if (DUPLICATE_KEY_CODES.has(code)) return 'duplicate';
+    if (
+      code === '23503' ||
+      code === '23001' ||
+      code === 'P2003' ||
+      code === 'ER_NO_REFERENCED_ROW_2' ||
+      code === 'ER_ROW_IS_REFERENCED_2'
+    )
+      return 'foreign-key';
+    if (
+      code === '23502' ||
+      code === 'P2011' ||
+      code === 'ER_BAD_NULL_ERROR' ||
+      code === 'ER_NO_DEFAULT_FOR_FIELD'
+    )
+      return 'not-null';
+    if (code === 'P1017' || code === 'P1008' || code === 'TimeoutError') return 'timeout';
+    if (code === '55P03' || code === 'ER_LOCK_WAIT_TIMEOUT') return 'conflict';
     if (UNAVAILABLE_CODES.has(code)) return 'unavailable';
     if (code === MYSQL_CONNECTION_LOST) return 'timeout';
     if (code === PG_CANNOT_CONNECT_NOW) return 'unavailable';
@@ -560,7 +635,7 @@ function classifyStructured(
     if (code.startsWith('08')) return 'unavailable';
     // A bare net error (e.g. DynamoDB Local refusing a connection) carries
     // errno rather than the SDK's TimeoutError/NetworkingError name.
-    if (isConnectionFaultCode(code)) return 'unavailable';
+    if (isConnectionFaultCode(code)) return name === 'TimeoutError' ? 'timeout' : 'unavailable';
   }
 
   // 3. MongoDB carries its conflict signal as an error LABEL, not a code —
@@ -575,13 +650,16 @@ function classifyStructured(
  * Classifies fallback signals after no structured rule matched the cause chain.
  */
 function classifyFallback(
-  { name, message }: DriverErrorMembers,
+  { names, name, message }: DriverErrorMembers,
   pgTimeout: 'unavailable' | 'timeout' | null,
 ): DriverErrorClass | null {
   // Driver error names, for the signals no code is carried on. These are
   //    `name` STRINGS, deliberately — the classifier sees foreign objects,
   //    not classes it could `instanceof`.
-  if (typeof name === 'string') {
+  for (const candidateName of names ?? (typeof name === 'string' ? [name] : [])) {
+    const name = candidateName;
+    if (name === 'MongoNetworkTimeoutError' || name === 'MongoOperationTimeoutError')
+      return 'timeout';
     if (name === 'TransactionConflictException') return 'conflict'; // DynamoDB
     if (
       name === 'MongoNetworkError' ||
@@ -593,7 +671,8 @@ function classifyFallback(
     }
     // The AWS SDK's own network failures. These names are generic, which is
     // why the code arms run first: a typed signal always wins over a name.
-    if (name === 'TimeoutError' || name === 'NetworkingError') return 'unavailable';
+    if (name === 'TimeoutError') return 'timeout';
+    if (name === 'NetworkingError') return 'unavailable';
   }
 
   // Message anchors — node-postgres connection/query timeouts and SQLite's
@@ -602,6 +681,9 @@ function classifyFallback(
   //    the real engine.
   if (pgTimeout !== null) return pgTimeout;
   if (typeof message === 'string') {
+    const text = message.startsWith('D1_ERROR: ') ? message.slice('D1_ERROR: '.length) : message;
+    if (text.startsWith('FOREIGN KEY constraint failed')) return 'foreign-key';
+    if (text.startsWith('NOT NULL constraint failed:')) return 'not-null';
     if (
       message.startsWith(SQLITE_UNIQUE_ANCHOR) ||
       message.startsWith(`D1_ERROR: ${SQLITE_UNIQUE_ANCHOR}`)
@@ -626,15 +708,88 @@ function safeMembers(value: object): DriverErrorMembers | undefined {
       message?: unknown;
       errorLabels?: unknown;
     };
+    const names = prototypeNames(value);
     return {
       code: candidate.code,
-      name: candidate.name,
+      name: names[0],
+      names,
       message: candidate.message,
       labels: Array.isArray(candidate.errorLabels) ? candidate.errorLabels : undefined,
     };
   } catch {
     return undefined;
   }
+}
+
+/** Read own names only: an inherited lookup must not jump beyond the eight-hop bound. */
+function prototypeNames(value: object): string[] {
+  const names: string[] = [];
+  const visited = new Set<object>();
+  let current: object | null = value;
+  for (let depth = 0; depth < 8 && current !== null; depth++) {
+    if (visited.has(current)) break;
+    visited.add(current);
+    try {
+      const descriptor = Object.getOwnPropertyDescriptor(current, 'name');
+      const name: unknown =
+        descriptor?.get === undefined ? descriptor?.value : descriptor.get.call(value);
+      if (typeof name === 'string') names.push(name);
+      current = Object.getPrototypeOf(current) as object | null;
+    } catch {
+      break;
+    }
+  }
+  return names;
+}
+
+/**
+ * Read only database-specific members at the transaction-work boundary.
+ * Application causes are opaque; a real query-wrapper shape is the one exception.
+ * @param error - Value thrown by transaction work
+ * @param site - Transaction work restricts both the chain and signal vocabulary
+ * @returns The members this interception site may read
+ */
+function membersAtSite(error: unknown, site?: 'transaction-work'): DriverErrorMembers[] {
+  if (site === undefined) return classificationMembers(error);
+  if (typeof error !== 'object' || error === null) return [];
+  let candidate: object = error;
+  try {
+    const wrapper = error as { query?: unknown; params?: unknown; cause?: unknown };
+    if (
+      error instanceof Error &&
+      typeof wrapper.query === 'string' &&
+      Array.isArray(wrapper.params) &&
+      typeof wrapper.cause === 'object' &&
+      wrapper.cause !== null
+    )
+      candidate = wrapper.cause;
+  } catch {
+    return [];
+  }
+  const members = safeMembers(candidate);
+  if (members === undefined) return [];
+  // Do not search an application's cause chain. Prisma's adapter payload belongs
+  // to this member, but it does not grant permission to inspect a deeper cause.
+  const adapter = prismaAdapterCause(candidate);
+  const candidates = adapter === undefined ? [members] : [members, adapter];
+  return candidates.map((own) => {
+    const { code } = own;
+    const excludedCode =
+      typeof code === 'number' || isConnectionFaultCode(code) || code === 'TimeoutError';
+    const names = (own.names ?? []).filter(
+      (name) => name !== 'TimeoutError' && name !== 'NetworkingError',
+    );
+    // Drop only the foreign-call signals: Mongo labels and database-specific
+    // names remain authoritative beside a numeric code or an errno.
+    return { ...own, code: excludedCode ? undefined : code, names, name: names[0] };
+  });
+}
+
+/** Unknown commit acknowledgements cannot be translated as server refusals. */
+export function hasUnknownCommitResult(error: unknown): boolean {
+  return classificationMembers(error).some(({ labels }) =>
+    labels?.includes('UnknownTransactionCommitResult'),
+  );
 }
 
 /**

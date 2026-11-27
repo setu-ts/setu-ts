@@ -104,8 +104,8 @@ describe('a duplicate key answers 409 Conflict', () => {
       });
       expect(response.statusCode).toBe(409);
       expect(response.json()).toEqual({
-        type: 'about:blank',
-        title: 'Conflict',
+        type: 'https://setu-ts.dev/errors/duplicate-key',
+        title: 'Duplicate Key',
         status: 409,
         detail: DETAIL,
         instance: '/accounts',
@@ -187,9 +187,8 @@ describe('a duplicate key answers 409 Conflict', () => {
     }
   });
 
-  it('still masks any OTHER commit rejection, whose outcome may be unknown', async () => {
-    // A retryable class is not advertised at commit: a lost acknowledgement
-    // can follow a write the server applied. Only a duplicate is mapped there.
+  it('maps a commit serialization verdict to write-conflict', async () => {
+    // SQLSTATE 40001 is the server refusing the whole transaction.
     const serialization = Object.assign(new Error('could not serialize access'), {
       code: '40001',
     });
@@ -202,7 +201,8 @@ describe('a duplicate key answers 409 Conflict', () => {
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit' });
-      expect(response.statusCode).toBe(500);
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({ type: 'https://setu-ts.dev/errors/write-conflict' });
     } finally {
       await app.stop();
     }
@@ -226,7 +226,7 @@ describe('a commit rejection is scrubbed before it is rethrown', () => {
     );
   }
 
-  it('drops bound values from an unclassified commit rejection', async () => {
+  it('drops bound values from a classified commit rejection cause', async () => {
     const plugin = DatabasePlugin({
       type: 'custom',
       adapter: stubAdapter(refusingCreate(new Error('not reached')), drizzleCommitFailure()),
@@ -242,7 +242,8 @@ describe('a commit rejection is scrubbed before it is rethrown', () => {
           (rejected: unknown) => rejected,
         );
       expect(error).toBeInstanceOf(Error);
-      const scrubbed = error as Error & { query?: unknown; params?: unknown };
+      expect(error).toHaveProperty('name', 'SerializationConflictError');
+      const scrubbed = (error as Error).cause as Error & { query?: unknown; params?: unknown };
       expect(scrubbed.message).toBe('Failed query: update "accounts" set "email" = $1');
       expect(scrubbed.query).toBe('update "accounts" set "email" = $1');
       expect(scrubbed.params).toBeUndefined();

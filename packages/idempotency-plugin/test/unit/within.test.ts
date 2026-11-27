@@ -13,7 +13,7 @@ import type {
   TimerHandle,
   TransactionalIdempotencyClaim,
 } from '@setu-ts/common';
-import { DuplicateKeyError, withHttpStatusHint } from '@setu-ts/common';
+import { DuplicateKeyError, withHttpStatusHint, DATABASE_PROBLEM_TYPES } from '@setu-ts/common';
 import { IdempotencyWithinError } from '../../src/errors.ts';
 import type { WithinDeps } from '../../src/within/within.ts';
 import { runWithin } from '../../src/within/within.ts';
@@ -77,6 +77,45 @@ function statefulStore(): {
 }
 
 describe('runWithin first call and replay (M109b §3.3)', () => {
+  for (const [slug, expected] of [
+    ['foreign-key-violation', 'store-failed'],
+    ['lock-timeout', 'conflict'],
+    // A DuplicateKeyError from another copy of common fails instanceof; its type still matches.
+    ['duplicate-key', 'conflict'],
+  ] as const) {
+    it(`commit ${slug} gives ${expected}`, async () => {
+      const failure = withHttpStatusHint(new Error('private driver diagnostic'), {
+        status: 409,
+        title: 'Conflict',
+        detail: 'Refused.',
+        problem: DATABASE_PROBLEM_TYPES[slug],
+      });
+      const store = fakeTransactionalStore({
+        run: async (_claim, work) => {
+          await work({});
+          throw failure;
+        },
+      });
+      expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1)))).toBe(
+        expected,
+      );
+    });
+  }
+  it('a status-only 409 is store-failed', async () => {
+    const store = fakeTransactionalStore({
+      run: () =>
+        Promise.reject(
+          withHttpStatusHint(new Error(), {
+            status: 409,
+            title: 'Conflict',
+            detail: 'Foreign conflict.',
+          }),
+        ),
+    });
+    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1)))).toBe(
+      'store-failed',
+    );
+  });
   it('isolates colon-bearing tenant and principal pairs with the recommended scope recipe', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });
@@ -321,7 +360,7 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
     ).toEqual({ value: 1, replayed: true });
   });
 
-  it('answers conflict for a DuplicateKeyError and for a 409 hint', async () => {
+  it('answers conflict for a DuplicateKeyError and a write-conflict hint', async () => {
     const duplicate = fakeTransactionalStore({
       run: () => Promise.reject(new DuplicateKeyError('duplicate')),
     });
@@ -336,6 +375,7 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
             status: 409,
             title: 'Conflict',
             detail: 'retry',
+            problem: DATABASE_PROBLEM_TYPES['write-conflict'],
           }),
         ),
     });

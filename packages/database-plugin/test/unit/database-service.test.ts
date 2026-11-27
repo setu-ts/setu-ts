@@ -472,6 +472,7 @@ describe('M113g driver timeout interception', () => {
       status: 504,
       title: 'Gateway Timeout',
       detail: 'The database did not answer in time.',
+      problem: { type: 'https://setu-ts.dev/errors/database-timeout', title: 'Database Timeout' },
     });
     const cause = (error as Error).cause;
     expect(cause).toBeInstanceOf(Error);
@@ -508,6 +509,13 @@ describe('M113g driver timeout interception', () => {
         status: 504,
         title: 'Gateway Timeout',
         detail: 'The database did not answer in time.',
+        problem:
+          cause === 'Query read timeout'
+            ? { type: 'https://setu-ts.dev/errors/database-timeout', title: 'Database Timeout' }
+            : {
+                type: 'https://setu-ts.dev/errors/database-connection-lost',
+                title: 'Database Connection Lost',
+              },
       });
     });
   }
@@ -579,6 +587,10 @@ describe('M119e refused PostgreSQL input through the service', () => {
           status: 400,
           title: 'Bad Request',
           detail: 'A supplied value does not fit the type of its field.',
+          problem: {
+            type: 'https://setu-ts.dev/errors/invalid-field-value',
+            title: 'Invalid Field Value',
+          },
         });
         expect(JSON.stringify(error)).not.toContain('private-canary');
         expect(((error as Error).cause as Error).message).not.toContain('private-canary');

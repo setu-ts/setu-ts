@@ -121,8 +121,10 @@ describe('M113g caller-safe fault bodies', () => {
         const status = kind === 'timeout' ? 504 : 400;
         expect(response.statusCode).toBe(status);
         const body = response.json<Record<string, unknown>>();
-        expect(body['type']).toBe('about:blank');
-        expect(body['title']).toBe(kind === 'timeout' ? 'Gateway Timeout' : 'Bad Request');
+        expect(body['type']).toBe(
+          kind === 'timeout' ? 'https://setu-ts.dev/errors/database-timeout' : 'about:blank',
+        );
+        expect(body['title']).toBe(kind === 'timeout' ? 'Database Timeout' : 'Bad Request');
         expect(body['status']).toBe(status);
         expect(body['detail']).toBe(
           kind === 'key'
@@ -233,7 +235,7 @@ function commitAcknowledgementLostBigtableClient(): IBigtableClient {
           return {
             readRows: (options) => table.readRows(options),
             row: () => ({
-              conditionalMutate: () => Promise.reject({ code: 10, details: 'ABORTED' }),
+              conditionalMutate: () => Promise.reject({ code: 14, details: 'UNAVAILABLE' }),
             }),
           };
         },
@@ -574,8 +576,8 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
       expect(response.statusCode).toBe(409);
       expect(response.headers.get('content-type')).toContain('application/problem+json');
       expect(response.json()).toEqual({
-        type: 'about:blank',
-        title: 'Conflict',
+        type: 'https://setu-ts.dev/errors/write-conflict',
+        title: 'Write Conflict',
         status: 409,
         detail:
           'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
@@ -645,7 +647,7 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
   it('masks a commit failure whose outcome is unknown', async () => {
     // A lost commit acknowledgement can follow a successful write. Even a
     // recognizable Bigtable gRPC code must not advertise the retry-safe
-    // contract. This uses the built-in Bigtable arm so code 10 reaches the
+    // contract. This uses the built-in Bigtable arm so code 14 reaches the
     // classifier-enabled path rather than the unclassified custom arm.
     const app = createApplication({
       plugins: [
@@ -688,7 +690,7 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
         instance: '/commit-only',
       });
       // The driver `details` text stays out of the body.
-      expect(JSON.stringify(response.json())).not.toContain('ABORTED');
+      expect(JSON.stringify(response.json())).not.toContain('UNAVAILABLE');
     } finally {
       await app.stop();
     }
@@ -708,10 +710,10 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
       expect(response.statusCode).toBe(503);
       expect(response.headers.get('retry-after')).toBe(null);
       expect(response.json()).toEqual({
-        type: 'about:blank',
-        title: 'Service Unavailable',
+        type: 'https://setu-ts.dev/errors/database-pool-saturated',
+        title: 'Database Pool Saturated',
         status: 503,
-        detail: 'The database is temporarily unavailable. The request was not applied.',
+        detail: 'The database connection pool is busy. The request was not applied.',
         instance: '/pool',
       });
       // The driver's own words stay out of the body (they reached the log).

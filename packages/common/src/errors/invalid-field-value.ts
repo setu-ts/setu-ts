@@ -1,8 +1,10 @@
 /** Portable field type refusal. @module */
 import { withHttpStatusHint } from './status-hint.ts';
+import { DATABASE_PROBLEM_TYPES } from './problem-types.ts';
 
 /**
  * The database refused a supplied value for its field type.
+ * Problem identity and client action: docs/problem-types.md.
  * No supplied key, field or value is included in the diagnostic or HTTP detail.
  * @example
  * ```typescript
@@ -24,6 +26,7 @@ export class InvalidFieldValueError extends Error {
     withHttpStatusHint(this, {
       status: 400,
       title: 'Bad Request',
+      problem: DATABASE_PROBLEM_TYPES['invalid-field-value'],
       detail: 'A supplied value does not fit the type of its field.',
     });
   }

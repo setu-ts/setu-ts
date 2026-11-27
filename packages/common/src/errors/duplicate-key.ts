@@ -20,9 +20,11 @@
  * @module
  */
 import { withHttpStatusHint } from './status-hint.ts';
+import { DATABASE_PROBLEM_TYPES } from './problem-types.ts';
 
 /**
  * Thrown when a write would duplicate a primary key or a unique index.
+ * Problem identity and client action: docs/problem-types.md.
  *
  * The write did **not** happen, and repeating it unchanged fails the same
  * way: unlike a serialization conflict this is not a retryable condition.
@@ -70,6 +72,7 @@ export class DuplicateKeyError extends Error {
     withHttpStatusHint(this, {
       status: 409,
       title: 'Conflict',
+      problem: DATABASE_PROBLEM_TYPES['duplicate-key'],
       detail:
         'A record with the same unique key already exists. The conflicting write was rejected.',
     });

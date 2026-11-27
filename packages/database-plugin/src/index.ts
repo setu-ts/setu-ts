@@ -112,6 +112,10 @@ export {
   DatabaseUnavailableError,
   DatabaseTimeoutError,
   EntityNotFoundError,
+  /** Database integrity refusal. See docs/problem-types.md. @since 0.14.0 */
+  ForeignKeyViolationError,
+  /** Required value refusal. See docs/problem-types.md. @since 0.14.0 */
+  NotNullViolationError,
   UnknownPayloadFieldError,
   MissingKeyColumnError,
   TenantColumnUnresolvedError,

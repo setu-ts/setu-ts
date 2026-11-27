@@ -13,6 +13,7 @@
  * @module
  */
 import type { IRequestContext, ProblemTypeInit } from '@setu-ts/common';
+import { ERROR_TYPE_BASE } from '@setu-ts/common';
 
 import { statusTitle } from '../errors/exceptions.ts';
 import { HttpError } from '../errors/http-error.ts';
@@ -22,7 +23,7 @@ import { HttpError } from '../errors/http-error.ts';
  *
  * @since 0.1.0
  */
-export const ERROR_TYPE_BASE = 'https://setu-ts.dev/errors';
+export { ERROR_TYPE_BASE } from '@setu-ts/common';
 
 /**
  * The problem type URI identifying a validation failure.
