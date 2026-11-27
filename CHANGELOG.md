@@ -499,7 +499,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **`@setu-ts/messaging-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/realtime-backplane-plugin`
-  (M143m).** RPC `RequestTimeoutError` now carries `topic`/`timeoutMs` and answers 504;
+  (M143m, #620).** RPC `RequestTimeoutError` now carries `topic`/`timeoutMs` and answers 504;
   `RemoteHandlerError` answers 502 without serving remote text. RabbitMQ publish paths distinguish
   503 refusals from 504 uncertain confirms or expiry, with sources `queue-plugin: rabbitmq enqueue`,
   `queue-plugin: rabbitmq requeue`, `queue-plugin: rabbitmq dead-letter` and
