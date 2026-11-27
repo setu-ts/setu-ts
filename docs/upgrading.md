@@ -81,16 +81,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
   `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` (default one second) of
   latency. This is explicit; there is no automatic after-commit hook.
 - An injected Redis backplane pair must connect and subscribe within `commandTimeoutMs` (15000 ms),
-  or startup fails with `BackendUnavailableError`. Use 0 for an unbounded wait or connect clients
-  before `app.start()`. After successful startup, close UNSUBSCRIBEs then QUITs both injected Redis
-  clients, with disconnect as the fallback if QUIT fails, preserving 0.13.0 normal-close behavior;
-  no normal-close migration is needed. A cancelled, failed or timed-out injected start never
-  disconnects or QUITs them. Close stops waiting, removes the backplane's listeners and watches, and
-  undoes late subscriptions unless a newer open is using the subscriber. The option also bounds
-  built-client commands; injected-client commands after connect retain their own settings. Owned
-  clients are force-disconnected when close cancels SUBSCRIBE, including with a finite bound. A stop
-  during startup ends pending waits and leaves no late service/health registration; a messaging
-  backplane connect overtaken by close rejects.
+  or its backplane open fails with `BackendUnavailableError`. Use 0 for an unbounded wait or connect
+  clients before `app.start()`. Once the backplane's own open installs a connected pair, any close
+  UNSUBSCRIBEs then QUITs both injected Redis clients, with disconnect as the fallback if QUIT
+  fails, preserving 0.13.0 normal-close behavior; no normal-close migration is needed. This includes
+  kernel cleanup after a later plugin fails or `stop()` cancels application start. To retry
+  application `start()`, create a new application with new injected clients. A cancelled, failed or
+  timed-out backplane open never disconnects or QUITs injected clients. It stops waiting, removes
+  its own listeners and watches, and undoes late subscriptions unless a newer open is using the
+  subscriber. The option also bounds built-client commands; injected-client commands after connect
+  retain their own settings. Owned clients are force-disconnected when close cancels SUBSCRIBE,
+  including with a finite bound. A stop during startup ends pending waits and leaves no late
+  service/health registration; a messaging backplane connect overtaken by close rejects.
 
 ### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
 

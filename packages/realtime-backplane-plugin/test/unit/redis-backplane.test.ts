@@ -1833,6 +1833,7 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
     // Only a pending open leaves the injected pair caller-owned. Once the
     // first open installs it, normal close QUITs both connections.
     let inFlight = 0;
+    let sawInstalled = false;
     for (let delay = 0; delay <= 12; delay++) {
       const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
       const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
@@ -1858,6 +1859,9 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       );
       const first = backplane.connect();
       for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      // Publish reaches the fake synchronously only after the pair is installed.
+      void backplane.publish(FRAME).catch(() => {});
+      const installed = client.published.length > 0;
       const closing = backplane.close();
       // A second open on the same pair starts before the first one retires.
       const second = backplane.connect();
@@ -1865,7 +1869,10 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       await second;
       await closing;
       await setImmediate();
-      if (subscriber.quitCount > 0) {
+      if (installed) {
+        sawInstalled = true;
+        expect([client.quitCount, subscriber.quitCount]).toEqual([1, 1]);
+        expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
         await backplane.close();
         break;
       }
@@ -1877,6 +1884,7 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       await backplane.close();
     }
     expect(inFlight).toBeGreaterThan(1);
+    expect(sawInstalled).toBe(true);
   });
 
   it('retires the pair without waiting on a silent host after the ready wait (V12-53)', async () => {

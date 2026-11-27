@@ -97,11 +97,14 @@ Connection errors of both built and injected Redis clients go to the application
 error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
 `ioredis` printing every reconnect failure to `console.error`. Both pairs get reporting watches,
 removed on close. Set `connectionErrorReporter` to route them elsewhere. After a successful open,
-`close()` UNSUBSCRIBEs then QUITs an injected pair too, as it does the built pair; a failed QUIT
-falls back to `disconnect()`. A cancelled, failed or timed-out start never QUITs or disconnects
-injected clients. It stops waiting, removes its own listeners and watches, and undoes a late
-subscription unless a newer open is using that subscriber. The caller's pending `connect()` can keep
-running. Retired owned clients keep a no-op error sink until their `end` event, when it is removed.
+meaning the pair is installed and connected, `close()` UNSUBSCRIBEs then QUITs an injected pair too,
+as it does the built pair; a failed QUIT falls back to `disconnect()`. Any close does so, including
+kernel cleanup after a later plugin fails or `stop()` cancels application start. To retry
+application `start()`, create a new application with new injected clients. A cancelled, failed or
+timed-out backplane open never QUITs or disconnects injected clients. It stops waiting, removes its
+own listeners and watches, and undoes a late subscription unless a newer open is using that
+subscriber. The caller's pending `connect()` can keep running. Retired owned clients keep a no-op
+error sink until their `end` event, when it is removed.
 
 **node-redis.** To use node-redis instead of ioredis, pass two adapters —
 `client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
@@ -204,8 +207,8 @@ On `'redis'`, a frame published while a connection is down is lost:
   sooner.
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
   nowhere reads as a failure. Earlier releases resolved it without sending.
-- **`close()` during an outage still releases both successfully opened connections.** Each step runs
-  even when an earlier one fails, a connection whose QUIT fails is force-closed through
+- **`close()` after a successful backplane open releases both clients, even during an outage.** Each
+  step runs even when an earlier one fails, a connection whose QUIT fails is force-closed through
   `disconnect()` (without it, ioredis reconnects and re-subscribes once an unreachable server
   returns), and the first failure is rethrown afterwards, so a shutdown during an outage is reported
   rather than leaving connections reconnecting behind it. For built clients, against a silent server
@@ -216,11 +219,11 @@ On `'redis'`, a frame published while a connection is down is lost:
   `commandTimeoutMs: 0`.** It cancels the wait and force-disconnects owned connections. An open
   overtaken later, during the publisher-ready wait, bypasses waiting on UNSUBSCRIBE or QUIT only
   with `commandTimeoutMs: 0`. With a finite bound, it awaits unsubscribe and discards the owned
-  connections through QUIT, falling back to disconnect if QUIT fails. An injected pair whose start
-  has not succeeded remains caller-owned and is never disconnected or QUIT; the backplane removes
-  its listeners and watches and undoes a late subscription unless a newer open uses the subscriber.
-  Redis `connect()` then resolves without a backplane connection, as it does for any open a
-  `close()` overtakes.
+  connections through QUIT, falling back to disconnect if QUIT fails. An injected pair whose
+  backplane open has not installed a connected pair remains caller-owned and is never disconnected
+  or QUIT; the backplane removes its listeners and watches and undoes a late subscription unless a
+  newer open uses the subscriber. Redis `connect()` then resolves without a backplane connection, as
+  it does for any open a `close()` overtakes.
 - **A timed-out publish may still be sent.** A publish rejected by the command timeout was already
   written to a connection that looked healthy, and can reach Redis afterward (measured against a
   paused server). A caller that retries a rejected publish may therefore deliver that frame twice;
@@ -230,12 +233,12 @@ On `'redis'`, a frame published while a connection is down is lost:
 Frames are never persisted or replayed. `commandTimeoutMs` is the only ioredis setting reachable
 through this plugin's options. It sets per-command timeouts on the lazy path and, since 0.14.0,
 bounds an injected pair's connect and first subscribe together (default 15000 ms, 0 unbounded).
-Expiry fails start as `BackendUnavailableError`; connect the clients before `app.start()` or use
-`commandTimeoutMs: 0` to retain an unbounded wait. An application that needs different behaviour, or
-injects its own `client`/`subscriber` pair, configures those clients directly. To keep a publish
-refused while the connection is down with an injected pair, create the ioredis publisher with
-`enableOfflineQueue: false`, or a node-redis client with `disableOfflineQueue: true`; a client that
-queues delivers late as described above.
+Expiry fails the backplane open as `BackendUnavailableError`; connect clients before `app.start()`
+or use `commandTimeoutMs: 0` to retain an unbounded wait. An application that needs different
+behaviour, or injects its own `client`/`subscriber` pair, configures those clients directly. To keep
+a publish refused while the connection is down with an injected pair, create the ioredis publisher
+with `enableOfflineQueue: false`, or a node-redis client with `disableOfflineQueue: true`; a client
+that queues delivers late as described above.
 
 On cancellation during application start, the plugin's early close hook ends pending connection
 waits. It registers no backplane service, health indicator or diagnostics source afterwards. The

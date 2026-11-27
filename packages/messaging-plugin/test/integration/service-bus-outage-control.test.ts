@@ -36,6 +36,15 @@ async function cleanup(
     throw new AggregateError(errors, 'Service Bus outage cleanup failed');
 }
 
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
+}
+
+function entityNotFound(error: unknown): boolean {
+  // Administration uses RestError; AMQP operations use translated ServiceBusError codes.
+  return hasCode(error, 'MessageEntityNotFoundError') || hasCode(error, 'MessagingEntityNotFound');
+}
+
 describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
   it.each(['paused publish', 'consume-only readiness'] as const)(
     'proves %s and restores the emulator',
@@ -70,12 +79,65 @@ describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
       let created = false;
       let restore: 'unpause' | 'start' | undefined;
       let originalFailed = false;
+      let missingEntity: { error: unknown } | undefined;
+      const recreateEntities = async (): Promise<void> => {
+        const deadline = runtime.hrtime() + 60000;
+        let lastError: unknown;
+        const timedOut = (): Error =>
+          new Error('Service Bus emulator entities were not recreated within 60000 ms', {
+            cause: lastError,
+          });
+        const create = async (
+          step: (abortSignal: AbortSignal) => Promise<unknown>,
+        ): Promise<void> => {
+          const remainingMs = deadline - runtime.hrtime();
+          if (remainingMs <= 0) throw timedOut();
+          // Bound the caller too: an SDK retry sleep may ignore the abort signal.
+          await withDeadline(
+            async (abortSignal) => {
+              if (abortSignal.aborted || runtime.hrtime() >= deadline) throw timedOut();
+              try {
+                await step(abortSignal);
+              } catch (error) {
+                if (hasCode(error, 'MessageEntityAlreadyExistsError')) return;
+                if (entityNotFound(error)) missingEntity = { error };
+                // Keep the last driver failure, not the deadline's abort rejection.
+                if (!abortSignal.aborted) lastError = error;
+                throw error;
+              }
+            },
+            {
+              timeoutMs: remainingMs,
+              onTimeout: timedOut,
+              timing: resolveProbeTiming(runtime),
+            },
+          );
+        };
+        while (runtime.hrtime() < deadline) {
+          try {
+            await create((abortSignal) => admin.createTopic(topic, { abortSignal }));
+            await create((abortSignal) =>
+              admin.createSubscription(topic, subscription, { abortSignal }),
+            );
+            missingEntity = undefined;
+            return;
+          } catch {
+            // Every failure retries the whole pair, including not-found during warmup.
+          }
+          const remainingMs = deadline - runtime.hrtime();
+          if (remainingMs > 0) await wait(Math.min(250, remainingMs));
+        }
+        throw timedOut();
+      };
       const status = async (): Promise<number> => {
         const response = await app.fetch(new Request('http://localhost/ready'));
         await response.body?.cancel();
         return response.status;
       };
       const waitForEmulator = async (): Promise<void> => {
+        // A missing dynamic entity cannot recover by waiting; finally must not
+        // spend another recovery window probing it after the proof found it absent.
+        if (missingEntity !== undefined) throw missingEntity.error;
         const deadline = runtime.hrtime() + 60000;
         let lastError: unknown;
         while (runtime.hrtime() < deadline) {
@@ -91,6 +153,10 @@ describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
             });
             return;
           } catch (error) {
+            if (entityNotFound(error)) {
+              missingEntity = { error };
+              throw error;
+            }
             lastError = error;
           } finally {
             await cleanup([() => receiver.close(), () => client.close()], true);
@@ -134,8 +200,10 @@ describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
           expect(stopped).toBe(503);
           expect(runtime.hrtime()).toBeLessThanOrEqual(deadline);
           await docker('start');
-          await waitForEmulator();
           restore = undefined;
+          // Restart re-seeds the emulator and discards these dynamic entities.
+          await recreateEntities();
+          await waitForEmulator();
           const recoveredBy = runtime.hrtime() + 15000;
           let recovered = await status();
           while (recovered !== 200 && runtime.hrtime() < recoveredBy) {
@@ -148,9 +216,11 @@ describe.skipIf(!container)('Service Bus controlled emulator outages', () => {
         originalFailed = true;
         throw error;
       } finally {
+        const restoreAction = restore;
         await cleanup(
           [
-            ...(restore === undefined ? [] : [() => docker(restore!)]),
+            ...(restoreAction === undefined ? [] : [() => docker(restoreAction)]),
+            ...(restoreAction === 'start' ? [recreateEntities] : []),
             ...(created ? [waitForEmulator] : []),
             () => app.stop(),
             ...(created ? [() => admin.deleteTopic(topic)] : []),

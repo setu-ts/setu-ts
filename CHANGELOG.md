@@ -401,13 +401,15 @@ All notable changes to this project are documented here. The format follows
   sweeps follow up with a macrotask yield between batches, warning once on saturation and logging
   catch-up; any failure stops the chain. Backlogs drain back-to-back with one claim and one mark per
   delivered row; there is no chain switch or tuning option. Call `dispatch()` after commit to avoid
-  interval latency. Injected Redis backplane startup now shares the 15000 ms command bound and close
-  cancels pending starts before late registration. After successful Redis startup, close
-  UNSUBSCRIBEs then QUITs both injected clients, with disconnect on failed QUIT, preserving 0.13.0
-  normal-close behavior. Cancelled, failed or timed-out injected startup never disconnects or QUITs
-  them; the backplane removes its listeners and watches and undoes late subscriptions unless a newer
-  open is using the subscriber. Owned clients now force-disconnect when close cancels an in-flight
-  SUBSCRIBE even with a finite bound. See the
+  interval latency. An injected Redis backplane open now shares the 15000 ms command bound and close
+  cancels pending opens before late registration. Once the backplane's own open installs a connected
+  pair, any close UNSUBSCRIBEs then QUITs both injected clients, with disconnect on failed QUIT,
+  preserving 0.13.0 normal-close behavior. This includes kernel cleanup after a later plugin fails
+  or `stop()` cancels application start; retry startup in a new application with new injected
+  clients. A cancelled, failed or timed-out backplane open never disconnects or QUITs injected
+  clients; it removes its listeners and watches and undoes late subscriptions unless a newer open is
+  using the subscriber. Owned clients now force-disconnect when close cancels an in-flight SUBSCRIBE
+  even with a finite bound. See the
   [upgrade guide](docs/upgrading.md#broker-and-queue-bounds-health-and-delivery-setu-tsmessaging-plugin-setu-tsqueue-plugin-setu-tsrealtime-backplane-plugin).
 - **`@setu-ts/database-plugin` (M143q; V13-230, V13-242, V13-243, V13-244, V13-251, V13-231,
   V13-239, V13-240, V13-249, #617).** On Prisma with MySQL a conditional or versioned write that

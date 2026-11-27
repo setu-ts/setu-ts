@@ -5532,16 +5532,18 @@ Since 0.14.0 its close hook is registered before connecting. Cancelling applicat
 pending transport waits and registers no service, health indicator or diagnostics source afterwards.
 An injected Redis pair's connect and first subscribe share `commandTimeoutMs` (default 15000 ms, 0
 unbounded); expiry fails as `BackendUnavailableError` with source
-`realtime-backplane-plugin: redis transport`. Close cancels that wait even with a finite bound.
-After a successful Redis start, close UNSUBSCRIBEs then QUITs both injected clients, with disconnect
-as the fallback if QUIT fails, as for built clients and in 0.13.0. Failed, cancelled or timed-out
-injected startup never disconnects or QUITs those clients. Close stops waiting, removes the
-backplane's listeners and watches, and undoes late subscriptions unless a newer open is using the
-subscriber. `commandTimeoutMs` bounds built-client commands and an injected pair's whole startup
-(default 15000 ms, 0 disables); injected commands after connect retain their own settings. Owned
-clients are still force-disconnected when close cancels an in-flight SUBSCRIBE, including with a
-finite bound. Closing a messaging backplane during connect rejects the connect promise and cleans up
-a late subscription; the broker still owns its subscribe timeout.
+`realtime-backplane-plugin: redis transport`. Close cancels that wait even with a finite bound. Once
+the Redis backplane's own open installs its connected pair, any close UNSUBSCRIBEs then QUITs both
+injected clients, with disconnect as the fallback if QUIT fails, as for built clients and in 0.13.0.
+This includes kernel cleanup after a later plugin fails or `stop()` cancels application start; retry
+startup in a new application with new injected clients. A failed, cancelled or timed-out backplane
+open never disconnects or QUITs injected clients. It stops waiting, removes the backplane's
+listeners and watches, and undoes late subscriptions unless a newer open is using the subscriber.
+`commandTimeoutMs` bounds built-client commands and an injected pair's whole backplane open (default
+15000 ms, 0 disables); injected commands after connect retain their own settings. Owned clients are
+still force-disconnected when close cancels an in-flight SUBSCRIBE, including with a finite bound.
+Closing a messaging backplane during connect rejects the connect promise and cleans up a late
+subscription; the broker still owns its subscribe timeout.
 
 ### Options
 

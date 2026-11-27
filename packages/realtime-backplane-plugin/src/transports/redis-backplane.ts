@@ -563,9 +563,14 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Leaves the topic and QUITs both successfully opened clients, with disconnect
-   * as the fallback on failure. Failed or cancelled injected opens leave the
-   * clients caller-owned. Detaches all watches after normal close cleanup.
+   * Leaves the topic and QUITs both clients after the backplane's own open
+   * succeeds, with disconnect as the fallback on failure. A failed, cancelled
+   * or timed-out backplane open leaves injected clients alone.
+   *
+   * Once the backplane open succeeds, every close QUITs the injected pair,
+   * including kernel cleanup after a later plugin's registration fails or
+   * stop() cancels application startup. Retrying application startup requires
+   * new injected clients. Detaches all watches after normal close cleanup.
    *
    * @throws The first failure among applicable UNSUBSCRIBE, QUIT and disconnect
    * steps, after all cleanup has been attempted
