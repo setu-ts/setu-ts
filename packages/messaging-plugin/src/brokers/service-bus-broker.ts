@@ -1533,7 +1533,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
           await deleteCreated();
           if (!taskCurrent()) return;
           report(error);
-          if (!isServiceBusOutage(error) && !(creating && isTransientManagementFailure(error))) {
+          // An administration answer (a RestError) is judged only by the
+          // administration policy, so a 403 marked retryable still stops here.
+          const administration =
+            creating && (error as { name?: unknown } | null)?.name === 'RestError';
+          const retry = administration
+            ? isTransientManagementFailure(error)
+            : isServiceBusOutage(error) || (creating && isTransientManagementFailure(error));
+          if (!retry) {
             stop(error);
             return;
           }

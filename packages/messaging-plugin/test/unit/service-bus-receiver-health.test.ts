@@ -127,6 +127,8 @@ describe('Service Bus receiver health', () => {
       closing = broker.disconnect();
       await flushCloud();
       expect(inbox!.close).toHaveBeenCalledOnce();
+      // Still waiting on its retry delay, so the settle below is the wait ending.
+      expect(nack).not.toHaveBeenCalled();
       await clock.advance(100);
       await delivery;
       expect(nack).toHaveBeenCalledOnce();

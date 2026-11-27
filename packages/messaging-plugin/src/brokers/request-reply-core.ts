@@ -31,6 +31,9 @@ import { RemoteHandlerError, RequestTimeoutError } from '../errors.ts';
 /** Default reply wait budget when {@link RequestOptions.timeoutMs} is omitted. */
 const DEFAULT_TIMEOUT_MS = 5000;
 
+/** Opens a request may try before refusing, when each inbox it gets is retired first. */
+const MAX_INBOX_ACQUIRE_ATTEMPTS = 3;
+
 /**
  * Prefix separating the RPC channel from plain pub/sub on the same topic.
  *
@@ -163,6 +166,7 @@ export class RequestReplyCore {
    * @returns The reply payload
    * @throws {RequestTimeoutError} When no reply arrives within `timeoutMs`
    * @throws {RemoteHandlerError} When the responder throws
+   * @throws {Error} When three inboxes in a row are retired before the request can be sent
    * @since 0.1.0
    */
   async request<TRes>(
@@ -171,14 +175,23 @@ export class RequestReplyCore {
     options?: RequestOptions,
     headers?: Readonly<Record<string, string>>,
   ): Promise<TRes> {
-    const { inbox, generation } = await this.#ensureInboxWithGeneration();
-
-    // Check if we're still in an active generation after inbox initialization.
-    // If `close()` was called while we were waiting, the generation will have
-    // advanced and we must reject immediately.
-    if (generation !== this.#generation) {
-      throw new Error('Broker disconnected before a reply was received');
+    let acquired = await this.#ensureInboxWithGeneration();
+    // An inbox retired while its open was pending can still resolve; publishing
+    // with its address may lose the reply. Reacquire, a bounded
+    // number of times, until the inbox this request uses is the current one.
+    for (let attempt = 1; ; attempt++) {
+      // If `close()` was called while we were waiting, the generation will
+      // have advanced and we must reject immediately.
+      if (acquired.generation !== this.#generation) {
+        throw new Error('Broker disconnected before a reply was received');
+      }
+      if (acquired.current()) break;
+      if (attempt >= MAX_INBOX_ACQUIRE_ATTEMPTS) {
+        throw new Error('Reply inbox was retired before the request could be sent');
+      }
+      acquired = await this.#ensureInboxWithGeneration();
     }
+    const { inbox } = acquired;
 
     const correlationId = this.#deps.uuid();
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -194,6 +207,10 @@ export class RequestReplyCore {
         timer,
       });
     });
+    // The reply deadline can fire while publish is still pending, before the
+    // caller holds `reply`; observe it now so that rejection is never unhandled.
+    // The caller still receives it through the returned promise.
+    reply.catch(() => undefined);
 
     const envelope: RequestEnvelope = {
       kind: 'rr-request',
@@ -339,7 +356,11 @@ export class RequestReplyCore {
    * We capture the generation BEFORE awaiting the inbox open, so that a concurrent close()
    * will be detected when the inbox finally resolves.
    */
-  #ensureInboxWithGeneration(): Promise<{ inbox: ReplyInbox; generation: number }> {
+  #ensureInboxWithGeneration(): Promise<{
+    inbox: ReplyInbox;
+    generation: number;
+    current: () => boolean;
+  }> {
     // Capture generation BEFORE awaiting the inbox open.
     const generationAtStart = this.#generation;
 
@@ -357,7 +378,12 @@ export class RequestReplyCore {
       });
       this.#inboxInit = init;
     }
-    return this.#inboxInit.then((inbox) => ({ inbox, generation: generationAtStart }));
+    const init = this.#inboxInit;
+    return init.then((inbox) => ({
+      inbox,
+      generation: generationAtStart,
+      current: () => this.#inboxInit === init,
+    }));
   }
 
   /** Resolves or rejects the pending request a reply correlates to. */

@@ -514,11 +514,12 @@ All notable changes to this project are documented here. The format follows
   lifetime can expire it: a missing-entity receive report or a send confirming the shared reply
   topic is missing invalidates the local cached inbox, and the next request recreates it once that
   topic exists (a missing topic fails with `ReplyInboxUnavailableError`; the broker creates no
-  topics); requests in flight may time out. Fan-out receivers also recreate their same per-instance
-  subscription after a missing-entity receive report, resuming after an outage longer than the idle
-  lifetime. Recovery retries every second through outages and transient administration failures
-  (each create bounded at 5 s); the first failure logs one warning, and any other failure, such as
-  401/403/404, stops recovery for that subscription. Copies published during the
+  topics); requests in flight may time out. A request whose inbox is retired while it opens waits
+  for the next one, and is refused after three in a row. Fan-out receivers also recreate their same
+  per-instance subscription after a missing-entity receive report, resuming after an outage longer
+  than the idle lifetime. Recovery retries every second through outages and transient administration
+  failures (each create bounded at 5 s); the first failure logs one warning, and any other failure,
+  such as 401/403/404, stops recovery for that subscription. Copies published during the
   missing-subscription gap are lost, without replay. Transient receive failures retain inboxes and
   fan-out receivers; durable competing subscriptions are not recreated. Service Bus refusal codes
   take precedence over `retryable` and stay unchanged without marking it down. An aggregate stays a

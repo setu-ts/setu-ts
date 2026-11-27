@@ -133,6 +133,26 @@ describe('Service Bus fan-out recovery retries', () => {
     },
   );
 
+  it('stops recovery on an administration 403 even when the error is marked retryable', async () => {
+    const h = harness();
+    const error = Object.assign(managementFailure(403), { retryable: true });
+    expect(error).toMatchObject({ name: 'RestError', statusCode: 403, retryable: true });
+    await h.broker.connect();
+    try {
+      await h.broker.subscribe('orders', vi.fn(), { fanOut: true });
+      vi.mocked(h.transport.createSubscription).mockRejectedValueOnce(error);
+      h.fail();
+      await flushCloud();
+      expect(h.clock.timerCount()).toBe(0);
+      expect(h.warn).toHaveBeenCalledOnce();
+      await h.clock.advance(5000);
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(2);
+    } finally {
+      await h.broker.disconnect();
+      expect(h.clock.timerCount()).toBe(0);
+    }
+  });
+
   it.each(['REQUEST_SEND_ERROR', 'ECONNABORTED', 'ENETDOWN', 'ERR_TLS_CERT_ALTNAME_INVALID'])(
     'retries an administration request that got no answer (RestError %s, no status)',
     async (code) => {

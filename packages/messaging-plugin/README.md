@@ -826,9 +826,10 @@ longer than that idle lifetime can expire it. A receive report of `MessagingEnti
 send confirming that the shared reply topic is missing, invalidates the local cached inbox. The next
 request recreates it once the shared reply topic exists; when the topic itself is missing the
 request fails with `ReplyInboxUnavailableError`, because the broker creates no topics. Requests
-already in flight may still time out. Transient receive errors retain the inbox, and clean shutdown
-still deletes it. `MessagingNotSupportedError` is also still exported but **deprecated** — it
-existed for the Kafka broker's former refusal and no broker throws it now.
+already in flight may still time out. A request whose inbox is retired while it opens waits for the
+next one, and is refused after three in a row. Transient receive errors retain the inbox, and clean
+shutdown still deletes it. `MessagingNotSupportedError` is also still exported but **deprecated** —
+it existed for the Kafka broker's former refusal and no broker throws it now.
 
 ## Writing a custom broker
 

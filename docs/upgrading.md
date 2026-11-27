@@ -37,8 +37,9 @@ cutting a release renames that heading to the version and is a rename, not a rec
   receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic is
   missing, invalidates the local cached inbox; the next request recreates it once the shared reply
   topic exists (a missing topic fails the request with `ReplyInboxUnavailableError`; the broker
-  creates no topics). Requests already in flight may still time out. Transient receive errors retain
-  the inbox; clean shutdown deletes it. No option changes are needed.
+  creates no topics). Requests already in flight may still time out. A request whose inbox is
+  retired while it opens waits for the next one, and is refused after three in a row. Transient
+  receive errors retain the inbox; clean shutdown deletes it. No option changes are needed.
 - Service Bus evidence now includes real publish outcomes (including timeouts), receive outages only
   from source `receive`, and delivered application and reply-inbox messages. Consume-only services
   become not-ready on receive transport outages, recovering on a successful publish, delivery or
