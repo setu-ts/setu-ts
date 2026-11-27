@@ -180,11 +180,11 @@ describe('Injected Redis pair connect', () => {
         'frames',
       );
       const result = backplane.connect().catch((error: unknown) => error);
-      await vi.advanceTimersByTimeAsync((timeout ?? 15000) - 1);
       let settled = false;
       void result.then(() => {
         settled = true;
       });
+      await vi.advanceTimersByTimeAsync((timeout ?? 15000) - 1);
       expect(settled).toBe(false);
       for (const connection of [publisher, subscriber]) {
         expect(connection.listenerCount('error')).toBe(1);
