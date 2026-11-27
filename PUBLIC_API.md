@@ -17226,18 +17226,19 @@ metadata values are ASCII by spec.
   is reported as the instance's failure and rejects as `Unavailable`; a unary call is first sent
   once more on a fresh pick, within what is left of its deadline (its own or the configured one).
   The retry setup wait races caller abort and the remaining deadline; if stopped before sending, the
-  original refusal remains the answer and that unsent attempt records no outcome. Only the refusal
-  itself is resent, never an error a server sent whose message names the code. `GrpcClientOptions`
-  (`common`): `basePath` (`''`), `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default
-  `'connect'`), `httpVersion` (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs`
-  (1–2147483647, default `5000`); per-call options override `GrpcPluginOptions.clients[target]`,
-  which overrides the defaults. The transport is `@connectrpc/connect-node`, an optional peer loaded
-  on the first call. On Cloudflare Workers the client refuses with a `TypeError` at
-  `grpcClient()`/`client()` (`workerd` has no `node:http2` client; HTTP/1.1 calls hang). On Deno it
-  is not safe yet: Deno's Node-style HTTP clients can crash the process natively when their peer
-  goes away (a Deno defect, reproduced without Setu).
-  `grpcClientProvider(provide, definition, target, options?)` returns the same client as a
-  `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
+  original refusal remains the answer and that unsent attempt records no outcome. A unary
+  `Unavailable` whose metadata carries exactly `x-setu-unprocessed: shutdown` (a server draining
+  before its pipeline ran) is resent once in the same way. Only these two are resent, never an error
+  a server sent whose message names the code. `GrpcClientOptions` (`common`): `basePath` (`''`),
+  `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` |
+  `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs` (1–2147483647, default `5000`);
+  per-call options override `GrpcPluginOptions.clients[target]`, which overrides the defaults. The
+  transport is `@connectrpc/connect-node`, an optional peer loaded on the first call. On Cloudflare
+  Workers the client refuses with a `TypeError` at `grpcClient()`/`client()` (`workerd` has no
+  `node:http2` client; HTTP/1.1 calls hang). On Deno it is not safe yet: Deno's Node-style HTTP
+  clients can crash the process natively when their peer goes away (a Deno defect, reproduced
+  without Setu). `grpcClientProvider(provide, definition, target, options?)` returns the same client
+  as a `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
   `@Module({ providers })`, so a decorated class takes it with `@Inject(provide)`; its options and
   target are checked when it is called, and the container's client is the one `grpcClient` returns
   for the same arguments.
