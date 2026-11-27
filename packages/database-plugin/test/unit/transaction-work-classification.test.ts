@@ -360,3 +360,40 @@ describe('transaction work classification', () => {
     });
   }
 });
+
+describe('a tagged driver error that the scrub replaces keeps its status', () => {
+  const tagged = (): Error =>
+    withHttpStatusHint(
+      Object.assign(new Error('invalid input syntax for type integer: "tagged-secret"'), {
+        code: '22P02',
+      }),
+      { status: 400, title: 'Bad Request', detail: 'The value is not a number.' },
+    );
+  const check = (thrown: unknown): void => {
+    expect(httpStatusHintOf(thrown)?.status).toBe(400);
+    expect((thrown as Error).message).not.toContain('tagged-secret');
+    expect(String((thrown as Error).stack)).not.toContain('tagged-secret');
+  };
+  it('from transaction work', async () => {
+    const thrown = await service()
+      .transaction(() => Promise.reject(tagged()))
+      .catch((error: unknown) => error);
+    check(thrown);
+  });
+  it('from a repository call', async () => {
+    const failing: IDataSource = { ...source, findAll: () => Promise.reject(tagged()) };
+    const adapter: IDatabaseAdapter = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      isReady: () => true,
+      createDataSource: () => failing,
+      rawQuery: () => Promise.resolve([]),
+      beginTransaction: () => Promise.reject(new Error('unused')),
+    };
+    const thrown = await new DatabaseService(adapter, () => failing, 'custom')
+      .getRepository('Item')
+      .findAll()
+      .catch((error: unknown) => error);
+    check(thrown);
+  });
+});

@@ -55,7 +55,9 @@ with snake_case properties resource_id and user_id. Memory/log/file reject a sco
 AuditScopeUnsupportedError and write nothing; omit scope only when an independent write is intended.
 Stamping and redaction apply to both paths. DynamoDB buffered plain update/delete pre-reads now use
 ConsistentRead: true, costing one RCU per 4 KB. Outer writes still send no GetItem. Unsupported
-conditional writes name their adapter; standalone repositories default to database-plugin.
+conditional writes name their adapter. A directly constructed `BaseRepository` without an adapter
+type names `database-plugin`; `PrismaRepository` and `DrizzleRepository` name `prisma` and
+`drizzle`.
 
 Failed model calls now log the original error's class and status hint, without provider text. Update
 class-based alerts that matched generic Error. Cancelling a replay stream waits for its in-flight

@@ -8,11 +8,11 @@ scrubbed before they reach the caller or log. Classification reads the raw signa
 `Failed query:` wrapper keeps its SQL with placeholders and loses its bound values, from the
 message, the whole multiline stack header and `params`. A SQLSTATE class 22 cause (data exception:
 invalid text, out of range, bad date, bad enum) is rebuilt from its code, because PostgreSQL's
-message quotes the rejected input. Classification is unchanged. Two limits: an error from a query
-built through `getDrizzleDatabase(...)`, or a raw driver call, never passes through the service and
-is logged as the driver wrote it; and the scrub walks at most five causes, so a value nested deeper
-survives. It is not a general log-redaction policy, and request paths logged by the request logger
-are outside it.
+message quotes the rejected input. The scrub does not change how an error is classified. Two limits:
+an error from a query built through `getDrizzleDatabase(...)`, or a raw driver call, never passes
+through the service and is logged as the driver wrote it; and the scrub walks at most five causes,
+so a value nested deeper survives. It is not a general log-redaction policy, and request paths
+logged by the request logger are outside it.
 
 Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
 and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
@@ -281,10 +281,9 @@ export async function editArticle(
 - It works with any repository that has `updateWhere` — an outer repository, `uow.getRepository()`
   and a tenant repository. Inside a transaction it applies on Drizzle, Prisma, MongoDB, DynamoDB,
   Cosmos DB and Bigtable; the memory and D1 transaction sources answer
-  `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write.
-
-* The refusal names the bound adapter, including `custom`; a directly constructed BaseRepository
-* without an adapter type falls back to `database-plugin`.
+  `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write. The
+  refusal names the bound adapter, including `custom`; a directly constructed `BaseRepository`
+  without an adapter type names `database-plugin`.
 
 - **The outcome is decided by the write itself.** On PostgreSQL the conditional `UPDATE`/`DELETE`
   reports which row it changed; on MySQL, where there is no `RETURNING`, the adapters read the
@@ -1629,8 +1628,8 @@ Inside a unit of work, plain `update` and `delete` read the current item before 
 Both send `ConsistentRead: true`, as the conditional pre-reads already do. A strongly consistent
 read costs one read capacity unit per 4 KB, rounded up; see the
 [DynamoDB read-capacity rules](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/read-write-operations.html).
-Outside a unit of work these operations send their conditional UpdateItem or DeleteItem directly;
-they send no preliminary GetItem.
+Outside a unit of work these operations send their UpdateItem (conditional on the item existing) or
+their unconditional DeleteItem directly; they send no preliminary GetItem.
 
 ## What a driver condition returns to the client
 
@@ -1892,14 +1891,16 @@ new-connection handshake timeout does not count as pool saturation.
 
 A full pool can also mean a hung database. With pg-pool, the plugin counts `release` events as
 progress for all traffic, including queries through `getDrizzleDatabase`, `getDrizzleTransaction`
-and the application's own Drizzle instance. A release that carries an error (a failed query, a
-client-side query timeout, a broken client) does not count. The plugin removes its listener on
-shutdown. The indicator samples progress on each poll: no observed completion in the last 10 seconds
-makes saturation `degraded`, with `/ready` 503. Detection lags by at most one poll interval plus
-that window. A busy pool that keeps releasing clients stays `up` with `reachable: 'unknown'`. Other
-clients (mysql2 with an explicit `poolStats`) count completed adapter calls only. Once such an
-application takes a native handle, progress is unobservable and a saturated pool stays `up` with
-`reachable: 'unknown'`.
+and the application's own Drizzle instance. A `pool.query` release that carries an error (a failed
+query, a client-side query timeout, a broken client) does not count. A transaction's client, or one
+the application checked out with `pool.connect()`, is released without an error even when its work
+failed, so it counts. The plugin removes its listener on shutdown. The indicator samples progress on
+each poll: no observed completion in the last 10 seconds makes saturation `degraded`, with
+`/ready` 503. Detection lags by one poll interval plus that window, and by longer while transactions
+that were in flight when the database stopped answering are still ending. A busy pool that keeps
+releasing clients stays `up` with `reachable: 'unknown'`. Other clients (mysql2 with an explicit
+`poolStats`) count completed adapter calls only. Once such an application takes a native handle,
+progress is unobservable and a saturated pool stays `up` with `reachable: 'unknown'`.
 
 The vector-store plugin owns a different pool/probe. Its pgvector arm also treats `idle === 0` and
 `totalCount >= options.max` as saturation, and counts its own statement completions. DatabasePlugin

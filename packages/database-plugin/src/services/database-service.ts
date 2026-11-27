@@ -25,7 +25,7 @@ import type {
   TransactionOptions,
 } from '@setu-ts/common';
 import { FIELD_FOR_COLUMN, ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
-import { httpStatusHintOf, DuplicateKeyError } from '@setu-ts/common';
+import { httpStatusHintOf, DuplicateKeyError, withHttpStatusHint } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -104,7 +104,15 @@ function classifiedOrOriginal(
   entity?: string,
   site?: 'transaction-work',
 ): unknown {
-  if (httpStatusHintOf(error) !== undefined) return scrubDriverError(error);
+  const hint = httpStatusHintOf(error);
+  if (hint !== undefined) {
+    // A tagged driver error (a `Failed query:` wrapper, a pg 22xxx) is replaced
+    // by a scrubbed copy; the copy carries the tag, so its status survives.
+    const scrubbed = scrubDriverError(error);
+    return scrubbed !== error && scrubbed instanceof Error
+      ? withHttpStatusHint(scrubbed, hint)
+      : scrubbed;
+  }
   const kind = classifyDriverError(error, adapterType, site);
   const refused = entity === undefined ? undefined : refusalErrorOf(error, entity);
   const lost = kind === 'timeout' && isConnectionLostMidCall(error, adapterType, site);

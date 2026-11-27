@@ -416,12 +416,6 @@ replica whose backend stops answering leaves the load balancer instead of failin
 calls the adapter's `isHealthy()` through a probe cached for 5 seconds and bounded at 2 seconds. A
 probe that fails, rejects or runs past that bound reports `down` with `reachable: false`:
 
-The indicator reports a probe's cause through the plugin logger. An outage's first failure logs at
-`warn`; repeats of the same description log at `debug`, and a changed cause warns again. Recovery
-logs once at `info`. A returned `false` reports "reported unreachable"; a timeout reports "did not
-answer within 2000 ms". Only the first outcome counts, so a late result cannot log a recovery after
-timeout. A returned `undefined` reports nothing.
-
 | Adapter                | Probe                                                                                    |
 | ---------------------- | ---------------------------------------------------------------------------------------- |
 | `QdrantVectorStore`    | whether the first declared collection exists, an endpoint that needs the API key         |
@@ -429,17 +423,24 @@ timeout. A returned `undefined` reports nothing.
 | `VectorizeVectorStore` | the index's `describe()`                                                                 |
 | `MemoryVectorStore`    | always reachable                                                                         |
 
+The indicator reports a probe's cause through the plugin logger. An outage's first failure logs at
+`warn`; repeats of the same description log at `debug`, and a changed cause warns again. Recovery
+logs once at `info`. A returned `false` reports "reported unreachable"; a timeout reports "did not
+answer within 2000 ms". Only the first outcome counts, so a late result cannot log a recovery after
+timeout. A returned `undefined` reports nothing.
+
 A saturated node-postgres pool, with no idle connection and either callers waiting or every
 connection it may open already open, is not by itself an outage. `PgVectorStore` queues no probe
 behind that traffic. When the pool's `connectionTimeoutMillis` is under the 2-second probe bound, it
 also reads the probe's own pool-acquire timeout as the same saturation. The indicator stays `up`
 with `reachable: 'unknown'` while the adapter's own statements keep completing, or none is running.
 Once they have stopped completing for 10 seconds it reports `down`. This plugin owns its own pool
-and counts its own statement completions. DatabasePlugin uses pg-pool releases, including native
-queries, and requires `idle === 0 && waiting > 0` (or a probe acquire timeout); its stale-progress
-case is `degraded`. Both fail `/ready`. An adapter without `isHealthy()` stays `up` with
-`reachable: 'unknown'`. After shutdown the indicator reports `down` with `state: 'closed'`. To keep
-it out of readiness, exclude it in `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
+and counts its own statement completions. DatabasePlugin counts error-free pg-pool releases,
+including native queries, and requires `idle === 0 && waiting > 0` (or a probe acquire timeout); its
+stale-progress case is `degraded`. Both fail `/ready`. An adapter without `isHealthy()` stays `up`
+with `reachable: 'unknown'`. After shutdown the indicator reports `down` with `state: 'closed'`. To
+keep it out of readiness, exclude it in
+`HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 ## Errors
 

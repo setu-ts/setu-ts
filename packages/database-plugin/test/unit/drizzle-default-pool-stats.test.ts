@@ -16,6 +16,7 @@ import {
 } from '../../src/index.ts';
 import {
   DATABASE_QUERY_PROGRESS,
+  QueryProgressTracker,
   readPoolCapacity,
   readQueryProgress,
   probeHitAcquireTimeout,
@@ -133,11 +134,19 @@ describe('default Drizzle pool statistics', () => {
       waitingCount: 1,
     });
     const stop = observePoolReleases({ $client: pool }, adapter)!;
+    const tracker = new QueryProgressTracker();
+    tracker.observe(readQueryProgress(adapter), 0);
     expect(readQueryProgress(adapter)).toBe(3);
+    // Taking a native handle turns the adapter's count to null; the last
+    // number is kept, so the switch itself is not progress.
     own = null;
-    expect(readQueryProgress(adapter)).toBe(0);
+    expect(readQueryProgress(adapter)).toBe(3);
+    tracker.observe(readQueryProgress(adapter), 10_001);
+    expect(tracker.progressedWithin(10_001)).toBe(false);
     pool.emit('release', undefined, {});
-    expect(readQueryProgress(adapter)).toBe(1);
+    expect(readQueryProgress(adapter)).toBe(4);
+    tracker.observe(readQueryProgress(adapter), 10_002);
+    expect(tracker.progressedWithin(10_002)).toBe(true);
     stop();
     expect(readQueryProgress(adapter)).toBe('unobservable');
   });

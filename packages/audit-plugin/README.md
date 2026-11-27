@@ -92,7 +92,7 @@ paths, including JSON strings for `before`, `after` and `metadata`.
 
 A scope on `memory`, `log` or `file` rejects with the exported `AuditScopeUnsupportedError` and
 writes nothing. Use database storage to join the transaction, or omit the scope for an independent
-write. A third-party storage can support scoped writes by implementing `appendIn`.
+write.
 
 ## Backend configuration
 
