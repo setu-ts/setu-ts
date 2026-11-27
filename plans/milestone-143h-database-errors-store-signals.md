@@ -246,6 +246,14 @@ row beside each new arm).
   its input. Compared frameworks read their own pool's counters (§12.1 T-4).
 - **Developer impact:** on Drizzle with pg, a saturated but progressing pool stops failing `/ready`
   without any change; an application that wrote `poolStats` by hand can delete it.
+- **Query progress (D-9, decided 2026-11-27 after the code review).** With the default counters, an
+  application that queried through `getDrizzleDatabase`/`getDrizzleTransaction` made progress
+  "unobservable", so a pool full because the database hung read `up` forever. pg-pool `release`
+  events now count as completed queries for the progress seam, so progress is observable for every
+  query: a full pool that still releases reads `up` with `reachable: 'unknown'`, and a full pool
+  with no releases (a hung database) reads `degraded`. No option is added. Tests: a hung database
+  filling the pool reads `degraded` (including after `getDrizzleDatabase`); a negative control fails
+  without release counting; a busy pool that still releases reads `up`.
 - **Test home:** `test/unit/drizzle-default-pool-stats.test.ts` (a `$client` with the three counters
   → seams attached and read; explicit `poolStats` wins; a client without numeric counters → no
   seams); guarded live cell in `test/integration/real-drizzle-adapter.test.ts`: saturate a
@@ -772,6 +780,12 @@ D-1 to its alternative ("Do D1 in the same PR"). §3 is written to match.
 - D-7: `ForeignKeyViolationError` 409; `NotNullViolationError` 400.
 - D-8: `within`'s `isConflict` narrows; `idempotency-plugin` joins the Data lane (ROADMAP lanes
   table); the SDK keyed retry is handed to the CLI lane (§11).
+- D-9 (raised by the code review, decided 2026-11-27, "Count pool releases"): pg-pool `release`
+  events count as query progress (§3.5).
+- D-10 (raised by the code review, decided 2026-11-27, "Fix in M143h's PR"): the one-line
+  expectation in `packages/cloudflare-plugin/test/unit/d1-database.test.ts:131-135` (the
+  `InvalidFieldValueError` hint gains its problem type) is edited in this pull request, an approved
+  out-of-lane edit recorded in the lanes table and the PR body.
 
 | #   | Section     | Question                                                                                                                                                                                           | Recommended                                                                                                                                                                                                                                                                                               | Alternative and its cost                                                                                                                                                                                                                  |
 | --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
