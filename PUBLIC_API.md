@@ -8792,11 +8792,20 @@ Provides background job queue with Memory and Redis adapters.
 
 `QueuePluginOptions.retryDelayMs?: number | ((attempts: number) => number)` applies to every
 adapter. A number must be finite and non-negative; the function receives the attempt that just
-failed (1 on first delivery). Absent retains exponential backoff. Results clamp to 0–2147483647; a
-throwing function or non-finite result warns once and retries without delay.
+failed (1 on first delivery). Omitted or `undefined` retains exponential backoff. Other runtime
+types (including `null`, strings, objects and booleans) and negative or non-finite numbers throw
+`RangeError` synchronously at `QueuePlugin(...)` and `QueueService` construction. Results clamp to
+0–2147483647; a throwing function or non-finite result warns once and retries without delay.
 `health?: { probeCacheMs?: number; probeTimeoutMs?: number }` configures the cached reachability
 probe: defaults 5000/2000 ms, integer ranges 0–2147483647 / 1–2147483647. TTL 0 probes every read;
 failures share the cache TTL. Invalid values throw `RangeError` at construction.
+
+Every queue loop-failure line (`queue reserve failed`, `queue poll failed`,
+`queue recurring failed`, `queue depth-probe failed`, `queue recurring enqueue failed`) reports once
+per failure episode at warn (error when warn is absent), then info on recovery with the failure
+count. Their `error` metadata is the one-line `describeError` rendering, including the error name
+and available classifiers/causes, with URL userinfo masked and no stack field added. Job-error
+reports keep their existing format.
 
 `SqsQueueOptions.requestTimeoutMs` and `SnsPublisherOptions.requestTimeoutMs` default to 15000 ms; 0
 disables the whole-call bound (SDK retries included). `deadlineRangeError` validates the range. SQS
@@ -8950,8 +8959,8 @@ reserve does not reject for that move, and the warning does not expose driver te
 - **`QueueDepths`** — `{ ready, processing, dead }` per job name, as the health indicator publishes
   them
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
-- **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
-  through (structurally compatible with `ILogger`)
+- **`QueueLogger`** — Required `error`, optional `warn`/`info` logger surface for background
+  failures and recovery (structurally compatible with `ILogger`)
 - **`QueueDiagnosticsOptions`** — Opt-in minimized attempt/depth observations for the diagnostics
   connector (M98f): `{ enabled: true, instanceAlias, queues, depths? }`
 - **`QueueDepthDiagnosticsOptions`** — Separately bounded depth collection:

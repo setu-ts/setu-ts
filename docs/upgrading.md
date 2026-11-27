@@ -50,10 +50,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
   broker behaves as before, warning once when non-empty trace headers would be dropped. Confirm
   `ISubscription.fanOut` for independent copies.
 - Queue reserve failures move from error on every tick to warn once per name and episode, then info
-  with a failure count on recovery. Update alert severity/volume expectations. The optional
-  `health.probeCacheMs` (5000 ms, 0 disables caching) and `health.probeTimeoutMs` (2000 ms) preserve
-  the previous defaults; failures remain cached. `retryDelayMs` adds a fixed or callable delay for
-  every adapter; absence keeps existing exponential backoff.
+  with a failure count on recovery (error remains the fallback when warn is absent). Update alert
+  severity/volume expectations. The `error` metadata on every queue loop-failure line
+  (`queue reserve failed`, `queue poll failed`, `queue recurring failed`,
+  `queue depth-probe failed`, `queue recurring enqueue failed`) now uses one-line `describeError`,
+  including the error name and available classifiers/causes, with URL userinfo masked and no stack
+  field added. Job-error reports keep their existing format. The optional `health.probeCacheMs`
+  (5000 ms, 0 disables caching) and `health.probeTimeoutMs` (2000 ms) preserve the previous
+  defaults; failures remain cached. `retryDelayMs` adds a fixed or callable delay for every adapter;
+  omission or `undefined` keeps existing exponential backoff. Only a function or a finite
+  non-negative number is accepted. Other runtime types (including `null`, numeric strings, objects
+  and booleans) and invalid numbers throw `RangeError` synchronously at `QueuePlugin(...)` and
+  `QueueService` construction; convert environment strings to numbers before supplying them.
 - SQS's SDK path now probes all distinct configured queue URLs with `GetQueueAttributes` for
   `QueueArn`, explicitly selecting a separate one-attempt SDK client rather than matching the
   attribute list. Each request forwards `abortSignal` and aborts on expiry. Its per-call bound is

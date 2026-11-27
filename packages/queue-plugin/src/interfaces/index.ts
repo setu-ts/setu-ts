@@ -232,8 +232,12 @@ export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq' | 'sqs';
  */
 export interface QueuePluginOptions {
   /**
-   * Retry delay for every adapter. A function receives the attempt that just failed.
-   * Absent uses exponential backoff; invalid function results warn once and retry immediately.
+   * Retry delay for every adapter: a function or a finite non-negative number.
+   * Omitted or undefined uses exponential backoff. A function receives the attempt
+   * that just failed; results clamp to 0–2147483647. A throwing function or
+   * non-finite result warns once and retries immediately.
+   * @throws {RangeError} At QueuePlugin or QueueService construction for any other
+   * supplied value, including null or an invalid number.
    * @since 0.14.0
    */
   retryDelayMs?: number | ((attempts: number) => number);

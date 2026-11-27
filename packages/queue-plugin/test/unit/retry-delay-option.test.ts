@@ -4,12 +4,61 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { describe, expect, it, vi } from 'vitest';
 import { QueuePlugin } from '../../src/index.ts';
+import type { QueuePluginOptions } from '../../src/index.ts';
 import { QueueService } from '../../src/services/queue-service.ts';
 import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 import { sqsHarness, envelope } from '../fixtures/sqs-harness.ts';
 
 describe('Queue retry delay option', () => {
+  describe.each(['plugin', 'service'] as const)('%s construction', (entry) => {
+    const construct = (input: unknown): unknown => {
+      const options = input as QueuePluginOptions;
+      return entry === 'plugin'
+        ? QueuePlugin(options)
+        : new QueueService(new MemoryQueue(), new FakeRuntimeServices(0), options);
+    };
+
+    it.each([
+      { label: 'numeric string', value: '100' },
+      { label: 'object', value: {} },
+      { label: 'boolean', value: true },
+      { label: 'null', value: null },
+      { label: 'negative number', value: -1 },
+      { label: 'NaN', value: NaN },
+      { label: 'Infinity', value: Infinity },
+    ])('refuses $label synchronously', ({ value }) => {
+      expect(() => construct({ retryDelayMs: value })).toThrow(RangeError);
+    });
+
+    it.each([
+      { label: 'zero', options: { retryDelayMs: 0 } },
+      { label: 'finite number', options: { retryDelayMs: 100 } },
+      { label: 'function', options: { retryDelayMs: (attempts: number) => attempts * 100 } },
+      { label: 'undefined', options: { retryDelayMs: undefined } },
+      { label: 'omitted', options: {} },
+    ])('accepts $label synchronously', ({ options }) => {
+      expect(() => construct(options)).not.toThrow();
+    });
+
+    it('refuses an object without rendering its value', () => {
+      const toString = vi.fn(() => {
+        throw new Error('private configuration');
+      });
+      let error: unknown;
+      try {
+        construct({ retryDelayMs: { toString } });
+      } catch (failure) {
+        error = failure;
+      }
+      expect(error).toBeInstanceOf(RangeError);
+      expect(error).toMatchObject({
+        message: 'retryDelayMs must be a function or a finite non-negative number',
+      });
+      expect(toString).not.toHaveBeenCalled();
+    });
+  });
+
   it.each([false, true])(
     'forwards retry delay through plugin behavior mode %s',
     async (withBehaviors) => {

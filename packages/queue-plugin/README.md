@@ -507,15 +507,21 @@ of readiness (use the named capability for a named instance).
 
 `retryDelayMs` applies to every adapter: a non-negative finite number supplies a fixed delay, or a
 function receives the attempt that just failed (1 on first delivery) and returns milliseconds.
-Absent, exponential backoff stays unchanged. A result is clamped to 0–2147483647; a throwing
-function or non-finite result warns once and retries with no delay. SQS still clamps the delay to
-the remaining visibility budget.
+Omitted or `undefined`, exponential backoff stays unchanged. Other runtime types, including `null`,
+strings, objects and booleans, and negative or non-finite numbers throw `RangeError` synchronously
+at `QueuePlugin(...)` or `QueueService` construction. A result is clamped to 0–2147483647; a
+throwing function or non-finite result warns once and retries with no delay. SQS still clamps the
+delay to the remaining visibility budget.
 
-A reserve outage logs `queue reserve failed` at warn once per name and episode, without a stack; the
-first successful reserve logs `queue reserve recovered` at info with its failure count. Poll and
-recurring-enqueue failures follow the same episode rule. Job-processing failures keep their own
-error reports. RabbitMQ enqueue now answers 503 for definite refusal and 504 for an expired publish
-or a channel lost after writing and before confirmation.
+A reserve outage logs `queue reserve failed` at warn once per name and episode (at error when the
+logger has no warn); the first successful reserve logs `queue reserve recovered` at info with its
+failure count. Other loop failures follow the same episode rule. Every queue loop-failure line
+(`queue reserve failed`, `queue poll failed`, `queue recurring failed`, `queue depth-probe failed`,
+`queue recurring enqueue failed`) uses the one-line `describeError` rendering for its `error`
+metadata, including the error name and available classifiers/causes, with URL userinfo masked and no
+stack field added. Job-processing failures keep their own error reports. RabbitMQ enqueue now
+answers 503 for definite refusal and 504 for an expired publish or a channel lost after writing and
+before confirmation.
 
 #### Long jobs
 

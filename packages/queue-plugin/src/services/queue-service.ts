@@ -10,6 +10,7 @@
 import {
   type AddJobOptions,
   createCachedProbe,
+  describeError,
   toBackendFault,
   type HealthCheckResult,
   type HealthIndicatorFn,
@@ -44,7 +45,7 @@ const PROBE_TIMEOUT_MS = 2000;
  * Validates shared queue health and retry options at either construction entry.
  * @param options - Queue configuration subset
  * @returns Resolved health cache and timeout
- * @throws {RangeError} For invalid cache, timeout or numeric delay
+ * @throws {RangeError} For invalid cache, timeout or retry delay
  * @since 0.14.0
  * @internal
  */
@@ -62,8 +63,12 @@ export function resolveQueueServiceOptions(options?: {
       throw new RangeError(`queue health.${name} must be an integer from ${min} to 2147483647`);
   }
   const delay = options?.retryDelayMs;
-  if (typeof delay === 'number' && (!Number.isFinite(delay) || delay < 0))
-    throw new RangeError('retryDelayMs must be a finite non-negative number');
+  if (
+    delay !== undefined &&
+    typeof delay !== 'function' &&
+    (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0)
+  )
+    throw new RangeError('retryDelayMs must be a function or a finite non-negative number');
   return { probeCacheMs, probeTimeoutMs };
 }
 
@@ -235,11 +240,10 @@ export class QueueService implements IQueue {
       return;
     }
     try {
-      const err = toReportableError(error);
       // `warn` is optional on a queue logger; one with only `error` still hears
       // about the failure, as it did before X88-9.
       const report = logger.warn ?? logger.error;
-      report.call(logger, message, { error: err.message, ...meta });
+      report.call(logger, message, { error: describeError(error), ...meta });
     } catch {
       // A broken logger must not take the loop down.
     }
