@@ -808,7 +808,8 @@ record for the PR body.
 - **Data lane:** an after-commit callback on `DatabaseService.transaction` would let the outbox
   dispatch itself (§3.16); proposed, not required for this row.
 - **Core lane, after M143r and this letter merge:** one `common` helper for AWS fault classification
-  in place of `mail-plugin`'s and `queue-plugin`'s copies.
+  in place of `mail-plugin`'s and `queue-plugin`'s copies. It also settles whether a single-attempt
+  HTTP 5xx is `503` or `504` everywhere (PR #620 review, P2).
 - **M143r (#614):** `docs/health-indicators.md` rows 3-4 sit next to row 5; whichever merges second
   resolves the adjacent hunk. No other shared file overlaps except the `[Unreleased]` and upgrading
   sections, kept both sides.
@@ -829,6 +830,29 @@ close the kernel runs after a later plugin fails or `stop()` cancels the applica
 after a failed application start the injected clients are quit, so an application that retries
 `start()` creates new ones. A kernel-level test proves it (a later plugin fails, both clients QUIT
 once).
+
+**PR #620 review decisions, DECIDED by the maintainer, 2026-11-27, all as recommended.** (P1) When
+the Service Bus reply inbox is reported missing (Azure deletes it after a receive-side outage longer
+than its five-minute idle lifetime), the broker drops the cached inbox and the next request
+recreates it; requests in flight during the gap still time out. M143p's fan-out subscriptions share
+the exposure; the maintainer then approved fixing them here too (next paragraph). (P2) A
+single-attempt SQS/SNS HTTP 5xx stays `503` as §3.12 says; whether any 5xx should be `504` is raised
+for the Core-lane AWS fault consolidation (§11). (P3) The §3.19 consume-only proof expects `503`
+within one indicator cache period plus the probe bound and a margin (about 7.5 s from `docker stop`
+returning), since a cached `up` taken before the SDK reports the outage can hold for one more
+period.
+
+**Out-of-lane addition approved by the maintainer, 2026-11-27 (PR #620 review):** M143p's Service
+Bus fan-out subscriptions carry the same five-minute idle lifetime as the reply inbox, so a
+subscriber cut off from Azure for longer than that loses its subscription and, before this change,
+never got it back: the application kept running and silently received no more fan-out copies. With
+P1's mechanism the broker treats `MessagingEntityNotFound` on a fan-out subscription's receive as
+the subscription being gone, drops its cached receiver and recreates the subscription (same
+per-instance name and rule) and its receiver. Developer impact: fan-out delivery resumes by itself
+after a long outage; copies published while the subscription did not exist are lost, as for any
+fan-out subscriber that was not subscribed (fan-out is at-most-once per instance across a gap). No
+option changes. The emulator does not honour `autoDeleteOnIdle` (C3), so only unit tests can show
+the recovery.
 
 **Out-of-lane additions approved by the maintainer, 2026-11-26** (two PR #614 review leftovers, each
 its own commit, made by Claude, not Codex): (A1) `AI_GUIDELINES.md` §6.7 names the practice the
