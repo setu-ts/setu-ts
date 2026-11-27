@@ -1878,18 +1878,19 @@ carries `reachable` whenever the adapter can probe:
 | omitted                                                            | `up`       | 200      |
 
 The rows are the whole decision. **Since M101a** a saturated pool is not an outage. When the Drizzle
-adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
-`waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
-indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
-`/ready` there would pull every saturated replica out of rotation at once. **Since 0.13.0** a probe
-that timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
-is the same evidence: pg-pool removes the timed-out waiter before it rejects, so with
-`connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads `waiting: 0`. An
-explicit `poolStats` callback wins. Without it, a Drizzle instance whose public `$client` has
-numeric `totalCount`, `idleCount` and `waitingCount` gets pg-pool counters by default. mysql2 and
-Prisma expose no matching public counters; an explicit callback is still needed where supported. A
-callback that throws or returns malformed data leaves this saturation case `degraded`. A
-new-connection handshake timeout does not count as pool saturation.
+adapter's capacity snapshot (`poolStats`, or pg-pool's counters by default) reports every connection
+busy with callers waiting (`idle === 0` and `waiting > 0`), the probe queues no `SELECT 1` behind
+the callers it would be measuring, and the indicator reports `up` with `reachable: 'unknown'` and
+the snapshot in `data.capacity` — failing `/ready` there would pull every saturated replica out of
+rotation at once. **Since 0.13.0** a probe that timed out waiting for a pool client (node-postgres's
+`timeout exceeded when trying to connect`) is the same evidence: pg-pool removes the timed-out
+waiter before it rejects, so with `connectionTimeoutMillis` under the 2-second probe bound the
+snapshot already reads `waiting: 0`. An explicit `poolStats` callback wins. Without it, a Drizzle
+instance whose public `$client` has numeric `totalCount`, `idleCount` and `waitingCount` gets
+pg-pool counters by default. mysql2 and Prisma expose no matching public counters; an explicit
+callback is still needed where supported. A callback that throws or returns malformed data leaves
+this saturation case `degraded`. A new-connection handshake timeout does not count as pool
+saturation.
 
 A full pool can also mean a hung database. With pg-pool, the plugin counts `release` events as
 progress for all traffic, including queries through `getDrizzleDatabase`, `getDrizzleTransaction`

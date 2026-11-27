@@ -1,8 +1,9 @@
 # Database problem types
 
 A status alone does not tell a client what to do. Several different refusals use 409. With
-`errorHandler({ format: 'rfc9457' })`, use the Problem Details `type` to distinguish them. The
-`default` error format has no `type` and ignores problem metadata.
+`errorHandler({ format: 'rfc9457' })` (or the older `rfc7807`, which writes the same body), use the
+Problem Details `type` to distinguish them. The `default` error format has no `type` and ignores
+problem metadata.
 
 The base is `https://setu-ts.dev/errors`, exported as `ERROR_TYPE_BASE` from `@setu-ts/common`. Each
 slug below identifies `https://setu-ts.dev/errors/<slug>`. A type URI is an identifier; it need not
@@ -27,14 +28,15 @@ and each entry are frozen at runtime.
 from `@setu-ts/database-plugin`. The `reason` fields are on errors in application code; they select
 the problem type and are not separate fields in the HTTP body.
 
-For example, a version mismatch under `rfc9457` is:
+For example, a version mismatch on `PUT /items/42` under `rfc9457` is:
 
 ```json
 {
   "type": "https://setu-ts.dev/errors/version-conflict",
   "title": "Version Conflict",
   "status": 409,
-  "detail": "The record was changed after it was read. Reload it and try again."
+  "detail": "The record was changed after it was read. Reload it and try again.",
+  "instance": "/items/42"
 }
 ```
 

@@ -49,6 +49,13 @@ it('documents all eleven statuses, titles, classes and reasons from their real h
   }
   const example: unknown = JSON.parse(guide.match(/```json\n([\s\S]*?)\n```/)![1]!);
   const version = httpStatusHintOf(new VersionConflictError('diagnostic'))!;
-  expect(example).toEqual({ ...version.problem, status: version.status, detail: version.detail });
+  // `instance` is the request path errorHandler adds; the guide's example is `PUT /items/42`.
+  expect(guide).toContain('`PUT /items/42`');
+  expect(example).toEqual({
+    ...version.problem,
+    status: version.status,
+    detail: version.detail,
+    instance: '/items/42',
+  });
   expect(example).not.toHaveProperty('message');
 });

@@ -13,12 +13,16 @@
  * refusals AND by configuration refusals, so branding it unconditionally
  * turned a misconfigured deployment into a caller-facing `501`.
  *
- * Two more — {@linkcode SerializationConflictError} and
- * {@linkcode DatabaseUnavailableError} (M90f, X38-1/X35-2) — carry `409` and
- * `503` hints: TRANSIENT conditions the caller can act on by retrying, where
- * the `501` refusals above are permanent. Both wrap the original driver error
- * as `cause`, produced by `classifyDriverError` (`errors/classify.ts`) at
- * `DatabaseService`'s interception sites.
+ * The classified driver conditions carry hints too, each with a Problem
+ * Details type from `DATABASE_PROBLEM_TYPES` (see `docs/problem-types.md`):
+ * {@linkcode SerializationConflictError} (`409`), {@linkcode DatabaseUnavailableError}
+ * (`503`) and {@linkcode DatabaseTimeoutError} (`504`), which are transient,
+ * and {@linkcode ForeignKeyViolationError} (`409`) and
+ * {@linkcode NotNullViolationError} (`400`), which the caller fixes by changing
+ * the input. They wrap the original driver error as `cause`, produced by
+ * `classifyDriverError` (`errors/classify.ts`) at `DatabaseService`'s
+ * interception sites. {@linkcode VersionConflictError} (`409`) comes from a
+ * versioned write's own precondition.
  *
  * The pre-existing transaction/concurrency scope errors are deliberately NOT
  * branded: they may legitimately quote backend state, and they keep the
