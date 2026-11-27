@@ -1952,8 +1952,8 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
-| `UnsupportedRelationModeError`            | class     |
 | `UnsupportedSqlModeError`                 | class     |
+| `UnsupportedRelationModeError`            | class     |
 | `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
