@@ -5,7 +5,7 @@ across the instances behind it, and takes them out of rotation when callers repo
 
 Registers an `IServiceDiscovery` under `CAPABILITIES.SERVICE_DISCOVERY`. **Zero npm dependencies**:
 the HTTP providers run on web-standard `fetch` and the DNS provider on the optional
-`IRuntimeServices.dns`.
+`IRuntimeServices.dns` (or `IRuntimeServices.createDnsResolver` when `servers` is set).
 
 ## Install
 
@@ -150,7 +150,8 @@ reads: an empty change to a nonempty list is held for `emptyAnswerGraceMs`. One 
 coalesced background read at the grace deadline; an empty answer replaces the list and is delivered
 to every watcher, even if the backend never repeats the empty change. Read-path list changes also
 reach watchers, once per change. A read of a watched name still starts a background refresh once its
-list is `cacheTtlMs` old.
+list is `cacheTtlMs` old. If a listener synchronously triggers a newer delivery, the older broadcast
+stops before reaching further subscribers.
 
 Subscribers to one name share one provider watch. A later subscriber receives the cached list at
 once; a listener may receive the current list on subscription and the same list more than once. The
@@ -161,6 +162,11 @@ error and no instance data, once per name until every failing listener has succe
 or its watch stopped. A read that started before a newer watch delivery neither replaces the
 delivered list nor marks the name failed or starts retry spacing; a superseded failure opens no
 outage or recovery log.
+
+Closing invalidates every watch before attempting all provider stops. Cleanup failures surface
+together after every stop has been attempted. A watch whose provider setup is still pending at close
+is stopped when that setup settles, and a failure of that stop rejects its `watch()` call. A read
+still queued at close never calls the provider.
 
 Discovery names should be chosen by the application, never taken from a request. As a backstop, the
 resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a budget
@@ -288,9 +294,10 @@ coalesced with any active read and subject to normal failure retry spacing. Its 
 replaces the list and reaches every watcher without another backend event. A cold empty answer (a
 name with no list yet, such as an absent DNS name) is cached like any other, but at most 256
 unwatched names that have only ever answered empty stay cached; past that, the oldest is evicted (a
-failing one last), and watched names are never evicted, so names taken from requests cannot grow the
-cache; replacement and close clear the timer. An empty answer succeeded, so it does not raise
-`staleForMs` or incur failure spacing.
+failing one last), and watched names are never evicted. This cap covers only empty-only names.
+Nonempty cached names remain until close, so a provider answering request-supplied names can grow
+the cache without bound. Replacement and close clear the timer. An empty answer succeeded, so it
+does not raise `staleForMs` or incur failure spacing.
 
 DNS NXDOMAIN/no-record answers (`ENOTFOUND`, `ENODATA`, Deno `NotFound`, including wrapped causes)
 resolve to `[]` only when every failed address family says absent. Any timeout or other failure
@@ -309,7 +316,10 @@ Bun, Deno; not Workers); without it startup throws `DiscoveryUnavailableError` n
 Omitting `servers` uses `runtime.dns`. `resolveTimeoutMs` bounds the whole lookup across all
 servers, one attempt each; fractions are rounded up with `Math.ceil` for the runtime's integer
 bound. `0` adds no lookup timer. On Deno a lookup may run about 2 s past the bound before its
-underlying operation ends. DNS record TTLs are not read: `cacheTtlMs` stays the freshness bound.
+underlying operation ends. Reads and watches share one pending raw lookup per name, even across
+aborted or timed-out cold reads; a caller stopping its wait does not cancel the shared query. DNS
+record TTLs are not read: `cacheTtlMs` is the age threshold for starting a background refresh, not a
+bound on returned data.
 
 Read failures log under `service-discovery-plugin: <kind> resolve '<serviceName>'`: first or changed
 error at `warn`, identical repeats at `debug`, recovery at `info`, with URL userinfo masked. A name

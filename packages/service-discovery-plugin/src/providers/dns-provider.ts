@@ -113,6 +113,8 @@ export class DnsProvider implements DiscoveryProvider {
   }
 
   #lastFailure: { error: unknown } | undefined;
+  /** Raw resolver work survives caller cancellation; only one per name is pending. */
+  readonly #pending = new Map<string, Promise<readonly ServiceInstance[]>>();
 
   /** Reachability from the last lookup; absent names are successful answers. */
   isHealthy(): Promise<boolean> {
@@ -123,9 +125,21 @@ export class DnsProvider implements DiscoveryProvider {
 
   async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
     return await this.#resolveLookup(
-      signal?.aborted ? Promise.resolve([]) : this.#lookup(serviceName),
+      signal?.aborted ? Promise.resolve([]) : this.#pendingLookup(serviceName),
       signal,
     );
+  }
+
+  #pendingLookup(serviceName: string): Promise<readonly ServiceInstance[]> {
+    const existing = this.#pending.get(serviceName);
+    if (existing !== undefined) return existing;
+    const lookup = this.#lookup(serviceName);
+    this.#pending.set(serviceName, lookup);
+    const settled = (): void => {
+      this.#pending.delete(serviceName);
+    };
+    void lookup.then(settled, settled);
+    return lookup;
   }
 
   async #resolveLookup(
@@ -215,7 +229,7 @@ export class DnsProvider implements DiscoveryProvider {
       const local = new AbortController();
       active = local;
       const ms = this.#options.resolveTimeoutMs ?? 2000;
-      const lookup = this.#lookup(serviceName);
+      const lookup = this.#pendingLookup(serviceName);
       raw = lookup;
       const settled = (): void => {
         if (raw === lookup) raw = undefined;

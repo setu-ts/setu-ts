@@ -11,7 +11,7 @@ async function flush(): Promise<void> {
 }
 const a = instance({ id: 'a' });
 const b = instance({ id: 'b' });
-function setup() {
+function setup(cacheTtlMs = 0) {
   const provider = createFakeProvider([a]);
   const runtime = createFakeRuntime();
   const logger = new RecordingLogger();
@@ -19,7 +19,7 @@ function setup() {
   const service = new ServiceDiscoveryService(
     provider,
     runtime,
-    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs: 0 }),
+    resolveOptions({ provider: 'custom', discovery: provider, cacheTtlMs }),
     undefined,
     (name) => createConnectionErrorReporter({ source: name, logger: () => logger }),
     (_name, error) => {
@@ -38,7 +38,7 @@ it('does not start queued provider watch setup after close', async () => {
   expect(watch).not.toHaveBeenCalled();
 });
 it('reapplies the empty-only cache cap as watched names stop', async () => {
-  const { service, provider } = setup();
+  const { service, provider } = setup(1000);
   provider.setInstances([]);
   const stops: (() => void)[] = [];
   for (let n = 0; n < 270; n++) {
@@ -53,7 +53,7 @@ it('reapplies the empty-only cache cap as watched names stop', async () => {
   const calls = provider.resolveCalls;
   await service.resolve('empty-14');
   await flush();
-  expect(provider.resolveCalls).toBe(calls + 1); // warm refresh, not eviction/re-watch
+  expect(provider.resolveCalls).toBe(calls);
   for (const stop of stops.slice(14)) stop();
   expect(service.cachedServices).toBeLessThanOrEqual(256);
   service.close();
@@ -255,10 +255,9 @@ it('compares every instance field, including optional collections and metadata k
     metadata: { zone: 'one', rack: 'two' },
   };
   const rows: readonly (readonly ServiceInstance[])[] = [
-    [base],
-    [{ ...base, metadata: { rack: 'two', zone: 'one' } }],
     [{ ...base, id: 'new' }],
     [{ ...base, serviceName: 'other' }],
+    [{ ...base, host: 'other-host' }],
     [{ ...base, port: 9090 }],
     [{ ...base, secure: false }],
     [{ ...base, weight: 3 }],
@@ -267,18 +266,98 @@ it('compares every instance field, including optional collections and metadata k
     [{ ...base, metadata: { zone: 'changed', rack: 'two' } }],
     [{ ...base, metadata: { zone: 'one' } }],
     [a],
-    [base],
     [a, b],
     [a],
   ];
   for (const list of rows) {
+    provider.setInstances([base]);
+    await service.resolve('billing');
+    await flush();
+    seen.length = 0;
     provider.setInstances(list);
     await service.resolve('billing');
     await flush();
+    expect(seen).toEqual([list]);
   }
-  expect(seen).toHaveLength(rows.length - 1);
+  provider.setInstances([base]);
+  await service.resolve('billing');
+  await flush();
+  seen.length = 0;
+  provider.setInstances([{ ...base, metadata: { rack: 'two', zone: 'one' } }]);
+  await service.resolve('billing');
+  await flush();
+  expect(seen).toEqual([]);
   service.close();
 });
+
+it('does not deliver a superseded list after a synchronous nested watch delivery', async () => {
+  const { service, provider } = setup(1000);
+  const seen: string[][] = [];
+  await service.watch('billing', (list) => {
+    if (list[0]?.id === 'a') provider.emit('billing', [b]);
+  });
+  await service.watch('billing', (list) => seen.push(list.map((item) => item.id)));
+  provider.emit('billing', [a]);
+  expect(seen).toEqual([['b']]);
+  expect(await service.resolve('billing')).toEqual([b]);
+  service.close();
+});
+
+for (const failures of [1, 2]) {
+  it(`invalidates every watch and attempts every stop before reporting ${failures} cleanup failures`, async () => {
+    const callbacks = new Map<string, (list: readonly ServiceInstance[]) => void>();
+    const stopped: string[] = [];
+    const errors = [new Error('first stop'), new Error('second stop')];
+    const provider = {
+      ...createFakeProvider([a]),
+      watch: (name: string, listener: (list: readonly ServiceInstance[]) => void) => {
+        callbacks.set(name, listener);
+        return Promise.resolve(() => {
+          stopped.push(name);
+          // Cleanup itself may synchronously deliver through another watch.
+          callbacks.get('second')?.([b]);
+          if (name === 'first') throw errors[0];
+          if (failures === 2) throw errors[1];
+        });
+      },
+    };
+    const service = new ServiceDiscoveryService(
+      provider,
+      createFakeRuntime(),
+      resolveOptions({ provider: 'custom', discovery: provider }),
+    );
+    const seen: unknown[] = [];
+    await service.watch('first', (list) => seen.push(list));
+    await service.watch('second', (list) => seen.push(list));
+    expect(() => service.close()).toThrow(
+      new AggregateError(errors.slice(0, failures), 'Service discovery watch cleanup failed.'),
+    );
+    expect(stopped).toEqual(['first', 'second']);
+    callbacks.get('first')?.([a]);
+    callbacks.get('second')?.([b]);
+    expect(seen).toEqual([]);
+    expect(service.cachedServices).toBe(0);
+    expect(service.watchedServices).toBe(0);
+    expect(() => service.close()).not.toThrow();
+  });
+}
+
+for (const resolveTimeoutMs of [0, 2000]) {
+  it(`does not start a deferred provider read after close (bound=${resolveTimeoutMs})`, async () => {
+    const provider = createFakeProvider([a]);
+    const service = new ServiceDiscoveryService(
+      provider,
+      createFakeRuntime(),
+      resolveOptions({ provider: 'custom', discovery: provider, resolveTimeoutMs }),
+    );
+    const pending = service.resolve('billing');
+    const rejected = expect(pending).rejects.toThrow('Service discovery is closed.');
+    service.close();
+    await rejected;
+    expect(provider.resolveCalls).toBe(0);
+    expect(service.cachedServices).toBe(0);
+  });
+}
 
 for (const outcome of ['success', 'failure'] as const) {
   it(`keeps a newer empty watch answer when teardown evicts its cache during a pending ${outcome}`, async () => {

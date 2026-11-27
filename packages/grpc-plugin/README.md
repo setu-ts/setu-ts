@@ -195,10 +195,12 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   `GOAWAY`), so the marked 503 reaches a client over HTTP/1.1 (`httpVersion: '1.1'` on `connect` or
   `grpc-web`) or through a proxy that forwards the kernel's answer. Unmarked `Unavailable`, other
   marker values, other codes and streaming calls are not resent. A second marked failure surfaces to
-  the caller. Caller abort prevents resend. The instance still reports failure. The header is
-  reserved: an application setting it on its own `Unavailable` claims the request was not processed
-  and gets one resend of that unary call. The kernel does not strip it from application responses.
-  The server's own post-`close()` 503 is unmarked.
+  the caller. Retry setup races caller abort and the remaining deadline. Stopping before the resend
+  starts returns the original refusal, records no outcome for that unsent attempt, and cannot
+  dispatch through a late pick. A resend that starts returns its own outcome. The instance still
+  reports failure. The header is reserved: an application setting it on its own `Unavailable` claims
+  the request was not processed and gets one resend of that unary call. The kernel does not strip it
+  from application responses. The server's own post-`close()` 503 is unmarked.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.

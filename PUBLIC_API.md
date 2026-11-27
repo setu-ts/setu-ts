@@ -9678,14 +9678,16 @@ const pending = guarded(controller.signal);
 controller.abort(); // pending rejects with the caller's reason
 ```
 
-Cancellation is **cooperative**: a call that ignores the signal still runs to completion, and only
-the caller's `await` rejects. Passing a zero-argument `() => Promise<T>` remains valid — it simply
-cannot be cancelled.
+Cancellation is **cooperative**: a function ignoring its signal can still run to completion. The
+timeout layer rejects the caller's wait if its deadline elapses first; without that layer, ignoring
+an abort does not itself reject the call. Passing a zero-argument `() => Promise<T>` remains valid —
+it simply cannot be cancelled.
 
 Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across instances.
 
-Breaker accounting skips already-aborted calls. A mid-flight abort records failure only when the
-protected function rejects; a function that ignores its signal and resolves records success.
+Breaker accounting skips already-aborted calls and records the result of the inner retry/timeout
+layers: rejection is failure, resolution is success. A timeout rejection is failure even if the
+function ignores its signal and later resolves; without a timeout, that resolution records success.
 
 ---
 
@@ -14011,16 +14013,18 @@ wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%4
   raise the age. Both read and watch paths hold nonempty lists for `emptyAnswerGraceMs`; the watch
   listener receives the held list. A per-name timer starts a coalesced, retry-spaced background read
   at the grace deadline. If still empty, replacement reaches every watcher without another backend
-  event. Changes from reads also notify watchers once; unchanged watch deliveries still notify.
-  Nonempty answers, replacement and close clear the timer. A cold empty answer (a name with no list
-  yet, such as an absent DNS name) is cached like any other, but at most 256 unwatched names that
-  have only ever answered empty stay cached; past that, the oldest is evicted (a failing one last),
-  and watched names are never evicted, so names taken from requests cannot grow the cache. A read of
-  a watched name still starts a background refresh once its list is `cacheTtlMs` old. Subscribers to
-  one name share one provider watch; a later subscriber receives the cached list at once. A listener
-  may receive the current list on subscription and the same list more than once. The provider watch
-  stops when the last subscriber unsubscribes. Each listener failure is isolated from discovery and
-  other subscribers; it is logged at `warn` as
+  event. Changes from reads also notify watchers once; unchanged watch deliveries still notify. A
+  nested delivery stops the older broadcast, so remaining subscribers never receive it after the new
+  list. Nonempty answers, replacement and close clear the timer. A cold empty answer (a name with no
+  list yet, such as an absent DNS name) is cached like any other, but at most 256 unwatched names
+  that have only ever answered empty stay cached; past that, the oldest is evicted (a failing one
+  last), and watched names are never evicted. The cap covers only empty-only names. Nonempty cached
+  names remain until `close()`: a provider answering arbitrary request-supplied names can grow the
+  cache without bound. A read of a watched name still starts a background refresh once its list is
+  `cacheTtlMs` old. Subscribers to one name share one provider watch; a later subscriber receives
+  the cached list at once. A listener may receive the current list on subscription and the same list
+  more than once. The provider watch stops when the last subscriber unsubscribes. Each listener
+  failure is isolated from discovery and other subscribers; it is logged at `warn` as
   `service-discovery-plugin: watch listener for '<name>' failed` with the masked error and no
   instance data, once per name until every failing listener has succeeded, unsubscribed, or its
   watch stopped. A read that started before a newer watch delivery neither replaces the delivered
@@ -14047,15 +14051,20 @@ wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%4
   otherwise startup refuses naming `servers`. Without it, `runtime.dns` is used. `resolveTimeoutMs`
   bounds the whole lookup across all servers, one attempt each; fractional values round up for the
   runtime's integer bound. On Deno the underlying lookup may end about 2 s past the bound. Record
-  TTLs are not read: `cacheTtlMs` stays the freshness bound.
+  TTLs are not read: `cacheTtlMs` is the age threshold for starting a background refresh, not a
+  bound on returned data.
 - `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
   Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
-  bounded and arm the interval before the first lookup. Each watch keeps at most one raw lookup
-  pending, skipping ticks until it settles even after the caller-facing bound. An abandoned lookup
-  may keep running in the resolver until its own timeout: the resolver takes no signal. Stopping a
-  watch preserves the prior lookup outcome.
-- `onClose` stops watches and clears cache, in-flight, retry, reporter and ejection state. Late
-  refreshes do not write state.
+  bounded and arm the interval before the first lookup. Reads and watches share at most one raw
+  lookup per name until it settles, including across aborted or timed-out cold reads. Each watch
+  skips ticks while that lookup remains pending, even after the caller-facing bound. An abandoned
+  lookup may keep running in the resolver until its own timeout: the resolver takes no signal.
+  Stopping a watch preserves the prior lookup outcome.
+- `onClose` invalidates every watch and clears cache, in-flight, retry, reporter and ejection state
+  before attempting every provider stop; cleanup failures surface together after all stops. A watch
+  whose provider setup is still pending at close is stopped when that setup settles, and a failure
+  of that stop rejects its `watch()` call. Late refreshes do not write state, and reads still queued
+  when close runs never call the provider.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
   strategy and the same ejection filter.
 - Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
@@ -17194,33 +17203,38 @@ metadata values are ASCII by spec.
   `grpcClient(services, definition, target, options?)` resolves `IGrpcService` and calls the
   optional `IGrpcService.client?(definition, target, options?): unknown`, returning Connect's typed
   `Client`. A `target` that is a service name resolves through `CAPABILITIES.SERVICE_DISCOVERY` on
-  every call, and the client reports each outcome (`failure` for `Unavailable`, `success` otherwise)
-  so a refusing instance is ejected; an absolute `http(s)://` URL is used as is. A name with no
-  discovery registered throws `TypeError` at `grpcClient()`, as does a target carrying credentials
-  (`user:password@`, with or without a scheme) a URL target with a query or fragment, a URL that
-  does not parse, or a name outside the service-name grammar (letters, digits, `.`, `_`, `-`),
-  without repeating it. Each reply message is bounded by `GrpcPluginOptions.readMaxBytes` (default 4
-  MiB). Each client HTTP/2 session may buffer 64 MB (`maxSessionMemory`; Node's 10 MB default reset
-  streams with several 1 MB replies in flight). Calls share one HTTP/2 session per instance (64
-  origins at most; the least recently used is forgotten, never closed by the client, and closed by
-  connect-node after 60 s with no stream; the application's stop closes the rest), have a 5 s
-  deadline, carry the active span as `traceparent` when telemetry is registered, and reject with
-  `ConnectError(Unavailable)` when no instance is known, when the discovery backend fails
-  (`could not resolve "<target>"`, cause kept), or after the application stops. Each definition
-  caches at most 256 clients (least recently used evicted). A stream the server refused
-  (`REFUSED_STREAM`, never processed — a server shutting down) is reported as the instance's failure
-  and rejects as `Unavailable`; a unary call is first sent once more on a fresh pick, within what is
-  left of its deadline (its own or the configured one). Only the refusal itself is resent, never an
-  error a server sent whose message names the code. `GrpcClientOptions` (`common`): `basePath`
-  (`''`), `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default `'connect'`), `httpVersion`
-  (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs` (1–2147483647, default
-  `5000`); per-call options override `GrpcPluginOptions.clients[target]`, which overrides the
-  defaults. The transport is `@connectrpc/connect-node`, an optional peer loaded on the first call.
-  On Cloudflare Workers the client refuses with a `TypeError` at `grpcClient()`/`client()`
-  (`workerd` has no `node:http2` client; HTTP/1.1 calls hang). On Deno it is not safe yet: Deno's
-  Node-style HTTP clients can crash the process natively when their peer goes away (a Deno defect,
-  reproduced without Setu). `grpcClientProvider(provide, definition, target, options?)` returns the
-  same client as a `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
+  every call, and reports outcomes by the instance-reporting rule above: no answer, a refused
+  stream, `Unavailable`, `Unimplemented`, `DeadlineExceeded` or peer `Canceled` reports failure;
+  other server answers succeed, except a status Connect itself cannot decode. Caller cancellation
+  and the client-fault exclusions above report nothing. A refusing instance can be ejected; an
+  absolute `http(s)://` URL is used as is. A name with no discovery registered throws `TypeError` at
+  `grpcClient()`, as does a target carrying credentials (`user:password@`, with or without a scheme)
+  a URL target with a query or fragment, a URL that does not parse, or a name outside the
+  service-name grammar (letters, digits, `.`, `_`, `-`), without repeating it. Each reply message is
+  bounded by `GrpcPluginOptions.readMaxBytes` (default 4 MiB). Each client HTTP/2 session may buffer
+  64 MB (`maxSessionMemory`; Node's 10 MB default reset streams with several 1 MB replies in
+  flight). Calls share one HTTP/2 session per instance (64 origins at most; the least recently used
+  is forgotten, never closed by the client, and closed by connect-node after 60 s with no stream;
+  the application's stop closes the rest), have a 5 s deadline, carry the active span as
+  `traceparent` when telemetry is registered, and reject with `ConnectError(Unavailable)` when no
+  instance is known, when the discovery backend fails (`could not resolve "<target>"`, cause kept),
+  or after the application stops. Each definition caches at most 256 clients (least recently used
+  evicted). A stream the server refused (`REFUSED_STREAM`, never processed — a server shutting down)
+  is reported as the instance's failure and rejects as `Unavailable`; a unary call is first sent
+  once more on a fresh pick, within what is left of its deadline (its own or the configured one).
+  The retry setup wait races caller abort and the remaining deadline; if stopped before sending, the
+  original refusal remains the answer and that unsent attempt records no outcome. Only the refusal
+  itself is resent, never an error a server sent whose message names the code. `GrpcClientOptions`
+  (`common`): `basePath` (`''`), `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default
+  `'connect'`), `httpVersion` (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs`
+  (1–2147483647, default `5000`); per-call options override `GrpcPluginOptions.clients[target]`,
+  which overrides the defaults. The transport is `@connectrpc/connect-node`, an optional peer loaded
+  on the first call. On Cloudflare Workers the client refuses with a `TypeError` at
+  `grpcClient()`/`client()` (`workerd` has no `node:http2` client; HTTP/1.1 calls hang). On Deno it
+  is not safe yet: Deno's Node-style HTTP clients can crash the process natively when their peer
+  goes away (a Deno defect, reproduced without Setu).
+  `grpcClientProvider(provide, definition, target, options?)` returns the same client as a
+  `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
   `@Module({ providers })`, so a decorated class takes it with `@Inject(provide)`; its options and
   target are checked when it is called, and the container's client is the one `grpcClient` returns
   for the same arguments.

@@ -28,7 +28,11 @@ the list and notifies all watchers, even without a repeated backend event. Nonem
 replacement and close clear the timer. Changes from background reads also reach watchers once.
 Missing DNS names now resolve `[]`, as static unknown names do, rather than causing a cold 503 or
 retaining removed records indefinitely. Use a trusted host resolver. Other DNS errors remain
-failures, reflected in health, including hung lookups.
+failures, reflected in health, including hung lookups. Reads and watches now share one pending raw
+DNS lookup per name across caller aborts and timeouts. Stopping a caller does not cancel the query.
+Discovery close invalidates all watches, attempts every provider stop, then surfaces cleanup errors
+(a watch still in setup is stopped when setup settles, and its stop failure rejects that `watch()`);
+a read still queued at close never starts. A nested watch delivery supersedes the older broadcast.
 
 No DNS configuration change is required. To select name servers, add the DNS arm's `servers` option
 with IP literals (optional ports; IPv6 ports need brackets). This requires a runtime with
@@ -71,10 +75,11 @@ before). The header is reserved: remove it from application errors unless the re
 processed and one resend is safe. Setting it on an application's own `Unavailable` makes that claim
 and gets the same resend; the kernel does not strip it. Streaming calls, other codes and unmarked
 errors are not resent. The instance still reports failure, a second marked failure surfaces, and
-caller abort prevents resend. Discover individual pods (headless DNS mode `'a'` or Kubernetes) to
-spread calls; a single Service address pins a connection to one pod. Cancelling a response stream
-aborts the handler's `ctx.signal` before awaiting cleanup without a bound; handlers must observe it
-to exit promptly.
+retry setup races caller abort and the remaining deadline. If stopped before sending, it returns the
+original refusal and records no unsent outcome; a late pick cannot dispatch it. Discover individual
+pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a single Service address pins a
+connection to one pod. Cancelling a response stream aborts the handler's `ctx.signal` before
+awaiting cleanup without a bound; handlers must observe it to exit promptly.
 
 Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
 the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause

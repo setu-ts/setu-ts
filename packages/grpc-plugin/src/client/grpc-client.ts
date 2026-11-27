@@ -9,7 +9,12 @@
  *
  * @module
  */
-import { contextToTraceparent, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
+import {
+  contextToTraceparent,
+  UNPROCESSED_HEADER,
+  UNPROCESSED_SHUTDOWN,
+  withDeadline,
+} from '@setu-ts/common';
 import type {
   GrpcClientOptions,
   GrpcServiceDefinition,
@@ -65,6 +70,8 @@ export const CLIENT_IDLE_TIMEOUT_MS = 60_000;
 /** How many origins keep a transport (and session) before the oldest is forgotten. */
 export const MAX_CLIENT_ORIGINS = 64;
 
+/** Largest delay a runtime timer accepts. */
+const MAX_TIMER_MS = 2_147_483_647;
 const PROTOCOLS: ReadonlySet<string> = new Set(['connect', 'grpc', 'grpc-web']);
 const HTTP_VERSIONS: ReadonlySet<string> = new Set(['2', '1.1']);
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -106,7 +113,7 @@ export function validateClientOptions(options: GrpcClientOptions, where: string)
   }
   if (
     timeoutMs !== undefined &&
-    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647)
+    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMER_MS)
   ) {
     throw new TypeError(
       `${where}: timeoutMs must be an integer from 1 to 2147483647, received ${String(timeoutMs)}`,
@@ -442,6 +449,37 @@ export class GrpcClients {
       const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
       if (!unary || signal?.aborted || (remaining !== undefined && remaining <= 0))
         throw error.error;
+      // Bound each setup wait by the same original budget. The abandoned pick
+      // may settle later, but only the race's result can reach the transport.
+      const setup = <T>(pending: Promise<T>): Promise<T> => {
+        const left = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+        return withDeadline(
+          async (bound) => {
+            const stopped = signal === undefined ? bound : AbortSignal.any([bound, signal]);
+            let onAbort!: () => void;
+            const cancelled = new Promise<never>((_, reject) => {
+              onAbort = () => reject(error);
+              if (stopped.aborted || (left !== undefined && left <= 0)) onAbort();
+              else stopped.addEventListener('abort', onAbort, { once: true });
+            });
+            try {
+              return await Promise.race([cancelled, pending]);
+            } finally {
+              stopped.removeEventListener('abort', onAbort);
+            }
+          },
+          // A per-call timeout Connect passes unchecked (NaN, Infinity, above the timer range)
+          // leaves the setup wait unbounded rather than failing the resend.
+          {
+            timeoutMs:
+              left !== undefined && Number.isFinite(left) && left <= MAX_TIMER_MS
+                ? Math.max(0, left)
+                : 0,
+            onTimeout: () => error.error,
+          },
+        );
+      };
+      let sent = false;
       return this.#attempt(
         target,
         base,
@@ -450,15 +488,19 @@ export class GrpcClients {
           const left = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
           // Return the refusal as an unsent sentinel: #attempt must record no outcome.
           if (signal?.aborted || (left !== undefined && left <= 0)) return Promise.resolve(error);
+          sent = true;
           return run(transport, left ?? timeoutMs);
         },
         signal,
+        setup,
       ).then(
         (result) => {
           if (result instanceof RefusedStream) throw result.error;
           return result;
         },
         (again: unknown) => {
+          if (!sent && (signal?.aborted || (deadline !== undefined && now() - started >= deadline)))
+            throw error.error;
           throw again instanceof RefusedStream ? again.error : again;
         },
       );
@@ -471,6 +513,7 @@ export class GrpcClients {
     options: ResolvedClientOptions,
     run: (transport: ClientTransportLike) => Promise<unknown>,
     signal: AbortSignal | undefined,
+    setup?: <T>(pending: Promise<T>) => Promise<T>,
   ): Promise<unknown> {
     const { runtime } = this.#deps;
     if (this.#closed) throw runtime.unavailable('the gRPC client is closed');
@@ -484,17 +527,22 @@ export class GrpcClients {
       }
       // A backend that fails (and has nothing cached) is an unreachable
       // dependency, reported the way every other one is: Unavailable.
-      instance =
-        (await discovery.pick(target).catch((cause: unknown) => {
-          throw runtime.unavailable(`could not resolve "${target}"`, cause);
-        })) ?? undefined;
+      const picked = discovery.pick(target).catch((cause: unknown) => {
+        throw runtime.unavailable(`could not resolve "${target}"`, cause);
+      });
+      instance = (await (setup === undefined ? picked : setup(picked))) ?? undefined;
       if (instance === undefined) {
         throw runtime.unavailable(`no instance of "${target}" is available`);
       }
       origin = instanceOrigin(instance);
     }
     const pending = this.#transport(`${origin}${options.basePath}`, options);
-    const transport = pending instanceof Promise ? await pending : pending;
+    const transport =
+      setup !== undefined
+        ? await setup(Promise.resolve(pending))
+        : pending instanceof Promise
+          ? await pending
+          : pending;
     try {
       const result = await run(transport);
       if (!(result instanceof RefusedStream)) this.#report(discovery, instance, 'success');

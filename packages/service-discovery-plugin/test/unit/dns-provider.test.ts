@@ -522,6 +522,59 @@ it('does not hide an aggregate timeout behind absent members or hide failed memb
   ).toBe(false);
 });
 for (const mode of ['a', 'srv'] as const) {
+  for (const outcome of ['resolve', 'reject'] as const) {
+    it(`shares one pending raw ${mode} lookup across aborted cold reads until it ${outcome}s`, async () => {
+      let calls = 0;
+      let finish!: () => void;
+      let fail!: (error: Error) => void;
+      const raw = new Promise<void>((yes, no) => {
+        finish = yes;
+        fail = no;
+      });
+      const resolver: IDnsResolver = {
+        resolveHost: () => {
+          calls++;
+          return raw.then(() => ['10.0.0.1']);
+        },
+        resolveSrv: () => {
+          calls++;
+          return raw.then(() => [srv('node', 80, 0, 1)]);
+        },
+      };
+      const provider = new DnsProvider(resolver, createFakeRuntime(), {
+        mode,
+        port: 80,
+        domainTemplate: '{service}',
+        watchIntervalMs: 100,
+      });
+      for (let n = 0; n < 3; n++) {
+        const controller = new AbortController();
+        const reason = new Error('caller deadline');
+        const pending = provider.resolve('billing', controller.signal);
+        controller.abort(reason);
+        await expect(pending).rejects.toBe(reason);
+      }
+      expect(calls).toBe(1);
+      // A different name is independent, and one caller aborting must not
+      // cancel either a shared raw query or another caller's wait.
+      const other = provider.resolve('orders');
+      const waiting = provider.resolve('billing');
+      expect(calls).toBe(2);
+      if (outcome === 'resolve') {
+        finish();
+        expect(await waiting).toHaveLength(1);
+        expect(await other).toHaveLength(1);
+      } else {
+        const error = new Error('resolver failed');
+        fail(error);
+        await expect(waiting).rejects.toBe(error);
+        await expect(other).rejects.toBe(error);
+      }
+      await flush();
+      await provider.resolve('billing').catch(() => {});
+      expect(calls).toBe(3);
+    });
+  }
   it(`keeps only one raw ${mode} lookup pending across bounded watch intervals`, async () => {
     let calls = 0;
     const hung = () => {

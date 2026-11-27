@@ -329,9 +329,22 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     return wrapped;
   }
 
-  /** Stops watches and clears cache, refresh, retry, reporter and ejection state. */
+  /**
+   * Stops watches and clears cache, refresh, retry, reporter and ejection state.
+   * @throws {AggregateError} After attempting every provider stop, if any failed
+   */
   close(): void {
     this.#closed = true;
+    // Invalidate every callback before running user/provider cleanup: a stop
+    // may throw or synchronously deliver through a different watch.
+    const stops: Unsubscribe[] = [];
+    for (const state of this.#nameWatches.values()) {
+      state.closed = true;
+      state.listeners.clear();
+      if (state.stop !== undefined) stops.push(state.stop);
+    }
+    this.#nameWatches.clear();
+    this.#watches.clear();
     this.#cache.clear();
     this.#inFlight.clear();
     this.#backoff.clear();
@@ -340,12 +353,17 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#watchSequences.clear();
     this.#emptyOnly.clear();
     for (const name of this.#emptyTimers.keys()) this.#clearEmptyTimer(name);
-    for (const unsubscribe of [...this.#watches]) {
-      unsubscribe();
-    }
-    this.#watches.clear();
-    for (const [name, state] of this.#nameWatches) this.#stopWatch(name, state);
     this.#ejection?.clear();
+    const errors: unknown[] = [];
+    for (const stop of stops) {
+      try {
+        stop();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0)
+      throw new AggregateError(errors, 'Service discovery watch cleanup failed.');
   }
 
   #stopWatch(name: string, state: INameWatch): void {
@@ -451,8 +469,10 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
 
   #broadcast(name: string, instances: readonly ServiceInstance[]): void {
     const state = this.#nameWatches.get(name);
+    const sequence = this.#watchSequences.get(name);
     for (const listener of [...(state?.listeners ?? [])]) {
       if (state?.closed || this.#nameWatches.get(name) !== state) break;
+      if (this.#watchSequences.get(name) !== sequence) break;
       if (state?.listeners.has(listener)) this.#invokeListener(name, listener, instances);
     }
   }
@@ -527,7 +547,8 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     // yet registered) are cached like any other, so `cacheTtlMs` still spaces
     // their reads and watchers still see them. Their number is bounded: past
     // the cap, the oldest unwatched one is evicted, so names taken from
-    // requests cannot grow the cache without bound.
+    // requests that only answer empty cannot grow it without bound. Nonempty
+    // names remain until close; an answering wildcard can grow that cache.
     if (accepted.length === 0 && (old === undefined || this.#emptyOnly.has(serviceName))) {
       this.#emptyOnly.delete(serviceName);
       this.#emptyOnly.add(serviceName);
@@ -556,14 +577,20 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     let instances: readonly ServiceInstance[];
     try {
       const ms = this.#options.resolveTimeoutMs;
-      instances = await withDeadline((signal) => this.#provider.resolve(serviceName, signal), {
-        timeoutMs: ms,
-        timing: resolveProbeTiming(this.#runtime),
-        onTimeout: () =>
-          new Error(
-            `${this.#provider.kind} discovery did not answer the read for '${serviceName}' within ${ms} ms`,
-          ),
-      });
+      instances = await withDeadline(
+        (signal) => {
+          if (this.#closed) throw new DiscoveryUnavailableError('Service discovery is closed.');
+          return this.#provider.resolve(serviceName, signal);
+        },
+        {
+          timeoutMs: ms,
+          timing: resolveProbeTiming(this.#runtime),
+          onTimeout: () =>
+            new Error(
+              `${this.#provider.kind} discovery did not answer the read for '${serviceName}' within ${ms} ms`,
+            ),
+        },
+      );
     } catch (error) {
       if (!this.#closed) {
         const stale = this.#cache.get(serviceName);

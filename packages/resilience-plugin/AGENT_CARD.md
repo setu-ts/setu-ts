@@ -1,7 +1,7 @@
 # @setu-ts/resilience-plugin — protect calls to unreliable services
 
-**Add it:** `setu add resilience` adds it and wires `ResiliencePlugin()` in a recognized functional
-config. It provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
+**Add:** `setu add resilience` wires `ResiliencePlugin()` in a recognized functional config.
+Provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
 
 ## Retry and limit an upstream HTTP call
 
@@ -41,8 +41,8 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - `retry.limit` counts total attempts (safe integer at least 1); delay is finite and non-negative.
   Invalid defaults throw RangeError at registration; selected policies at wrap. All timing is ms;
   timeout applies per attempt.
-- Breakers skip already-aborted calls. Mid-flight abort fails only if the function rejects; a
-  function ignoring its signal and resolving records success.
+- Breakers skip already-aborted calls and count their inner layers' result. A timeout fails even if
+  the function ignores abort and later resolves; without timeout, that resolution succeeds.
 - Timeout aborts the attempt's signal. Forward it to the underlying I/O to cancel that work;
   ignoring it only rejects the caller's wait. Caller cancellation stops retries and queued work.
 - A full bulkhead rejects after its queue fills; omitted `maxQueue` means no waiting queue.
@@ -51,5 +51,5 @@ export function registerBillingRoutes(router: IRouterApi): void {
 
 - `retry: true`, `circuitBreaker: true` and `bulkhead: true` require matching `defaultRetry`,
   `defaultCircuitBreaker` and `defaultBulkhead` policies on `ResiliencePlugin`.
-- Omitted or `false` policy layers are disabled; an explicit object overrides the default.
+- Omitted/`false` layers are disabled; an object overrides the default.
 - `TimeoutError`, `BulkheadFullError` and `CircuitOpenError` carry HTTP hints 504, 503 and 503.

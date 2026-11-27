@@ -68,13 +68,20 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/service-discovery-plugin` (M143c, #618).** DNS `servers` selects IP-literal name
   servers through `runtime.createDnsResolver` (Node, Bun, Deno). `resolveTimeoutMs` bounds the whole
   lookup across all servers with one attempt each; fractional bounds round up for the runtime.
-  Record TTLs are not read; `cacheTtlMs` stays the freshness bound. On Deno SERVFAIL reads as
-  absence and an underlying lookup may end about 2 s past the bound. V13-246.
+  Record TTLs are not read; `cacheTtlMs` is the age threshold for starting a background refresh, not
+  a bound on returned data. On Deno SERVFAIL reads as absence and an underlying lookup may end about
+  2 s past the bound. V13-246. Reads and watches share one pending raw DNS lookup per name across
+  caller timeouts. Discovery close invalidates all watches before attempting every stop and
+  surfacing cleanup failures; a watch still in setup is stopped when setup settles, its stop failure
+  rejecting that `watch()`; reads still queued at close never start. Nested watch deliveries cannot
+  send an older list after a newer one.
 - **`@setu-ts/grpc-plugin` (M143c, #618).** Unary `Unavailable` with exactly
   `x-setu-unprocessed: shutdown` is resent once on a new pick within the remaining deadline,
   regardless of wire status. Streaming calls and unmarked errors are not resent. The reserved header
   claims no processing; applications setting it on their own `Unavailable` get the same resend. The
-  instance still reports failure; a second marked failure surfaces. V13-23.
+  instance still reports failure; a second marked failure surfaces. Retry setup now races caller
+  abort and the remaining deadline; if stopped before sending, it preserves the original refusal and
+  records no outcome for the unsent attempt. V13-23.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,

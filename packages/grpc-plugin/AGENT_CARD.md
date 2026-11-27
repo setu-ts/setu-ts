@@ -1,4 +1,4 @@
-# @setu-ts/grpc-plugin — Connect and gRPC-Web services
+# @setu-ts/grpc-plugin — RPC services
 
 **Add it:** `setu add grpc` adds it with its `@connectrpc/connect` and `@bufbuild/protobuf` peers,
 and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`; an outbound client also needs
@@ -41,8 +41,8 @@ export function registerRpcService(
 
 - `basePath` defaults to `/`; a prefix needs a matching client URL.
 - `reflection` and `health` default to `true`.
-- Native `application/grpc` is refused with gRPC status 12 (HTTP 200); Connect and gRPC-Web are
-  served.
+- Native gRPC needs Node/Bun with `RuntimePlugin({ http2 })`; otherwise status 12. Connect and
+  gRPC-Web are served.
 - A duplicate service type name throws; no implementation means reflection only.
 - Server answers (handler errors) succeed; status Connect cannot decode, no answer, unavailable,
   unimplemented, deadline and peer cancel fail. Abort, pre-send faults and early ENHANCE_YOUR_CALM

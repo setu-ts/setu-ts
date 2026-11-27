@@ -75,6 +75,23 @@ async function expectReject(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('ResilienceService.wrap', () => {
+  it('records the inner timeout rejection even when the protected function later resolves', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const work = deferred<string>();
+    let calls = 0;
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return work.promise;
+      },
+      { timeout: 5, circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 } },
+    );
+    await expect(guarded()).rejects.toBeInstanceOf(TimeoutError);
+    work.resolve('late success');
+    await work.promise;
+    await expect(guarded()).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(calls).toBe(1);
+  });
   it('returns a callable that passes through when no patterns are selected', async () => {
     const service = new ResilienceService(new FakeRuntime());
     const guarded = service.wrap(() => Promise.resolve('plain'));

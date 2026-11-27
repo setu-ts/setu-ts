@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { CAPABILITIES, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import type {
@@ -52,6 +52,100 @@ describe('unprocessed shutdown answers', () => {
     error.metadata.set(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN);
     return error;
   };
+  for (const stop of ['abort', 'deadline', 'unbounded abort'] as const) {
+    for (const late of ['resolve', 'reject'] as const) {
+      it(`settles a pending retry pick on ${stop} before its late ${late}`, async () => {
+        vi.useFakeTimers();
+        const controller = new AbortController();
+        const refusal = marked(true);
+        const discovery = fakeDiscovery([instance('first', 1)]);
+        let picks = 0;
+        let finish!: (found: ServiceInstance) => void;
+        let fail!: (error: Error) => void;
+        const picking = new Promise<ServiceInstance>((yes, no) => {
+          finish = yes;
+          fail = no;
+        });
+        discovery.pick = () => (++picks === 1 ? Promise.resolve(instance('first', 1)) : picking);
+        let sends = 0;
+        const { clients: c } = clients(
+          { discovery: () => discovery, clock: () => performance.now() },
+          fakeNode(() => {
+            sends++;
+            return Promise.reject(refusal);
+          }),
+        );
+        const client = c.client(BILLING, 'billing') as { transport: ClientTransportLike };
+        let settled = false;
+        let result: unknown;
+        const pending = client.transport
+          .unary({}, controller.signal, stop === 'unbounded abort' ? 0 : 100, undefined, {})
+          .catch((error: unknown) => {
+            settled = true;
+            result = error;
+          });
+        try {
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(picks).toBe(2);
+          if (stop === 'deadline') await vi.advanceTimersByTimeAsync(100);
+          else controller.abort(new Error('caller stopped'));
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(settled).toBe(true);
+          expect(result).toBe(refusal);
+          if (late === 'resolve') finish(instance('late', 2));
+          else fail(new Error('late pick failure'));
+          await pending;
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(sends).toBe(1);
+          expect(discovery.reports).toEqual([['first', 'failure']]);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          finish(instance('cleanup', 2));
+          await pending;
+          c.close();
+          vi.useRealTimers();
+        }
+      });
+    }
+  }
+  it('preserves the first refusal when retry setup rejects after the budget', async () => {
+    let now = 0;
+    const refusal = marked(false);
+    const discovery = fakeDiscovery([instance('first', 1)]);
+    let picks = 0;
+    discovery.pick = () => {
+      if (++picks === 1) return Promise.resolve(instance('first', 1));
+      now = 101;
+      return Promise.reject(new Error('late resolution failure'));
+    };
+    const { clients: c } = clients(
+      { discovery: () => discovery, clock: () => now },
+      fakeNode(() => Promise.reject(refusal)),
+    );
+    try {
+      await expect(call(c.client(BILLING, 'billing'), undefined, 100)).rejects.toBe(refusal);
+      expect(discovery.reports).toEqual([['first', 'failure']]);
+    } finally {
+      c.close();
+    }
+  });
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 3e9])(
+    'resends marked Unavailable when the per-call timeout is out of timer range (%s)',
+    async (timeoutMs) => {
+      const discovery = fakeDiscovery([instance('draining', 1), instance('live', 2)]);
+      let attempts = 0;
+      const node = fakeNode(() =>
+        ++attempts === 1 ? Promise.reject(marked(false)) : Promise.resolve('ok'),
+      );
+      const { clients: c } = clients({ discovery: () => discovery }, node);
+      try {
+        expect(await call(c.client(BILLING, 'billing'), undefined, timeoutMs)).toBe('ok');
+        expect(attempts).toBe(2);
+      } finally {
+        c.close();
+      }
+    },
+  );
   it.each([false, true])(
     'resends marked Unavailable once on a new pick with the remaining deadline (wire=%s)',
     async (wire) => {

@@ -404,7 +404,7 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
   resolver's `timeoutMs` bounds the whole lookup by the resolver's own timer, surfacing as code
   `'ETIMEOUT'` on every runtime (measured on Node 24, Bun 1.4.5 and Deno 2.9.6 by the Core session,
   2026-11-23). The record TTL is not read: `resolveSrv` returns none on Node (Q11), so `cacheTtlMs`
-  stays the freshness bound and the README says so.
+  starts background refresh after that age; warm reads may keep an older list indefinitely.
 - **Core follow-up status (2026-11-23).** The maintainer approved the Core half; it is being built
   on `feat/m143-core-dns-drain` and is not on `develop` yet, so this section is built after it
   merges. Two facts it brings, measured by the Core session: `resolveHost` will reject with an
@@ -437,7 +437,9 @@ wait" wording and the read-through shape of `service-discovery-service.ts:156-18
     `failures * 100 / calls >= failureRateThreshold`. Cancellation is counted as today on both arms:
     a call whose signal was already aborted is not recorded (`circuit-breaker.ts:69-71`); a call
     aborted mid-flight is recorded as a failure only if the protected call rejects; a call that
-    ignores the signal and resolves records success (`:88-92`). Half-open is unchanged.
+    ignores the signal and resolves records success without a timeout (`:88-92`). The breaker counts
+    the inner retry/timeout result: a timeout rejection is failure even if the function later
+    resolves. Half-open is unchanged.
   - `ResilienceService` validates a breaker policy at `wrap()` and `ResiliencePlugin()` with a
     `RangeError` naming the field, through `common`'s `breakerPolicyRangeError(policy)` (exported by
     the Core PR; `validateCircuitBreakerPolicy` in `patterns/circuit-breaker.ts` becomes a call to
@@ -994,9 +996,9 @@ against the Consul container of X83, before the rows close on `0.14.0`.
 
 ## 8. Risks & mitigations
 
-- The DNS race leaves a hung lookup running after its bound fires. Mitigation: the retry spacing
-  keeps new lookups to one per name per interval; with the Core resolver (§3.6) the lookup itself is
-  bounded.
+- The DNS race leaves a hung lookup running after its bound fires. Mitigation: the retry spacing and
+  the shared raw-lookup map keep at most one pending raw query per name; with the Core resolver
+  (§3.6) the lookup itself is bounded.
 - Background refresh serves a list one refresh older than before on every expiry, and serves the
   last good list indefinitely while the registry is down. Mitigation: `staleForMs` and `degraded` in
   the indicator, the warn line, and ejection of instances that fail calls; documented in the README
@@ -1009,7 +1011,8 @@ against the Consul container of X83, before the rows close on `0.14.0`.
 - The Core marker PR may not land in time. Mitigation: §3.9's gate; without it the branch ships no
   503 resend and V13-23's client half stays open.
 - A peer (or a proxy) that copies the marker header onto a 503 it did not refuse could cause one
-  extra send. Mitigation: once, unary only, within the deadline, and only for a non-wire error; §13.
+  extra send. Mitigation: once, unary only, within the deadline, and only for marked `Unavailable`,
+  wire or not; §13.
 - A spoofed or unauthenticated NXDOMAIN now empties a name's list after the grace window, where it
   used to be served stale. Mitigation: the grace window, `degraded` during it, the README's advice
   to use a trusted resolver (`servers`), and the security audit (§13).
@@ -1177,8 +1180,9 @@ and §3.9.
   uses `describeError`, which masks URL userinfo.
 - **Integrity.** The client trusts `x-setu-unprocessed: shutdown` from a peer it chose through
   discovery. A peer that sends the marker falsely can cause at most one extra send of one unary call
-  to another instance of the same service, within the deadline; it cannot cause a resend of a wire
-  error or of a stream. The marker carries no data and is never logged with request content.
+  to another instance of the same service, within the deadline, whether the marked `Unavailable` is
+  a wire error or not; it cannot resend a stream. The marker carries no data and is never logged
+  with request content.
 - **Authorization and tenancy.** Not touched.
 - **Availability from network answers.** An authoritative NXDOMAIN now replaces a list with `[]`
   after `emptyAnswerGraceMs` (V13-247), where it used to be served stale; an unauthenticated or
@@ -1204,9 +1208,19 @@ and §3.9.
   that close and counts them too.
 - **Bounds.** The per-name reporters and retry state are keyed by service names the application
   resolves (not request input), and are cleared by `close()`; the DNS watch never holds more than
-  one lookup per name.
+  one lookup per name; cold reads share that pending query too.
 - **Audit (required).** The diff crosses trust boundaries named by CLAUDE.md and the security-audit
   skill: network input from registries and name servers decides where calls and their credentials
   go, and a resend carries a call's headers to another host. A committed-tree security audit per
   `.roo/skills/security-audit/SKILL.md` runs on the final commit in a freshly spawned Claude agent
   that did not implement or review the milestone, and its record goes in the PR.
+
+### PR review corrections — retry setup and discovery lifecycle
+
+Retry discovery/transport setup races caller cancellation and the original remaining deadline.
+Expiry or cancellation before dispatch preserves the first refusal and reports no unsent outcome; a
+resend that starts retains its own outcome. Discovery close invalidates every watch before
+attempting all stops and surfacing their failures together; a deferred read checks close before
+calling its provider. A nested watch delivery supersedes the older broadcast for remaining
+listeners. The empty-only cap does not bound names with nonempty answers, which remain cached until
+close.
