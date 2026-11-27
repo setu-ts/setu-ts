@@ -142,12 +142,14 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
   way out is `storage: 'database'` or dropping the scope.
 - **Lane routing (D-1):** this edits an existing `common` contract. §12 asks whether it ships as a
   small Core follow-up pull request first (the lane rule, as #612/#613 did) or in this letter.
-- **Test home:** `packages/audit-plugin/test/unit/audit-scope.test.ts` (scoped write reaches
-  `scope.getRepository(table).create` with `toAuditRow`'s row; no scope uses the client; memory, log
-  and file reject `AuditScopeUnsupportedError` and write nothing; redaction applies on the scoped
-  path); `packages/database-plugin/test/integration/audit-in-transaction.test.ts` (real
-  `DatabasePlugin` memory adapter + `AuditPlugin`: a rolled-back transaction leaves no audit row, a
-  committed one leaves exactly one; guarded PostgreSQL cell).
+- **Test home:** `packages/audit-plugin/test/unit/audit-service.test.ts` and
+  `database-audit.test.ts` (scoped write reaches `scope.getRepository(table).create` with
+  `toAuditRow`'s row; no scope uses the client; memory, log and file reject
+  `AuditScopeUnsupportedError` and write nothing; redaction applies on the scoped path);
+  `packages/audit-plugin/test/integration/audit-in-transaction.test.ts` (real `DatabasePlugin`
+  memory adapter + `AuditPlugin`, `@setu-ts/database-plugin` added as a `workspace:^` devDependency
+  of `audit-plugin`: a rolled-back transaction leaves no audit row, a committed one leaves exactly
+  one; guarded PostgreSQL cell).
 
 ### 3.2 V13-27: a failed model call logs its cause
 
@@ -161,11 +163,10 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
 - **Why:** the docs already promise the class and status (`docs/durable-runs.md:213`); the AI SDK
   hands the original error to `onError` (§12.1 T-8).
 - **Developer impact:** log lines change from `"error":"Error"` to the real class; no API change.
-- **Test home:** `packages/agent-runs-plugin/test/unit/step-loop-failure.test.ts` (a fake runtime
-  whose stream errors with a `QuotaExceededError` → log carries the class and `429`; a
-  provider-shaped error → its name; an error chunk with nothing captured → `Error`, as today); one
-  real-`ai` test in `test/integration/ai-runtime-real.test.ts` driving `loadAi()` with a mock model
-  that throws.
+- **Test home:** `packages/agent-runs-plugin/test/unit/step-loop.test.ts` (a fake runtime whose
+  stream errors with a `QuotaExceededError` → log carries the class and `429`; a provider-shaped
+  error → its name; an error chunk with nothing captured → `Error`, as today); one real-`ai` test in
+  `test/integration/real-ai.test.ts` driving `loadAi()` with a mock model that throws.
 
 ### 3.3 V13-39: the vector-store indicator logs its probe's cause
 
@@ -179,9 +180,9 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
   connection-error reporter, M119g); a log line is where an operator tells a revoked key from a dead
   backend.
 - **Developer impact:** one `warn` per outage and one `info` on recovery in the application log.
-- **Test home:** `packages/vector-store-plugin/test/unit/indicator.test.ts` (rejection → one warn
-  with the description, repeats at debug, recovery info; timeout → warn naming the bound; no logger
-  → no throw).
+- **Test home:** `packages/vector-store-plugin/test/unit/health-indicator.test.ts` (rejection → one
+  warn with the description, repeats at debug, recovery info; timeout → warn naming the bound; no
+  logger → no throw).
 
 ### 3.4 V13-5: the pgvector index check tells "wrong" from "missing"
 
@@ -193,8 +194,8 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
 - **Why:** an operator reading "missing" runs `CREATE INDEX IF NOT EXISTS`, which does nothing.
 - **Developer impact:** message text only.
 - **Test home:** `test/unit/pgvector-store.test.ts` (fake rows: absent → "missing"; present but
-  wrong → "is not"); guarded real cell in `test/integration/real-pgvector.test.ts` building the
-  index with `vector_l2_ops`.
+  wrong → "is not"); guarded real cell in `test/integration/conformance.test.ts` (`PGVECTOR_URL`)
+  building the index with `vector_l2_ops`.
 
 ### 3.5 V13-40: a pg pool's counters by default
 
@@ -225,8 +226,8 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
   acquire timeout (§12.1 T-4).
 - **Developer impact:** the `detail` and `type` change on this one case;
   `instanceof DatabaseUnavailableError` still holds, and a client can branch on the type.
-- **Test home:** `test/unit/classify-driver-error.test.ts` (row) and
-  `test/unit/database-errors.test.ts` (reason, detail, type).
+- **Test home:** `test/unit/classify-driver-error.test.ts` (row) and `test/unit/errors.test.ts`
+  (reason, detail, type).
 
 ### 3.7 V13-115: driver errors thrown by the transaction's own work (D-3)
 
@@ -314,10 +315,11 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
   "The write refers to a record that does not exist, or would remove one that others refer to.") and
   `NotNullViolationError` (`400`, type `not-null-violation`, detail "A required field has no
   value."). Signals: SQLSTATE `23503`/`23502`; mysql2 `ER_NO_REFERENCED_ROW_2`,
-  `ER_ROW_IS_REFERENCED_2`, `ER_BAD_NULL_ERROR`; the Prisma kinds `ForeignKeyConstraintViolation`,
-  `RestrictViolation` (`23001`) and `NullConstraintViolation`, and Prisma `P2003`/`P2011`; SQLite's
-  `FOREIGN KEY constraint failed` and `NOT NULL constraint failed:` message anchors, which M143o's
-  D1 half reads through this classifier. Every interception site (§3.0).
+  `ER_ROW_IS_REFERENCED_2`, `ER_BAD_NULL_ERROR`, `ER_NO_DEFAULT_FOR_FIELD`; the Prisma kinds
+  `ForeignKeyConstraintViolation`, `RestrictViolation` (`23001`) and `NullConstraintViolation`, and
+  Prisma `P2003`/`P2011`; SQLite's `FOREIGN KEY constraint failed` and `NOT NULL constraint failed:`
+  message anchors, which M143o's D1 half reads through this classifier. Every interception site
+  (§3.0).
 - **Why:** every compared framework classifies all four as non-transient caller faults (Spring
   `DataIntegrityViolationException`, Hibernate `ConstraintViolationException` with its kind, Rails
   `InvalidForeignKey`/`NotNullViolation`, Django `IntegrityError`, EF.Exceptions, Prisma
@@ -362,7 +364,7 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
   it shares D-1's routing question in §12.
 - **Developer impact:** under `rfc9457` the body's `type` and `title` change from `about:blank` and
   `Conflict` to the class's own; `status` and `detail` are unchanged.
-- **Test home:** `test/unit/database-errors.test.ts` (each class's hint, field by field, with the
+- **Test home:** `test/unit/error-status-hints.test.ts` (each class's hint, field by field, with the
   forbidden `message` absent); `packages/exceptions/test/integration/problem-type-database.test.ts`
   (a thrown `VersionConflictError` and `SerializationConflictError` through
   `errorHandler({ format: 'rfc9457' })` give different `type`s; `default` format bodies are
@@ -386,7 +388,7 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
 - **Why:** a configuration that boots and resolves no tenant fails silently, which the rules refuse.
 - **Developer impact:** a JavaScript configuration with `['header', 'subdomain']` fails at startup
   with the way out in the message.
-- **Test home:** `packages/multi-tenancy-plugin/test/unit/resolver-chain.test.ts`.
+- **Test home:** `packages/multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts`.
 
 ### 3.16 E-1: DynamoDB plain pre-reads inside a unit of work are strongly consistent
 
@@ -432,8 +434,8 @@ backend, class, site set). New `DriverErrorClass` members: `'foreign-key'`, `'no
 - **Decision:** `respond.ts` keeps the pump's promise; `cancel()` aborts and then awaits it (the
   pump swallows its own abort), so `ctx.defer` cleanups run after the last store read. The inventory
   row moves to `cancel-awaits-work` with new evidence and no `handOver`.
-- **Test home:** `packages/agent-runs-plugin/test/unit/respond-cancel.test.ts` (a store read held
-  open: `cancel()` does not settle until it returns); the inventory test.
+- **Test home:** `packages/agent-runs-plugin/test/unit/respond.test.ts` (a store read held open:
+  `cancel()` does not settle until it returns); the inventory test.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -479,23 +481,23 @@ that switches on it exhaustively (listed in the CHANGELOG as a change, ships in 
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                                                                                                  | src covered                                                    | Key assertions                                                                                                                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `database-plugin/test/unit/classify-driver-error.test.ts` (extended)                                                                                                                                       | `errors/classify.ts`                                           | the signal table of §3.0 as data; every new row, and the negative rows (`{code:4}` under mongodb, numeric strings outside the namespace) |
-| `database-plugin/test/unit/database-errors.test.ts`                                                                                                                                                        | `errors.ts`, `errors/problem-types.ts`                         | each class's hint field by field; `reason`                                                                                               |
-| `database-plugin/test/unit/transaction-work-classification.test.ts` (new)                                                                                                                                  | `services/database-service.ts`                                 | §3.7 table                                                                                                                               |
-| `database-plugin/test/unit/drizzle-default-pool-stats.test.ts` (new)                                                                                                                                       | `adapters/drizzle/drizzle-adapter.ts`                          | §3.5                                                                                                                                     |
-| `database-plugin/test/unit/dynamo-data-source.test.ts` (extended)                                                                                                                                          | `adapters/dynamo/dynamo-data-source.ts`                        | §3.16                                                                                                                                    |
-| `database-plugin/test/unit/base-repository.test.ts` (extended)                                                                                                                                             | `repositories/base-repository.ts`, `versioned-write.ts`        | §3.17                                                                                                                                    |
-| `database-plugin/test/integration/audit-in-transaction.test.ts` (new)                                                                                                                                      | cross-package                                                  | §3.1                                                                                                                                     |
-| guarded real cells (`real-drizzle-adapter`, `real-prisma-adapter`, `real-prisma-mysql`, `real-drizzle-mysql`, `real-mongo-adapter`, `real-dynamo-adapter`, `real-bigtable-adapter`, `real-cosmos-adapter`) | real drivers                                                   | the measured signal of every new row                                                                                                     |
-| `audit-plugin/test/unit/audit-scope.test.ts` (new)                                                                                                                                                         | `services/audit-service.ts`, `storage/*.ts`, `src/errors.ts`   | §3.1                                                                                                                                     |
-| `agent-runs-plugin/test/unit/step-loop-failure.test.ts`, `respond-cancel.test.ts` (new); `test/integration/ai-runtime-real.test.ts`                                                                        | `runtime/ai-runtime.ts`, `loop/step-loop.ts`, `log/respond.ts` | §3.2, §3.18                                                                                                                              |
-| `vector-store-plugin/test/unit/indicator.test.ts`, `pgvector-store.test.ts` (extended); `real-pgvector.test.ts`                                                                                            | `health/indicator.ts`, `adapters/pgvector/*`                   | §3.3, §3.4                                                                                                                               |
-| `multi-tenancy-plugin/test/unit/resolver-chain.test.ts` (new)                                                                                                                                              | `plugin/multi-tenancy-plugin.ts`                               | §3.15                                                                                                                                    |
-| `exceptions/test/integration/problem-type-database.test.ts` (new)                                                                                                                                          | (consumer proof)                                               | §3.13                                                                                                                                    |
-| `common/test/unit/duplicate-key.test.ts` (extended)                                                                                                                                                        | `errors/duplicate-key.ts`                                      | type and title                                                                                                                           |
-| `test/response-stream-cancel-inventory.test.ts`                                                                                                                                                            | (inventory)                                                    | §3.18 row                                                                                                                                |
+| Test file                                                                                                                                                                                                  | src covered                                                                   | Key assertions                                                                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `database-plugin/test/unit/classify-driver-error.test.ts` (extended)                                                                                                                                       | `errors/classify.ts`                                                          | the signal table of §3.0 as data; every new row, and the negative rows (`{code:4}` under mongodb, numeric strings outside the namespace) |
+| `database-plugin/test/unit/errors.test.ts`, `error-status-hints.test.ts`                                                                                                                                   | `errors.ts`, `errors/problem-types.ts`                                        | each class's hint field by field; `reason`                                                                                               |
+| `database-plugin/test/unit/transaction-work-classification.test.ts` (new)                                                                                                                                  | `services/database-service.ts`                                                | §3.7 table                                                                                                                               |
+| `database-plugin/test/unit/drizzle-default-pool-stats.test.ts` (new)                                                                                                                                       | `adapters/drizzle/drizzle-adapter.ts`                                         | §3.5                                                                                                                                     |
+| `database-plugin/test/unit/dynamo-data-source.test.ts` (extended)                                                                                                                                          | `adapters/dynamo/dynamo-data-source.ts`                                       | §3.16                                                                                                                                    |
+| `database-plugin/test/unit/base-repository.test.ts` (extended)                                                                                                                                             | `repositories/base-repository.ts`, `versioned-write.ts`                       | §3.17                                                                                                                                    |
+| `audit-plugin/test/integration/audit-in-transaction.test.ts` (new)                                                                                                                                         | cross-package                                                                 | §3.1                                                                                                                                     |
+| guarded real cells (`real-drizzle-adapter`, `real-prisma-adapter`, `real-prisma-mysql`, `real-drizzle-mysql`, `real-mongo-adapter`, `real-dynamo-adapter`, `real-bigtable-adapter`, `real-cosmos-adapter`) | real drivers                                                                  | the measured signal of every new row                                                                                                     |
+| `audit-plugin/test/unit/audit-service.test.ts`, `database-audit.test.ts` (extended)                                                                                                                        | `services/audit-service.ts`, `storage/*.ts`, `src/errors.ts`                  | §3.1                                                                                                                                     |
+| `agent-runs-plugin/test/unit/step-loop.test.ts`, `respond.test.ts` (new); `test/integration/real-ai.test.ts`                                                                                               | `runtime/ai-runtime.ts`, `loop/step-loop.ts`, `log/respond.ts`                | §3.2, §3.18                                                                                                                              |
+| `vector-store-plugin/test/unit/health-indicator.test.ts`, `pgvector-store.test.ts` (extended); `test/integration/conformance.test.ts` (`PGVECTOR_URL`)                                                     | `health/indicator.ts`, `plugin/vector-store-plugin.ts`, `adapters/pgvector/*` | §3.3, §3.4                                                                                                                               |
+| `multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts` (extended)                                                                                                                                   | `plugin/multi-tenancy-plugin.ts`                                              | §3.15                                                                                                                                    |
+| `exceptions/test/integration/problem-type-database.test.ts` (new)                                                                                                                                          | (consumer proof)                                                              | §3.13                                                                                                                                    |
+| `common/test/unit/duplicate-key.test.ts` (new)                                                                                                                                                             | `errors/duplicate-key.ts`                                                     | type and title                                                                                                                           |
+| `test/response-stream-cancel-inventory.test.ts`                                                                                                                                                            | (inventory)                                                                   | §3.18 row                                                                                                                                |
 
 ## 7. Verification gates
 
