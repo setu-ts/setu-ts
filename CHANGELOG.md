@@ -557,11 +557,15 @@ All notable changes to this project are documented here. The format follows
   WebSocket room on Workers works for any number of members, on one Worker and across Workers
   sharing a Durable Object namespace, and keeps working after members leave; proved on local workerd
   with 200 members (V13-195, V13-196). The isolate-level Durable Object backplane reconnects after a
-  settled connect, resends a frame once when its socket is dead, and closes a retired socket instead
-  of leaving it open at the hub (V13-196). The Workers adapter answers a peer's close frame at once,
-  so a clean close no longer waits 30 seconds at a compatibility date before 2026-04-07, and tracks
-  the socket's state without reading the native object (V13-203); it reports a `maxMessageBytes` of
-  0 or above workerd's 32 MiB ceiling once (V13-41).
+  settled connect and closes a retired socket instead of leaving it open at the hub (V13-196). Its
+  `publish` goes through the hub's `POST /publish` rather than the shared socket, so publishes from
+  concurrent requests no longer retire and reopen a socket another request owns, and no frame is
+  lost to that churn; the frame's existing `origin` drops the replica's own echo. The memory
+  transport now drops a frame that is not well-formed, as the other transports do. The Workers
+  adapter answers a peer's close frame at once, so a clean close no longer waits 30 seconds at a
+  compatibility date before 2026-04-07, and tracks the socket's state without reading the native
+  object (V13-203); it reports a `maxMessageBytes` of 0 or above workerd's 32 MiB ceiling once
+  (V13-41).
 - **`@setu-ts/cloudflare-plugin` (M143o, #619).** A trace crosses Workers messaging: with a
   telemetry service, `WorkersBroker` writes the producer span's `traceparent` into the envelope's
   framework `trace` field and runs subscribers and responders in a consumer span parented from it

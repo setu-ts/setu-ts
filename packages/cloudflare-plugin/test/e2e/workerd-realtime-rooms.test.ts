@@ -379,6 +379,56 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
+    'isolate-level publishes from concurrent requests all reach the hub, with no socket churn',
+    async () => {
+      // The hub's own socket hears every frame it fans out.
+      const listener = await client('/hub-listen?topic=iso');
+      const ids = ['a', 'b'].flatMap((w) => Array.from({ length: 20 }, (_, i) => `${w}-${i}`));
+
+      const answers = await Promise.all(
+        ids.map((id) => text(`/${id.slice(0, 1)}/iso/publish?id=${id}`, { method: 'POST' })),
+      );
+      await until(
+        () => ids.every((id) => listener.got.some((m) => m.includes(`"data":"${id}"`))),
+        10_000,
+        'every frame at the hub',
+      );
+      const stats = async (w: string): Promise<IsoStats> =>
+        JSON.parse((await text(`/${w}/iso/stats`)).body) as IsoStats;
+      const a = await stats('a');
+      const b = await stats('b');
+
+      expect(answers.every((r) => r.status === 204)).toBe(true);
+      expect(listener.got).toHaveLength(ids.length);
+      for (const s of [a, b]) {
+        expect(s.posts).toBe(20);
+        // One receiving socket each: a publish from another request never
+        // touches it, so nothing retires and reopens it.
+        expect(s.opens).toBe(1);
+        expect(s.warnings).toEqual([]);
+      }
+
+      // The receive side. A replica hears a frame only once its receiving socket
+      // has joined the hub, so B may miss A's first frames (measured: it did);
+      // A's socket belongs to one of the requests above, all of which have
+      // answered. Does it still hear B afterwards?
+      await sleep(2000);
+      for (let i = 0; i < 5; i++) await text(`/b/iso/publish?id=late-${i}`, { method: 'POST' });
+      const late = Array.from({ length: 5 }, (_, i) => `late-${i}`);
+      let later = await stats('a');
+      const deadline = Date.now() + 5000;
+      while (!late.every((id) => later.received.includes(id)) && Date.now() < deadline) {
+        await sleep(100);
+        later = await stats('a');
+      }
+      // Locally, yes: the socket outlives the request that opened it.
+      expect(later.received).toEqual(expect.arrayContaining(late));
+      expect(later.opens).toBe(1);
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
     'control: without the Durable Object arm, ws.room() answers the named error',
     async () => {
       const bare = await text('/a/rooms-without-arm');
@@ -405,4 +455,12 @@ function hubCountIs(expected: number): () => boolean {
     });
     return hubCount === expected;
   };
+}
+
+/** What `/iso/stats` answers. */
+interface IsoStats {
+  readonly opens: number;
+  readonly posts: number;
+  readonly warnings: readonly string[];
+  readonly received: readonly string[];
 }

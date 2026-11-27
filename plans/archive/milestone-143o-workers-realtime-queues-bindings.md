@@ -1492,3 +1492,49 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   and no-break space, which workerd keeps in the value, so `13\v`, `\f13` and `13\xa0` passed the
   adapter while workerd refuses them. The rule is now `raw === '13'` (spaces and tabs are stripped
   from a header value before the Worker sees it), with unit rows for those spellings.
+- **CodeRabbit on #619, thread 4716760556: isolate-level publish goes through the hub (maintainer
+  decision, option (b)).** `DurableObjectBackplane.publish` sent on the isolate socket, which
+  belongs to the request that opened it. A publish from another request threw on `send`. That
+  retired the socket, reopened it in the new request, and so on. Measured on local workerd, 20
+  concurrent publishes from each of two Workers: on the old path the hub never received every frame
+  (the e2e timed out waiting for them). `publish` now awaits `connect()` (the socket is kept for
+  receiving), then `publishViaHub(frame)`: a `POST /publish` the hub fans out to every socket, the
+  publisher's own included. The frame's existing `origin` (`RealtimeFrame.origin`, in `common` since
+  0.2.0) drops that echo in `#receive`. No contract field is added: the out-of-lane `common` edit
+  the decision allowed was not needed. A failed POST is logged, never thrown. A failed open still
+  throws, as before.
+  - **Comparison.**
+    - Workers I/O ownership: an I/O object belongs to the request that created it, and touching it
+      from another request throws.
+    - Durable Object docs: the object, not the Worker, is the place to hold long-lived sockets, and
+      a Worker reaches it per request through a stub `fetch`.
+    - partyserver: a broadcast is a call on the object, never a write on another request's socket.
+    - Hono's WebSocket helper and `ws`: a socket is used only from the code that owns it.
+    - All of these send from the request at hand. A POST is the same shape: the stub is fetched from
+      the publishing request.
+  - **Developer impact.** None on the API: `sse-plugin` calls `publish` as before. Every publish is
+    now one hub request, which counts against the object's soft limit of 1,000 requests a second, as
+    route broadcasts already do.
+  - **The receive side stays a documented limit.** The receiving socket still belongs to the request
+    that opened it (the first SSE stream or publish). On local workerd it kept receiving after every
+    request that opened it had answered: the e2e publishes five more frames 2 s later and the first
+    Worker hears all of them, still on its one socket. On the platform this is unverified (no
+    account). A replica also hears only the frames sent after its socket joined the hub: in the
+    measurement, the second Worker missed the first Worker's earliest frames. Both are in the
+    cloudflare README and PUBLIC_API.
+  - **The self-echo rule on every transport.** `test/realtime-backplane-origin.test.ts` runs memory,
+    messaging, Redis and Durable Object over one shared fake medium each, with four rows:
+    - a publish reaches the other replica and never the publisher's own handlers;
+    - a frame stamped with the receiver's own origin is dropped (a forged origin can only silence
+      the replica it names);
+    - a frame with no origin, or a non-string one, is dropped everywhere;
+    - a third party's frame reaches both replicas. The memory transport delivered a frame with no
+      origin. It now checks `isRealtimeFrame`, as the other three do.
+  - **Tests.**
+    - `durable-object-backplane.test.ts`: POST and no socket send, a socket that throws on send not
+      retired, reopen after a close or an error, a refused POST logged, connect failure, a raced
+      close.
+    - `workerd-realtime-rooms.test.ts`: concurrent publishes, every frame at the hub, one open and
+      no warnings on each Worker; then the receive measurement.
+  - **Negative controls.** The old `publish` fails the e2e (frames missing at the hub) and four unit
+    tests. The old memory `#deliver` fails the no-origin row. The restored tree passes.

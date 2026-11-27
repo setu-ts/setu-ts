@@ -97,11 +97,17 @@ export interface DurableObjectBackplaneOptions {
  *   socket; a broadcast from any other request is POSTed to the hub, which
  *   needs no socket. Client sockets are request-bound, never isolate-wide, so
  *   a room cannot write to all its members from one request.
- * - **The isolate socket** (`connect`/`publish`/`subscribe`) carries frames
- *   for consumers that still hold one isolate-level subscription
- *   (`sse-plugin`, and any runtime other than Workers). It is opened lazily
- *   on the first publish, retired and closed when it fails, and a publish
- *   that finds it dead reopens once and resends the same frame.
+ * - **The isolate socket** (`connect`/`subscribe`) receives frames for
+ *   consumers that hold one isolate-level subscription (`sse-plugin`). It is
+ *   opened lazily by `connect` or the first `publish`, and retired when it
+ *   reports a close or an error, so the next call reopens it. `publish`
+ *   sends through the hub's HTTP publish rather than this socket, so
+ *   publishes from different requests never touch a socket another request
+ *   owns; the frame's `origin` is what drops this replica's own echo. The
+ *   socket itself still belongs to the request that opened it. On local
+ *   workerd it keeps receiving after that request has answered; on the
+ *   platform that is unverified. A replica hears a frame only once its socket
+ *   has joined the hub, so frames published before then are not delivered.
  *
  * @example
  * ```typescript
@@ -208,41 +214,28 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
   }
 
   /**
-   * Publishes a frame to every other subscribed replica.
+   * Publishes a frame to every other subscribed replica, through the hub's
+   * HTTP publish. Opens the receiving socket first when none is open. A failed
+   * POST is logged, never thrown.
    *
    * @param frame - The frame to publish
-   * @throws {CloudflareUnsupportedError} When the socket cannot be opened
+   * @throws {CloudflareUnsupportedError} When the receiving socket cannot be
+   * opened
    */
   async publish(frame: RealtimeFrame): Promise<void> {
+    // The socket is opened (or kept) for receiving only. Sending on it would
+    // fail from every request but the one that opened it, since workerd ties
+    // the socket to that request: concurrent publishes from different requests
+    // retired and reopened it in turn. The hub's HTTP publish needs no socket.
+    // It fans out to every socket, this replica's own included, and the
+    // origin check in #receive drops that echo.
     await this.connect();
-    const socket = this.#socket;
-    if (socket === undefined) {
+    if (this.#socket === undefined) {
       // Only reachable when a close() raced this publish, in which case there
       // is deliberately nothing to send.
       return;
     }
-    try {
-      socket.send(JSON.stringify(frame));
-      return;
-    } catch {
-      // The socket is dead (or, on Workers, belongs to a request that has
-      // ended): retire it, reopen once and send the same frame again, so the
-      // frame that discovered the dead socket is not the one lost.
-      this.#retire(socket);
-    }
-    try {
-      await this.connect();
-      this.#socket?.send(JSON.stringify(frame));
-    } catch (error) {
-      // Reported rather than rethrown: both consuming plugins call publish
-      // detached (`void backplane.publish(f).catch(...)`), so an unreported
-      // throw here is invisible.
-      if (this.#socket !== undefined) this.#retire(this.#socket);
-      this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
-        topic: this.#options.topic,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await this.publishViaHub(frame);
   }
 
   /**
@@ -391,10 +384,9 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
     } catch {
       return;
     }
-    // The own-origin check is belt and braces beside the object's sender
-    // exclusion: the reconnect path in this class makes it briefly possible for
-    // one replica to hold two sockets to the same object, and without this the
-    // second would deliver this replica's own broadcasts back to it.
+    // The own-origin check is what keeps a replica from hearing itself: its
+    // publishes go through the hub's HTTP publish, which fans out to every
+    // socket, this replica's own included.
     if (!isRealtimeFrame(parsed) || parsed.origin === this.origin) {
       return;
     }

@@ -1,7 +1,8 @@
 /**
  * The front Worker (framework-free): `wrangler dev` exposes only the first
  * configuration, so this one routes `/a/*` to Worker A, `/b/*` to Worker B,
- * and `/hub-count` to the hub's fixture-only socket count. `/worker-to-worker`
+ * `/hub-count` to the hub's fixture-only socket count, and `/hub-listen?topic=`
+ * to a socket of the topic's hub itself, which hears every frame it fans out. `/worker-to-worker`
  * opens a socket to Worker A's `/chat` the way one Worker calls another over a
  * service binding — `Upgrade` and `Connection`, no key — and answers the status.
  *
@@ -36,6 +37,12 @@ export default {
           socket.close(1000);
         }
         return new Response(String(response.status));
+      });
+    }
+    if (url.pathname === '/hub-listen') {
+      const topic = url.searchParams.get('topic') ?? 'chat';
+      return env.REALTIME.get(env.REALTIME.idFromName(topic)).fetch('https://hub/connect', {
+        headers: { Upgrade: 'websocket' },
       });
     }
     if (url.pathname === '/hub-count') {

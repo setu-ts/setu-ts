@@ -494,6 +494,16 @@ when that connection is a member of the room. Without the arm, `ws.room()` and `
 - **A lost link** reopens up to three times (0.5 s, 1 s, 2 s apart), then logs
   `cloudflare: backplane link lost` once and stays closed.
 
+**SSE channels** use one isolate-level socket to the hub, for receiving only. A channel publish is
+POSTed to the hub, so publishes from concurrent requests never touch a socket another request owns.
+The hub sends the frame back to the publisher's socket too, and the replica drops it by its own
+`origin`. Two limits remain:
+
+- A replica hears frames only once its socket has joined the hub. The socket opens on the first SSE
+  stream or publish, so frames published before then do not reach it.
+- The socket belongs to the request that opened it. On local workerd it keeps receiving after that
+  request has answered. That is unverified on the platform.
+
 Two applications sharing one namespace must set different `topic` values, or each receives the
 other's frames.
 

@@ -46,6 +46,10 @@ const FRAME: RealtimeFrame = {
 class ScriptedNamespace implements IDurableObjectNamespace {
   readonly sockets: FakeClientSocket[] = [];
   opens = 0;
+  /** Every body POSTed to the hub's publish path. */
+  readonly posts: string[] = [];
+  /** What the hub's publish path answers. */
+  postStatus = 204;
   /** Set to make the next upgrade reject. */
   failNext = false;
   /** Set to answer without a `webSocket` member. */
@@ -59,7 +63,11 @@ class ScriptedNamespace implements IDurableObjectNamespace {
 
   get(_id: unknown): IServiceBinding {
     return {
-      fetch: async (): Promise<Response> => {
+      fetch: async (_input: unknown, init?: RequestInit): Promise<Response> => {
+        if (init?.method === 'POST') {
+          this.posts.push(String(init.body));
+          return { ok: this.postStatus === 204, status: this.postStatus } as unknown as Response;
+        }
         this.opens++;
         if (this.failNext) {
           this.failNext = false;
@@ -214,17 +222,37 @@ describe('DurableObjectBackplane.connect', () => {
 });
 
 describe('DurableObjectBackplane.publish', () => {
-  it('connects on demand and sends the serialized frame', async () => {
+  it('opens the receiving socket and POSTs the serialized frame to the hub', async () => {
     const namespace = new ScriptedNamespace();
     const backplane = build(namespace);
 
     await backplane.publish(FRAME);
 
     expect(namespace.opens).toBe(1);
-    expect(namespace.sockets[0]?.sent).toEqual([JSON.stringify(FRAME)]);
+    expect(namespace.posts).toEqual([JSON.stringify(FRAME)]);
+    // Nothing is sent on the socket: it is for receiving only.
+    expect(namespace.sockets[0]?.sent).toEqual([]);
   });
 
-  it('reopens after the socket reported itself closed', async () => {
+  it('never touches the socket, so a socket that throws on send is not retired', async () => {
+    // On workerd a send from a request that does not own the socket throws;
+    // the old send path retired and reopened the socket on every such publish.
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    const backplane = build(namespace, () => logger);
+    await backplane.connect();
+    namespace.sockets[0]!.failSend = true;
+
+    await backplane.publish(FRAME);
+    await backplane.publish(FRAME);
+
+    expect(namespace.opens).toBe(1);
+    expect(namespace.posts).toHaveLength(2);
+    expect(namespace.sockets[0]?.closed).toBe(false);
+    expect(logger.records).toEqual([]);
+  });
+
+  it('reopens the receiving socket after it reported itself closed', async () => {
     const namespace = new ScriptedNamespace();
     const backplane = build(namespace);
     await backplane.publish(FRAME);
@@ -233,9 +261,10 @@ describe('DurableObjectBackplane.publish', () => {
     await backplane.publish(FRAME);
 
     expect(namespace.opens).toBe(2);
+    expect(namespace.posts).toHaveLength(2);
   });
 
-  it('reopens after the socket reported an error', async () => {
+  it('reopens the receiving socket after it reported an error', async () => {
     const namespace = new ScriptedNamespace();
     const backplane = build(namespace);
     await backplane.publish(FRAME);
@@ -244,27 +273,6 @@ describe('DurableObjectBackplane.publish', () => {
     await backplane.publish(FRAME);
 
     expect(namespace.opens).toBe(2);
-  });
-
-  it('reports a non-Error thrown by send without losing the value', async () => {
-    const namespace = new ScriptedNamespace();
-    const logger = new RecordingLogger();
-    const backplane = build(namespace, () => logger);
-    await backplane.publish(FRAME);
-    const gone = (): never => {
-      // A DOMException-style string throw, which `error.message` would drop.
-      throw 'socket gone';
-    };
-    namespace.sockets[0]!.send = gone;
-    // The resend's fresh socket throws the same way, so the failure is logged.
-    namespace.onOpen = (): void => {
-      const latest = namespace.sockets.at(-1);
-      if (latest !== undefined) latest.send = gone;
-    };
-
-    await backplane.publish(FRAME);
-
-    expect(logger.records[0]?.meta).toMatchObject({ error: 'socket gone' });
   });
 
   it('a late close from a replaced socket does not retire the live one', async () => {
@@ -283,11 +291,23 @@ describe('DurableObjectBackplane.publish', () => {
     expect(namespace.opens).toBe(2);
   });
 
+  it('logs a POST the hub refuses, never throwing', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    namespace.postStatus = 413;
+    const backplane = build(namespace, () => logger);
+
+    await expect(backplane.publish(FRAME)).resolves.toBeUndefined();
+
+    expect(logger.records.map((r) => r.meta)).toEqual([{ topic: 'realtime', status: 413 }]);
+  });
+
   it('propagates a connect failure, since a caller cannot otherwise learn of it', async () => {
     const namespace = new ScriptedNamespace();
     namespace.failNext = true;
 
     await expect(build(namespace).publish(FRAME)).rejects.toThrow('durable object unreachable');
+    expect(namespace.posts).toEqual([]);
   });
 
   it('sends nothing when a close raced the publish', async () => {
@@ -299,6 +319,7 @@ describe('DurableObjectBackplane.publish', () => {
 
     await backplane.publish(FRAME);
 
+    expect(namespace.posts).toEqual([]);
     expect(namespace.sockets[0]?.sent).toEqual([]);
   });
 });
@@ -324,7 +345,8 @@ describe('DurableObjectBackplane.subscribe', () => {
     const seen: RealtimeFrame[] = [];
     await backplane.subscribe((frame) => seen.push(frame));
 
-    // Reachable during a reconnect, when one replica briefly holds two sockets.
+    // The hub's HTTP publish fans out to every socket, the publisher's own
+    // included, so this is the echo of every publish this replica makes.
     namespace.sockets[0]!.receive(JSON.stringify(FRAME));
 
     expect(seen).toEqual([]);
@@ -437,52 +459,7 @@ describe('DurableObjectBackplane.close', () => {
   });
 });
 
-describe('DurableObjectBackplane repairs (V13-196)', () => {
-  it('resends the frame once on a fresh socket when the old one throws, without logging', async () => {
-    const namespace = new ScriptedNamespace();
-    const logger = new RecordingLogger();
-    const backplane = build(namespace, () => logger);
-    await backplane.publish(FRAME);
-    namespace.sockets[0]!.failSend = true;
-
-    await backplane.publish(FRAME);
-
-    expect(namespace.opens).toBe(2);
-    expect(namespace.sockets[1]?.sent).toEqual([JSON.stringify(FRAME)]);
-    expect(logger.records).toEqual([]);
-  });
-
-  it('logs when the resend fails too, and closes the retired sockets', async () => {
-    const namespace = new ScriptedNamespace();
-    const logger = new RecordingLogger();
-    const backplane = build(namespace, () => logger);
-    await backplane.publish(FRAME);
-    namespace.sockets[0]!.failSend = true;
-    namespace.failNext = true;
-
-    await backplane.publish(FRAME);
-
-    expect(logger.records[0]?.message).toBe('cloudflare: backplane publish failed');
-    expect(namespace.sockets[0]?.closed).toBe(true);
-  });
-
-  it('logs and retires when the resent socket throws as well', async () => {
-    const namespace = new ScriptedNamespace();
-    const logger = new RecordingLogger();
-    const backplane = build(namespace, () => logger);
-    await backplane.publish(FRAME);
-    namespace.sockets[0]!.failSend = true;
-    namespace.onOpen = (): void => {
-      const latest = namespace.sockets.at(-1);
-      if (latest !== undefined && namespace.sockets.length === 2) latest.failSend = true;
-    };
-
-    await backplane.publish(FRAME);
-
-    expect(logger.records).toHaveLength(1);
-    expect(namespace.sockets[1]?.closed).toBe(true);
-  });
-
+describe('DurableObjectBackplane receiving socket', () => {
   it('closes a socket retired by its close event, so the hub stops fanning out to it', async () => {
     const namespace = new ScriptedNamespace();
     const backplane = build(namespace);

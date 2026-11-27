@@ -17584,9 +17584,17 @@ connection from that connection's own request, and `publishViaHub(frame)` POSTs 
 request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
 (request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning),
 reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost`
-once with `{ topic, connection }`. The isolate socket (`connect`/`publish`/`subscribe`) stays for
-`sse-plugin` and other runtimes: it opens lazily, a publish that finds it dead reopens once and
-resends the frame, and a retired socket is closed rather than left open at the hub.
+once with `{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin`
+and receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports
+a close or an error is retired and closed rather than left open at the hub, so the next call reopens
+it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
+different requests never touch a socket another request owns; a failed POST is logged as
+`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
+publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
+backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
+frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
+local workerd it keeps receiving after that request has answered, which is unverified on the
+platform.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses
