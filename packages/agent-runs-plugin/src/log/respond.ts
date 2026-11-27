@@ -123,6 +123,7 @@ export async function respond(
       pump = (async () => {
         try {
           let current = (await deps.store.get(row.id)) ?? row;
+          if (closed) return;
           const initial = await deps.store.chunks(current, 0);
           if (resume) {
             const committed = initial.find((value) => value.seq === batch);
@@ -155,6 +156,7 @@ export async function respond(
               const timer = deps.runtime.setTimeout(done, deps.pollIntervalMs);
               if (closed || queued.length > 0) done();
             });
+            if (closed) break;
             const fresh = await deps.store.get(row.id);
             if (!fresh) break;
             current = fresh;

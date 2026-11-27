@@ -7,8 +7,10 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
+import { startFrozenRelay } from '../fixtures/frozen-relay.ts';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { postgresConditionCells } from '../fixtures/postgres-condition-cells.ts';
 import { drizzle } from 'drizzle-orm/pg-proxy';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
@@ -29,7 +31,12 @@ import {
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
-import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
+import {
+  createDrizzleDatabase,
+  DatabasePlugin,
+  DatabaseService,
+  getDrizzleDatabase,
+} from '../../src/index.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { describeError } from '@setu-ts/common';
 import { probeHitAcquireTimeout } from '../../src/health/database-capacity.ts';
@@ -48,7 +55,7 @@ import {
 } from '@setu-ts/common';
 import type { DrizzleAdapterOptions, IDatabaseService } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { NormalizedQuery } from '@setu-ts/common';
+import type { NormalizedQuery, IRuntimeServices } from '@setu-ts/common';
 
 const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -826,20 +833,91 @@ const livePgUrl = process.env['POSTGRES_URL'];
 const skipLivePg = livePgUrl === undefined;
 
 it(
-  'default pg pool counters keep a saturated two-connection pool ready with reachable unknown',
+  'native queries against a frozen PostgreSQL fill the pool and readiness degrades without releases',
+  { skip: skipLivePg, timeout: 15_000 },
+  async () => {
+    const upstream = new URL(livePgUrl!);
+    const relay = await startFrozenRelay({
+      host: upstream.hostname,
+      port: Number(upstream.port || 5432),
+    });
+    const endpoint = new URL(livePgUrl!);
+    endpoint.hostname = relay.host;
+    endpoint.port = String(relay.port);
+    const pool = new Pool({ connectionString: endpoint.href, max: 2 });
+    const native = nodePostgresDrizzle(pool);
+    const configured = createDrizzleDatabase(native, (db, work) => db.transaction(work));
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: { drizzleInstance: configured, drizzleTables: { Item: users } },
+        }),
+        HealthPlugin({ details: true }),
+      ],
+    });
+    const pending: Promise<unknown>[] = [];
+    let restoreClock: (() => void) | undefined;
+    try {
+      await app.start();
+      let now = 0;
+      const clock = vi
+        .spyOn(app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME), 'hrtime')
+        .mockImplementation(() => now);
+      restoreClock = () => clock.mockRestore();
+      const handle = getDrizzleDatabase(
+        app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
+        configured,
+      );
+      await Promise.all([handle.execute(sql`SELECT 1`), handle.execute(sql`SELECT 1`)]);
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+      // Observe the release from the initial reachability query before the freeze.
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
+      relay.freeze();
+      pending.push(...[1, 2, 3].map(() => handle.execute(sql`SELECT 1`).then((result) => result)));
+      for (
+        let attempt = 0;
+        attempt < 200 && (pool.waitingCount !== 1 || pool.idleCount !== 0);
+        attempt++
+      )
+        await sleep(5);
+      expect(pool.waitingCount).toBe(1);
+      expect(pool.idleCount).toBe(0);
+      now = 10_001;
+      const health = (await app.inject({ method: 'GET', url: '/health' })).json<{
+        checks: { database: { status: string; data: { reachable: string } } };
+      }>();
+      expect(health.checks.database.status).toBe('degraded');
+      expect(health.checks.database.data.reachable).toBe('unknown');
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+    } finally {
+      relay.thaw();
+      await Promise.allSettled(pending);
+      restoreClock?.();
+      await app.stop();
+      await pool.end();
+      await relay.close();
+    }
+  },
+);
+
+it(
+  'default pg pool counters observe native releases and distinguish a busy pool from a hung pool',
   { skip: skipLivePg },
   async () => {
     const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
     const name = `pool_counters_${crypto.randomUUID().replaceAll('-', '')}`;
     const table = pgTable(name, { id: text('id').primaryKey() });
     const native = nodePostgresDrizzle(pool);
+    const configured = createDrizzleDatabase(native, (db, work) => db.transaction(work));
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
         DatabasePlugin({
           type: 'drizzle',
           options: {
-            drizzleInstance: createDrizzleDatabase(native, (db, work) => db.transaction(work)),
+            drizzleInstance: configured,
             drizzleTables: { Item: table },
           },
         }),
@@ -848,13 +926,20 @@ it(
     });
     let holders: PoolClient[] = [];
     let waiting: Promise<unknown> | undefined;
+    let restoreClock: (() => void) | undefined;
     try {
       await pool.query(`CREATE TABLE "${name}" (id text PRIMARY KEY)`);
       await app.start();
-      await app.services
-        .get<IDatabaseService>(CAPABILITIES.DATABASE)
-        .getRepository('Item')
-        .findAll();
+      let now = 0;
+      const clock = vi
+        .spyOn(app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME), 'hrtime')
+        .mockImplementation(() => now);
+      restoreClock = () => clock.mockRestore();
+      const handle = getDrizzleDatabase(
+        app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
+        configured,
+      );
+      await handle.execute(sql`SELECT 1`);
       holders = await Promise.all([pool.connect(), pool.connect()]);
       waiting = pool.query('SELECT 1');
       expect(pool.waitingCount).toBe(1);
@@ -865,9 +950,22 @@ it(
       }>();
       expect(health.checks.database.data.reachable).toBe('unknown');
       expect(health.checks.database.data.capacity).toEqual({ total: 2, idle: 0, waiting: 1 });
+      now = 10_001;
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(503);
+      const hung = (await app.inject({ method: 'GET', url: '/health' })).json<{
+        checks: { database: { status: string } };
+      }>();
+      expect(hung.checks.database.status).toBe('degraded');
+      holders.pop()!.release();
+      await waiting;
+      holders.push(await pool.connect());
+      waiting = pool.query('SELECT 1');
+      expect(pool.waitingCount).toBe(1);
+      expect((await app.inject({ method: 'GET', url: '/ready' })).statusCode).toBe(200);
     } finally {
       for (const holder of holders) holder.release();
       await waiting;
+      restoreClock?.();
       await app.stop();
       await pool.query(`DROP TABLE IF EXISTS "${name}"`);
       await pool.end();

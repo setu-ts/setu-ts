@@ -129,11 +129,22 @@ terminal — an unmatched-path `404`, a guard's `401`, the rate limiter's `429` 
 The `'rfc9457'` format emits `type: "about:blank"` for any error whose only semantics are its status
 code — which is every factory in this package except `validationError()`. [RFC 9457][rfc9457] §4.2
 registers `about:blank` for exactly that case, because a URI minted from the status code identifies
-nothing the `status` member does not already carry. Read `status` to distinguish errors.
+nothing the `status` member does not already carry. Read `status` for the HTTP category and `type`,
+when present, for the condition and its client action. Different conditions can share 409.
 
 `validationError()` is the exception: it defines an `errors` extension member, so it is a distinct
 problem type identified by `https://setu-ts.dev/errors/validation` — the same URI
 `@setu-ts/validation-plugin` uses.
+
+Database errors carry eleven distinct types under the same base: `write-conflict`, `lock-timeout`,
+`version-conflict`, `duplicate-key`, `foreign-key-violation`, `not-null-violation`,
+`invalid-field-value`, `database-unavailable`, `database-pool-saturated`, `database-timeout` and
+`database-connection-lost`. Their Problem Details titles identify the condition, not just the
+status. See
+[Database problem types](https://github.com/setu-ts/setu-ts/blob/main/docs/problem-types.md) for
+statuses and retry actions. `ERROR_TYPE_BASE` is defined in `@setu-ts/common` and re-exported here;
+its value remains `https://setu-ts.dev/errors`. A type URI is an identifier and need not resolve.
+The `default` format ignores problem metadata and carries no `type`.
 
 ```json
 {

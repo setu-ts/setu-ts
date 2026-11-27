@@ -853,12 +853,17 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
   /**
    * Application-owned callback reporting the driver's connection-pool
    * counters (M90b). The application reads its own driver's documented pool
-   * API — the configured Drizzle identity is opaque to this package — and
+   * API, and
    * the adapter publishes the returned {@linkcode DatabasePoolCapacity}
    * snapshot to the `database` health indicator through an internal seam.
    *
-   * Omitted, the indicator carries no capacity fields. No threshold is
-   * applied: saturation is data, not policy.
+   * An explicit callback wins. When omitted, numeric `totalCount`, `idleCount`
+   * and `waitingCount` on the instance's public `$client` supply pg-pool's
+   * default counters. mysql2 and Prisma have no such public counters. Without
+   * either source the indicator carries no capacity fields. Error-free pg-pool
+   * `release` events report progress, including queries through a native
+   * Drizzle handle; other clients count completed adapter calls, and their
+   * progress is unobservable once a native handle is taken.
    *
    * @example
    * ```typescript

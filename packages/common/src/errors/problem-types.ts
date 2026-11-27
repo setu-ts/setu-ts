@@ -49,34 +49,46 @@ export const DATABASE_PROBLEM_TYPES: {
     readonly type: `${typeof ERROR_TYPE_BASE}/database-connection-lost`;
     readonly title: 'Database Connection Lost';
   };
-} = {
-  'write-conflict': { type: `${ERROR_TYPE_BASE}/write-conflict`, title: 'Write Conflict' },
-  'lock-timeout': { type: `${ERROR_TYPE_BASE}/lock-timeout`, title: 'Lock Timeout' },
-  'version-conflict': { type: `${ERROR_TYPE_BASE}/version-conflict`, title: 'Version Conflict' },
-  'duplicate-key': { type: `${ERROR_TYPE_BASE}/duplicate-key`, title: 'Duplicate Key' },
-  'foreign-key-violation': {
+} = Object.freeze({
+  'write-conflict': Object.freeze({
+    type: `${ERROR_TYPE_BASE}/write-conflict`,
+    title: 'Write Conflict',
+  }),
+  'lock-timeout': Object.freeze({ type: `${ERROR_TYPE_BASE}/lock-timeout`, title: 'Lock Timeout' }),
+  'version-conflict': Object.freeze({
+    type: `${ERROR_TYPE_BASE}/version-conflict`,
+    title: 'Version Conflict',
+  }),
+  'duplicate-key': Object.freeze({
+    type: `${ERROR_TYPE_BASE}/duplicate-key`,
+    title: 'Duplicate Key',
+  }),
+  'foreign-key-violation': Object.freeze({
     type: `${ERROR_TYPE_BASE}/foreign-key-violation`,
     title: 'Foreign Key Violation',
-  },
-  'not-null-violation': {
+  }),
+  'not-null-violation': Object.freeze({
     type: `${ERROR_TYPE_BASE}/not-null-violation`,
     title: 'Not Null Violation',
-  },
-  'invalid-field-value': {
+  }),
+  'invalid-field-value': Object.freeze({
     type: `${ERROR_TYPE_BASE}/invalid-field-value`,
     title: 'Invalid Field Value',
-  },
-  'database-unavailable': {
+  }),
+  'database-unavailable': Object.freeze({
     type: `${ERROR_TYPE_BASE}/database-unavailable`,
     title: 'Database Unavailable',
-  },
-  'database-pool-saturated': {
+  }),
+  'database-pool-saturated': Object.freeze({
     type: `${ERROR_TYPE_BASE}/database-pool-saturated`,
     title: 'Database Pool Saturated',
-  },
-  'database-timeout': { type: `${ERROR_TYPE_BASE}/database-timeout`, title: 'Database Timeout' },
-  'database-connection-lost': {
+  }),
+  'database-timeout': Object.freeze({
+    type: `${ERROR_TYPE_BASE}/database-timeout`,
+    title: 'Database Timeout',
+  }),
+  'database-connection-lost': Object.freeze({
     type: `${ERROR_TYPE_BASE}/database-connection-lost`,
     title: 'Database Connection Lost',
-  },
-};
+  }),
+});

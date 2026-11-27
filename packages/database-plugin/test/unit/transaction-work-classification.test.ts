@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DrizzleQueryError } from 'drizzle-orm';
 import { httpStatusHintOf, withHttpStatusHint } from '@setu-ts/common';
 import type { IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
@@ -260,7 +261,18 @@ describe('transaction work classification', () => {
       }
     });
   }
+  const hintedQuery = withHttpStatusHint(
+    new Error('Application refusal', {
+      cause: new DrizzleQueryError(
+        'insert into accounts values ($1)',
+        ['bound-secret'],
+        new Error('driver'),
+      ),
+    }),
+    { status: 422, title: 'Application', detail: 'Application refusal.' },
+  );
   const OUT: readonly (readonly [string, unknown, DatabaseAdapterType?])[] = [
+    ['hinted app error with a private Drizzle cause', hintedQuery],
     ...[
       'ECONNREFUSED',
       'ECONNRESET',
@@ -315,6 +327,15 @@ describe('transaction work classification', () => {
       await expect(
         service(undefined, backend).transaction(() => Promise.reject(error)),
       ).rejects.toBe(error);
+      if (error === hintedQuery) {
+        expect(hintedQuery.cause).not.toHaveProperty('params');
+        expect((hintedQuery.cause as Error).message).toBe(
+          'Failed query: insert into accounts values ($1)',
+        );
+        expect((hintedQuery.cause as Error).stack).not.toContain('bound-secret');
+        expect(JSON.stringify(hintedQuery)).not.toContain('bound-secret');
+        expect(httpStatusHintOf(hintedQuery)?.status).toBe(422);
+      }
     });
   }
   for (const [label, error, status] of IN.filter(

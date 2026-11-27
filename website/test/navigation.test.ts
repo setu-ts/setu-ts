@@ -20,6 +20,10 @@ describe('guide navigation', () => {
     expect(
       DOCS_NAV.find((group) => group.items.some((item) => item.slug === 'ai'))?.items,
     ).toContainEqual({ slug: 'durable-runs', label: 'Durable agent runs' });
+    const reference = DOCS_NAV.find((group) => group.label === 'Plugin reference')!.items;
+    expect(reference[reference.findIndex((item) => item.slug === 'health-indicators') + 1]).toEqual(
+      { slug: 'problem-types', label: 'Database problem types' },
+    );
   });
 });
 

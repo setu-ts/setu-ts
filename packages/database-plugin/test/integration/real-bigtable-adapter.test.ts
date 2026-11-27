@@ -1008,6 +1008,53 @@ const OUTAGE_SLACK_MS = 1000;
 
 describe('BigtableAdapter behind a frozen relay (guarded)', () => {
   it(
+    'SDK ReadRows deadline with the plugin bound disabled serves 504 with reason bound',
+    { skip: skipReal, timeout: 15_000 },
+    async () => {
+      const tableId = await provision(`sdk_timeout_${suffix}`, ['cf']);
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      const adapter = new BigtableAdapter({
+        projectId,
+        instance: instanceId,
+        apiEndpoint: `${relay.host}:${relay.port}`,
+        requestTimeoutMs: 0,
+        clientOptions: {
+          clientConfig: {
+            interfaces: {
+              'google.bigtable.v2.Bigtable': {
+                methods: { ReadRows: { timeout_millis: 200, retry_codes_name: 'non_idempotent' } },
+              },
+            },
+          },
+        },
+        tables: { Outage: { table: tableId } },
+      });
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'bigtable',
+      );
+      try {
+        await adapter.connect();
+        const repository = service.getRepository('Outage');
+        await expect(repository.findById('absent')).resolves.toBeNull();
+        relay.freeze();
+        const result = await timed(() => repository.findById('absent'));
+        expect(result.outcome).toBe('rejected');
+        if (result.outcome === 'rejected') {
+          expect(result.error).toBeInstanceOf(DatabaseTimeoutError);
+          expect(result.error).toHaveProperty('reason', 'bound');
+          expect(httpStatusHintOf(result.error)?.status).toBe(504);
+          expect((result.error as Error).cause).toHaveProperty('code', 4);
+        }
+        expect(result.elapsedMs).toBeLessThan(5_000);
+      } finally {
+        relay.thaw();
+        await cleanupAll([() => service.close(), () => relay.close()]);
+      }
+    },
+  );
+  it(
     'ends a point read, a page, a write and a unit of work with 504 within requestTimeoutMs',
     { skip: skipReal, timeout: 60_000 },
     async () => {

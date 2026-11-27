@@ -44,6 +44,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'plugins', label: 'Plugin catalog' },
       { slug: 'custom-plugins', label: 'Custom plugins' },
       { slug: 'health-indicators', label: 'Health indicators' },
+      { slug: 'problem-types', label: 'Database problem types' },
       { slug: 'mcp', label: 'Tools for AI agents (MCP)' },
       { slug: 'ai', label: 'AI calls and budgets' },
       { slug: 'durable-runs', label: 'Durable agent runs' },

@@ -2174,51 +2174,50 @@ hang `/health` past the bound. Repeated polls cost at most one readiness read pe
 reads per poll. The consequence is the ordinary TTL trade-off, and it is the same one every other
 M90b indicator makes: closing the database reads `down` on the very next poll, while an adapter that
 loses readiness on its own — a pool that ends itself — is served from the cache for up to the TTL
-before the indicator reports it. A Drizzle registration that supplies
-`DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
-documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
-(`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
-Capacity is data, not policy: no threshold is applied, and the snapshot changes one row only.
-**Since M101a**, when it shows every connection busy with callers waiting (`idle === 0` and
-`waiting > 0`), the probe queues no `SELECT 1` and the indicator reports `up` with
-`reachable: 'unknown'` while queries through the adapter are still completing (one completed within
-the last 10 seconds; with none, a full pool is a hung database and reports `degraded`; once
-`getDrizzleDatabase`/`getDrizzleTransaction` has handed out the native instance, whose queries
-bypass the adapter, progress is unobservable and a saturated pool reads `up`) — saturation, not an
-outage, so `/ready` does not pull every saturated replica at once. **Since 0.13.0** a probe that
-timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
-counts as the same saturation evidence. pg-pool removes the timed-out waiter before it rejects, so
-with `connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads
-`waiting: 0`. A new-connection handshake timeout does not count. Without `poolStats` that row cannot
-be read, so a pool connection timeout or an unanswered probe reports `degraded` (a pool connection
-timeout reported `down` before M101a: the database never answered either way). Caller-facing
-pool-timeout status mapping is M90f. A snapshot the callback returns in a malformed shape is dropped
-exactly like an absent one — a broken reading is never published as a number. A callback that
-throws, or one whose counters violate the documented shape (a negative count, or `idle` exceeding
-`total`, which counts idle + in use), is dropped the same way: capacity is omitted for that poll and
-the indicator's own lifecycle and reachability answer stands.
+before the indicator reports it.
+
+Drizzle publishes a `DatabasePoolCapacity` snapshot (`{ total, idle, waiting }`) under
+`data.capacity` from an explicit `DrizzleAdapterOptions.poolStats` callback, or by default from
+numeric public pg-pool counters (`totalCount`, `idleCount`, `waitingCount` on `$client`). Explicit
+poolStats wins; mysql2 and Prisma expose no matching counters. Without either source, capacity is
+omitted. A throwing callback or malformed snapshot is not published.
+
+When capacity shows `idle === 0 && waiting > 0`, or the probe hit pg-pool's acquire timeout, the
+probe queues no further query behind the callers. The indicator is `up` with `reachable: 'unknown'`
+while progress was observed within 10 seconds; otherwise it is `degraded`. On pg-pool, error-free
+client releases count as progress, so native Drizzle handles and the application's own queries are
+seen. Other clients count adapter-call completions only, and once a native handle is taken their
+progress is unobservable: a saturated pool then stays `up` with `reachable: 'unknown'`. The
+indicator samples on each poll, so detecting a hang can lag one poll interval plus the window. A
+busy pool with releases stays ready; a hung pool without them fails `/ready`.
+
+The exact acquire-timeout message is `timeout exceeded when trying to connect`. pg-pool drops the
+waiter before rejecting it, so waiting may already be zero. A new-connection handshake timeout is
+not saturation. Without a readable capacity snapshot, an unanswered probe is degraded. The
+vector-store plugin owns another pool and adds `totalCount >= options.max` to its saturation rule;
+it counts its own statements and reports stale progress as down rather than degraded.
 
 **Since M95b** the payload also carries `reachable` whenever the adapter carries a liveness probe
 (the optional `IDatabaseAdapter.isHealthy?()`): `true` — the backend answered; `false` — `down`; a
 probe that exists and did not answer inside the 2-second bound reports `'unknown'` and the status
-`degraded`, **never `up`** — the claim that put a dead-database pod back in rotation (X51-1: the
-indicator used to read the lifecycle `isReady()`, which reports that `connect()` once succeeded and
-says nothing about the backend now). An adapter that ships NO probe reports `up` with `reachable`
-OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe that was never written is
-evidence of nothing about the backend, so a missing probe is not mapped to `degraded` (which answers
-503). Shipped probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle
-omits the probe for instances without `execute()`), memory (its own connection state — the process
-is the backend), and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read
-of the absent key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped
-entity; with none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by
-2000 ms, or by `requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's
-bound), and rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access,
-unreachable service) is `false`. The concrete `DatabaseService` exposes the seam the indicator
-reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
-(`Promise<boolean | undefined>` — the bounded probe, `undefined` when no answer was produced), the
-database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
-adapter whose own probe does not re-derive `isReady()` cannot report `up` for a connection it has
-already dropped.
+`degraded` unless the saturation/progress rule above applies — the claim that put a dead-database
+pod back in rotation (X51-1: the indicator used to read the lifecycle `isReady()`, which reports
+that `connect()` once succeeded and says nothing about the backend now). An adapter that ships NO
+probe reports `up` with `reachable` OMITTED and `/ready` answering 200 — the deliberate no-change
+row: a probe that was never written is evidence of nothing about the backend, so a missing probe is
+not mapped to `degraded` (which answers 503). Shipped probes: MongoDB (`db.command({ ping: 1 })`),
+Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without `execute()`), memory
+(its own connection state — the process is the backend), and since 0.14.0 Cosmos DB
+(`database.read()`), DynamoDB and Bigtable (a point read of the absent key `'__setu_readiness__'` on
+the table of `readinessEntity`, default the first mapped entity; with none the adapter has no probe
+and logs one `warn` at `connect()`). Each is bounded by 2000 ms, or by `requestTimeoutMs` when that
+is non-zero and smaller (`0` does not lift the probe's bound), and rejects on expiry (`'unknown'`,
+`degraded`); a refusal (missing table, denied access, unreachable service) is `false`. The concrete
+`DatabaseService` exposes the seam the indicator reads: `hasReachabilityProbe` (a synchronous
+presence read) and `reachability()` (`Promise<boolean | undefined>` — the bounded probe, `undefined`
+when no answer was produced), the database twin of `IMessageBroker.reachability()`. The lifecycle
+read still gates the probe, so an adapter whose own probe does not re-derive `isReady()` cannot
+report `up` for a connection it has already dropped.
 
 ### Database Interface
 
@@ -3239,8 +3238,9 @@ bound:
 | `DatabaseService`                                                                                                                                                                                                                                                                                                       | class                                |
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
-| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
+| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              | Constructors `(dataSource: DataSource, adapterType?: DatabaseAdapterType)`, defaulting to `prisma` and `drizzle`. The optional adapter type reaches BaseRepository conditional-write refusals; the standalone fallback is `database-plugin`. |
 | `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`, `UnsupportedRelationModeError`                                                                                                  | classes                              |
+| `ForeignKeyViolationError`, `NotNullViolationError`                                                                                                                                                                                                                                                                     | classes                              | Constraint refusals, 409 and 400, with optional entity/cause and condition-specific problem identities. Since 0.14.0.                                                                                                                        |
 | `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |
@@ -3302,103 +3302,94 @@ is reachable only in the log, and is what `errorHandler` records. So the respons
 a sentence without gaining a disclosure channel; a hinted error is exempt from `maskInternalErrors`
 precisely because there is no driver output in its body to mask.
 
-**Driver conditions answer their classified status (M90f, X38-1/X35-2).** `DatabaseService`
-classifies a driver rejection at its interception sites (the repository wrappers, the
-`beginTransaction()` acquisition and `query()`; since M128 the transaction catch no longer
-classifies what the caller's own work throws, see below) and throws `SerializationConflictError` —
-answered **`409 Conflict`**, the canonical retry-me signal, for a backend-reported write conflict
-(PostgreSQL SQLSTATE class `40` including `40001`, Prisma's `P2034` mapping of it, MongoDB's
-`TransientTransactionError` label, DynamoDB's `TransactionConflictException` name, Bigtable's gRPC
-`ABORTED`, Cosmos `449`) — or `DatabaseUnavailableError` — answered **`503 Service Unavailable`** —
-for a transiently unreachable backend (SQLSTATE class `08`, `57P03`, the node-postgres pool timeout,
-`MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, and the net
-errno `ECONNREFUSED` family the AWS SDK surfaces as a bare error). Both carry the original driver
-error as `cause` — the SQLSTATE and the failing statement stay reachable for the log — and serve a
-fixed sentence, so the masking exemption stays narrow. **Neither carries `Retry-After`**:
-`ErrorResponseInit` has no header channel, and the framework holds no honest horizon for a pool's
-saturation — `503` is itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is
-the deliberate asymmetry (a fixed window genuinely knows when it resets). An unrecognised error
-keeps the masked `500`, and an already-classified error is passed through untouched rather than
-wrapped twice. MongoDB's conflict mapping is verified against a real replica set and PostgreSQL's
-against a real server (SQLSTATE `40001` through Drizzle and Prisma's `P2034` alike); **DynamoDB's
-`TransactionConflictException` and Cosmos's `449` are documented-unverified** — neither was
-reproducible against DynamoDB Local or the local emulator, and Cosmos's connect refusal is a startup
-failure that never reaches a client.
+**Driver conditions (since 0.14.0).** `DatabaseService` classifies repository calls, `query()`,
+transaction acquisition and database-specific errors thrown by transaction work. Commit maps only
+server refusal verdicts. The
+[database README](packages/database-plugin/README.md#what-a-driver-condition-returns-to-the-client)
+lists the complete signal table. SQLSTATE `40001`/`40P01` are conflicts; other class-40 codes do not
+establish a retry-safe refusal. Numeric codes are backend-specific.
 
-<!-- version:history -->
+| Class                             | Status | Readonly reason / problem slug                                                                             |
+| --------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------- |
+| `SerializationConflictError`      | 409    | `reason: 'write-conflict'` (default) or `'lock-timeout'`; same-named problem slug                          |
+| `VersionConflictError`            | 409    | No reason field; `version-conflict`                                                                        |
+| `DuplicateKeyError` (common)      | 409    | No reason field; `duplicate-key`                                                                           |
+| `ForeignKeyViolationError`        | 409    | No reason field; `foreign-key-violation`                                                                   |
+| `NotNullViolationError`           | 400    | No reason field; `not-null-violation`                                                                      |
+| `InvalidFieldValueError` (common) | 400    | No reason field; `invalid-field-value`                                                                     |
+| `DatabaseUnavailableError`        | 503    | `reason: 'unreachable'` (default) → `database-unavailable`; `'pool-saturated'` → `database-pool-saturated` |
+| `DatabaseTimeoutError`            | 504    | `reason: 'bound'` (default) → `database-timeout`; `'connection-lost'` → `database-connection-lost`         |
 
-**A timed-out query answers `504 Gateway Timeout` (M113g, V9-33).** `DatabaseService` classifies
-node-postgres's `query_timeout` firing — the driver's `Query read timeout` rejection — as a new
-`timeout` kind and throws `DatabaseTimeoutError`, branded `504 Gateway Timeout` with the fixed
-detail "The database did not answer in time."; the scrubbed driver error stays as `cause` for the
-log, and `errorHandler` reads the hint. It is not `DatabaseUnavailableError`: that class's contract
-says the operation did not happen, and a timed-out statement may have run, so a write's outcome is
-unknown and a retry of a write must be idempotent. The bound is the driver's own — node-postgres's
-`query_timeout` and `connectionTimeoutMillis` on the `Pool` the application hands Drizzle; the
-plugin adds no JavaScript race to a call (only the bounded `sql_mode` read at `connect()` on Drizzle
-over mysql2), for the reasons the README's `Bounding a call` section gives. The DynamoDB, Cosmos DB
-and Bigtable arms set their driver's own cancelling deadline, `requestTimeoutMs` (since 0.14.0). The
-behaviour of a timed-out statement inside a transaction is measured in this milestone and documented
-there. Ships in 0.10.0.
+The three reason-bearing constructors accept `(message, { cause?, reason? }?)`.
+`ForeignKeyViolationError` and `NotNullViolationError` accept
+`(message, { entity?: string, cause?: unknown }?)` and expose `readonly entity: string | undefined`.
+An error raised at commit may carry no entity. Their details are fixed sentences, never driver text.
+The scrubbed diagnostic stays in `cause`. The [problem-types guide](docs/problem-types.md) gives all
+eleven type URIs, exact titles and client actions.
 
-**A duplicate key answers `409 Conflict`.** A write that would duplicate a primary key or a unique
-index is thrown as `DuplicateKeyError` (exported from `@setu-ts/common`, so a package that may not
-import this one can raise or recognise it), where every backend used to reach the client as a masked
-`500`. The signals, each measured against the real engine: PostgreSQL SQLSTATE `23505`, Prisma's
-`P2002`, MySQL's `ER_DUP_ENTRY` (by probe; CI runs no MySQL), MongoDB code `11000`, Cosmos `409`,
-and SQLite's `UNIQUE constraint failed`, which is the only signal Cloudflare D1 carries. The memory,
-DynamoDB and Bigtable adapters raise the class themselves. Numeric codes are read only under their
-own adapter, as for the conflict class. It is **not** retryable: the served `detail` says the
-conflicting write was rejected, never that it is safe to retry. The class carries the targeted
-`entity` when the failing repository call names one. At `commit()` a duplicate is the one class
-mapped, because the backends that detect it there (D1's atomic batch, a Cosmos transactional batch,
-a DynamoDB `TransactWriteItems` whose cancellation reason sits on a create's `Put`, a buffered
-memory or Bigtable create) apply nothing when they refuse. Since 0.14.0 a DynamoDB, Cosmos DB or
-Bigtable commit whose precondition failed (a conditional write, or a buffered plain update of a row
-deleted meanwhile), or a `TransactWriteItems` cancelled with a `TransactionConflict` reason, is
-`SerializationConflictError` (`409`). Any other commit rejection is still rethrown unchanged.
+Problem Details formats use the condition's `type` and `title`, so a version mismatch is distinct
+from a write conflict. Under `rfc9457`:
 
-<!-- version:history -->
+```json
+{
+  "type": "https://setu-ts.dev/errors/version-conflict",
+  "title": "Version Conflict",
+  "status": 409,
+  "detail": "The record was changed after it was read. Reload it and try again."
+}
+```
 
-**Outage-time driver errors answer `503` or `504`, and a transaction's own errors stay its own
-(M128, X94-2, V11-5).** The classifier gained the connection-loss signals measured during the
-`0.11.0` X94 outage cells, each mapped by one rule: a server verdict that the statement did not run,
-or a refusal before anything was sent, is `DatabaseUnavailableError` (`503`, "the request was not
-applied"); a connection lost under an in-flight statement, with no verdict, is
-`DatabaseTimeoutError` (`504`, outcome unknown — a retried write must be idempotent). Since 0.13.0
-its message says so — "The database connection closed before the call completed; the outcome is
-unknown." — instead of the driver-call-bound sentence, which is kept for a bound that fired; the
-class, status and public detail are the same.
+The `default` format ignores problem metadata and has no `type`; its body shape is unchanged. No
+classified database error adds `Retry-After`.
 
-| Driver        | Signal                                                                                                                                                                                               | Answer   |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| node-postgres | SQLSTATE `57P01` (the server terminated the backend)                                                                                                                                                 | `503`    |
-| node-postgres | `Client has encountered a connection error and is not queryable`, `Client was closed and is not queryable`                                                                                           | `503`    |
-| node-postgres | `Connection terminated unexpectedly`                                                                                                                                                                 | `504`    |
-| Prisma        | `P1001` (server unreachable), `P2028` (transaction could not start in time)                                                                                                                          | `503`    |
-| Prisma        | `P2039` / `P2010` — the driver code under `meta.driverAdapterError.cause.originalCode` is classified (adapter-pg `57P01` → `503`; adapter-mariadb `45028`, `45013`, `1053` → `503`, `45009` → `504`) | per code |
-| mysql2        | `ER_SERVER_SHUTDOWN` and `Can't add new command when connection is in closed state` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                      | as shown |
-| libsql        | `SQLITE_BUSY`                                                                                                                                                                                        | `503`    |
-| MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107` `NotWritablePrimary` (read only under the `mongodb` adapter)                                                                     | `503`    |
+**Conflict and constraint signals.** Lock timeouts (`55P03`, `ER_LOCK_WAIT_TIMEOUT`, namespaced
+mariadb `1205`) select `lock-timeout`; write conflicts select `write-conflict`. FK/restrict codes
+`23503`/`23001`, `P2003`, mysql2 reference codes and Prisma kinds
+`ForeignKeyConstraintViolation`/`RestrictViolation` map to 409. NOT NULL codes `23502`, `P2011`,
+mysql2 NULL/default codes and `NullConstraintViolation` map to 400. Both SQLite constraint anchors
+work with or without the `D1_ERROR: ` prefix. Duplicate keys still map through `DuplicateKeyError`:
+`23505`, `P2002`, `ER_DUP_ENTRY`, kind `UniqueConstraintViolation`, MongoDB `11000`, Cosmos `409`
+and the SQLite/D1 unique anchors.
 
-The pg message anchors are read only on a cause chain carrying no string code. The mariadb codes are
-read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. Since
-0.14.0 the driver-adapter cause's `kind` is read on every connector: `UniqueConstraintViolation` is
-`DuplicateKeyError` and `TransactionWriteConflict` is `SerializationConflictError` (both `409`), so
-a MySQL duplicate key or deadlock through `query()` (`P2010`) answers as on PostgreSQL; mysql2's
-`ER_LOCK_DEADLOCK` is `SerializationConflictError` too. MySQL, mariadb and libsql rows were measured
-by probe (CI runs none of them); the PostgreSQL and MongoDB rows are pinned by guarded live suites.
-**Known limitation:** the older connection-fault arms (`ECONNRESET`, `EPIPE`, `MongoNetworkError`)
-still answer `503` even when the connection dropped under a write in flight, which the `503`
-detail's "not applied" does not strictly cover; re-mapping them is a separate decision.
+**Unavailable versus unknown outcome.** Connection limits (`53300`, `P2037`, kind
+`TooManyConnections`, `ER_CON_COUNT_ERROR`, `ER_TOO_MANY_USER_CONNECTIONS`) map to 503. Only
+pg-pool's exact acquire-timeout message selects `pool-saturated`; mariadb `45028` remains
+`unreachable`. `P1001`, `P2028`, kind `DatabaseNotReachable`, server/closed-connection refusals and
+MongoDB pool-cleared subclasses remain 503.
 
-`IDatabaseService.transaction()` no longer classifies an error its `work` throws. Repository calls
-inside the work are classified by the repository wrapper as before, so a database fault there still
-answers `409`/`503`/`504`; anything else — an HTTP call refused with `ECONNREFUSED`, an application
-error carrying a `code` — reaches the caller as itself (only bound values of a native Drizzle error
-are scrubbed). Errors from the native Drizzle handles (`getDrizzleDatabase`,
-`getDrizzleTransaction`) stay unclassified in both scopes. Begin-time errors are classified and
-commit-time errors map only a duplicate key, as before.
+`TimeoutError` now maps to 504, including on a member with `ETIMEDOUT`, `ECONNRESET` or `EPIPE`.
+Structured database signals are checked before a generic name: an outer bare TimeoutError over
+`40001` stays a conflict. Cosmos `code: 'TimeoutError'`, Bigtable `DEADLINE_EXCEEDED` (4), Prisma
+`P1008`/`SocketTimeout` and MongoDB network/operation timeout classes select `bound`.
+`P1017`/`ConnectionClosed`, `PROTOCOL_CONNECTION_LOST`, namespaced mariadb `45009`, the pg
+terminated-connection message and TimeoutError with `ECONNRESET`/`EPIPE` select `connection-lost`.
+Portable Prisma kinds are read even without originalCode. Both 504 reasons have the fixed detail
+"The database did not answer in time." A write may have run: retry only idempotently.
+
+Bare `ECONNRESET`/`EPIPE`/`MongoNetworkError` still map to 503 even during an in-flight write,
+including bare Cosmos socket errors. That is a known limitation of the not-applied detail.
+DynamoDB's SDK renames socket errors to TimeoutError, ending that limitation on its SDK path.
+
+**Transaction work.** Native errors from `getDrizzleTransaction` are classified from the thrown
+error's own database-specific signals, or the cause of a Drizzle query wrapper. Generic errno,
+AWS/Cosmos timeout names/codes and numeric codes are excluded at this boundary. Database-specific
+names, labels, SQLSTATEs, Prisma codes and adapter kinds still apply. Application errors with a
+driver cause retain their identity, including hinted errors, while bound values in a Drizzle cause
+are scrubbed. Outside `db.transaction`, errors from `getDrizzleDatabase` reach the application as
+thrown; inspect the Drizzle cause when handling them.
+
+At commit, duplicate, serialization/lock conflict, FK and NOT NULL verdicts are mapped.
+`UnknownTransactionCommitResult` always prevents mapping. Unavailable/timeout commit rejections are
+scrubbed and rethrown without classification because acknowledgement may have been lost after the
+write ran. DynamoDB/Cosmos/Bigtable precondition failures at commit remain conflicts when their
+atomic primitive rejected the write.
+
+**Refused values.** Repository calls map `22001` (length), `22003` (range), `22P02`, `22007`,
+`22008`, mysql2 `ER_DATA_TOO_LONG`/`ER_WARN_DATA_OUT_OF_RANGE`, kinds
+`LengthMismatch`/`ValueOutOfRange`, Prisma client validation and known-request
+`P2000`/`P2007`/`P2020` to `InvalidFieldValueError`. The mapping requires an entity, so raw
+`query()` and native transaction work do not apply it. Unknown payload fields remain
+`UnknownPayloadFieldError`, a separate 400 refusal.
 
 **A Drizzle connection lost inside a transaction no longer exits the process (M128, X94-1).**
 pg-pool removes its idle `'error'` listener from a client it hands out, and a Drizzle transaction
@@ -6959,6 +6950,17 @@ await audit.log({
 `id`/`timestamp`. Stored records add both internally and are immutable once written. Retrieval is
 not part of the public capability this milestone.
 
+### Scoped writes (since 0.14.0)
+
+`IAuditLogger.log(entry, options?: AuditLogOptions)` accepts
+`{ readonly scope?: IOutboxWriteScope }` from common. With database storage,
+`DatabaseAuditStorage.appendIn(scope, entry): Promise<void>` serializes the stamped/redacted entry
+with toAuditRow and calls `scope.getRepository(table).create(row)`. The entity named by
+options.table (default audit_logs) must use the stored snake_case property names, including
+resource_id and user_id. SQL adapters refuse unknown fields. With no scope, client.insert is used.
+Memory, log and file sinks reject a scope with the exported `AuditScopeUnsupportedError`, before
+writing. Use database storage to join the transaction or omit the scope for an independent write.
+
 ### Options
 
 | Option           | Backend    | Description                                                                                    |
@@ -6973,6 +6975,10 @@ not part of the public capability this milestone.
 ### Exports
 
 - `AuditPlugin(options?)` — plugin factory.
+- `AuditScopeUnsupportedError` — named, value-free rejection of a scope on a sink that cannot roll
+  back.
+- `DatabaseAuditStorage.appendIn(scope: IOutboxWriteScope, entry: StoredAuditEntry): Promise<void>`
+  — the scoped row write.
 - `AuditService` — the `IAuditLogger` implementation (stamps `id`/`timestamp`, deep-freezes,
   delegates to storage).
 - `MemoryAuditStorage`, `LogAuditStorage`, `DatabaseAuditStorage`, `FileAuditStorage` — storage
@@ -14597,6 +14603,9 @@ reaches `redactors[<string>]`):
 | `describeError(value)`                                 | function  | Renders any thrown value as ONE bounded diagnostic line for a string log sink: `Name: message (code=…, …) [inner; inner] <- cause`, built from the same `serializeError` record, so a non-`Error` value yields `Error: <string>` and an `AggregateError` lists its members. Whitespace and control or format characters collapse to a single space (one value cannot inject a line break), and the line caps at 8192 Unicode code points with `… [truncated]`. Since 0.12.0 every name, message and classifier value has its URL userinfo masked (`maskUrlUserinfo`) before that cap, so a cut cannot expose part of a password. Pure and total — it never throws, whatever getters a value carries. Shared by `createConnectionErrorReporter`, the idempotency plugin's claim/release/settle lines, and the messaging plugin's broker error lines, which re-export it (M119g).                                                                                                                                                                                                                                                                                                                                                                                              |
 | `causeMessage(value)`                                  | function  | Extracts a caller-facing message from any thrown value: its `message` when it is an `Error`, `String(value)` otherwise. The one-line counterpart of `serializeError` — that shapes a record for a log sink, this supplies the sentence that goes inside another error's message. Pure. Here because `resolveRegistryEntry` and `@setu-ts/scheduler-plugin`'s declared-job refusal must produce the SAME sentence for the two arms of one option, and §2.2 forbids one reading the other's copy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `parseJsonBody(text)`                                  | function  | Parses one request-body text as JSON — the ONE parse all three `IRequest.json()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, so a malformed body answers `400` at every producer rather than a masked `500` on the served path while the test path answered `400` (X37-1). Throws `MalformedRequestBodyError`, carrying the platform `SyntaxError` as `cause` (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `ERROR_TYPE_BASE`                                      | const     | Canonical literal `https://setu-ts.dev/errors`, defined in common since 0.14.0 and re-exported by exceptions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `DATABASE_PROBLEM_TYPES`                               | const     | Deep-frozen table of the eleven database slugs and `{ type, title }` entries. Every URI has an explicit literal type; see docs/problem-types.md for statuses and client actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `AuditLogOptions`                                      | interface | `{ readonly scope?: IOutboxWriteScope }`, consumed by IAuditLogger.log's optional second argument. Since 0.14.0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `DuplicateKeyError`                                    | class     | A write that would duplicate a primary key or a unique index, branded `409 Conflict` with the fixed detail "A record with the same unique key already exists. The conflicting write was rejected." Carries the targeted `entity` when known and the driver error as `cause`, never served. Not retryable. In `common` because `@setu-ts/database-plugin` and `@setu-ts/cloudflare-plugin` raise it and any store recording "already processed" with a unique insert must recognise it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `assertPrimaryKeyUnchanged`                            | function  | **Since M113g.** The one shared primary-key check every `update`/`updateWhere` of the eight `IDataSource` implementations (the seven `database-plugin` adapters and `cloudflare-plugin`'s D1 data source) runs before any I/O; throws `PrimaryKeyChangeError` when the payload carries an own key column whose value is not `undefined` and does not equal the addressed key's value for that column. An equal value is accepted, compared as a string for `string`, `number`, `bigint` and `ObjectId`-like values and by time for `Date` values. In `common` because `cloudflare-plugin` raises it too and §2.2 forbids it importing `database-plugin` (the `DuplicateKeyError` precedent). Ships in 0.10.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `PrimaryKeyChangeError`                                | class     | **Since M113g.** An `update`/`updateWhere` payload that changes a row's primary key, branded `400 Bad Request` at construction with the fixed detail "An update cannot change a row's primary key." Thrown by `assertPrimaryKeyUnchanged` before any I/O; the `message` names the entity and the column, never a key value; `errorHandler` reads its hint. In `common` for the `DuplicateKeyError` reason — every `database-plugin` adapter and `cloudflare-plugin`'s D1 data source raise it, and an application must be able to `instanceof` it without importing either. Ships in 0.10.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -14678,7 +14687,7 @@ reaches `redactors[<string>]`):
 | Queue                  | `IQueue`, `IJob<T>`, `JobProcessor<T>`, `AddJobOptions`, `ProcessOptions`, `RecurringOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Scheduler              | `IScheduler`, `ScheduledJob<T>`, `SchedulerJobHandler<T>`, `ScheduleOptions<T>`, `RetryOptions`, `SchedulerBackoff`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Secrets                | `ISecretManager`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Audit                  | `IAuditLogger`, `AuditEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Audit                  | `IAuditLogger`, `AuditEntry`, `AuditLogOptions` — `log(entry: AuditEntry, options?: AuditLogOptions): Promise<void>`; `AuditLogOptions` is `{ readonly scope?: IOutboxWriteScope }` for an atomic audit write.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Resilience             | `ICircuitBreaker`, `CircuitState`, `IResilienceService`, `WrapOptions`, `CircuitBreakerPolicy` (union of `CircuitBreakerCountPolicy` and `CircuitBreakerRatePolicy`, since 0.14.0), `RetryPolicy`, `BulkheadPolicy`, `BackoffStrategy`, `ResilientCall`, `HardenedCall`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Storage                | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Mail                   | `IMailer`, `MailMessage`, `MailAttachment` (since 0.13.0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -15781,7 +15790,7 @@ middleware via the application's pipeline.
 | `rfc9457Formatter`    | const    | RFC 9457 Problem Details formatter                                                                                                                            |
 | `rfc7807Formatter`    | const    | **Deprecated.** RFC 7807 Problem Details formatter                                                                                                            |
 | `selectFormatter`     | function | Resolves an `ErrorFormat` or custom function to a formatter                                                                                                   |
-| `ERROR_TYPE_BASE`     | const    | Base URI for framework problem types (`https://setu-ts.dev/errors`)                                                                                           |
+| `ERROR_TYPE_BASE`     | const    | Re-export of the common literal `https://setu-ts.dev/errors`; the value is unchanged.                                                                         |
 
 ### Types
 
@@ -15849,8 +15858,9 @@ Contract notes:
   problem carrying "no semantics beyond the HTTP status code", which is every error this package
   produces except the one from `validationError()`. That one defines an `errors` extension member,
   so it is a distinct problem type identified by `https://setu-ts.dev/errors/validation` — the same
-  URI `@setu-ts/validation-plugin` emits for it. Clients that need to distinguish errors should read
-  `status`, which is what it is for.
+  URI `@setu-ts/validation-plugin` emits for it. Read `status` for the HTTP category and `type` for
+  the condition and its client action. Database hints have eleven concrete types and titles; see
+  [Database problem types](docs/problem-types.md). They share ERROR_TYPE_BASE from common.
 
   ```json
   {
@@ -15865,8 +15875,9 @@ Contract notes:
 - **`'rfc7807'` is deprecated but unchanged.** RFC 7807 was obsoleted by RFC 9457 in July 2023. The
   `'rfc7807'` alias and the `rfc7807Formatter` export are retained through a deprecation period
   (AI_GUIDELINES §9.2) and still emit the status-derived `type` (`https://setu-ts.dev/errors/404`)
-  they always did — a deprecated symbol must not silently change behavior (§9.4). Both spellings
-  carry `application/problem+json`. Removal is scheduled for v1.0.0.
+  they always did for status-only errors — a deprecated symbol must not silently change behavior
+  (§9.4). A supplied problem identity overrides type and title in both formats. Both spellings carry
+  `application/problem+json`. Removal is scheduled for v1.0.0.
 - **Logger is optional**: `errorHandler` logs via `ILogger` resolved from
   `ctx.services.get(CAPABILITIES.LOGGER)` only when a logger is registered; otherwise logging is
   silently skipped.

@@ -104,7 +104,7 @@ function classifiedOrOriginal(
   entity?: string,
   site?: 'transaction-work',
 ): unknown {
-  if (httpStatusHintOf(error) !== undefined) return error;
+  if (httpStatusHintOf(error) !== undefined) return scrubDriverError(error);
   const kind = classifyDriverError(error, adapterType, site);
   const refused = entity === undefined ? undefined : refusalErrorOf(error, entity);
   const lost = kind === 'timeout' && isConnectionLostMidCall(error, adapterType, site);

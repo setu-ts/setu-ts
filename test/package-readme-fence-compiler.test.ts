@@ -96,7 +96,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
   'packages/session-plugin/README.md': 12,
-  'packages/audit-plugin/README.md': 4,
+  'packages/audit-plugin/README.md': 5,
   // M101h: +1 for the Redaction policy-shape example.
   // M117: +1 for the node-redis example; `redis` resolves through the snippet tsconfig to the
   // devDependency `common` already carries, so the fence checks against node-redis's own types.

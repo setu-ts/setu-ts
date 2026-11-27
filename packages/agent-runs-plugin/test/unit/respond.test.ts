@@ -4,10 +4,36 @@ import { harness, row } from '../fixtures/harness.ts';
 import { respond } from '../../src/log/respond.ts';
 import { claim } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
+import { setTimeout as nextTurn } from 'node:timers/promises';
 async function read(ctx: ReturnType<Awaited<ReturnType<typeof harness>>['ctx']>): Promise<string> {
   return new Response(ctx.response.snapshot().body as ReadableStream<Uint8Array>).text();
 }
 describe('stream replay', () => {
+  it('cancel during the poll wait starts no further get or chunks read', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'poll-cancel' });
+      await h.store.create(current);
+      const get = vi.spyOn(h.store, 'get');
+      const chunks = vi.spyOn(h.store, 'chunks');
+      const ctx = h.ctx();
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 17,
+      });
+      await nextTurn(0);
+      expect([...h.timers.values()].some((timer) => timer.ms === 17)).toBe(true);
+      const counts = [get.mock.calls.length, chunks.mock.calls.length];
+      await (ctx.response.snapshot().body as ReadableStream<Uint8Array>).cancel();
+      await nextTurn(0);
+      expect([get.mock.calls.length, chunks.mock.calls.length]).toEqual(counts);
+      expect(h.timers.size).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
   for (const operation of ['get', 'chunks'] as const) {
     it(`cancel waits for a held ${operation} store read, including a late rejection`, async () => {
       const h = await harness();
@@ -17,6 +43,7 @@ describe('stream replay', () => {
           const current = row({ id: 'held-' + operation + reject });
           const entered = Promise.withResolvers<void>();
           const release = Promise.withResolvers<void>();
+          const afterGet = operation === 'get' ? vi.spyOn(h.store, 'chunks') : undefined;
           const spy =
             operation === 'get'
               ? vi.spyOn(h.store, 'get').mockImplementationOnce(async (id) => {
@@ -43,15 +70,17 @@ describe('stream replay', () => {
             .then(() => {
               settled = true;
             });
-          await Promise.resolve();
-          await Promise.resolve();
+          // A full event-loop turn also catches an async cancel with no pump await.
+          await nextTurn(0);
           expect(settled).toBe(false);
           if (reject) release.reject(new Error('late store failure'));
           else release.resolve();
           await cancelled;
           expect(settled).toBe(true);
+          if (afterGet !== undefined) expect(afterGet).not.toHaveBeenCalled();
           expect(h.timers.size).toBe(0);
           spy.mockRestore();
+          afterGet?.mockRestore();
         }
       } finally {
         await h.close();

@@ -180,6 +180,10 @@ Same-instance clients subscribe before replay and receive unflushed chunks. Othe
 committed batches. Cancellation aborts a local in-flight call immediately, or a remote holder on its
 next renewal. Client disconnection ends its tail, leaving the detached run available to resume.
 
+Replay cancellation waits for its pump's store read already in flight. No further read starts after
+cancellation. This wait has no separate bound; configure the store's own call bound (for example pg
+`query_timeout`) so response cleanup can finish.
+
 ## What exactly-once means here
 
 Tool database writes through the supplied unit of work commit with their idempotency result. A
@@ -225,8 +229,10 @@ that invocation's lifetime attached to its recovered runs. A sweep started while
 running on the same instance returns at once with zero counts.
 
 A run that fails is logged at `warn` (`Agent run failed.`) with its definition name, the error's
-class name and any HTTP status hint, never its message, inputs or ids. Supply a logger plugin to see
-it; the SDK's own provider-error log is switched off.
+original class name and any HTTP status hint, never its message, inputs or ids. A failed model call
+preserves the error passed to the UI stream's `onError` callback; an error chunk with no captured
+error keeps the generic `Error` fallback. Supply a logger plugin to see it; the SDK's own
+provider-error log is switched off.
 
 Defaults: 30-second lease, 5-second skew and sweep, 25 rows per sweep query, one-day retention,
 100-ms/64-chunk flushes, 250-ms polling, 256-KiB input and 8-MiB retained deltas. All numeric bounds

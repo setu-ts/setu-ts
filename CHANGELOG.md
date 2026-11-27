@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common` (M143h; V13-139, V13-9).** `ERROR_TYPE_BASE` is the literal
+  `https://setu-ts.dev/errors`, now shared with exceptions. `DATABASE_PROBLEM_TYPES` is the frozen
+  table of eleven `{ type, title }` entries; each entry is frozen too. `AuditLogOptions` supplies
+  the optional `{ scope?: IOutboxWriteScope }` argument to `IAuditLogger.log`.
+- **`@setu-ts/database-plugin` (M143h; V13-218, V13-139, V13-50).** `ForeignKeyViolationError` (409)
+  and `NotNullViolationError` (400), with optional entity/cause. Readonly
+  `SerializationConflictError.reason` selects write-conflict or lock-timeout;
+  `DatabaseUnavailableError.reason` selects unreachable or pool-saturated;
+  `DatabaseTimeoutError.reason` selects bound or connection-lost. `PrismaRepository` and
+  `DrizzleRepository` accept an optional adapter-type constructor argument for conditional-write
+  refusals, defaulting to prisma and drizzle respectively.
+- **`@setu-ts/audit-plugin` (M143h; V13-9).** `DatabaseAuditStorage.appendIn(scope, entry)` writes
+  the stamped/redacted row through the caller's transaction. `AuditScopeUnsupportedError` identifies
+  a scoped write to memory, log or file storage.
+- **Docs (M143h; V13-139, V12-8).** Database problem types and client actions have a guide and
+  navigation entry. The durable-run budget recipe shares one quota at composition and imports the AI
+  guide's saved middleware and usage modules; its fence compiler uses those real fences.
+
 - **`@setu-ts/service-discovery-plugin` (M143c, #618).** `resolveTimeoutMs` (2000 ms, `0` unbounded)
   and `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and
   `staleForMs`. Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range
@@ -155,6 +173,46 @@ All notable changes to this project are documented here. The format follows
   confirm logs none.
 
 ### Changed
+
+- **BREAKING — `@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/exceptions` (M143h; V13-139,
+  V13-132, V13-237, V13-252, V13-218, V13-115).** Problem Details database responses replace
+  about:blank/status titles with condition-specific type URIs and titles; default-format bodies stay
+  unchanged. TimeoutError now answers 504 instead of 503, including with ETIMEDOUT; Bigtable
+  deadlines and Cosmos SDK timeouts follow that rule. Prisma P1017 and ConnectionClosed are
+  connection-lost (504), P1008/SocketTimeout bound (504). A write outcome is unknown: retry only
+  idempotently. FK, NOT NULL, repository length/range and lock wait refusals now answer 409/400
+  rather than masked 500s. Database-specific native errors thrown inside transaction work are
+  classified; application-wrapped causes and generic foreign network errors are not. Commit maps
+  only duplicate/conflict/FK/NOT NULL verdicts, never unknown commit results, unavailable or
+  timeout. Hinted application errors keep their identity while Drizzle cause values are scrubbed.
+  Exceptions still re-exports ERROR_TYPE_BASE with the same value from common.
+- **BREAKING — `@setu-ts/database-plugin` (M143h; V13-133, V13-50, V13-40, V13-250).** MongoDB
+  pool-cleared subclasses map to 503; network/operation timeout classes to 504. Prisma P2037,
+  SQLSTATE 53300, mysql2 connection-limit codes and portable adapter kinds are recognised. pg-pool
+  acquire timeout selects pool-saturated; mariadb 45028 remains unreachable. Public pg counters are
+  inferred when poolStats is omitted; explicit callbacks win. Error-free pg-pool releases count
+  native traffic too, so a hung pg pool becomes degraded even after taking a Drizzle handle; other
+  clients keep the native-handle exemption. No option is added. DynamoDB buffered plain
+  update/delete pre-reads are strongly consistent; outer writes still send no GetItem.
+  Conditional-write refusals name their adapter.
+- **BREAKING — `@setu-ts/idempotency-plugin` (M143h; V13-139).** `within` recognises
+  DuplicateKeyError or the duplicate-key/write-conflict/lock-timeout problem types as a holder
+  conflict, including errors from another common copy. A status-only or unrelated 409, such as an FK
+  rejection at commit, is store-failed. Custom stores should raise DuplicateKeyError for a claim
+  race.
+- **`@setu-ts/audit-plugin` (M143h; V13-9).** `log(entry, { scope })` joins database storage to the
+  caller's transaction. Memory, log and file reject the scope and write nothing. Redaction and
+  stamping run before both paths; scoped SQL entities use snake_case row properties.
+- **BREAKING — `@setu-ts/agent-runs-plugin` (M143h; V13-27).** Model failures log the original error
+  class and status hint without provider text. Replay cancellation waits for the store read in
+  flight and starts no new read after cancellation; bound the store so cleanup can finish.
+- **`@setu-ts/vector-store-plugin` (M143h; V13-39, V13-5).** Readiness warns on an outage's first
+  probe failure, repeats the same cause at debug and logs recovery at info. Changed causes warn
+  again; late settlements after timeout report nothing. pgvector distinguishes a missing index from
+  a present relation that is not the expected valid, non-partial index.
+- **BREAKING — `@setu-ts/multi-tenancy-plugin` (M143h; V12-15).** register() refuses a non-resolver
+  array member with its index, an unknown name string, or a lone object without resolve. Pass
+  resolver instances in arrays or one supported name.
 
 - **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
   version with `isWireError`. A status Connect itself cannot decode fails the instance; valid status

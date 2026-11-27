@@ -5,8 +5,9 @@
  * and the `'custom'` arm flow through the same `IDatabaseAdapter` value, and
  * `common`'s port stays lifecycle-shaped. Pool capacity is therefore not a
  * port member — it is a symbol the Drizzle adapter attaches to itself when
- * the application configured {@linkcode DatabasePoolCapacity}-producing
- * `poolStats`, and the plugin feature-detects that symbol. Absent, the
+ * pg counters are available or the application configured a
+ * {@linkcode DatabasePoolCapacity}-producing `poolStats` callback, and the
+ * plugin feature-detects that symbol. Absent, the
  * health indicator carries no capacity fields; nothing else about the
  * indicator changes.
  *
@@ -153,7 +154,9 @@ export function probeHitAcquireTimeout(adapter: IDatabaseAdapter): boolean {
 
 /**
  * Symbol key under which an adapter exposes a monotonically increasing count
- * of the queries it has seen COMPLETE (M101a V8-3 review fix). Attached beside
+ * of the queries it has seen COMPLETE (M101a V8-3 review fix): adapter calls
+ * that resolved and, on pg-pool, client releases without an error. The two can
+ * overlap, so the count is progress evidence, not a query metric. Attached beside
  * {@linkcode DATABASE_POOL_CAPACITY}, by the same adapter, for the same reason:
  * a saturated pool and a hung database both show `idle === 0 && waiting > 0`,
  * and only the second stops completing queries.
@@ -176,7 +179,8 @@ export const QUERY_PROGRESS_WINDOW_MS = 10_000;
  * The reading an adapter returns from its {@linkcode DATABASE_QUERY_PROGRESS}
  * reader when it can no longer see every query the application runs — for
  * the Drizzle adapter, once the typed query seam has handed out the native
- * instance, whose queries never cross the adapter.
+ * instance, whose queries never cross the adapter. On pg-pool the plugin's
+ * release observer replaces this reading with the release count.
  */
 export const QUERY_PROGRESS_UNOBSERVABLE = 'unobservable';
 

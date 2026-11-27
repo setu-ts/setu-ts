@@ -129,6 +129,14 @@ Errors are shared from common: missing/cross-tenant 404, conflicting state 409, 
 403, repeated decision 409, input bound 413 and unavailable store 503. Served details contain no
 provider messages or request values. Definition and lease errors are internal.
 
+A failed model call logs the original error's class and HTTP status hint at `warn` (for example,
+`QuotaExceededError` and 429). It never logs the provider message or inputs. An error chunk with no
+captured cause keeps the generic `Error` fallback.
+
+Cancelling a replay stream aborts its pump and waits for the store read already in flight. It starts
+no new read after cancellation. The wait has no separate bound: configure a bound on the store, such
+as pg `query_timeout`, so response cleanup can finish.
+
 ## Development
 
 Use `pnpm test:coverage agent-runs-plugin --no-tooling` for the edit loop. Real PostgreSQL store and
