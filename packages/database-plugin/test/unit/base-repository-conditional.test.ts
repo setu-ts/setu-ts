@@ -4,13 +4,65 @@ import { BaseRepository } from '../../src/repositories/base-repository.ts';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { DatabaseService, DrizzleRepository, PrismaRepository } from '../../src/index.ts';
+import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
+import type { IDatabaseAdapter } from '@setu-ts/common';
 
 class TestRepo extends BaseRepository<Record<string, unknown>> {
-  constructor(source: DataSource) {
-    super(source);
+  constructor(source: DataSource, adapterType?: DatabaseAdapterType) {
+    super(source, adapterType);
   }
 }
 describe('BaseRepository conditional writes', () => {
+  it('names the bound adapter on direct, service and transaction repositories, with a standalone fallback', async () => {
+    const source = { ...new MemoryAdapter().createDataSource('Item') };
+    delete source.updateWhere;
+    delete source.deleteWhere;
+    const adapter: IDatabaseAdapter = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      isReady: () => true,
+      createDataSource: () => source,
+      rawQuery: () => Promise.resolve([]),
+      beginTransaction: () =>
+        Promise.resolve({
+          createDataSource: () => source,
+          commit: () => Promise.resolve(),
+          rollback: () => Promise.resolve(),
+        }),
+    };
+    const assert = async (repo: BaseRepository<Record<string, unknown>>, name: string) => {
+      for (const call of [
+        () => repo.updateWhere('key', { version: 1 }, { value: 2 }),
+        () => repo.deleteWhere('key', { version: 1 }),
+      ]) {
+        const error = await call().catch((error: unknown) => error);
+        expect(error).toHaveProperty('adapter', name);
+        expect(httpStatusHintOf(error)?.detail).toContain(`'${name}'`);
+      }
+    };
+    await assert(new TestRepo(source), 'database-plugin');
+    await assert(new PrismaRepository(source), 'prisma');
+    await assert(new DrizzleRepository(source), 'drizzle');
+    await assert(new PrismaRepository(source, 'custom'), 'custom');
+    await assert(new DrizzleRepository(source, 'custom'), 'custom');
+    for (const type of [
+      'custom',
+      'memory',
+      'prisma',
+      'drizzle',
+      'mongodb',
+      'dynamodb',
+      'cosmos',
+      'bigtable',
+    ] as const) {
+      const db = new DatabaseService(adapter, () => source, type);
+      await assert(db.getRepository('Item') as BaseRepository<Record<string, unknown>>, type);
+      await db.transaction((uow) =>
+        assert(uow.getRepository('Item') as BaseRepository<Record<string, unknown>>, type),
+      );
+    }
+  });
   it('delegates matches and misses', async () => {
     const repo = new TestRepo(new MemoryAdapter().createDataSource('User'));
     await repo.create({ id: 'a', n: 1 });

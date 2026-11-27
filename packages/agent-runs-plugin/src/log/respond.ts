@@ -64,6 +64,7 @@ export async function respond(
     deps.local?.listeners.delete(listener);
     for (const resolve of wake) resolve();
   };
+  let pump: Promise<void> = Promise.resolve();
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const encoder = new TextEncoder();
@@ -119,7 +120,7 @@ export async function respond(
       };
       ctx.signal?.addEventListener('abort', disconnected, { once: true });
       if (ctx.signal?.aborted) disconnected();
-      void (async () => {
+      pump = (async () => {
         try {
           let current = (await deps.store.get(row.id)) ?? row;
           const initial = await deps.store.chunks(current, 0);
@@ -170,8 +171,9 @@ export async function respond(
         }
       })();
     },
-    cancel() {
+    async cancel() {
       abort();
+      await pump;
     },
   });
   for (const [key, value] of Object.entries(deps.headers)) ctx.response.header(key, value);

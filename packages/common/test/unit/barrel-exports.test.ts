@@ -15,6 +15,27 @@ it('exports the route middleware scanner', async () => {
 });
 import * as common from '../../src/index.ts';
 
+it('exports audit scope options consumed by the shared audit writer', async () => {
+  const calls: unknown[] = [];
+  const options: common.AuditLogOptions = {
+    scope: {
+      getRepository: () => ({
+        create: (row) => {
+          calls.push(row);
+          return Promise.resolve(row);
+        },
+      }),
+    },
+  };
+  const logger: common.IAuditLogger = {
+    log: async (entry, init) => {
+      await init?.scope?.getRepository('trail').create({ action: entry.action });
+    },
+  };
+  await logger.log({ action: 'create', resource: 'record', result: 'success' }, options);
+  expect(calls).toEqual([{ action: 'create' }]);
+});
+
 it('exports the database problem identities and portable errors', () => {
   expect(common.ERROR_TYPE_BASE).toBe('https://setu-ts.dev/errors');
   expect(Object.keys(common.DATABASE_PROBLEM_TYPES)).toHaveLength(11);

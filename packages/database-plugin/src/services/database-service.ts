@@ -226,8 +226,8 @@ function verdictAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterT
  * @internal
  */
 class InternalRepo<Entity, Id extends EntityKey = string> extends BaseRepository<Entity, Id> {
-  constructor(dataSource: DataSource) {
-    super(dataSource);
+  constructor(dataSource: DataSource, adapterType: DatabaseAdapterType) {
+    super(dataSource, adapterType);
   }
 }
 
@@ -318,7 +318,10 @@ export class DatabaseService implements IDatabaseService {
     const cached = this._repositories.get(entity);
     if (cached !== undefined) return cached as unknown as IRepository<Entity, Id>;
     const source = this._createDataSource(entity);
-    const repository = new InternalRepo<Entity, Id>(this.wrapDataSource(entity, source));
+    const repository = new InternalRepo<Entity, Id>(
+      this.wrapDataSource(entity, source),
+      this._adapterType,
+    );
     if (!(hasAccessPathReporter(source) && this._options?.logQueries === true)) {
       this._repositories.set(entity, repository as unknown as IRepository<unknown, EntityKey>);
     }
@@ -353,7 +356,10 @@ export class DatabaseService implements IDatabaseService {
         txn,
         (entity: string) => {
           const scopedDs = txn.createDataSource(entity);
-          return new InternalRepo<unknown>(this.wrapDataSource(entity, scopedDs));
+          return new InternalRepo<unknown>(
+            this.wrapDataSource(entity, scopedDs),
+            this._adapterType,
+          );
         },
         this._adapterType,
       );

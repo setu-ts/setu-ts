@@ -13,6 +13,8 @@ export interface AiRuntime {
     system?: string;
   }): {
     readonly chunks: ReadableStream<UIMessageChunk>;
+    /** Original model error captured by the UI stream's onError callback. */
+    readonly failure: () => unknown;
     readonly result: () => Promise<{
       messages: ModelMessage[];
       finishReason: string;
@@ -27,6 +29,7 @@ export async function loadAi(): Promise<AiRuntime> {
     return {
       headers: ai.UI_MESSAGE_STREAM_HEADERS,
       model(options) {
+        let failure: unknown;
         // The SDK's default onError logs provider text. The UI error below
         // becomes a value-free failed run instead.
         const result = ai.streamText({ ...options, onError: () => {} });
@@ -36,8 +39,12 @@ export async function loadAi(): Promise<AiRuntime> {
             tools: options.tools,
             sendStart: false,
             sendFinish: false,
-            onError: () => 'Agent model call failed.',
+            onError: (error) => {
+              failure = error;
+              return 'Agent model call failed.';
+            },
           }),
+          failure: () => failure,
           async result() {
             return {
               messages: await result.responseMessages,

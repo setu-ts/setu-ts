@@ -891,9 +891,24 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
  *
  * @param scratchDir - The directory the caller writes its fences into
  */
-export async function writeProjectStubs(scratchDir: string): Promise<void> {
+export async function writeProjectStubs(scratchDir: string, aiMarkdown?: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
   await mkdir(scratchDir, { recursive: true });
+  // These application modules are the guide's real code, not API-shaped stubs.
+  const aiFences = extractFences(
+    'docs/ai.md',
+    aiMarkdown ?? (await readFile('docs/ai.md', 'utf8')),
+  );
+  for (const [name, heading] of [
+    ['chat.budget.ts', 'Budget middleware'],
+    ['usage.ts', 'Usage delivery'],
+  ] as const) {
+    const fence = aiFences.find(
+      (candidate) => candidate.heading === `## ${heading}` && TS_ALIASES.has(candidate.lang),
+    );
+    if (fence === undefined) throw new Error(`Missing AI guide fence: ${heading}`);
+    await writeFile(`${scratchDir}/${name}`, assembleSource(fence, classify(fence)));
+  }
   const source =
     "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
     'export function createApp(): IKernelApplication {\n' +

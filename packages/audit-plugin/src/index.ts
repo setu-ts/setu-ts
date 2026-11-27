@@ -47,3 +47,5 @@ export type {
 // ── Re-exported from @setu-ts/common ────────────────────────────────
 
 export type { AuditEntry, IAuditLogger } from '@setu-ts/common';
+/** Transactional scope refusal. @since 0.14.0 */
+export { AuditScopeUnsupportedError } from './errors.ts';

@@ -5,6 +5,41 @@ import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-type
 import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 import { createDynamoTransactionBuffer } from '../../src/adapters/dynamo/dynamo-transaction-buffer.ts';
 describe('DynamoDB data source writes', () => {
+  it('plain transaction pre-reads are strongly consistent; outer writes never pre-read', async () => {
+    const reads: unknown[] = [];
+    const client: IDynamoClient = {
+      query: async () => ({}),
+      scan: async () => ({}),
+      getItem: async (input) => {
+        reads.push(input);
+        return { Item: { ...input.Key, value: { N: '1' } } };
+      },
+      putItem: async () => ({}),
+      updateItem: async () => ({ Attributes: { pk: { S: 'outside' } } }),
+      deleteItem: async () => ({ Attributes: { pk: { S: 'outside' } } }),
+      transactWriteItems: async () => ({}),
+      destroy() {},
+    };
+    const mappings = { Item: { partitionKey: 'pk' } };
+    const scoped = createDynamoDataSource(
+      client,
+      'Item',
+      mappings,
+      undefined,
+      createDynamoTransactionBuffer(),
+    );
+    await scoped.update('update', { value: 2 });
+    await scoped.delete('delete');
+    expect(reads).toEqual([
+      { TableName: 'Item', Key: { pk: { S: 'update' } }, ConsistentRead: true },
+      { TableName: 'Item', Key: { pk: { S: 'delete' } }, ConsistentRead: true },
+    ]);
+    reads.length = 0;
+    const outer = createDynamoDataSource(client, 'Item', mappings);
+    await outer.update('outside', { value: 2 });
+    await outer.delete('outside');
+    expect(reads).toEqual([]);
+  });
   it('reports the selected primary, GSI, and scan access paths', async () => {
     const client: IDynamoClient = {
       query: async () => ({}),

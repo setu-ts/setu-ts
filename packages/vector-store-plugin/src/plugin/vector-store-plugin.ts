@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, createConnectionErrorReporter } from '@setu-ts/common';
 import type {
   ILogger,
   IPlugin,
@@ -124,7 +124,15 @@ export function VectorStorePlugin(options: VectorStorePluginOptions): IPlugin {
       // unreachable, so the replica should stop receiving traffic.
       ctx.health.register(
         'vector-store',
-        createVectorStoreIndicator(adapter, ctx.runtime, () => closed),
+        createVectorStoreIndicator(
+          adapter,
+          ctx.runtime,
+          () => closed,
+          createConnectionErrorReporter({
+            source: `vector-store-plugin: ${adapter.name}`,
+            logger: () => ctx.logger,
+          }),
+        ),
       );
     },
   };

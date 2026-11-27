@@ -14,6 +14,7 @@ import { drizzle } from 'drizzle-orm/pg-proxy';
 import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { drizzle as nodePostgresDrizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
+import type { PoolClient } from 'pg';
 import { drizzle as sqliteDrizzle } from 'drizzle-orm/sqlite-proxy';
 import { integer as sqliteInteger, sqliteTable, text as sqliteText } from 'drizzle-orm/sqlite-core';
 import { and, asc, count, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
@@ -823,6 +824,56 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
 
 const livePgUrl = process.env['POSTGRES_URL'];
 const skipLivePg = livePgUrl === undefined;
+
+it(
+  'default pg pool counters keep a saturated two-connection pool ready with reachable unknown',
+  { skip: skipLivePg },
+  async () => {
+    const pool = new Pool({ connectionString: livePgUrl!, max: 2 });
+    const name = `pool_counters_${crypto.randomUUID().replaceAll('-', '')}`;
+    const table = pgTable(name, { id: text('id').primaryKey() });
+    const native = nodePostgresDrizzle(pool);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: {
+            drizzleInstance: createDrizzleDatabase(native, (db, work) => db.transaction(work)),
+            drizzleTables: { Item: table },
+          },
+        }),
+        HealthPlugin({ details: true }),
+      ],
+    });
+    let holders: PoolClient[] = [];
+    let waiting: Promise<unknown> | undefined;
+    try {
+      await pool.query(`CREATE TABLE "${name}" (id text PRIMARY KEY)`);
+      await app.start();
+      await app.services
+        .get<IDatabaseService>(CAPABILITIES.DATABASE)
+        .getRepository('Item')
+        .findAll();
+      holders = await Promise.all([pool.connect(), pool.connect()]);
+      waiting = pool.query('SELECT 1');
+      expect(pool.waitingCount).toBe(1);
+      const ready = await app.inject({ method: 'GET', url: '/ready' });
+      expect(ready.statusCode).toBe(200);
+      const health = (await app.inject({ method: 'GET', url: '/health' })).json<{
+        checks: { database: { data: { reachable: unknown; capacity: unknown } } };
+      }>();
+      expect(health.checks.database.data.reachable).toBe('unknown');
+      expect(health.checks.database.data.capacity).toEqual({ total: 2, idle: 0, waiting: 1 });
+    } finally {
+      for (const holder of holders) holder.release();
+      await waiting;
+      await app.stop();
+      await pool.query(`DROP TABLE IF EXISTS "${name}"`);
+      await pool.end();
+    }
+  },
+);
 
 it(
   'PostgreSQL native SERIALIZABLE work serves one 200 and one 409; FK, NOT NULL, length and lock timeout are classified',

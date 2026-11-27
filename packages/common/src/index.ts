@@ -885,3 +885,5 @@ export {
 export type { CapabilityServices, UnboundCapability } from './capability-services.ts';
 /** Stable database problem identities. @since 0.14.0 */
 export { ERROR_TYPE_BASE, DATABASE_PROBLEM_TYPES } from './errors/problem-types.ts';
+/** Options for joining an audit write to a transaction. @since 0.14.0 */
+export type { AuditLogOptions } from './services/audit.ts';

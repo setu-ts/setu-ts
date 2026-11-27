@@ -1411,6 +1411,9 @@ importers:
         specifier: workspace:^
         version: link:../common
     devDependencies:
+      '@setu-ts/database-plugin':
+        specifier: workspace:^
+        version: link:../database-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

@@ -310,10 +310,14 @@ it.skipIf(!PGVECTOR_URL)(
               `CREATE INDEX ${table}_hnsw ON ${table} USING ivfflat (embedding vector_cosine_ops) WITH (lists = 1)`,
             );
         }
-        for (const store of [verify, create])
+        for (const store of [verify, create]) {
           await expect(store.ensureCollection(spec)).rejects.toBeInstanceOf(
             VectorCollectionMismatchError,
           );
+          await expect(store.ensureCollection(spec)).rejects.toThrow(
+            /has a relation named .* that is not the expected valid, non-partial/,
+          );
+        }
       }
     } finally {
       await admin.query(`DROP TABLE IF EXISTS ${table} CASCADE`);

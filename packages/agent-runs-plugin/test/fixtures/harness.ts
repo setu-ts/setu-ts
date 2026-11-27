@@ -6,6 +6,7 @@ import type {
   IRuntimeServices,
   AgentRunEntryRow,
   IPluginContext,
+  ILogger,
 } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import {
@@ -23,6 +24,20 @@ import { AgentRunService } from '../../src/service/agent-run-service.ts';
 import { resolveOptions } from '../../src/plugin/agent-runs-plugin.ts';
 import { loadAi } from '../../src/runtime/ai-runtime.ts';
 import type { AiRuntime } from '../../src/runtime/ai-runtime.ts';
+
+export function failureLogger(): ILogger {
+  const logger: ILogger = {
+    level: 'trace',
+    fatal: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    child: () => logger,
+  };
+  return logger;
+}
 
 export function clock() {
   let now = 1_000_000;
@@ -141,6 +156,7 @@ export function fakeAi(
           },
         }),
         result: () => Promise.resolve(reply),
+        failure: () => undefined,
       };
     }),
   };

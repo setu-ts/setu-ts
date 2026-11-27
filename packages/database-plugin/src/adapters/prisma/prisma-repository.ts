@@ -5,6 +5,7 @@
  */
 import type { EntityKey } from '@setu-ts/common';
 import { BaseRepository, type DataSource } from '../../repositories/base-repository.ts';
+import type { DatabaseAdapterType } from '../../interfaces/index.ts';
 
 /**
  * Repository backed by the Prisma adapter.
@@ -20,8 +21,11 @@ export class PrismaRepository<
   Entity extends Record<string, unknown>,
   Id extends EntityKey = string,
 > extends BaseRepository<Entity, Id> {
-  constructor(protected override readonly _dataSource: DataSource) {
-    super(_dataSource);
+  constructor(
+    protected override readonly _dataSource: DataSource,
+    adapterType: DatabaseAdapterType = 'prisma',
+  ) {
+    super(_dataSource, adapterType);
   }
 }
 

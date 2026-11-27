@@ -250,7 +250,8 @@ export async function stepLoop(
           while (true) {
             const next = await reader.read();
             if (next.done) break;
-            if (next.value.type === 'error') throw new Error('Agent model call failed.');
+            if (next.value.type === 'error')
+              throw generation.failure() ?? new Error('Agent model call failed.');
             if (next.value.type === 'abort') throw new Error('Agent model call aborted.');
             if (next.value.type !== 'tool-input-delta' && next.value.type !== 'tool-input-start')
               await log.emit(next.value);

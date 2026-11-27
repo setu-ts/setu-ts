@@ -103,6 +103,30 @@ export type DrizzleInstance = {
   transaction<T>(cb: (tx: DrizzleInstance) => Promise<T>): Promise<T>;
 };
 
+/** A pg pool exposes these public counters; other clients have no inferred capacity. */
+function defaultPoolStats(
+  database: DrizzleInstance,
+): NonNullable<DrizzleAdapterOptions['poolStats']> | undefined {
+  try {
+    const client = (database as DrizzleInstance & { $client?: unknown }).$client;
+    if (typeof client !== 'object' || client === null) return undefined;
+    const counters = client as Record<string, unknown>;
+    if (
+      typeof counters.totalCount !== 'number' ||
+      typeof counters.idleCount !== 'number' ||
+      typeof counters.waitingCount !== 'number'
+    )
+      return undefined;
+    return () => ({
+      total: counters.totalCount as number,
+      idle: counters.idleCount as number,
+      waiting: counters.waitingCount as number,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 type DrizzleSelect = {
   from(table: DrizzleTable): DrizzleSelectQuery;
 };
@@ -306,15 +330,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   ) {
     this._warn = warn;
     this._options = options ?? undefined;
-    // The application owns the pool callback; the adapter only publishes
-    // what it returns, validated at read time by the plugin.
+    // An explicit application callback wins over inferred pg counters.
     const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
     if (poolStats !== undefined) {
-      const seams = this as unknown as Record<symbol, unknown>;
-      seams[DATABASE_POOL_CAPACITY] = poolStats;
-      seams[DATABASE_QUERY_PROGRESS] = () =>
-        this.#nativeHandleIssued ? null : this.#completedQueries;
-      seams[DATABASE_PROBE_ACQUIRE_TIMEOUT] = () => this.#probeAcquireTimedOut;
+      this.attachPoolStats(poolStats);
     }
     // The typed-query seam (M70j) is attached here rather than declared as a
     // computed-key method for the same TS9038 reason recorded on the capacity
@@ -329,6 +348,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     };
   }
 
+  /** Binds capacity, completed-query and acquire-timeout observations. */
+  private attachPoolStats(poolStats: NonNullable<DrizzleAdapterOptions['poolStats']>): void {
+    const seams = this as unknown as Record<symbol, unknown>;
+    seams[DATABASE_POOL_CAPACITY] = poolStats;
+    seams[DATABASE_QUERY_PROGRESS] = () =>
+      this.#nativeHandleIssued ? null : this.#completedQueries;
+    seams[DATABASE_PROBE_ACQUIRE_TIMEOUT] = () => this.#probeAcquireTimedOut;
+  }
+
   /** @inheritdoc */
   async connect(): Promise<void> {
     const configured = this.resolveDb();
@@ -336,6 +364,10 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._configuredDatabase = configured.configured;
     this._transactionBridge = configured.transaction;
     this._supportsIsolation = configured.supportsIsolation;
+    if ((this._options as DrizzleAdapterOptions | undefined)?.poolStats === undefined) {
+      const inferred = defaultPoolStats(this._db);
+      if (inferred !== undefined) this.attachPoolStats(inferred);
+    }
     let entityKind: unknown;
 
     try {

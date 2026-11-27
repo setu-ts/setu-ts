@@ -84,44 +84,59 @@ tenant budgeting there using that identity rather than a request that no longer 
 
 ### Budgeting a run
 
-A run has no request, but `AgentRunContext` already carries the tenant, principal, abort signal and
-services the budget middleware reads, so it satisfies `BudgetScope` as it is. The recipe reuses the
-`ai-chat` example's budget code, so the application must register what that code resolves: the
-example's `CHAT_MODELS` provider plugin (its priced models), a database and the messaging outbox
-(`CAPABILITIES.DATABASE` and `CAPABILITIES.OUTBOX`, which record usage), as `apps/ai-chat` does. The
-`createRunsApp` composition above registers the database but neither `CHAT_MODELS` nor the outbox,
-so it needs those two added first.
+A run has no request, but `AgentRunContext` carries the tenant, principal, abort signal and services
+required by `BudgetScope`. Save the **Budget middleware** and **Usage delivery** fences from
+[the AI guide](ai.md) as `./chat.budget.ts` and `./usage.ts`. Register the database and outbox
+services (`CAPABILITIES.DATABASE` and `CAPABILITIES.OUTBOX`) in the application. Build the quota
+once at composition using the application runtime, and pass that same quota to the chat route's
+budget middleware so HTTP calls and durable runs share one budget.
 
 ```ts
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { wrapLanguageModel } from 'ai';
 import { defineAgentRun } from '@setu-ts/agent-runs-plugin';
-import { budgetedModel } from '../../apps/ai-chat/src/modules/chat/chat.budget.ts';
-import { chatQuota } from '../../apps/ai-chat/src/modules/chat/chat.service.ts';
-import { CHAT_MODELS } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
-import type { IChatModelsService } from '../../apps/ai-chat/src/plugins/chat-models.plugin.ts';
+import { createQuota, MemoryQuotaStore } from '@setu-ts/auth-plugin';
+import type { IQuota } from '@setu-ts/auth-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRuntimeServices } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import type { IOutbox } from '@setu-ts/messaging-plugin';
+import { budgetMiddleware } from './chat.budget.ts';
+import type { BudgetPrices } from './chat.budget.ts';
+import { writeUsage } from './usage.ts';
 
-const quota = chatQuota();
+function memoryQuota(runtime: IRuntimeServices): IQuota {
+  return createQuota({ name: 'ai-spend', store: new MemoryQuotaStore(runtime), runtime,
+    limit: 1_000_000, window: 'utc-month' });
+}
 
-export const assistant = defineAgentRun({
-  name: 'assistant',
-  version: '1',
-  maxOutputTokens: 1024,
-  model: (run) => {
-    const { models } = run.services.get<IChatModelsService>(CHAT_MODELS);
-    const { model, ready } = budgetedModel(run, models, quota(run));
-    void ready.catch(() => undefined);
-    return model;
-  },
-});
+// Call once beside the plugin list, then share the returned quota with the chat route.
+export function createBudgetedAssistant(runtime: IRuntimeServices) {
+  const quota = memoryQuota(runtime);
+  const provider = createOpenAICompatible({ name: 'provider',
+    baseURL: runtime.env['MODEL_BASE_URL'] ?? 'http://localhost:8000/v1',
+    ...(runtime.env['MODEL_API_KEY'] === undefined ? {} : { apiKey: runtime.env['MODEL_API_KEY'] }), includeUsage: true });
+  const model = provider.chatModel(runtime.env['MODEL_ID'] ?? 'model');
+  // Example integer billing units; use conservative prices and media bounds for your model.
+  const prices: BudgetPrices = { inputPrice: 1, outputPrice: 4, perMessage: 128, perFile: 4096 };
+  const assistant = defineAgentRun({
+    name: 'assistant', version: '1', maxOutputTokens: 1024,
+    model: (run) => {
+      const db = run.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const outbox = run.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+      return wrapLanguageModel({ model, middleware: budgetMiddleware(run, quota, runtime, prices,
+        (record) => writeUsage(db, outbox, record)) });
+    },
+  });
+  return { assistant, quota };
+}
 ```
 
-`ready` is consumed only because a failing call already fails the run's step, so leaving its
-rejection unobserved would surface as an unhandled rejection. A run started without a tenant
-(`tenantId: ''`) is still accepted by `start`, but its first model call throws the middleware's
-`A server-resolved tenant is required`, so the run ends `execution-failed`: start budgeted
-definitions only with a tenant. `chatQuota()` builds a separate in-memory quota per call, and the
-example's chat route builds its own, so as written the chat route and this definition keep separate
-budgets. For one budget, call `chatQuota()` once and give the resolver it returns to both the run
-definition and the chat route (the example's `registerChatRoutes` would need a parameter for it).
+A run started without a tenant (`tenantId: ''`) is still accepted by `start`, but its first model
+call throws the middleware's `A server-resolved tenant is required`, so the run ends
+`execution-failed`: start budgeted definitions only with a tenant. The quota returned by
+`createBudgetedAssistant(runtime)` is the one captured by every model call; use the same object for
+the HTTP chat route's budget middleware.
 
 ### Approvals
 

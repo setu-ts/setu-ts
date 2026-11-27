@@ -8,6 +8,56 @@ async function read(ctx: ReturnType<Awaited<ReturnType<typeof harness>>['ctx']>)
   return new Response(ctx.response.snapshot().body as ReadableStream<Uint8Array>).text();
 }
 describe('stream replay', () => {
+  for (const operation of ['get', 'chunks'] as const) {
+    it(`cancel waits for a held ${operation} store read, including a late rejection`, async () => {
+      const h = await harness();
+      try {
+        for (const reject of [false, true]) {
+          await h.store.create(row({ id: 'held-' + operation + reject }));
+          const current = row({ id: 'held-' + operation + reject });
+          const entered = Promise.withResolvers<void>();
+          const release = Promise.withResolvers<void>();
+          const spy =
+            operation === 'get'
+              ? vi.spyOn(h.store, 'get').mockImplementationOnce(async (id) => {
+                  entered.resolve();
+                  await release.promise;
+                  return h.store.get(id);
+                })
+              : vi.spyOn(h.store, 'chunks').mockImplementationOnce(async (run, from) => {
+                  entered.resolve();
+                  await release.promise;
+                  return h.store.chunks(run, from);
+                });
+          const ctx = h.ctx();
+          await respond(ctx, current, {
+            store: h.store,
+            runtime: h.runtime,
+            headers: {},
+            pollIntervalMs: 1,
+          });
+          await entered.promise;
+          let settled = false;
+          const cancelled = (ctx.response.snapshot().body as ReadableStream<Uint8Array>)
+            .cancel()
+            .then(() => {
+              settled = true;
+            });
+          await Promise.resolve();
+          await Promise.resolve();
+          expect(settled).toBe(false);
+          if (reject) release.reject(new Error('late store failure'));
+          else release.resolve();
+          await cancelled;
+          expect(settled).toBe(true);
+          expect(h.timers.size).toBe(0);
+          spy.mockRestore();
+        }
+      } finally {
+        await h.close();
+      }
+    });
+  }
   it('closes tails when the request disconnects, including before subscription', async () => {
     const h = await harness();
     try {

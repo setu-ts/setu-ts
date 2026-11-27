@@ -50,10 +50,22 @@ function buildResolverChain(
   jwtOpts: JwtResolverOptions | undefined,
   jwtDecode: ((token: string) => Record<string, unknown> | null) | undefined,
 ): ITenantResolver[] {
-  if (Array.isArray(config)) return config;
+  if (Array.isArray(config)) {
+    for (const [index, resolver] of config.entries()) {
+      if (!isResolver(resolver))
+        throw new TypeError(
+          `Tenant resolver at index ${index} must be a resolver instance; names do not chain: pass resolver instances, for example new HeaderResolver().`,
+        );
+    }
+    return config;
+  }
   // Single resolver object (arrays handled above).
   if (typeof config === 'object' && config != null) {
-    return [config] as ITenantResolver[];
+    if (!isResolver(config))
+      throw new TypeError(
+        'Tenant resolver must be an object with a resolve function; pass a resolver instance, for example new HeaderResolver().',
+      );
+    return [config];
   }
 
   const optsWithDecode = jwtDecode != null ? { ...jwtOpts, decode: jwtDecode } : jwtOpts;
@@ -80,8 +92,19 @@ function buildResolverChain(
       ];
     }
     default:
-      return [];
+      throw new TypeError(
+        `Unknown tenant resolver name '${String(config)}'; pass subdomain, header, path or jwt, or a resolver instance.`,
+      );
   }
+}
+
+/** A configured resolver must have the one method the chain invokes. */
+function isResolver(value: unknown): value is ITenantResolver {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { resolve?: unknown }).resolve === 'function'
+  );
 }
 
 /** Build the isolation strategy from the `database` option. */

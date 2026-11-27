@@ -7,8 +7,45 @@ import { AuditService } from '../../src/services/audit-service.ts';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { createRedactionService } from '@setu-ts/common';
+import { vi } from 'vitest';
+import {
+  AuditScopeUnsupportedError,
+  MemoryAuditStorage,
+  LogAuditStorage,
+  FileAuditStorage,
+} from '../../src/index.ts';
 
 describe('AuditService', () => {
+  it('refuses scopes on memory, log and file without calling append or writing', async () => {
+    const writeFile = vi.fn(() => Promise.resolve());
+    const fs = {
+      readFile: () => Promise.resolve(new Uint8Array()),
+      writeFile,
+      stat: () => Promise.resolve({ isFile: true, isDirectory: false, size: 0 }),
+      readdir: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      rm: () => Promise.resolve(),
+    };
+    const scope = {
+      getRepository: vi.fn(() => ({ create: () => Promise.reject(new Error('unreachable')) })),
+    };
+    for (const storage of [
+      new MemoryAuditStorage(),
+      new LogAuditStorage(),
+      new FileAuditStorage({ fs }),
+    ]) {
+      const append = vi.spyOn(storage, 'append');
+      const service = new AuditService(storage, fakeRuntime);
+      await expect(
+        service.log({ action: 'update', resource: 'account', result: 'success' }, { scope }),
+      ).rejects.toBeInstanceOf(AuditScopeUnsupportedError);
+      expect(append).not.toHaveBeenCalled();
+      expect(await storage.query()).toEqual([]);
+    }
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(scope.getRepository).not.toHaveBeenCalled();
+    expect(new AuditScopeUnsupportedError().name).toBe('AuditScopeUnsupportedError');
+  });
   const fakeRuntime: IRuntimeServices = {
     platform: () => 'node' as never,
     version: () => '1.0.0',

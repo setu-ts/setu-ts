@@ -1,15 +1,61 @@
 /* eslint-disable require-await -- Fakes preserve asynchronous provider and tool contracts. */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { MockLanguageModelV4 } from 'ai/test';
 import { readUIMessageStream } from 'ai';
 import type { UIMessageChunk } from 'ai';
-import { harness, definition, loadAi } from '../fixtures/harness.ts';
+import { harness, definition, loadAi, failureLogger } from '../fixtures/harness.ts';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { AgentRunsPlugin } from '../../src/index.ts';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, withHttpStatusHint } from '@setu-ts/common';
 import type { IAgentRunService } from '@setu-ts/common';
 describe('real AI SDK', () => {
+  it('retains a real SDK model rejection and logs its quota class and 429 without provider text', async () => {
+    const failure = withHttpStatusHint(
+      Object.assign(new Error('private-quota-provider'), { name: 'QuotaExceededError' }),
+      { status: 429, title: 'Quota Exceeded', detail: 'Quota exceeded.' },
+    );
+    const model = new MockLanguageModelV4({ doStream: () => Promise.reject(failure) });
+    const ai = await loadAi();
+    const generation = ai.model({
+      model,
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: {},
+      maxOutputTokens: 10,
+      abortSignal: new AbortController().signal,
+    });
+    expect(generation.failure()).toBeUndefined();
+    const reader = generation.chunks.getReader();
+    const chunks: UIMessageChunk[] = [];
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      chunks.push(next.value);
+    }
+    reader.releaseLock();
+    expect(generation.failure()).toBe(failure);
+    expect(chunks).toContainEqual({ type: 'error', errorText: 'Agent model call failed.' });
+    expect(JSON.stringify(chunks)).not.toContain('private-quota-provider');
+    const h = await harness(definition({ model: () => model }), ai);
+    const logger = failureLogger();
+    const warn = vi.spyOn(logger, 'warn');
+    Object.assign(h.deps, { logger });
+    try {
+      const { runId } = await h.service.start(h.ctx(), 'demo', {
+        messages: [{ role: 'user', content: 'hi' }],
+      });
+      await h.settle();
+      expect((await h.store.get(runId))?.status).toBe('failed');
+      expect(warn).toHaveBeenCalledWith('Agent run failed.', {
+        definition: 'demo',
+        error: 'QuotaExceededError',
+        status: 429,
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private-quota-provider');
+    } finally {
+      await h.close();
+    }
+  });
   it('converts a real SDK provider error to a safe failed run', async () => {
     const model = new MockLanguageModelV4({
       doStream: () => Promise.reject(new Error('provider secret')),
