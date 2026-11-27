@@ -216,10 +216,10 @@ export class Room implements WebSocketRoom {
    * call {@linkcode Room.broadcast}; only the plugin's backplane subscriber
    * calls this.
    *
-   * Exclusion is honored two ways: `options.except` names a live connection
-   * object (the local path), and `options.exceptId` names one by ID (the path a
-   * frame arriving from another replica takes, since the excluded connection
-   * object does not exist here).
+   * Exclusion is honored three ways: `options.except` names a live connection
+   * object (the local path), and `options.exceptId` and `options.exceptIds`
+   * name them by ID (the path a frame arriving from another replica takes,
+   * since the excluded connection object does not exist here).
    *
    * @param data - Text as `string`, binary as `Uint8Array`
    * @param options - Broadcast options, including exclusion by ID
