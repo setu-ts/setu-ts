@@ -426,7 +426,9 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
 - **Ordering.** A broadcast from inside a member's handler (`onOpen`, `onMessage`, `onClose`), or
   after an `await` in it with `except: connection`, goes over that member's link, so one member's
   frames arrive in order. The exception is a link still opening whose 1 MiB queue budget the next
-  frame would pass: that frame goes through the hub and can arrive before the queued ones. A
+  frame would pass: that frame goes through the hub and can arrive before the queued ones. The
+  sender still gets its own such broadcast, once, unless it names another member as `except`: it
+  then relies on the hub's copy, which it misses if the hub has not yet accepted its link. A
   broadcast from a route is published through the hub with no order relative to members' frames, as
   with any cross-replica backplane.
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
