@@ -74,7 +74,12 @@ function carried(value: unknown, depth: number, seen: Set<object>): boolean {
   let items: unknown[];
   if (Array.isArray(value)) {
     // A hole or an extra key: JSON writes `null` for one and drops the other.
+    // Every index present and as many keys as indexes rules out both, also
+    // together.
     if (Object.keys(value).length !== value.length) return false;
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index)) return false;
+    }
     items = value;
   } else {
     const proto: unknown = Object.getPrototypeOf(value);

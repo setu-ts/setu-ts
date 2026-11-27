@@ -761,6 +761,9 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     const holed: unknown[] = [];
     holed[1] = 1;
     const extra = Object.assign([1], { extra: 2 });
+    // One of each: the key count matches the length, the content does not.
+    const both: unknown[] = Object.assign([], { x: 2 });
+    both[1] = 1;
     const bodies: unknown[] = [
       'text',
       { order: 7, items: [1, 'two', null, { ok: true }] },
@@ -770,6 +773,7 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
       holed,
       [-0],
       extra,
+      both,
       { n: 1n },
     ];
 
@@ -783,7 +787,7 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(dlq.sends.map((s) => s.options)).toEqual([
       undefined,
       undefined,
-      ...Array.from({ length: 7 }, () => ({ contentType: 'v8' })),
+      ...Array.from({ length: 8 }, () => ({ contentType: 'v8' })),
     ]);
   });
 
