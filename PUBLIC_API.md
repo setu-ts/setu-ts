@@ -17594,7 +17594,8 @@ publisher's own included, and the replica drops a frame whose `origin` is its ow
 backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
 frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
 local workerd it keeps receiving after that request has answered, which is unverified on the
-platform.
+platform. Each publish is its own call to the hub and the platform orders calls only within one
+stub, so other replicas may receive one replica's frames out of order.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses

@@ -503,6 +503,9 @@ The hub sends the frame back to the publisher's socket too, and the replica drop
   stream or publish, so frames published before then do not reach it.
 - The socket belongs to the request that opened it. On local workerd it keeps receiving after that
   request has answered. That is unverified on the platform.
+- Other replicas may receive one replica's frames out of order. Each publish is its own call to the
+  hub, and the platform orders calls only within one stub. A stub, like a socket, cannot be kept
+  across requests: reusing one lost frames on local workerd.
 
 Two applications sharing one namespace must set different `topic` values, or each receives the
 other's frames.

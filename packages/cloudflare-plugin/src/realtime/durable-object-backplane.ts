@@ -108,6 +108,9 @@ export interface DurableObjectBackplaneOptions {
  *   workerd it keeps receiving after that request has answered; on the
  *   platform that is unverified. A replica hears a frame only once its socket
  *   has joined the hub, so frames published before then are not delivered.
+ *   Each publish is its own call to the hub, and the platform orders calls
+ *   only within one stub, which (like the socket) cannot be kept across
+ *   requests, so other replicas may receive one replica's frames out of order.
  *
  * @example
  * ```typescript

@@ -283,6 +283,31 @@ export class RoomRegistry {
    * rooms rather than to every room on the server.
    */
   readonly #neverJoined = new Set<Room>();
+  /**
+   * Rooms with members that share a name another room with members holds in
+   * the index (an application kept a `Room` while a `get` made another).
+   */
+  readonly #beside = new Map<string, Set<Room>>();
+
+  /**
+   * Takes an emptied room off its name: out of the index, where a room beside
+   * it takes its place, or out of the rooms beside the holder.
+   */
+  #leaveName(room: Room): void {
+    const beside = this.#beside.get(room.name);
+    if (this.#rooms.get(room.name) === room) {
+      const next = beside?.values().next().value;
+      if (next === undefined) {
+        this.#rooms.delete(room.name);
+        return;
+      }
+      this.#rooms.set(room.name, next);
+      beside?.delete(next);
+    } else {
+      beside?.delete(room);
+    }
+    if (beside?.size === 0) this.#beside.delete(room.name);
+  }
 
   /** Number of live rooms. */
   get size(): number {
@@ -309,12 +334,20 @@ export class RoomRegistry {
           this.#onMemberJoined?.();
           // A room the application kept after it emptied left the name index;
           // a member joining puts it back when the name is free, or held by a
-          // room nobody ever joined, so `peek`, remote delivery and `isMember`
-          // find it on every runtime.
+          // room nobody ever joined. When another room with members holds the
+          // name, this one is recorded beside it, so remote delivery reaches
+          // its members as `isMember` (Workers) counts them.
           const holder = this.#rooms.get(room.name);
           if (holder === undefined || (holder !== room && this.#neverJoined.has(holder))) {
             if (holder !== undefined) this.#neverJoined.delete(holder);
             this.#rooms.set(room.name, room);
+          } else if (holder !== room) {
+            let beside = this.#beside.get(room.name);
+            if (beside === undefined) {
+              beside = new Set<Room>();
+              this.#beside.set(room.name, beside);
+            }
+            beside.add(room);
           }
           this.#neverJoined.delete(room);
           let joined = this.#membership.get(conn);
@@ -336,9 +369,7 @@ export class RoomRegistry {
           // mid-broadcast drop is discarded too. The identity check matters: the
           // name may already have been rebound to a fresh room by a `get` that
           // ran after this one emptied.
-          if (room.rawSize === 0 && this.#rooms.get(room.name) === room) {
-            this.#rooms.delete(room.name);
-          }
+          if (room.rawSize === 0) this.#leaveName(room);
         },
       },
       this.#publish,
@@ -399,6 +430,10 @@ export class RoomRegistry {
    * per arriving name would let a cluster-wide namespace grow this replica's
    * room map without bound.
    *
+   * A room the application kept beside the one holding the name is delivered
+   * to as well, so its members hear remote frames on every runtime; a
+   * connection in two such rooms receives the frame once per room.
+   *
    * @param name - The room the frame was addressed to
    * @param data - The decoded payload
    * @param exceptId - Connection ID the originating replica excluded, if any
@@ -407,7 +442,11 @@ export class RoomRegistry {
   deliverRemote(name: string, data: string | Uint8Array, exceptId?: string): void {
     // `exactOptionalPropertyTypes` forbids handing through an explicit
     // `undefined`, so the absent case passes no options at all.
-    this.#rooms.get(name)?.broadcastLocal(data, exceptId === undefined ? undefined : { exceptId });
+    const options = exceptId === undefined ? undefined : { exceptId };
+    this.#rooms.get(name)?.broadcastLocal(data, options);
+    const beside = this.#beside.get(name);
+    if (beside === undefined) return;
+    for (const room of [...beside]) room.broadcastLocal(data, options);
   }
 
   /**
@@ -435,6 +474,7 @@ export class RoomRegistry {
     this.#rooms.clear();
     this.#membership.clear();
     this.#neverJoined.clear();
+    this.#beside.clear();
   }
 
   /**

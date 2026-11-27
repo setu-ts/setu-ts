@@ -540,6 +540,40 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
     );
   });
 
+  it('closeAll closes every link when a link and then the logger throw', () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const closed: string[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      openConnectionLink: (id: string) => ({
+        publish: () => true,
+        close: () => {
+          if (id === 'a') throw new Error('foreign request');
+          closed.push(id);
+        },
+      }),
+    };
+    const logger = {
+      ...createFakeLogger(),
+      warn: (): void => {
+        throw new Error('logger down');
+      },
+    };
+    const rooms = new RequestBoundRooms(backplane, logger);
+    for (const id of ['a', 'b']) {
+      rooms.open(
+        { id, isOpen: true, send: () => {} } as unknown as IWebSocketConnection,
+        () => true,
+      );
+    }
+
+    rooms.closeAll();
+
+    expect(closed).toEqual(['b']);
+    expect(rooms.linkCount).toBe(0);
+  });
+
   it('closeAll clears its state when a heartbeat stop throws', async () => {
     const h = await rooms();
     await h.connect('a');

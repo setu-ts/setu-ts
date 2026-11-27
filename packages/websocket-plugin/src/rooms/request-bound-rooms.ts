@@ -102,9 +102,13 @@ export class RequestBoundRooms {
         try {
           link.close();
         } catch (error: unknown) {
-          this.#logger?.warn('websocket: backplane link failed to close', {
-            error: describeError(error),
-          });
+          try {
+            this.#logger?.warn('websocket: backplane link failed to close', {
+              error: describeError(error),
+            });
+          } catch {
+            // A logger that throws must not leave the remaining links open.
+          }
         }
       }
     } finally {

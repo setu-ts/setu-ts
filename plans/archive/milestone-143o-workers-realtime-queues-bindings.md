@@ -1538,3 +1538,15 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       no warnings on each Worker; then the receive measurement.
   - **Negative controls.** The old `publish` fails the e2e (frames missing at the hub) and four unit
     tests. The old memory `#deliver` fails the no-origin row. The restored tree passes.
+  - **Ordering (code review of the change).** Cloudflare's stub page says there are no ordering
+    guarantees between different stubs, and every POST takes a new stub. The old socket kept the
+    order of one request's publishes. One cached stub per backplane was tried: on local workerd the
+    concurrent e2e then lost frames at the hub, because a stub, like a socket, belongs to the
+    request that made it. It was reverted. A 50-frame burst from one request arrived in order
+    locally with a stub per POST, but the platform does not promise that, so no test asserts it.
+    Cross-replica order is a documented limit (class doc, cloudflare README, PUBLIC_API).
+  - **Rooms beside the name holder (code review of c6c71c983).** Workers counted a kept room's
+    members through `isMember`, but `deliverRemote` on other runtimes reached only the indexed room.
+    The registry now records a room with members beside the holder. `deliverRemote` reaches it, and
+    it takes the name when the holder empties. A connection in two such rooms receives a frame once
+    per room. `RequestBoundRooms.closeAll` guards its logger.
