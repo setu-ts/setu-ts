@@ -17896,9 +17896,11 @@ this letter rather than as a Core-lane PR; `static-plugin`'s `Vary` fix joins th
 2026-11-24 the maintainer added three defects found in review: V13-274 (the Durable Object hubs' 426
 without `Upgrade`), V13-275 (an out-of-lane edit to the CLI lane's generated output: the Workers
 scaffold's wrangler pin, whose miniflare installed High-advisory undici and sharp) and the Workers
-handshake status, which measured a different cause than assumed: Workers keeps its 500, and V13-276
-(Deno's handshake validation, an out-of-lane edit in `runtime`) is fixed here; V13-277 is an
-upstream note.
+handshake status, which measured a different cause than assumed: Workers keeps its 500 for a
+handshake workerd itself refuses. The code review then added V13-278 (a malformed handshake ran a
+Workers route's `onOpen`): the adapter now answers 400 for a malformed key and 426 for a version
+other than 13 before `onOpen`. V13-276 (Deno's handshake validation, an out-of-lane edit in
+`runtime`) is fixed here; V13-277 is an upstream note.
 
 ### Milestone 143p: Queued Work and Frames That Are Lost or Repeated
 

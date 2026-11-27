@@ -184,7 +184,8 @@ discards exhausted jobs with one warning each (never the payload). The adapter c
 consumer's `max_retries` or `dead_letter_queue` from the binding, and without a `dead_letter_queue`
 Cloudflare deletes a message that runs out of retries, so the adapter keeps the job itself.
 
-- **`maxRetries` must equal `max_retries` in `wrangler.toml`** (default 3, both sides). A job's
+- **`maxRetries` must equal `max_retries` in `wrangler.toml`** (default 3, both sides). It must be a
+  whole number from 1 to 100; anything else throws a `RangeError` when the queue is built. A job's
   attempt budget is `min(maxAttempts, maxRetries)`. A larger `maxAttempts` is capped, with one
   warning per job name; raise both settings together to allow more attempts.
 - **`onFailed` runs once, on the final attempt**, with the error the processor threw. Then the job
@@ -679,12 +680,13 @@ app.router.get('/invoices/:id', {
   `public` and whose `Vary` names neither `Cookie` nor `Authorization`, and its own response is
   stored only on the same terms. A request carrying any cookie at all is never served an entry that
   varies on `Cookie`. A response the session plugin marked as one visitor's is never stored, and one
-  it marked as cookie-dependent is stored only from a cookie-less request, with `Cookie` added to
-  the stored `Vary`. Because the key is the URL, `Vary` cannot keep entries apart here, so the rule
-  is checked when an entry is read as well as when it is written. `ttlSeconds` adds `max-age` only,
-  never `public`. Cloudflare's Cache API page suggests `Cache-Control: private=Set-Cookie` to cache
-  a response that sets a cookie; here that response is not stored (any `private` refuses it), and
-  the middleware warns once naming the header. Drop `Set-Cookie` from cacheable responses instead.
+  it marked as cookie-dependent is stored only from a request carrying neither a cookie nor
+  `Authorization`, with `Cookie` added to the stored `Vary`. Because the key is the URL, `Vary`
+  cannot keep entries apart here, so the rule is checked when an entry is read as well as when it is
+  written. `ttlSeconds` adds `max-age` only, never `public`. Cloudflare's Cache API page suggests
+  `Cache-Control: private=Set-Cookie` to cache a response that sets a cookie; here that response is
+  not stored (any `private` refuses it), and the middleware warns once naming the header. Drop
+  `Set-Cookie` from cacheable responses instead.
 - **Evicting after a write.** `purgeCacheApi({ url, tenant?, locales? })` deletes the entries the
   default key stored for a URL (each listed locale; the no-locale entry when none is listed) and
   returns how many it deleted. `cacheApiKey` gives the same key text. Eviction is local to the data

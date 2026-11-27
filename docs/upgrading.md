@@ -69,11 +69,12 @@ CloudflarePlugin({
 
 `deadLetterQueue` names a Queues producer binding (add a `[[queues.producers]]` stanza for it), or
 `false` discards exhausted jobs with one warning each. `maxRetries` must equal the consumer's
-`max_retries` in `wrangler.toml` (both default to 3). A job's attempt budget is now
-`min(maxAttempts, maxRetries)`, one fewer than the platform's deliveries, so a failed dead-letter
-send can be retried; a larger `maxAttempts` is capped with one warning per job name. `onFailed` now
-runs once on the final attempt. Keeping a `dead_letter_queue` in `wrangler.toml` as well is
-recommended. A Worker that only adds jobs needs nothing.
+`max_retries` in `wrangler.toml` (both default to 3), and be a whole number from 1 to 100: anything
+else throws a `RangeError` at startup. A job's attempt budget is now `min(maxAttempts, maxRetries)`,
+one fewer than the platform's deliveries, so a failed dead-letter send can be retried; a larger
+`maxAttempts` is capped with one warning per job name. `onFailed` now runs once on the final
+attempt. Keeping a `dead_letter_queue` in `wrangler.toml` as well is recommended. A Worker that only
+adds jobs needs nothing.
 
 ### The edge cache stores nothing per visitor (`@setu-ts/cloudflare-plugin`)
 

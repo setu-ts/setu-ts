@@ -180,18 +180,19 @@ All notable changes to this project are documented here. The format follows
   arm sets `deadLetterQueue` to a producer binding name or to `false`, because the platform deletes
   an exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the adapter cannot see. A
   job that exhausts its attempts calls `onFailed` once and is forwarded to that producer (or
-  discarded with a warning for `false`) instead of being acked away; `maxRetries` (default 3) must
-  equal `max_retries`, and a larger `maxAttempts` is capped with one warning per job name; a
-  `deadLetterQueue` naming the queue's own binding fails `app.start()` (V13-197).
-  `cacheApiMiddleware` no longer stores or serves per-visitor responses, the same rule as
-  `cacheMiddleware`: `private` (qualified or not) and `no-store` are refused, including
-  `private=Set-Cookie`, which now logs one warning naming the header; a credentialed request is
-  served only a `public` entry that does not vary on a credential; the session plugin's per-visitor
-  and cookie-dependent flags are honoured; `ttlSeconds` writes `max-age` without `public`;
-  `CacheRefusal` gains `'private'` (V13-111). `DurableObjectLock.acquire` throws a `RangeError` for
-  a TTL that is not a whole number of milliseconds from 1 to 2147483647, and the lock object answers
-  400 for one (V13-204). `isKvNamespace` refuses an R2-shaped binding, and `d1()` and `service()`
-  check the binding's kind (V13-201).
+  discarded with a warning for `false`) instead of being acked away; `maxRetries` (default 3, a
+  whole number from 1 to 100, else a `RangeError`) must equal `max_retries`, and a larger
+  `maxAttempts` is capped with one warning per job name; a `deadLetterQueue` naming the queue's own
+  binding fails `app.start()` (V13-197). `cacheApiMiddleware` no longer stores or serves per-visitor
+  responses, the same rule as `cacheMiddleware`: `private` (qualified or not) and `no-store` are
+  refused, including `private=Set-Cookie`, which now logs one warning naming the header; a
+  credentialed request is served only a `public` entry that does not vary on a credential; the
+  session plugin's per-visitor and cookie-dependent flags are honoured; `ttlSeconds` writes
+  `max-age` without `public`; `CacheRefusal` gains `'private'` (V13-111).
+  `DurableObjectLock.acquire` throws a `RangeError` for a TTL that is not a whole number of
+  milliseconds from 1 to 2147483647, and the lock object answers 400 for one (V13-204).
+  `isKvNamespace` refuses an R2-shaped binding, and `d1()` and `service()` check the binding's kind
+  (V13-201).
 - **`@setu-ts/websocket-plugin` (M143o, #619).** On Cloudflare Workers the service runs in
   request-bound mode: rooms deliver through per-connection links of the Durable Object backplane,
   each connection runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the
