@@ -893,7 +893,7 @@ here.
 - **Milestone 143o** (`cloudflare-plugin` + `websocket-plugin` + `runtime` + `kernel` + `common` +
   `static-plugin` — Workers rooms through per-connection Durable Object links, exhausted Workers
   jobs dead-lettered, edge-cache credential rule and eviction, lock TTL, binding guards, broker
-  trace, `IRuntimeServices.waitUntil`; 12 V13 rows and six halves) — complete (PR pending).
+  trace, `IRuntimeServices.waitUntil`; 12 V13 rows and six halves) — complete (PR #619).
 - **Milestone 143r** (`storage-plugin` + `secrets-plugin` + `mail-plugin` + `feature-flags-plugin`
   - `notification-plugin` + `localization-plugin` + additive `common` — provider arms and their
     options: every cloud arm bounded by `requestTimeoutMs`, outages as 503/504, one

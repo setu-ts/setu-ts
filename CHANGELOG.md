@@ -8,14 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/cloudflare-plugin` (M143o;
-  V13-200).** Optional `IRuntimeServices.waitUntil` keeps an invocation alive after its response;
-  Workers sets it from `waitUntil` passed to `RuntimePlugin` (also `CreateRuntimeServicesOptions`
-  and `CloudflareRuntimeOptions`). The kernel hands it the `ctx.defer` cleanups that run after the
-  response, so an asynchronous cleanup is no longer cut off on workerd when a client leaves.
-  `CloudflarePlugin` falls back to it when its own `waitUntil` is omitted; an explicit option wins.
+- **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/cloudflare-plugin` (M143o,
+  #619; V13-200).** Optional `IRuntimeServices.waitUntil` keeps an invocation alive after its
+  response; Workers sets it from `waitUntil` passed to `RuntimePlugin` (also
+  `CreateRuntimeServicesOptions` and `CloudflareRuntimeOptions`). The kernel hands it the
+  `ctx.defer` cleanups that run after the response, so an asynchronous cleanup is no longer cut off
+  on workerd when a client leaves. `CloudflarePlugin` falls back to it when its own `waitUntil` is
+  omitted; an explicit option wins.
 
-- **`@setu-ts/common`, `@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin` (M143o).**
+- **`@setu-ts/common`, `@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin` (M143o, #619).**
   `IRealtimeConnectionLink`, `IRealtimeLinkBackplane` and `hasConnectionLinks` let a backplane give
   each WebSocket connection its own link; `DurableObjectBackplane` implements them
   (`openConnectionLink`, `publishViaHub`) and the hub object answers `POST /publish` (204; 413 above
@@ -174,10 +175,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`@setu-ts/cloudflare-plugin` (M143o, breaking behaviour).** A Workers queue consumer now needs a
-  dead-letter target: `queue.process()` throws `CloudflareUnsupportedError` unless the queue arm
-  sets `deadLetterQueue` to a producer binding name or to `false`, because the platform deletes an
-  exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the adapter cannot see. A
+- **`@setu-ts/cloudflare-plugin` (M143o, #619, breaking behaviour).** A Workers queue consumer now
+  needs a dead-letter target: `queue.process()` throws `CloudflareUnsupportedError` unless the queue
+  arm sets `deadLetterQueue` to a producer binding name or to `false`, because the platform deletes
+  an exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the adapter cannot see. A
   job that exhausts its attempts calls `onFailed` once and is forwarded to that producer (or
   discarded with a warning for `false`) instead of being acked away; `maxRetries` (default 3) must
   equal `max_retries`, and a larger `maxAttempts` is capped with one warning per job name; a
@@ -191,23 +192,25 @@ All notable changes to this project are documented here. The format follows
   a TTL that is not a whole number of milliseconds from 1 to 2147483647, and the lock object answers
   400 for one (V13-204). `isKvNamespace` refuses an R2-shaped binding, and `d1()` and `service()`
   check the binding's kind (V13-201).
-- **`@setu-ts/websocket-plugin` (M143o).** On Cloudflare Workers the service runs in request-bound
-  mode: rooms deliver through per-connection links of the Durable Object backplane, each connection
-  runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the arm, `ws.room()`
-  and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the arm.
-- **`@setu-ts/cloudflare-plugin` (M143o; V13-117 Workers half).** A Workers RPC that times out
+- **`@setu-ts/websocket-plugin` (M143o, #619).** On Cloudflare Workers the service runs in
+  request-bound mode: rooms deliver through per-connection links of the Durable Object backplane,
+  each connection runs its own heartbeat, and `room.size` touches no socket (V13-195). Without the
+  arm, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` and the startup notice
+  names the arm.
+- **`@setu-ts/cloudflare-plugin` (M143o, #619; V13-117 Workers half).** A Workers RPC that times out
   answers 504 and one whose responder threw answers 502, instead of a masked 500:
   `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` carry the status hints, and the
   remote message never reaches the response body.
-- **BREAKING — `@setu-ts/cloudflare-plugin` (M143o; V13-217 R2 half).** A missing R2 object throws
-  `StorageObjectNotFoundError` from `@setu-ts/common`, the class every `storage-plugin` provider
-  throws, so a route that reads it answers 404 instead of a masked 500, with the key kept out of the
-  body. `CloudflareObjectNotFoundError` is removed; narrow on `StorageObjectNotFoundError`.
-- **BREAKING — `@setu-ts/websocket-plugin` (M143o).** A negative, infinite or `NaN` `heartbeatMs` or
-  `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when `WebSocketPlugin()` is
-  called; use `0` to disable. A negative value used to turn the option off; a `NaN`, infinite or
-  over-range `heartbeatMs` started a timer of about 1 ms, and a `NaN` or infinite `idleTimeoutMs`
-  left the idle sweep off.
+- **BREAKING — `@setu-ts/cloudflare-plugin` (M143o, #619; V13-217 R2 half).** A missing R2 object
+  throws `StorageObjectNotFoundError` from `@setu-ts/common`, the class every `storage-plugin`
+  provider throws, so a route that reads it answers 404 instead of a masked 500, with the key kept
+  out of the body. `CloudflareObjectNotFoundError` is removed; narrow on
+  `StorageObjectNotFoundError`.
+- **BREAKING — `@setu-ts/websocket-plugin` (M143o, #619).** A negative, infinite or `NaN`
+  `heartbeatMs` or `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when
+  `WebSocketPlugin()` is called; use `0` to disable. A negative value used to turn the option off; a
+  `NaN`, infinite or over-range `heartbeatMs` started a timer of about 1 ms, and a `NaN` or infinite
+  `idleTimeoutMs` left the idle sweep off.
 - **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
   version with `isWireError`. A status Connect itself cannot decode fails the instance; valid status
   13 remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
@@ -550,7 +553,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin`, `@setu-ts/runtime` (M143o).** A
+- **`@setu-ts/websocket-plugin`, `@setu-ts/cloudflare-plugin`, `@setu-ts/runtime` (M143o, #619).** A
   WebSocket room on Workers works for any number of members, on one Worker and across Workers
   sharing a Durable Object namespace, and keeps working after members leave; proved on local workerd
   with 200 members (V13-195, V13-196). The isolate-level Durable Object backplane reconnects after a
@@ -559,25 +562,25 @@ All notable changes to this project are documented here. The format follows
   so a clean close no longer waits 30 seconds at a compatibility date before 2026-04-07, and tracks
   the socket's state without reading the native object (V13-203); it reports a `maxMessageBytes` of
   0 or above workerd's 32 MiB ceiling once (V13-41).
-- **`@setu-ts/cloudflare-plugin` (M143o).** A trace crosses Workers messaging: with a telemetry
-  service, `WorkersBroker` writes the producer span's `traceparent` into the envelope's framework
-  `trace` field and runs subscribers and responders in a consumer span parented from it (V13-210). A
-  cron handler that throws reports the expression and the first error in the `AggregateError`
-  message (V13-219). A failed job can be redelivered after `retryDelaySeconds` (V13-220, Workers
-  half). The README documents service bindings (V13-209), the lock's use from Worker code (V13-206),
-  `max_batch_size = 10` for request/reply (V13-205) and that KV is outside the session revocation
-  guarantee (V13-135).
-- **`@setu-ts/cloudflare-plugin` (M143o).** The Durable Object hubs' 426 answers carry
+- **`@setu-ts/cloudflare-plugin` (M143o, #619).** A trace crosses Workers messaging: with a
+  telemetry service, `WorkersBroker` writes the producer span's `traceparent` into the envelope's
+  framework `trace` field and runs subscribers and responders in a consumer span parented from it
+  (V13-210). A cron handler that throws reports the expression and the first error in the
+  `AggregateError` message (V13-219). A failed job can be redelivered after `retryDelaySeconds`
+  (V13-220, Workers half). The README documents service bindings (V13-209), the lock's use from
+  Worker code (V13-206), `max_batch_size = 10` for request/reply (V13-205) and that KV is outside
+  the session revocation guarantee (V13-135).
+- **`@setu-ts/cloudflare-plugin` (M143o, #619).** The Durable Object hubs' 426 answers carry
   `Upgrade: websocket` and `Connection: Upgrade`, as RFC 9110 requires, and the reply inbox's 405
   carries `Allow: GET, POST` (V13-274).
-- **`@setu-ts/runtime` (M143o).** Deno refuses a malformed WebSocket handshake the way Node's `ws`
-  does: a `Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400, and a `Sec-WebSocket-Version`
-  other than 13 or 8 gets 400 with `Sec-WebSocket-Version: 13, 8`. Before, Deno upgraded both
-  (V13-276).
-- **`@setu-ts/runtime` (M143o).** On Workers, a malformed WebSocket handshake no longer runs the
-  route's `onOpen` and `onClose`. workerd checks the handshake only after the Worker has accepted
-  the socket pair, so a bad key or version used to join a room and take a `maxConnections` slot
-  before the platform refused it. The adapter now checks first: a malformed key gets 400, and a
+- **`@setu-ts/runtime` (M143o, #619).** Deno refuses a malformed WebSocket handshake the way Node's
+  `ws` does: a `Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400, and a
+  `Sec-WebSocket-Version` other than 13 or 8 gets 400 with `Sec-WebSocket-Version: 13, 8`. Before,
+  Deno upgraded both (V13-276).
+- **`@setu-ts/runtime` (M143o, #619).** On Workers, a malformed WebSocket handshake no longer runs
+  the route's `onOpen` and `onClose`. workerd checks the handshake only after the Worker has
+  accepted the socket pair, so a bad key or version used to join a room and take a `maxConnections`
+  slot before the platform refused it. The adapter now checks first: a malformed key gets 400, and a
   version other than 13 gets 426 with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`
   (V13-278). The check applies to requests from the edge (`request.cf` set); a Worker-to-Worker
   socket over a service binding or Durable Object stub, which has no `cf` and no key, still opens.
@@ -585,19 +588,19 @@ All notable changes to this project are documented here. The format follows
   check cannot act there; a gateway that forwards only the headers also drops `cf`, so its requests
   are treated as Worker-to-Worker calls. Production behaviour is unverified here (no Cloudflare
   account).
-- **`@setu-ts/runtime` (M143o).** Cloudflare's documented Worker-to-Worker WebSocket call,
+- **`@setu-ts/runtime` (M143o, #619).** Cloudflare's documented Worker-to-Worker WebSocket call,
   `fetch(url, { headers: { Upgrade: 'websocket' } })` over a service binding or Durable Object stub,
   reaches a Setu WebSocket route: the Workers adapter treats such an internal subrequest as an
   upgrade without `Connection: Upgrade`. It used to answer 404. Node, Bun and Deno are unchanged:
   without `Connection: Upgrade` a request is not an upgrade (RFC 6455), and gets the route's 404.
-- **`@setu-ts/cli` (M143o, security).** A generated Workers project pins `wrangler ~4.153.0` and
-  `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's undici
-  7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose
+- **`@setu-ts/cli` (M143o, #619, security).** A generated Workers project pins `wrangler ~4.153.0`
+  and `@cloudflare/workers-types ^5.20261023.1`. The previous `~4.148.0` installed miniflare's
+  undici 7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose
   miniflare pins the fixed undici 7.30.1 and sharp 0.35.5 (V13-275). Existing projects can raise
   both pins the same way.
-- **`@setu-ts/static-plugin` (M143o).** A static asset served with CORS keeps `Vary: Origin`: the
-  handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no longer
-  replays one origin's `Access-Control-Allow-Origin` to another.
+- **`@setu-ts/static-plugin` (M143o, #619).** A static asset served with CORS keeps `Vary: Origin`:
+  the handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no
+  longer replays one origin's `Access-Control-Allow-Origin` to another.
 - **`@setu-ts/database-plugin` (M143q; V13-230, V13-242, V13-243, V13-244, V13-251, V13-231,
   V13-239, V13-240, V13-249, #617).** On Prisma with MySQL a conditional or versioned write that
   lost its race reports the miss (409 or 404) instead of returning the stale row: connectors other
