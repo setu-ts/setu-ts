@@ -80,9 +80,10 @@ export interface RealtimeFrame {
    * equals `exceptId` or appears here.
    *
    * Set only when a sender must be excluded as well as the caller's `except`:
-   * on Workers, a sender whose own link refused its broadcast gets its copy
-   * directly, and is listed here so the hub's copy never reaches it a second
-   * time. A transport that rebuilds frames field by field must carry it.
+   * on Workers, a sender whose own link refused its broadcast is sent its copy
+   * directly when it is an open member of the room (a send that throws on a
+   * closing socket is dropped), and is listed here so the hub's copy never
+   * reaches it a second time. A transport that rebuilds frames field by field must carry it.
    *
    * At most {@linkcode REALTIME_FRAME_EXCEPT_IDS_LIMIT} entries: the shipped
    * guards drop a longer list as malformed, since every receiver checks each

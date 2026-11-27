@@ -14521,8 +14521,9 @@ functions.
 `RealtimeFrame.exceptIds?: readonly string[]` (0.14.0) lists further connection IDs a broadcast
 excludes, beside `exceptId`: a receiver skips a member whose `id` equals `exceptId` or appears in
 `exceptIds`. `websocket-plugin` sets it only on Workers, for a sender whose own link refused its
-broadcast and which also names another member as `except`: the sender gets a local copy and is
-listed here, so the hub's copy never reaches it too. The shipped guards (`isRealtimeFrame` in
+broadcast and which also names another member as `except`: the sender, when an open member of the
+room, is sent a local copy (a send that throws on a closing socket is dropped) and is listed here,
+so the hub's copy never reaches it too. The shipped guards (`isRealtimeFrame` in
 `realtime-backplane-plugin` and the one the Durable Object backplane's links and isolate socket run
 on arriving frames; the hub itself forwards bytes unread) refuse a frame whose `exceptIds` is not an
 array of strings, or has more than `REALTIME_FRAME_EXCEPT_IDS_LIMIT` (16) entries, since every
