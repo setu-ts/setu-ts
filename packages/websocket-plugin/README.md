@@ -427,10 +427,10 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   after an `await` in it with `except: connection`, goes over that member's link, so one member's
   frames arrive in order. The exception is a link still opening whose 1 MiB queue budget the next
   frame would pass: that frame goes through the hub and can arrive before the queued ones. The
-  sender still gets its own such broadcast exactly once, whichever other member `except` names (none
-  when `except` is the sender itself): it is sent locally, and the hub's copy excludes the sender. A
-  broadcast from a route is published through the hub with no order relative to members' frames, as
-  with any cross-replica backplane.
+  sender still gets its own such broadcast exactly once when `except` names nobody or another
+  member: it is sent locally, and the hub's copy excludes the sender. A sender that names itself as
+  `except` gets no copy, as on every runtime. A broadcast from a route is published through the hub
+  with no order relative to members' frames, as with any cross-replica backplane.
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
   left as a member that receives nothing. Only a backplane built without its timers fails this way;
   `CloudflarePlugin` always passes them.
