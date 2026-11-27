@@ -138,7 +138,14 @@ async function closeTracked(): Promise<void> {
  * holds no link. A vanished client's link takes up to about 15 s to close.
  */
 async function serverAtBaseline(): Promise<void> {
-  const reads = ['/a/size', '/b/size', '/a/kept/size', '/b/kept/size', '/hub-count'];
+  const reads = [
+    '/a/size',
+    '/b/size',
+    '/a/kept/size',
+    '/b/kept/size',
+    '/a/except/size',
+    '/hub-count',
+  ];
   const deadline = Date.now() + 20_000;
   let last: string[] = [];
   while (Date.now() < deadline) {
@@ -465,6 +472,32 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
         expect(x.got.filter((m) => m === 'route')).toHaveLength(1);
       }
       expect((await text('/a/kept/size')).body).toBe('2');
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
+    'a sender excluding another member gets exactly one copy when its opening link refuses the frame',
+    async () => {
+      const big = (m: string): boolean => m.length === 1_048_577;
+      const quiet = await client('/a/except/chat?role=quiet');
+      const watch = await client('/a/except/chat?role=watch');
+      // Both must be members on the server before the sender opens.
+      let size = '';
+      const joined = Date.now() + 5000;
+      while (size !== '2' && Date.now() < joined) {
+        size = (await text('/a/except/size')).body;
+        if (size !== '2') await sleep(50);
+      }
+      expect(size).toBe('2');
+      const sender = await client('/a/except/chat?role=send');
+      await until(() => watch.got.some(big), 10_000, "the watcher's copy");
+      // Long enough for a second copy through the sender's link to arrive.
+      await sleep(1000);
+
+      expect(sender.got.filter(big)).toHaveLength(1);
+      expect(watch.got.filter(big)).toHaveLength(1);
+      expect(quiet.got.filter(big)).toHaveLength(0);
     },
     CASE_TIMEOUT_MS,
   );

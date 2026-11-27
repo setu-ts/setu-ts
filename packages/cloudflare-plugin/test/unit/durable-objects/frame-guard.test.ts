@@ -35,6 +35,8 @@ describe('isRealtimeFrame', () => {
 
   it('accepts a frame carrying the optional fields', () => {
     expect(isRealtimeFrame({ ...FRAME, binary: true, exceptId: 'conn-1' })).toBe(true);
+    expect(isRealtimeFrame({ ...FRAME, exceptId: 'conn-1', exceptIds: ['conn-2'] })).toBe(true);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: [] })).toBe(true);
   });
 
   it('rejects a non-object', () => {
@@ -58,5 +60,7 @@ describe('isRealtimeFrame', () => {
   it('rejects a mistyped optional field rather than ignoring it', () => {
     expect(isRealtimeFrame({ ...FRAME, binary: 'yes' })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, exceptId: 5 })).toBe(false);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: 'conn-2' })).toBe(false);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ['conn-2', 3] })).toBe(false);
   });
 });

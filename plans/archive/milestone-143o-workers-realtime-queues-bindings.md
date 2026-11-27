@@ -1605,6 +1605,18 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       sees it open (measured on workerd), and a frame names one exclusion only. That case keeps the
       hub's copy, which a link not yet accepted misses; PUBLIC_API says so. A broadcast with no
       `except` is unaffected: the sender gets the local copy, and the hub's copy excludes it.
+    - **Sender with `except` (fixed, maintainer decision 2026-11-27: "Fix it first").**
+      `RealtimeFrame.exceptIds?: readonly string[]` (common, additive) lists further excluded
+      connection IDs beside `exceptId`. A sender whose link refuses its broadcast now always gets
+      the local copy; with an `except` naming another member, the hub's copy keeps that member in
+      `exceptId` and lists the sender in `exceptIds`, so the sender's link drops it whether or not
+      the hub had accepted the link. Every receiver and both guards honour the field;
+      `LocalBroadcastOptions.exceptIds` and a fourth `deliverRemote` argument carry it into a room.
+      Public `except` stays single. Tests: a unit pair for both sides of the race (the 0-copy side
+      fails at fcab61140; the duplicate side fails when the link ignores `exceptIds`), guard rows,
+      an `exceptIds` round trip on all four transports, and a workerd row (fails when the link
+      ignores `exceptIds`; local workerd always has the link accepted, so the 0-copy side is
+      unit-only).
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as

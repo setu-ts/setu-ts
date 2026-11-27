@@ -194,6 +194,31 @@ describe('WebSocket rooms across replicas', () => {
     expect(otherRemote.sent).toEqual(['hi']);
   });
 
+  it('skips every member an arriving frame excludes, by exceptId and exceptIds', async () => {
+    const [aPlane, bPlane] = createBackplanePair();
+    const b = await serviceOn(bPlane);
+
+    const first = fakeConnection('first');
+    const second = fakeConnection('second');
+    const third = fakeConnection('third');
+    b.room('lobby').add(first);
+    b.room('lobby').add(second);
+    b.room('lobby').add(third);
+
+    await aPlane.publish({
+      kind: 'ws-room',
+      origin: 'node-a',
+      name: 'lobby',
+      data: 'hi',
+      exceptId: 'first',
+      exceptIds: ['second'],
+    });
+
+    expect(first.sent).toEqual([]);
+    expect(second.sent).toEqual([]);
+    expect(third.sent).toEqual(['hi']);
+  });
+
   it('carries no exceptId when the broadcast excludes nobody', async () => {
     const [aPlane, bPlane] = createBackplanePair();
     const a = await serviceOn(aPlane);

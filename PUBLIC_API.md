@@ -5462,7 +5462,7 @@ ws.route(
 | `HeartbeatOptions`               | type             | Resolved heartbeat configuration                                         |
 | `RoomMembershipListener`         | type             | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates       |
 | `RoomPublisher`                  | type             | Forwards a local broadcast to other replicas; supplied by a backplane    |
-| `LocalBroadcastOptions`          | type             | `broadcastLocal` options — adds `exceptId` to exclude by connection ID   |
+| `LocalBroadcastOptions`          | type             | `broadcastLocal` options — adds `exceptId`/`exceptIds` to exclude by ID  |
 
 ### Notes
 
@@ -5503,7 +5503,7 @@ ws.route(
   connection IDs come from `runtime.uuid()` and are globally unique, so the frame carries the
   excluded ID. `Room.size` keeps reporting **local** membership either way. `Room.broadcastLocal` is
   the local-only delivery path the backplane subscriber uses (its `LocalBroadcastOptions` adds
-  `exceptId`); applications call `broadcast`.
+  `exceptId`, and `exceptIds` since 0.14.0); applications call `broadcast`.
 - **Request-bound mode on Cloudflare Workers (0.14.0).** workerd ties a socket to the request that
   accepted it, so when `runtime.platform()` is `'cloudflare-workers'` no code writes to, reads the
   native state of, or closes a connection from another request. With a backplane that passes
@@ -14514,9 +14514,17 @@ owns the connection; `deliver` receives every frame the hub sends, unfiltered, i
 `publishViaHub(frame): Promise<void>` (publishes without a socket, from any request; reaches every
 link, the caller's own included).
 `hasConnectionLinks(backplane): backplane is IRealtimeLinkBackplane` is true when both members are
-functions. The backplane is still registered under `CAPABILITIES.REALTIME_BACKPLANE`;
-`websocket-plugin` narrows it with the guard on Cloudflare Workers, where a socket belongs to the
-request that accepted it.
+functions.
+
+`RealtimeFrame.exceptIds?: readonly string[]` (0.14.0) lists further connection IDs a broadcast
+excludes, beside `exceptId`: a receiver skips a member whose `id` equals `exceptId` or appears in
+`exceptIds`. `websocket-plugin` sets it only on Workers, for a sender whose own link refused its
+broadcast and which also names another member as `except`: the sender gets a local copy and is
+listed here, so the hub's copy never reaches it too. The shipped guards (`isRealtimeFrame` in
+`realtime-backplane-plugin` and the Durable Object hub's) refuse a frame whose `exceptIds` is not an
+array of strings. A custom transport that rebuilds frames field by field must carry it. The
+backplane is still registered under `CAPABILITIES.REALTIME_BACKPLANE`; `websocket-plugin` narrows it
+with the guard on Cloudflare Workers, where a socket belongs to the request that accepted it.
 
 <!-- version:history -->
 
@@ -17593,11 +17601,11 @@ up to 1 MiB (1,048,576 bytes) of frame data, counted on `frame.data.length`. A f
 that budget, or whose serialized form is above the hub's 33,554,432-byte cap, is refused (`publish`
 returns `false`), so `websocket-plugin` POSTs it through `publishViaHub`. The hub answers 413 above
 the cap, logged as `cloudflare: backplane publish failed` with `status: 413`. A sender whose own
-link refuses a broadcast with no `except` gets it locally, and the hub's copy excludes it. With an
-`except` naming another member the sender relies on the hub's copy, which its link can miss if the
-hub has not accepted the link yet, and which does not exist for a frame above the cap. Frames sent
-through the hub while queued ones wait can arrive before them. A link reopens a lost socket three
-times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
+link refuses a broadcast gets it locally, exactly once, whatever `except` names. The hub's copy
+excludes the sender: as `exceptId` when the broadcast has no `except`, otherwise in `exceptIds`
+beside the caller's `except`, so its link drops that copy whether or not the hub had accepted the
+link yet. Frames sent through the hub while queued ones wait can arrive before them. A link reopens
+a lost socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
 `{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and
 receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a
 close or an error is retired and closed rather than left open at the hub, so the next call reopens

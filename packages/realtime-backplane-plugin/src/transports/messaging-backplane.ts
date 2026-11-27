@@ -41,7 +41,10 @@ export function isRealtimeFrame(value: unknown): value is RealtimeFrame {
     typeof frame.name === 'string' &&
     typeof frame.data === 'string' &&
     (frame.binary === undefined || typeof frame.binary === 'boolean') &&
-    (frame.exceptId === undefined || typeof frame.exceptId === 'string')
+    (frame.exceptId === undefined || typeof frame.exceptId === 'string') &&
+    (frame.exceptIds === undefined ||
+      (Array.isArray(frame.exceptIds) &&
+        frame.exceptIds.every((id: unknown) => typeof id === 'string')))
   );
 }
 

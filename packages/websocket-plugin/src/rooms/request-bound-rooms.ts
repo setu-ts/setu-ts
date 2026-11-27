@@ -169,17 +169,19 @@ export class RequestBoundRooms {
         }
         return;
       }
-      if (except === undefined && room.has(current) && current.isOpen) {
+      if (current !== except && room.has(current) && current.isOpen) {
         // The link refused the frame (still opening with its budget used, or
         // the frame is above the hub's cap), so it goes through the hub. The
         // hub may or may not hold the sender's opening link yet, so the sender
         // gets its copy here, before the transport as on every runtime, and is
-        // excluded from the hub's copy so it never gets two. A frame names one
-        // exclusion only: with an `except` naming another member, the sender
-        // relies on the hub's copy, which its link misses if the hub has not
-        // accepted it yet.
+        // excluded from the hub's copy so it never gets two: as the frame's
+        // one `exceptId` when the caller excluded nobody, or beside the
+        // caller's `except` in `exceptIds`.
         sendQuietly(current, data);
-        frame = { ...frame, exceptId: current.id };
+        frame =
+          except === undefined
+            ? { ...frame, exceptId: current.id }
+            : { ...frame, exceptIds: [current.id] };
       }
     }
     if (except !== undefined && except !== current) {
@@ -209,7 +211,7 @@ function deliver(
   isMember: MembershipCheck,
 ): void {
   if (frame.kind !== 'ws-room') return;
-  if (frame.exceptId === conn.id) return;
+  if (frame.exceptId === conn.id || frame.exceptIds?.includes(conn.id) === true) return;
   if (!conn.isOpen || !isMember(frame.name, conn)) return;
   let data: string | Uint8Array;
   try {

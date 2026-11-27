@@ -477,39 +477,72 @@ describe('RequestBoundRooms', () => {
     expect(posted.map((f) => f.exceptId)).toEqual(['sender']);
   });
 
-  it('leaves a sender whose broadcast excludes another member to the hub copy, so it never gets two', () => {
+  /**
+   * A sender whose opening link refuses its broadcast, which names another
+   * member as `except`. `hubHoldsLink` decides the race the real hub runs: it
+   * accepts a link before the client sees it, so its fan-out may or may not
+   * reach the sender's opening link.
+   */
+  function exceptOtherWhileOpening(hubHoldsLink: boolean): {
+    got: unknown[];
+    posted: RealtimeFrame[];
+    otherGot: unknown[];
+  } {
     const world = new RequestWorld();
     const hub = new FakeHub(world);
     const posted: RealtimeFrame[] = [];
+    const links: ((frame: RealtimeFrame) => void)[] = [];
     const backplane = {
       ...hub.backplane('o'),
-      openConnectionLink: () => ({ publish: () => false, close: () => {} }),
+      openConnectionLink: (_id: string, deliverFrame: (frame: RealtimeFrame) => void) => {
+        links.push(deliverFrame);
+        return { publish: () => false, close: () => {} };
+      },
       publishViaHub: (frame: RealtimeFrame) => {
         posted.push(frame);
+        // The hub's fan-out over every link it holds.
+        if (hubHoldsLink) for (const deliverFrame of links) deliverFrame(frame);
         return Promise.resolve();
       },
     };
     const rooms = new RequestBoundRooms(backplane);
     const got: unknown[] = [];
+    const otherGot: unknown[] = [];
     const sender = {
       id: 'sender',
       isOpen: true,
       send: (d: unknown) => got.push(d),
     } as unknown as IWebSocketConnection;
-    const other = { id: 'other', isOpen: true, send: () => {} } as unknown as IWebSocketConnection;
-    rooms.open(sender, () => true);
+    const other = {
+      id: 'other',
+      isOpen: true,
+      send: (d: unknown) => otherGot.push(d),
+    } as unknown as IWebSocketConnection;
     const room = new Room('lobby');
     room.add(sender);
     room.add(other);
+    const isMember = (name: string, conn: IWebSocketConnection): boolean =>
+      name === 'lobby' && room.has(conn);
+    rooms.open(sender, isMember);
+    rooms.open(other, isMember);
 
     rooms.dispatching(sender, () => {
       rooms.broadcast(room, 'not for other', { except: other });
     });
+    return { got, posted, otherGot };
+  }
 
-    // A frame names one exclusion; it stays the caller's, and the hub's copy
-    // is the sender's only one (the hub may already hold its opening link).
-    expect(got).toEqual([]);
-    expect(posted.map((f) => f.exceptId)).toEqual(['other']);
+  it('gives a sender excluding another member exactly one copy when the hub has not taken its link yet', () => {
+    const { got, posted, otherGot } = exceptOtherWhileOpening(false);
+    expect(got).toEqual(['not for other']);
+    expect(otherGot).toEqual([]);
+    expect(posted.map((f) => [f.exceptId, f.exceptIds])).toEqual([['other', ['sender']]]);
+  });
+
+  it('gives a sender excluding another member exactly one copy when the hub already holds its link', () => {
+    const { got, otherGot } = exceptOtherWhileOpening(true);
+    expect(got).toEqual(['not for other']);
+    expect(otherGot).toEqual([]);
   });
 
   it('logs a link that cannot open, and a hub publish that rejects', async () => {

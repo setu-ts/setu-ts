@@ -15,6 +15,10 @@
  *   object or through `ws.room('kept')`; each message is broadcast through the
  *   kept object.
  * - `POST /kept/broadcast` and `GET /kept/size`: `ws.room('kept')` from a route.
+ * - `GET /except/chat?role=quiet|watch|send` (WebSocket): joins `except`. A
+ *   `quiet` member is kept as the exclusion; a `send` member broadcasts one
+ *   frame above its opening link's byte budget from its `onOpen`, excluding
+ *   the `quiet` member. `GET /except/size` is that room's size.
  * - `POST /iso/publish?id=<id>`: publishes one frame on this isolate's own
  *   `DurableObjectBackplane` (the isolate-level path `sse-plugin` uses).
  * - `GET /iso/stats`: that backplane's socket opens, hub POSTs, warnings, and
@@ -25,7 +29,7 @@
 import { env, waitUntil } from 'cloudflare:workers';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
-import type { IWebSocketService, WebSocketRoom } from '@setu-ts/common';
+import type { IWebSocketConnection, IWebSocketService, WebSocketRoom } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
@@ -85,6 +89,24 @@ function build(withArm: boolean): Promise<IKernelApplication> {
         kept?.broadcast(data);
       },
     });
+    ws().route('/except/chat', {
+      onOpen: (conn, context) => {
+        const role = context.query['role'];
+        if (role === 'quiet') excluded = conn;
+        ws().room('except').add(conn);
+        if (role === 'send' && excluded !== undefined) {
+          // The link opened just before this handler and is still opening, so
+          // it refuses a frame above its byte budget.
+          ws().room('except').broadcast(BIG, { except: excluded });
+        }
+      },
+      onClose: (conn) => {
+        if (excluded === conn) excluded = undefined;
+      },
+    });
+    app.router.get('/except/size', {
+      handler: (ctx) => ctx.response.text(String(ws().room('except').size)),
+    });
     app.router.get('/kept/hold', {
       handler: (ctx) => {
         kept = ws().room('kept');
@@ -126,6 +148,12 @@ function build(withArm: boolean): Promise<IKernelApplication> {
 
 /** `/chat` connections this isolate has opened, for the handshake e2e. */
 let opens = 0;
+
+/** The member a `send` broadcast excludes, for the sender-copy e2e. */
+let excluded: IWebSocketConnection | undefined;
+
+/** One byte above a link's 1 MiB queue budget, so an opening link refuses it. */
+const BIG = 'x'.repeat(1_048_577);
 
 /** The room object an application keeps, for the kept-handle e2e. */
 let kept: WebSocketRoom | undefined;

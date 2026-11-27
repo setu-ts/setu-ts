@@ -396,6 +396,23 @@ describe('Room exclusion across the backplane', () => {
     expect(b.transport.sent).toEqual(['hi']);
   });
 
+  it('deliverRemote skips the members named in exceptIds as well as exceptId', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('conn-a');
+    const b = makeConnection('conn-b');
+    const c = makeConnection('conn-c');
+    registry.get('lobby').add(a.conn);
+    registry.get('lobby').add(b.conn);
+    registry.get('lobby').add(c.conn);
+
+    registry.deliverRemote('lobby', 'hi', 'conn-a', ['conn-b']);
+    registry.deliverRemote('lobby', 'only', undefined, ['conn-a', 'conn-c']);
+
+    expect(a.transport.sent).toEqual([]);
+    expect(b.transport.sent).toEqual(['only']);
+    expect(c.transport.sent).toEqual(['hi']);
+  });
+
   it('deliverRemote with no exceptId delivers to every member', () => {
     const registry = new RoomRegistry();
     const a = makeConnection('conn-a');

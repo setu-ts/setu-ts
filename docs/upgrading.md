@@ -95,6 +95,11 @@ On Cloudflare Workers, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavaila
 `CloudflarePlugin({ durableObject: { binding } })` is registered with its exported hub class (see
 the cloudflare-plugin README). Before, rooms on Workers silently reached only one member per Worker.
 
+A custom `IRealtimeBackplane` transport that rebuilds a `RealtimeFrame` from the fields it knows,
+rather than forwarding the whole object, must also carry the new optional `exceptIds` (a list of
+connection IDs, `@setu-ts/common`). Without it, a Workers sender whose broadcast excludes another
+member can receive that broadcast twice. The shipped transports forward the whole frame.
+
 `WebSocketPlugin()` now throws for a negative, infinite or `NaN` `heartbeatMs` or `idleTimeoutMs`,
 and for a `heartbeatMs` above 2147483647. Use `0` to disable either; a value read from the
 environment needs a numeric default.

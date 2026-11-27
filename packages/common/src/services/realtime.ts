@@ -74,6 +74,19 @@ export interface RealtimeFrame {
    * @since 0.2.0
    */
   readonly exceptId?: string;
+  /**
+   * Further connections excluded from this broadcast, by ID, beside
+   * {@linkcode RealtimeFrame.exceptId}. A receiver skips a member whose `id`
+   * equals `exceptId` or appears here.
+   *
+   * Set only when a sender must be excluded as well as the caller's `except`:
+   * on Workers, a sender whose own link refused its broadcast gets its copy
+   * directly, and is listed here so the hub's copy never reaches it a second
+   * time. A transport that rebuilds frames field by field must carry it.
+   *
+   * @since 0.14.0
+   */
+  readonly exceptIds?: readonly string[];
 }
 
 /**

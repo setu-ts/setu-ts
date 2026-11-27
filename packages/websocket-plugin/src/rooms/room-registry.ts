@@ -77,6 +77,13 @@ export type RoomBroadcaster = (
 export interface LocalBroadcastOptions extends RoomBroadcastOptions {
   /** Skip the member with this connection ID. */
   readonly exceptId?: string;
+  /**
+   * Skip the members with these connection IDs too, as a frame's
+   * `exceptIds` carries them.
+   *
+   * @since 0.14.0
+   */
+  readonly exceptIds?: readonly string[];
 }
 
 /**
@@ -221,8 +228,13 @@ export class Room implements WebSocketRoom {
   broadcastLocal(data: string | Uint8Array, options?: LocalBroadcastOptions): void {
     const except = options?.except;
     const exceptId = options?.exceptId;
+    const exceptIds = options?.exceptIds;
     for (const member of this.#members()) {
-      if (member === except || (exceptId !== undefined && member.id === exceptId)) {
+      if (
+        member === except ||
+        (exceptId !== undefined && member.id === exceptId) ||
+        exceptIds?.includes(member.id) === true
+      ) {
         continue;
       }
       if (!member.isOpen) {
@@ -451,12 +463,22 @@ export class RoomRegistry {
    * @param name - The room the frame was addressed to
    * @param data - The decoded payload
    * @param exceptId - Connection ID the originating replica excluded, if any
+   * @param exceptIds - Further connection IDs it excluded (`exceptIds` on the frame), if any
    * @since 0.2.0
    */
-  deliverRemote(name: string, data: string | Uint8Array, exceptId?: string): void {
+  deliverRemote(
+    name: string,
+    data: string | Uint8Array,
+    exceptId?: string,
+    exceptIds?: readonly string[],
+  ): void {
     // `exactOptionalPropertyTypes` forbids handing through an explicit
-    // `undefined`, so the absent case passes no options at all.
-    this.#rooms.get(name)?.broadcastLocal(data, exceptId === undefined ? undefined : { exceptId });
+    // `undefined`, so absent fields are left out of the options.
+    const options: LocalBroadcastOptions = {
+      ...(exceptId === undefined ? {} : { exceptId }),
+      ...(exceptIds === undefined ? {} : { exceptIds }),
+    };
+    this.#rooms.get(name)?.broadcastLocal(data, options);
   }
 
   /**

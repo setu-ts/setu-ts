@@ -18,5 +18,12 @@ export function isRealtimeFrame(value: unknown): value is RealtimeFrame {
   if (typeof frame['data'] !== 'string') return false;
   if (frame['binary'] !== undefined && typeof frame['binary'] !== 'boolean') return false;
   if (frame['exceptId'] !== undefined && typeof frame['exceptId'] !== 'string') return false;
+  const exceptIds = frame['exceptIds'];
+  if (exceptIds !== undefined && !isStringArray(exceptIds)) return false;
   return true;
+}
+
+/** Whether `value` is an array of strings only. */
+function isStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }

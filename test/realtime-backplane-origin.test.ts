@@ -271,6 +271,27 @@ describe.each(TRANSPORTS)('the $name backplane and the frame origin', ({ build }
     }
   });
 
+  it('carries both exclusion fields across, unchanged', async () => {
+    // A transport that rebuilt the frame from known fields would drop one.
+    const { pair, seenA, seenB, done } = await open();
+    try {
+      const excluding: RealtimeFrame = {
+        ...FRAME('a'),
+        kind: 'ws-room',
+        exceptId: 'conn-1',
+        exceptIds: ['conn-2'],
+      };
+      await pair.a.publish(excluding);
+      await pair.inject({ ...FRAME('x'), exceptIds: ['conn-2', 3] });
+      await setImmediate();
+
+      expect(seenB).toEqual([excluding]);
+      expect(seenA).toEqual([]);
+    } finally {
+      await done();
+    }
+  });
+
   it('delivers a third party frame to both replicas', async () => {
     const { pair, seenA, seenB, done } = await open();
     try {

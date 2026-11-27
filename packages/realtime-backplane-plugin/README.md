@@ -148,8 +148,9 @@ frames reached the local handlers. A publication's success means the transport's
 resolved — never that a peer received it — and a receive is counted only after the transport's own
 frame-shape and own-origin filters admitted the frame; a receive where any local handler threw
 synchronously is `failed`. An async outcome is unknown when this count is recorded. A backplane
-reports no gauges. No frame, room or channel name, payload, `exceptId` or origin is ever captured. A
-`'custom'` transport is never observed and its options accept no `diagnostics` field.
+reports no gauges. No frame, room or channel name, payload, `exceptId`, `exceptIds` or origin is
+ever captured. A `'custom'` transport is never observed and its options accept no `diagnostics`
+field.
 
 Without the option the plugin registers an inert `disabled` source and nothing is attached to the
 transport. Observation never changes a result: a rejected publish still rejects with the same

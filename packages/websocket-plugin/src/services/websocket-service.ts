@@ -544,7 +544,7 @@ export class WebSocketService implements IWebSocketService {
       });
       return;
     }
-    this.#rooms.deliverRemote(frame.name, data, frame.exceptId);
+    this.#rooms.deliverRemote(frame.name, data, frame.exceptId, frame.exceptIds);
   }
 
   /**
