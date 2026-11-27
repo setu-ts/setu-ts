@@ -433,7 +433,7 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   broadcast goes through the hub and can arrive before that member's earlier frames. The exception
   is a link still opening whose 1 MiB queue budget the next frame would pass: that frame goes
   through the hub and can arrive before the queued ones. A sender that is an open member of the room
-  still gets its own such broadcast exactly once when `except` names nobody or another member (a
+  is still sent its own such broadcast exactly once when `except` names nobody or another member (a
   send that throws on a closing socket is dropped): it is sent locally, and the hub's copy excludes
   the sender. A sender that names itself as `except` gets no copy, as on every runtime. A broadcast
   from a route is published through the hub with no order relative to members' frames, as with any
