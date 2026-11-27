@@ -196,7 +196,11 @@ export function wrapDeferredStream(
     if (completed) return;
     completed = true;
     signal?.removeEventListener('abort', aborted);
-    return finish();
+    // The stream's own end or a consumer cancel runs the cleanups after the
+    // response; an asynchronous one is kept alive as the abort path's is.
+    const done = finish();
+    if (done instanceof Promise) keepAlive(registry, done);
+    return done;
   };
   // `once()` removes this listener, so it never runs after completion.
   function aborted(): void {

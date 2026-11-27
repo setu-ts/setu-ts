@@ -39,7 +39,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IWebSocketService } from '@setu-ts/common';
 
 const ws = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
+ws.room('lobby').broadcastJson({ event: 'deployment', version: '1.2' });
 ```
 
 ## Behaviour
@@ -49,11 +49,10 @@ ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
   `WebSocketUnavailableError`. `app.fetch` and `app.inject` do not establish Node sockets.
 - `room` creates a room; `peek` does not. Closing leaves every room.
 - `heartbeatMs`/`idleTimeoutMs` default to `0` (off; invalid throws); idle needs a heartbeat.
-  `maxConnections` defaults to `0` (unlimited) and refuses excess upgrades with 503.
-- Rooms are local without a backplane. With one, sizes stay local and `except` applies only on the
-  originating replica.
-- Workers rooms need `CloudflarePlugin({ durableObject })`, else `room`/`peek` throw
-  `WebSocketRoomsUnavailableError`.
+  `maxConnections` (default `0`, unlimited) refuses excess upgrades with 503.
+- Rooms are local without a backplane. With one, sizes and `except` stay per replica.
+- Workers rooms need a link-capable backplane (`CloudflarePlugin({ durableObject })` is one), else
+  `room`/`peek` throw `WebSocketRoomsUnavailableError`.
 
 ## Other options
 

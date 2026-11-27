@@ -424,6 +424,9 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   after an `await` in it with `except: connection`, goes over that member's link, so one member's
   frames arrive in order. A broadcast from a route is published through the hub with no order
   relative to members' frames, as with any cross-replica backplane.
+- **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
+  left as a member that receives nothing. Only a backplane built without its timers fails this way;
+  `CloudflarePlugin` always passes them.
 - **`room.size`** counts this isolate's open members, without touching any socket.
 - **Heartbeats** run per connection, each from its own request, instead of one shared interval.
 - **A clean close is answered at once.** The Workers adapter replies to the peer's close frame

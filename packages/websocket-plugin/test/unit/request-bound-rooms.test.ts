@@ -427,9 +427,7 @@ describe('RequestBoundRooms', () => {
     };
     const rooms = new RequestBoundRooms(failing, logger);
     const conn = { id: 'c', isOpen: true, send: () => {} } as unknown as IWebSocketConnection;
-    expect(() => {
-      rooms.open(conn, () => true);
-    }).not.toThrow();
+    expect(rooms.open(conn, () => true)).toBe(false);
     expect(rooms.linkCount).toBe(0);
     rooms.broadcast(new Room('lobby'), 'x');
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -437,5 +435,76 @@ describe('RequestBoundRooms', () => {
       'websocket: backplane link could not open',
       'websocket: backplane publish failed',
     ]);
+  });
+});
+
+describe('connections whose link fails, and shutdown, on Workers', () => {
+  it('closes a connection whose link cannot open with 1011, after its onOpen runs', async () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const failing = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => {
+        throw new Error('no timers');
+      },
+    };
+    const events: string[] = [];
+    const service = new WebSocketService(
+      workersRuntime(),
+      resolveOptions(undefined),
+      true,
+      createFakeLogger(),
+      failing,
+    );
+    service.route('/ws', {
+      onOpen: () => {
+        events.push('open');
+      },
+    });
+    const decision = await service.createUpgradeRouter()(upgradeRequest('http://w/ws'));
+    if (decision === null || !decision.accept) throw new Error('not accepted');
+    let transport!: OwnedTransport;
+    world.run('a', () => {
+      transport = ownedTransport(world);
+      decision.sink.onOpen(transport);
+    });
+
+    expect(events).toEqual(['open']);
+    expect(transport.closes).toEqual([{ code: 1011, reason: 'Backplane link unavailable' }]);
+  });
+
+  it('closeAll closes every connection and stops every heartbeat when a close throws', async () => {
+    const h = await rooms();
+    await h.connect('a');
+    await h.connect('b');
+    expect(h.runtime.intervals.filter((i) => !i.cleared)).toHaveLength(2);
+
+    // Outside any request: each Workers socket refuses the close.
+    expect(() => {
+      h.service.closeAll();
+    }).not.toThrow();
+
+    expect(h.service.connectionCount).toBe(0);
+    expect(h.runtime.intervals.filter((i) => !i.cleared)).toEqual([]);
+  });
+
+  it('delivers to members of a room the application retained after it emptied', async () => {
+    const h = await rooms();
+    // Retained by the application; emptying it drops it from the name index.
+    const chat = h.service.room('chat');
+    const { conn: a, transport: ta } = await h.connect('a');
+    const { conn: b, transport: tb } = await h.connect('b');
+    chat.add(a);
+    chat.remove(a);
+    chat.add(a);
+    chat.add(b);
+
+    h.world.run('a', () => {
+      chat.broadcast('to b', { except: a });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(tb.sent).toContain('to b');
+    expect(ta.sent).not.toContain('to b');
   });
 });

@@ -240,6 +240,72 @@ describe('ConnectionLink', () => {
     expect(namespace.clients[0]?.sent).toEqual([]);
   });
 
+  it('keeps the frames a failed drain did not try, and sends only those after the reopen', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    let opens = 0;
+    const l = link(namespace, () => {}, {
+      timers,
+      hub: () => ({
+        fetch: async (input: string, init?: RequestInit) => {
+          const response = await namespace.get('chat').fetch(input, init);
+          opens++;
+          if (opens === 1) {
+            // The first socket takes one frame, then fails.
+            const socket = (response as unknown as { webSocket: { send(m: string): void } })
+              .webSocket;
+            const send = socket.send.bind(socket);
+            let calls = 0;
+            socket.send = (m: string) => {
+              if (++calls > 1) throw new Error('gone');
+              send(m);
+            };
+          }
+          return response;
+        },
+      }),
+    });
+    l.publish(frame('a'));
+    l.publish(frame('b'));
+    l.publish(frame('c'));
+    await setImmediate();
+    expect(
+      namespace.clients[0]?.sent.map((m) => (JSON.parse(String(m)) as RealtimeFrame).data),
+    ).toEqual(['a']);
+
+    namespace.clients[0]?.fire('close', { data: '' });
+    timers.runNext();
+    await setImmediate();
+
+    expect(
+      namespace.clients[1]?.sent.map((m) => (JSON.parse(String(m)) as RealtimeFrame).data),
+    ).toEqual(['b', 'c']);
+  });
+
+  it('reports how many frames a closing link could not flush', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const logger = new RecordingLogger();
+    const quick = link(namespace, () => {}, {
+      logger,
+      hub: () => ({
+        fetch: async (input: string, init?: RequestInit) => {
+          const response = await namespace.get('chat').fetch(input, init);
+          (response as unknown as { webSocket: { failSend: boolean } }).webSocket.failSend = true;
+          return response;
+        },
+      }),
+    });
+    quick.publish(frame('a'));
+    quick.publish(frame('b'));
+    quick.close();
+    await setImmediate();
+
+    const unsent = logger.records.find(
+      (r) => r.message === 'cloudflare: backplane link closed with frames unsent',
+    );
+    expect(unsent?.meta).toMatchObject({ dropped: 2 });
+  });
+
   it('closes a live socket on close(), and ignores a second close event from the same socket', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();

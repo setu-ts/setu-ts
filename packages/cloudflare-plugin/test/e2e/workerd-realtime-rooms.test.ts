@@ -21,10 +21,10 @@
  * @module
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { createServer, connect } from 'node:net';
+import { createServer, connect, type Socket } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -72,10 +72,49 @@ interface Client {
   readonly got: string[];
 }
 
+/**
+ * Every client a test opens, closed after each test whatever its outcome, so
+ * a failed case cannot leave members that skew a later `/size` or hub count.
+ */
+const openClients = new Set<WebSocket>();
+const openRawSockets = new Set<Socket>();
+
+/** Closes every tracked client and waits until each has closed. */
+async function closeTracked(): Promise<void> {
+  const closing = [...openClients].map(
+    (socket) =>
+      new Promise<void>((resolve) => {
+        if (socket.readyState === WebSocket.CLOSED) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(resolve, 2000);
+        socket.addEventListener('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        if (socket.readyState !== WebSocket.CLOSING) socket.close(1000);
+      }),
+  );
+  await Promise.all(closing);
+  openClients.clear();
+  for (const raw of openRawSockets) raw.destroy();
+  openRawSockets.clear();
+}
+
+/** A raw TCP connection to the front Worker, tracked for cleanup. */
+function rawConnect(onConnect?: () => void): Socket {
+  const socket =
+    onConnect === undefined ? connect(port, '127.0.0.1') : connect(port, '127.0.0.1', onConnect);
+  openRawSockets.add(socket);
+  return socket;
+}
+
 /** Opens a WebSocket client on the front Worker. */
 function client(path: string): Promise<Client> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+    openClients.add(socket);
     const got: string[] = [];
     socket.addEventListener('message', (event) => {
       got.push(String(event.data));
@@ -123,6 +162,10 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
     });
     await until(() => output.includes('Ready on'), 90_000, `wrangler dev:\n${output.slice(-3000)}`);
   }, CASE_TIMEOUT_MS);
+
+  afterEach(async () => {
+    await closeTracked();
+  });
 
   afterAll(() => {
     if (dev?.pid !== undefined) {
@@ -229,7 +272,7 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       // A raw handshake whose socket is destroyed: no close frame at all.
       await sleep(1500);
       const before = Number((await text('/hub-count')).body);
-      const raw = connect(port, '127.0.0.1');
+      const raw = rawConnect();
       raw.write(
         'GET /a/chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
           'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
@@ -299,7 +342,7 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       // sent and cannot refuse it itself (workerd-handshake.test.ts covers an
       // app that receives edge requests directly).
       const head = await new Promise<string>((resolve, reject) => {
-        const socket = connect(port, '127.0.0.1', () => {
+        const socket = rawConnect(() => {
           socket.write(
             'GET /a/chat HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n' +
               'Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n',

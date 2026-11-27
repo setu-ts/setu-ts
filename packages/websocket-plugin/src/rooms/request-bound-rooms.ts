@@ -60,22 +60,26 @@ export class RequestBoundRooms {
    *
    * @param conn - The connection
    * @param isMember - Membership check, read per arriving frame
+   * @returns `false` when the link could not open; the caller closes the
+   *   connection, since it would receive nothing from its rooms
    */
-  open(conn: IWebSocketConnection, isMember: MembershipCheck): void {
+  open(conn: IWebSocketConnection, isMember: MembershipCheck): boolean {
     let link: IRealtimeConnectionLink;
     try {
       link = this.#backplane.openConnectionLink(conn.id, (frame) => {
         deliver(conn, frame, isMember);
       });
     } catch (error: unknown) {
-      // The connection still works; it only receives nothing from its rooms,
-      // and its own broadcasts go through the hub. Said, not swallowed.
+      // Only a misbuilt backplane fails here (a hand-made
+      // DurableObjectBackplane without `timers`); a connection left open would
+      // receive nothing from its rooms, so the caller closes it.
       this.#logger?.warn('websocket: backplane link could not open', {
         error: describeError(error),
       });
-      return;
+      return false;
     }
     this.#links.set(conn, link);
+    return true;
   }
 
   /**

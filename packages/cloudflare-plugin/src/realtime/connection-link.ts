@@ -183,12 +183,16 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   #attach(socket: IDurableObjectClientSocket): void {
     if (this.#flushing) {
       this.#flushing = false;
-      for (const frame of this.#queue.splice(0)) {
-        try {
-          socket.send(JSON.stringify(frame));
-        } catch {
-          break;
-        }
+      const unsent = this.#drain(socket);
+      if (unsent > 0) {
+        // Closing: nothing will reopen to carry these. Said once, without
+        // frame content.
+        this.#options.logger?.()?.warn('cloudflare: backplane link closed with frames unsent', {
+          topic: this.#options.topic,
+          connection: this.#options.connectionId,
+          dropped: unsent,
+        });
+        this.#queue.length = 0;
       }
       closeQuietly(socket);
       return;
@@ -209,15 +213,27 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     socket.addEventListener('error', dropped);
     this.#socket = socket;
     this.#reopens = 0;
-    const queued = this.#queue.splice(0);
-    for (const frame of queued) {
+    // A send that throws leaves the rest queued: the socket went away while
+    // draining, and the close listener reopens to send them.
+    this.#drain(socket);
+  }
+
+  /**
+   * Sends queued frames in order, removing each only once its send returned,
+   * so a failure keeps the frames not yet tried and never repeats one sent.
+   *
+   * @returns How many frames are still queued
+   */
+  #drain(socket: IDurableObjectClientSocket): number {
+    while (this.#queue.length > 0) {
       try {
-        socket.send(JSON.stringify(frame));
+        socket.send(JSON.stringify(this.#queue[0]));
       } catch {
-        // The socket went away while draining; the close listener reopens.
         break;
       }
+      this.#queue.shift();
     }
+    return this.#queue.length;
   }
 
   /** Schedules a reopen, or gives up after the last delay. */

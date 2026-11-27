@@ -77,6 +77,8 @@ const CLOSE_MESSAGE_TOO_BIG = 1009;
 const CLOSE_GOING_AWAY = 1001;
 /** RFC 6455 abnormal closure: the connection dropped without a close frame. */
 const CLOSE_ABNORMAL = 1006;
+/** Close code for a connection whose backplane link could not open (RFC 6455 Internal Error). */
+const CLOSE_INTERNAL_ERROR = 1011;
 
 /** Resolved options with every default applied. */
 interface ResolvedOptions {
@@ -253,6 +255,8 @@ export class WebSocketService implements IWebSocketService {
   readonly #routes = new WsRouteTable();
   readonly #rooms: RoomRegistry;
   readonly #connections = new Set<WebSocketConnection>();
+  /** Request-bound mode: each connection's own heartbeat, for `closeAll`. */
+  readonly #heartbeatStops = new Map<WebSocketConnection, () => void>();
   readonly #heartbeat: HeartbeatSweeper;
   readonly #available: boolean;
   readonly #logger: ILogger | undefined;
@@ -795,8 +799,16 @@ export class WebSocketService implements IWebSocketService {
     this.#heartbeat.stop();
     this.#requestBound?.closeAll();
     for (const conn of [...this.#connections]) {
-      conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
+      try {
+        conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
+      } catch {
+        // One socket that refuses (on Workers, one owned by another request)
+        // must not leave the rest open; its heartbeat is stopped below.
+        continue;
+      }
     }
+    for (const stop of this.#heartbeatStops.values()) stop();
+    this.#heartbeatStops.clear();
     this.#connections.clear();
     this.#rooms.clear();
     // In-flight handshakes are abandoned along with everything else.
@@ -867,6 +879,8 @@ export class WebSocketService implements IWebSocketService {
     let errored = false;
     // Request-bound mode: the connection's own heartbeat, stopped on close.
     let stopHeartbeat = (): void => {};
+    // Request-bound mode: whether the connection's link opened.
+    let linked = true;
     /** Runs a handler call with `target` marked as the dispatching connection. */
     const dispatch = (target: WebSocketConnection, fn: () => void): void => {
       if (this.#requestBound === undefined) {
@@ -903,7 +917,10 @@ export class WebSocketService implements IWebSocketService {
         if (this.#requestBoundMode) {
           // Opened here, in the connection's own request, so the link's
           // socket and the heartbeat's timer belong to it.
-          this.#requestBound?.open(opened, (name, member) => this.#rooms.isMember(name, member));
+          linked =
+            this.#requestBound?.open(opened, (name, member) =>
+              this.#rooms.isMember(name, member),
+            ) ?? true;
           stopHeartbeat = startConnectionHeartbeat(
             this.#runtime,
             {
@@ -913,10 +930,16 @@ export class WebSocketService implements IWebSocketService {
             },
             opened,
           );
+          this.#heartbeatStops.set(opened, stopHeartbeat);
         }
         dispatch(opened, () => {
           invoke(handlers.onOpen, opened, context);
         });
+        if (!linked) {
+          // Without its link the connection receives nothing from its rooms:
+          // closed, visibly, rather than left a silent member (1011).
+          opened.close(CLOSE_INTERNAL_ERROR, 'Backplane link unavailable');
+        }
       },
 
       onMessage: (data: string | Uint8Array): void => {
@@ -976,6 +999,7 @@ export class WebSocketService implements IWebSocketService {
         const closing = conn;
         closing.markClosed();
         stopHeartbeat();
+        this.#heartbeatStops.delete(closing);
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
         realtimeObserverOf(closing)?.observe('close', !errored && event.code !== CLOSE_ABNORMAL);

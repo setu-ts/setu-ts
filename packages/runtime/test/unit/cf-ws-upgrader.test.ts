@@ -310,7 +310,7 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade (post-M70a)', () => {
 
 describe('Workers transport: tracked state and the close reply (V13-195, V13-203)', () => {
   /** A socket whose native readyState and close calls are recorded. */
-  function tracedSocket(options?: { closeThrows?: boolean }) {
+  function tracedSocket(options?: { closeThrows?: boolean; pedantic?: boolean }) {
     const base = fakeServerSocket();
     const closes: { code: number | undefined; reason: string | undefined }[] = [];
     let nativeReads = 0;
@@ -318,6 +318,10 @@ describe('Workers transport: tracked state and the close reply (V13-195, V13-203
       close(code?: number, reason?: string): void {
         closes.push({ code, reason });
         if (options?.closeThrows === true) throw new Error('already replied');
+        // `pedantic_wpt`: only 1000 and 3000-4999 may be sent.
+        if (options?.pedantic === true && code !== 1000 && (code === undefined || code < 3000)) {
+          throw new TypeError('Invalid close code');
+        }
       },
     });
     Object.defineProperty(socket, 'readyState', {
@@ -387,6 +391,17 @@ describe('Workers transport: tracked state and the close reply (V13-195, V13-203
     openTransport(socket);
     socket.emit('close', { code });
     expect(closes[0]).toEqual({ code, reason: '' });
+  });
+
+  it('retries with 1000 when strict validation refuses the echoed code, reporting the received code', () => {
+    const { socket, closes } = tracedSocket({ pedantic: true });
+    const { events } = openTransport(socket);
+    socket.emit('close', { code: 1001, reason: 'away' });
+    expect(closes).toEqual([
+      { code: 1001, reason: 'away' },
+      { code: 1000, reason: 'away' },
+    ]);
+    expect(events).toEqual(['close:1001']);
   });
 
   it('swallows a reply the runtime already sent (web_socket_auto_reply_to_close)', () => {

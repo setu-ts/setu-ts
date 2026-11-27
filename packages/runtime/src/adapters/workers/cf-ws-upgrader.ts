@@ -207,10 +207,21 @@ export function bindCloudflareSocketToSink(
     const { code, reason } = event as unknown as { code?: number; reason?: string };
     const received = code ?? 1006;
     if (state === 'open') {
+      const reply = replyCode(received);
       try {
-        socket.close(replyCode(received), reason ?? '');
+        socket.close(reply, reason ?? '');
       } catch {
-        // The runtime replied already (web_socket_auto_reply_to_close).
+        // Either the runtime replied already (web_socket_auto_reply_to_close),
+        // or it refused the echoed code: under `pedantic_wpt` only 1000 and
+        // 3000-4999 are sendable. One retry with 1000 covers the second; in
+        // the first case it throws as well and is ignored the same way.
+        if (reply !== 1000) {
+          try {
+            socket.close(1000, reason ?? '');
+          } catch {
+            // Already replied.
+          }
+        }
       }
     }
     state = 'closed';

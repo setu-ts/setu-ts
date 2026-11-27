@@ -143,6 +143,34 @@ describe('the cleanup paths that outlive the response', () => {
     expect(held).toHaveLength(1);
   });
 
+  it('(b) a stream that ends normally hands its asynchronous cleanup over, once', async () => {
+    const { registry, held } = recording();
+    const order: string[] = [];
+    const body = wrapDeferredStream(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          controller.close();
+        },
+      }),
+      [
+        async () => {
+          await Promise.resolve();
+          order.push('cleanup');
+        },
+      ],
+      registry,
+      () => order.push('complete'),
+    );
+
+    await new Response(body).arrayBuffer();
+    await settle();
+
+    expect(held).toHaveLength(1);
+    await held[0];
+    expect(order).toEqual(['cleanup', 'complete']);
+  });
+
   it('(c) a handler still running after an early response is kept alive with its cleanups', async () => {
     const { createApplication } = await import('../../src/index.ts');
     const { RuntimePlugin } = await import('@setu-ts/runtime');

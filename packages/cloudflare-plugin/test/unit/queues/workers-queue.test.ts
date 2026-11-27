@@ -624,6 +624,44 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(JSON.stringify(logger.records)).not.toContain('s3cr3t');
   });
 
+  it('on the last delivery, sends the original job when the enriched copy is refused', async () => {
+    // The added fields can push a job near the Queues size limit over it.
+    const { queue, dlq, logger } = build();
+    const accepted: unknown[] = [];
+    let first = true;
+    dlq.send = (body: unknown) => {
+      if (first) {
+        first = false;
+        return Promise.reject(new RangeError('message too large'));
+      }
+      accepted.push(body);
+      return Promise.resolve();
+    };
+    queue.process('j', always);
+
+    const reserve = delivered('j', { n: 1 }, { attempts: 4 });
+    await queue.dispatch(new FakeQueueBatch('q', [reserve]));
+
+    expect(reserve.disposition).toBe('acked');
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]).not.toHaveProperty('attempts');
+    expect(accepted[0]).toMatchObject({ name: 'j', data: { n: 1 } });
+    expect(logger.messages()).toContain(
+      'cloudflare-queue: dead-letter copy refused on the last delivery; the original job was sent',
+    );
+  });
+
+  it('on the last delivery, retries when the original job is refused too', async () => {
+    const { queue, dlq } = build();
+    dlq.send = () => Promise.reject(new TypeError('queue unavailable'));
+    queue.process('j', always);
+
+    const reserve = delivered('j', {}, { attempts: 4 });
+    await queue.dispatch(new FakeQueueBatch('q', [reserve]));
+
+    expect(reserve.disposition).toBe('retried');
+  });
+
   it('forwards on the reserve delivery without the error text or a second onFailed', async () => {
     const { queue, dlq, logger } = build();
     let calls = 0;
@@ -759,17 +797,18 @@ describe('WorkersQueue retry spacing (V13-220, Workers half)', () => {
     expect((await retryOf({ retryDelaySeconds: 500, maxDelaySeconds: 60 })).options).toEqual({
       delaySeconds: 60,
     });
-    expect((await retryOf({ retryDelaySeconds: 0 })).options).toBeUndefined();
+    // An explicit 0 overrides the queue's retry_delay; a bare retry() would keep it.
+    expect((await retryOf({ retryDelaySeconds: 0 })).options).toEqual({ delaySeconds: 0 });
   });
 
   it('calls a function with the attempt that failed', async () => {
     expect((await retryOf({ retryDelaySeconds: (n) => n * 10 }, 2)).options).toEqual({
       delaySeconds: 20,
     });
-    expect((await retryOf({ retryDelaySeconds: () => -5 })).options).toBeUndefined();
+    expect((await retryOf({ retryDelaySeconds: () => -5 })).options).toEqual({ delaySeconds: 0 });
   });
 
-  it('falls back to no delay, warning once, for a function that throws or returns non-finite', async () => {
+  it("falls back to the queue's retry_delay, warning once, for a function that throws or returns non-finite", async () => {
     const throwing = await retryOf({
       retryDelaySeconds: () => {
         throw new Error('bug');
@@ -777,7 +816,7 @@ describe('WorkersQueue retry spacing (V13-220, Workers half)', () => {
     });
     expect(throwing.options).toBeUndefined();
     expect(throwing.logger.messages()).toContain(
-      'cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried without a delay',
+      "cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried with the queue's own retry_delay",
     );
 
     const { queue, logger } = build({ retryDelaySeconds: () => Number.NaN });

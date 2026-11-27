@@ -532,6 +532,17 @@ export class WorkersQueue implements IQueue {
     try {
       await target.send(copy);
     } catch (error: unknown) {
+      // On the last delivery the added fields can push a job near the Queues
+      // size limit over it; the original envelope is sent instead, once, so
+      // the job still reaches the dead-letter queue.
+      if (lastChance && (await this.#sendOriginal(target, message, envelope))) {
+        this.#logger?.()?.warn(
+          'cloudflare-queue: dead-letter copy refused on the last delivery; the original job was sent',
+          { queue, ...where, attempts: message.attempts },
+        );
+        message.ack();
+        return;
+      }
       this.#logger?.()?.error(
         lastChance
           ? 'cloudflare-queue: dead-letter send failed on the last delivery; the job leaves the ' +
@@ -548,6 +559,24 @@ export class WorkersQueue implements IQueue {
       return;
     }
     message.ack();
+  }
+
+  /**
+   * Sends the job as it arrived, without the dead-letter fields.
+   *
+   * @returns Whether the send succeeded
+   */
+  async #sendOriginal(
+    target: IQueueProducer,
+    message: IQueueMessage,
+    envelope: JobEnvelope | undefined,
+  ): Promise<boolean> {
+    try {
+      await target.send(envelope === undefined ? { body: message.body } : envelope);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Retries a message with the configured spacing, or the queue's own `retry_delay`. */
@@ -567,17 +596,15 @@ export class WorkersQueue implements IQueue {
       if (!this.#retryDelayWarned) {
         this.#retryDelayWarned = true;
         this.#logger?.()?.warn(
-          'cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried without a delay',
+          "cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried with the queue's own retry_delay",
         );
       }
       message.retry();
       return;
     }
+    // Passed even when 0: a bare retry() keeps the consumer's `retry_delay`,
+    // and an explicit 0 is how Cloudflare overrides it.
     const bounded = Math.min(this.#maxDelaySeconds, Math.max(0, Math.ceil(seconds)));
-    if (bounded === 0) {
-      message.retry();
-      return;
-    }
     message.retry({ delaySeconds: bounded });
   }
 

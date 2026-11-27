@@ -403,13 +403,21 @@ export class RoomRegistry {
 
   /**
    * Whether a connection is a member of the named room, without creating it.
+   * Read from the connection's own memberships, so a `Room` the application
+   * retained after it emptied (and so left the name index) still counts the
+   * members it gained again.
    * @param name - Room name
    * @param conn - The connection
-   * @returns `true` when the room exists and holds the connection
+   * @returns `true` when the connection is in a room of that name
    * @since 0.14.0
    */
   isMember(name: string, conn: IWebSocketConnection): boolean {
-    return this.#rooms.get(name)?.has(conn) ?? false;
+    const joined = this.#membership.get(conn);
+    if (joined === undefined) return false;
+    for (const room of joined) {
+      if (room.name === name) return true;
+    }
+    return false;
   }
 
   /** Discards every room. */

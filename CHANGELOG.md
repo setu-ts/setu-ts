@@ -598,6 +598,17 @@ All notable changes to this project are documented here. The format follows
   undici 7.29.1 and sharp 0.35.4, which carry five High advisories; 4.153 is the first minor whose
   miniflare pins the fixed undici 7.30.1 and sharp 0.35.5 (V13-275). Existing projects can raise
   both pins the same way.
+- **`@setu-ts/cloudflare-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/runtime`, `@setu-ts/kernel`
+  (M143o, #619, review).**
+  - **Queues:** on its last delivery, a Workers job whose dead-letter copy is refused is forwarded
+    as it arrived. `retryDelaySeconds: 0` overrides the queue's `retry_delay`.
+  - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
+    closing link could not.
+  - **Close replies:** the Workers adapter retries a refused close echo with 1000.
+  - **Rooms:** a retained room still delivers to members it regains, and a connection whose link
+    cannot open is closed with 1011.
+  - **Shutdown:** `closeAll` closes every connection when one close throws.
+  - **Cleanup:** a stream's own end hands an asynchronous `ctx.defer` cleanup to `waitUntil`.
 - **`@setu-ts/static-plugin` (M143o, #619).** A static asset served with CORS keeps `Vary: Origin`:
   the handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no
   longer replays one origin's `Access-Control-Allow-Origin` to another.
