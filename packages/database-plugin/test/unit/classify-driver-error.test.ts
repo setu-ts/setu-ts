@@ -273,6 +273,11 @@ describe('classifyDriverError — conflict signals (409)', () => {
 describe('classifyDriverError — unavailable signals (503)', () => {
   it('PostgreSQL SQLSTATE class 08', () => {
     expect(classifyDriverError({ code: '08006' })).toBe('unavailable');
+    // Class 08 is a five-character SQLSTATE; an application code is not one.
+    for (const code of ['08-PHONE-INVALID', '080', '08abc']) {
+      expect(classifyDriverError({ code })).toBeNull();
+      expect(classifyDriverError({ code }, 'custom', 'transaction-work')).toBeNull();
+    }
   });
 
   it('PostgreSQL 57P03 cannot_connect_now', () => {

@@ -67,7 +67,13 @@ function copyWithCause(node: Error, cause: unknown): Error {
   const copy = new Error(typeof message === 'string' ? message : '', { cause });
   for (const key of Object.keys(node)) {
     if (key !== 'cause') {
-      Object.defineProperty(copy, key, { value: safeRead(node, key), enumerable: true });
+      // Writable: an own enumerable `name` or `stack` is assigned below.
+      Object.defineProperty(copy, key, {
+        value: safeRead(node, key),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
   }
   copy.name = nameOf(node);

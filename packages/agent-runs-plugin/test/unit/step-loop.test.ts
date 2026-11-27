@@ -342,6 +342,10 @@ describe('step loop: settled and void tool calls', () => {
         { definition: 'demo', error: 'Error', status: 429 },
       ],
       ['secret thrown string', { definition: 'demo', error: 'string' }],
+      [
+        Object.assign(new Error('x'), { name: { leaked: 'secret-name' } }),
+        { definition: 'demo', error: 'object' },
+      ],
     ];
     for (const [thrown, expected] of cases) {
       const ai = fakeAi();

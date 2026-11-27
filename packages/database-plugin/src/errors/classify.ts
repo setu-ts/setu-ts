@@ -632,7 +632,9 @@ function classifyStructured(
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
     if (code === 'ER_LOCK_DEADLOCK') return 'conflict';
     if (code === '40001' || code === '40P01') return 'conflict';
-    if (code.startsWith('08')) return 'unavailable';
+    // SQLSTATE class 08 (connection exception): exactly five characters, so an
+    // application code such as `08-PHONE-INVALID` is not read as one.
+    if (/^08[0-9A-Z]{3}$/.test(code)) return 'unavailable';
     // A bare net error (e.g. DynamoDB Local refusing a connection) carries
     // errno rather than the SDK's TimeoutError/NetworkingError name.
     if (isConnectionFaultCode(code)) return name === 'TimeoutError' ? 'timeout' : 'unavailable';

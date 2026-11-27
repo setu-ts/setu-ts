@@ -330,7 +330,9 @@ export async function stepLoop(
       const status = httpStatusHintOf(error)?.status;
       deps.logger?.warn('Agent run failed.', {
         definition: definition?.name ?? '',
-        error: error instanceof Error ? error.name : typeof error,
+        // The captured error is application-model code's own value: a
+        // non-string `name` is not logged.
+        error: error instanceof Error && typeof error.name === 'string' ? error.name : typeof error,
         ...(status === undefined ? {} : { status }),
       });
     }

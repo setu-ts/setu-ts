@@ -112,6 +112,20 @@ describe('scrubDriverError', () => {
     expect((outer.cause as Error).message).toContain('private-email');
   });
 
+  it('copies a frozen wrapper with an own enumerable name without throwing', () => {
+    class Refusal extends Error {
+      constructor() {
+        super('refused', { cause: queryError() });
+        this.name = 'Refusal';
+      }
+    }
+    const outer = Object.freeze(new Refusal());
+    const clean = scrubDriverError(outer) as Error;
+    expect(clean.name).toBe('Refusal');
+    expect(clean.message).toBe('refused');
+    expect(JSON.stringify(clean.cause)).not.toContain('private-email');
+  });
+
   it('rebuilds a SQLSTATE class 22 cause from its code, dropping the quoted input', () => {
     const pg = Object.assign(new Error('invalid input syntax for type uuid: "canary-22p02"'), {
       code: '22P02',
