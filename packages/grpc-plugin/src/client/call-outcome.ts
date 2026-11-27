@@ -126,16 +126,24 @@ const INVALID_STATUS_PREFIX = 'invalid grpc-status: ';
 
 /**
  * Whether Connect raised this `Internal` because it could not decode the trailer's status.
- * Connect decodes only the trailer but merges response headers into `metadata`, so the
- * metadata cannot say which fields it read; the status it rejected is in its own message.
- * The value must also fail Connect's rule (exact '0', else a decimal integer prefix naming
- * a Code member), so a valid status whose message merely says this counts as an answer.
+ * Connect decodes only the trailer but merges response headers into `metadata` after it, so
+ * presence of a metadata field cannot say which fields it read. The rejected value is in
+ * Connect's own message, and it must also be the first `grpc-status` value in `metadata`
+ * (the trailer's own), so a peer relaying a downstream's message under a valid status, or
+ * as a Connect-protocol error with no `grpc-status`, stays an answer. The value must fail
+ * Connect's rule (exact '0', else a decimal integer prefix naming a Code member).
  */
 function hasInvalidGrpcStatus(error: unknown): boolean {
-  const { rawMessage, details } = error as { rawMessage?: unknown; details?: unknown };
+  const { rawMessage, details, metadata } = error as {
+    rawMessage?: unknown;
+    details?: unknown;
+    metadata?: unknown;
+  };
   if (typeof rawMessage !== 'string' || !rawMessage.startsWith(INVALID_STATUS_PREFIX)) return false;
   if (Array.isArray(details) && details.length > 0) return false;
   const status = rawMessage.slice(INVALID_STATUS_PREFIX.length);
+  const sent = metadata instanceof Headers ? metadata.get('grpc-status') : null;
+  if (sent === null || (sent !== status && !sent.startsWith(`${status}, `))) return false;
   return status !== '0' && !GRPC_STATUS_CODES.has(Number.parseInt(status, 10));
 }
 

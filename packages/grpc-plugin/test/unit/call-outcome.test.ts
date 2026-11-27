@@ -5,7 +5,11 @@ import {
   validateTrailer,
 } from '@connectrpc/connect/protocol-grpc';
 import { Code, ConnectError } from '@connectrpc/connect';
-import { codeFromHttpStatus, errorFromJson } from '@connectrpc/connect/protocol-connect';
+import {
+  codeFromHttpStatus,
+  errorFromJson,
+  errorToJson,
+} from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import {
   callOutcome,
@@ -486,6 +490,28 @@ it('keeps decoded status details whose message imitates the invalid-status text 
   const error = trailerError(setTrailerStatus(new Headers(), answer), new Headers());
   expect((error as ConnectError).rawMessage).toBe('invalid grpc-status: 99');
   expect((error as ConnectError).details).toHaveLength(1);
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
+});
+
+it('keeps a peer relaying a downstream invalid-status error over gRPC as an answer', async () => {
+  const runtime = await loadConnectModule();
+  const downstream = trailerError(new Headers({ 'grpc-status': '99' }), new Headers());
+  const relayed = setTrailerStatus(new Headers(), ConnectError.from(downstream));
+  expect(relayed.get('grpc-status')).toBe('13');
+  const error = trailerError(relayed, new Headers());
+  expect((error as ConnectError).rawMessage).toBe('invalid grpc-status: 99');
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
+});
+
+it('keeps a peer relaying a downstream invalid-status error over Connect as an answer', async () => {
+  const runtime = await loadConnectModule();
+  const downstream = ConnectError.from(
+    trailerError(new Headers({ 'grpc-status': '99' }), new Headers()),
+  );
+  const fallback = new ConnectError('HTTP 500', codeFromHttpStatus(500));
+  const error = errorFromJson(errorToJson(downstream, undefined), undefined, fallback);
+  error.isWireError = true;
+  expect(error.rawMessage).toBe('invalid grpc-status: 99');
   expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
 });
 
