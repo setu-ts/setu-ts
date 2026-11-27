@@ -203,6 +203,33 @@ describe('background discovery refresh', () => {
     service.close();
   });
 
+  it('rejects every watch waiting on a setup whose late stop throws after close', async () => {
+    let ready!: (unsubscribe: () => void) => void;
+    const provider = {
+      kind: 'fake',
+      resolve: () => Promise.resolve([]),
+      watch: () =>
+        new Promise<() => void>((resolve) => {
+          ready = resolve;
+        }),
+    };
+    const service = new ServiceDiscoveryService(
+      provider,
+      createFakeRuntime(),
+      resolveOptions({ provider: 'custom', discovery: provider }),
+    );
+    const first = service.watch('billing', () => {});
+    const second = service.watch('billing', () => {});
+    await flush();
+    service.close();
+    const failure = new Error('late stop failed');
+    ready(() => {
+      throw failure;
+    });
+    await expect(first).rejects.toBe(failure);
+    await expect(second).rejects.toBe(failure);
+  });
+
   it('drops late failures and late watch registrations after close', async () => {
     const runtime = createFakeRuntime();
     let reject!: (error: Error) => void;

@@ -165,8 +165,8 @@ outage or recovery log.
 
 Closing invalidates every watch before attempting all provider stops. Cleanup failures surface
 together after every stop has been attempted. A watch whose provider setup is still pending at close
-is stopped when that setup settles, and a failure of that stop rejects its `watch()` call. A read
-still queued at close never calls the provider.
+is stopped when that setup settles, and a failure of that stop rejects every `watch()` waiting on
+that setup. A read still queued at close never calls the provider.
 
 Discovery names should be chosen by the application, never taken from a request. As a backstop, the
 resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a budget

@@ -14063,8 +14063,8 @@ wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%4
 - `onClose` invalidates every watch and clears cache, in-flight, retry, reporter and ejection state
   before attempting every provider stop; cleanup failures surface together after all stops. A watch
   whose provider setup is still pending at close is stopped when that setup settles, and a failure
-  of that stop rejects its `watch()` call. Late refreshes do not write state, and reads still queued
-  when close runs never call the provider.
+  of that stop rejects every `watch()` waiting on that setup. Late refreshes do not write state, and
+  reads still queued when close runs never call the provider.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
   strategy and the same ejection filter.
 - Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
@@ -17045,9 +17045,9 @@ grpc.addService(AnotherDefinition, anotherImpl);
 | `serve`         | `boolean`                                | `true`  | `false` registers the capability for calling only: no request is claimed and no procedure, health or reflection service is served; `services` must then be empty. Not a boolean → `TypeError` at `GrpcPlugin()`. Since `0.13.0`.                                             |
 | `clients`       | `Record<string, GrpcClientOptions>`      | `{}`    | Per-target client defaults, keyed by the `target` passed to `grpcClient()`. Each entry is validated at `GrpcPlugin()`. Since `0.13.0`.                                                                                                                                       |
 
-> Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
-> Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
-> HTTP/2 trailers the native protocol requires. Connect and gRPC-Web are fully supported.
+> Native gRPC-binary (`application/grpc`, `+proto`, `+json`) is served on Node and Bun with
+> `RuntimePlugin({ http2 })`; elsewhere it is refused with a Trailers-Only `UNIMPLEMENTED`
+> (`grpc-status: 12`). Connect and gRPC-Web are fully supported.
 
 ### Exports
 
@@ -17167,8 +17167,9 @@ metadata values are ASCII by spec.
 - The request handed to `handleRequest` is **reconstructed** from the mapped `IRequest` (method,
   URL, headers, buffered body), because the framework mapping has already consumed the original
   body. Cloning every request before mapping would tax the whole application to serve the gRPC
-  minority. Trailers do not survive the round trip — M49 already records that native gRPC-binary
-  trailers work on no runtime this plugin runs on, so no working path regresses.
+  minority. Trailers do not survive the round trip — M49 recorded that native gRPC-binary trailers
+  then worked on no runtime this plugin ran on, so no working path regressed (native gRPC over
+  HTTP/2 arrived in 0.13.0).
 - **`inject()` CAN exercise RPC.** Since M70a the kernel dispatches gRPC from its terminal handler,
   and `inject()` attaches the undisturbed web `Request` as `IRequest.raw` before running the
   pipeline, so an injected request reaches RPC dispatch exactly as a socket request does — the

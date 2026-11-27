@@ -31,8 +31,9 @@ retaining removed records indefinitely. Use a trusted host resolver. Other DNS e
 failures, reflected in health, including hung lookups. Reads and watches now share one pending raw
 DNS lookup per name across caller aborts and timeouts. Stopping a caller does not cancel the query.
 Discovery close invalidates all watches, attempts every provider stop, then surfaces cleanup errors
-(a watch still in setup is stopped when setup settles, and its stop failure rejects that `watch()`);
-a read still queued at close never starts. A nested watch delivery supersedes the older broadcast.
+(a watch still in setup is stopped when setup settles, and its stop failure rejects every `watch()`
+waiting on it); a read still queued at close never calls the provider. A nested watch delivery
+supersedes the older broadcast.
 
 No DNS configuration change is required. To select name servers, add the DNS arm's `servers` option
 with IP literals (optional ports; IPv6 ports need brackets). This requires a runtime with

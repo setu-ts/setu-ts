@@ -73,8 +73,8 @@ All notable changes to this project are documented here. The format follows
   2 s past the bound. V13-246. Reads and watches share one pending raw DNS lookup per name across
   caller timeouts. Discovery close invalidates all watches before attempting every stop and
   surfacing cleanup failures; a watch still in setup is stopped when setup settles, its stop failure
-  rejecting that `watch()`; reads still queued at close never start. Nested watch deliveries cannot
-  send an older list after a newer one.
+  rejecting every `watch()` waiting on it; reads still queued at close never call the provider.
+  Nested watch deliveries cannot send an older list after a newer one.
 - **`@setu-ts/grpc-plugin` (M143c, #618).** Unary `Unavailable` with exactly
   `x-setu-unprocessed: shutdown` is resent once on a new pick within the remaining deadline,
   regardless of wire status. Streaming calls and unmarked errors are not resent. The reserved header
