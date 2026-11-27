@@ -201,7 +201,11 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   well does the job leave the adapter's hands: the platform writes it to `dead_letter_queue` when
   one is configured, or deletes it. That is why the stanza above sets both. A dead-letter consumer
   therefore sees two shapes: the copy with `failedAt`, `attempts` and `error` (an unroutable body
-  under `body`), and, rarely, the message body alone.
+  under `body`), and, rarely, the message body alone. Both are sent as JSON, which pull consumers
+  and the dashboard can read, unless an unroutable body is one JSON would change (an `ArrayBuffer`
+  or typed array, a `Date`, `Map` or other non-plain object, `undefined`, a non-finite number, a
+  cycle, or nesting past 64 levels): then the copy is sent with `contentType: 'v8'`, and the body
+  alone as `bytes` when it is an `ArrayBuffer`, else `v8`.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
   retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
   own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past

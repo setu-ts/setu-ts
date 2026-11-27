@@ -143,9 +143,10 @@ export class RequestBoundRooms {
    * Broadcasts to a room. The publishing link is, in order: the connection
    * whose event is dispatching now; the `except` connection's (a handler
    * broadcasting after an `await`, still in its own request); otherwise the
-   * hub's HTTP publish. The caller's own connection is delivered to locally
-   * only when its link carried the frame, since the hub never sends a link's
-   * frame back to it.
+   * hub's HTTP publish. The caller's own connection gets its copy locally,
+   * unless it is the `except` connection: when its link carried the frame,
+   * since the hub never sends a link's frame back to it, and when its link
+   * refused it, with the hub's copy then excluding the caller.
    *
    * @param room - The room
    * @param data - The payload

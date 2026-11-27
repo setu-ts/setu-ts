@@ -743,9 +743,95 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     const binary = new FakeQueueMessage('cf-b', bytes, 4);
     await queue.dispatch(new FakeQueueBatch('q', [binary]));
 
+    // The copy wraps the bytes in an object, so only structured clone carries
+    // it; the original is the bytes alone, sent as bytes so a pull consumer
+    // can still read it.
     expect(binary.disposition).toBe('acked');
     expect(refused).toEqual([{ contentType: 'v8' }]);
-    expect(dlq.sends.map((s) => [s.body, s.options])).toEqual([[bytes, { contentType: 'v8' }]]);
+    expect(dlq.sends.map((s) => [s.body, s.options])).toEqual([[bytes, { contentType: 'bytes' }]]);
+  });
+
+  it('sends a foreign body JSON can carry as JSON, and one it cannot with structured clone', async () => {
+    // Pull consumers and the dashboard cannot decode v8, so it is used only
+    // where JSON would lose the body.
+    const { queue, dlq } = build();
+    queue.process('known', () => {});
+    const at = new Date(0);
+    const bodies: unknown[] = [
+      'text',
+      { order: 7, items: [1, 'two', null, { ok: true }] },
+      { at },
+      new Map([['k', 1]]),
+      [new Uint8Array([1])],
+    ];
+
+    await queue.dispatch(
+      new FakeQueueBatch(
+        'q',
+        bodies.map((body, i) => new FakeQueueMessage(`cf-${String(i)}`, body, 3)),
+      ),
+    );
+
+    expect(dlq.sends.map((s) => s.options)).toEqual([
+      undefined,
+      undefined,
+      { contentType: 'v8' },
+      { contentType: 'v8' },
+      { contentType: 'v8' },
+    ]);
+  });
+
+  it('sends a cyclic or deeply nested foreign body with structured clone', async () => {
+    const { queue, dlq } = build();
+    queue.process('known', () => {});
+    const cyclic: Record<string, unknown> = {};
+    cyclic['self'] = cyclic;
+    let deep: unknown = 'leaf';
+    for (let i = 0; i < 200; i++) deep = [deep];
+
+    await queue.dispatch(
+      new FakeQueueBatch('q', [
+        new FakeQueueMessage('cf-c', cyclic, 3),
+        new FakeQueueMessage('cf-d', deep, 3),
+      ]),
+    );
+
+    expect(dlq.sends.map((s) => s.options)).toEqual([{ contentType: 'v8' }, { contentType: 'v8' }]);
+  });
+
+  it('retries, then reports, when the retry-delay function throws and so does the logger', async () => {
+    const throwing = new RecordingLogger();
+    throwing.warn = (message: string) => {
+      if (message.includes('retryDelaySeconds')) throw new Error('logger down');
+    };
+    const { queue, dlq } = build({
+      logger: () => throwing,
+      retryDelaySeconds: () => {
+        throw new Error('bad policy');
+      },
+    });
+    dlq.send = () => Promise.reject(new TypeError('queue unavailable'));
+    queue.process('j', always);
+
+    const message = delivered('j', {}, { attempts: 3 });
+    await expect(queue.dispatch(new FakeQueueBatch('q', [message]))).resolves.toBeUndefined();
+
+    expect(message.disposition).toBe('retried');
+  });
+
+  it('discards with deadLetterQueue false even when the warning logger throws', async () => {
+    // Only the line reported after the discard throws.
+    const throwing = new RecordingLogger();
+    throwing.warn = (message: string) => {
+      if (message.includes('deadLetterQueue is false')) throw new Error('logger down');
+    };
+    const { queue } = build({ logger: () => throwing, deadLetter: false });
+    queue.process('j', always);
+
+    const message = delivered('j', {}, { attempts: 3 });
+    await expect(queue.dispatch(new FakeQueueBatch('q', [message]))).resolves.toBeUndefined();
+
+    expect(message.disposition).toBe('acked');
   });
 
   it('keeps a job envelope on the default JSON serialization when forwarding it', async () => {

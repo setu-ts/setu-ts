@@ -17745,8 +17745,11 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   (the envelope, or an unroutable body as is), without the dead-letter fields, and the message is
   acked; only if that fails as well does the job leave the adapter (the platform's
   `dead_letter_queue`, or deleted), which is logged. A dead-letter consumer therefore sees the copy
-  (`failedAt`, `attempts`, `error`; an unroutable body under `body`) or, rarely, the body alone. An
-  unroutable message is forwarded the same way, its copy's `error` naming its own reason
+  (`failedAt`, `attempts`, `error`; an unroutable body under `body`) or, rarely, the body alone.
+  Both go as JSON, except an unroutable body JSON would change (binary, a non-plain object,
+  `undefined`, a non-finite number, a cycle, nesting past 64 levels): its copy is sent with
+  `contentType: 'v8'`, and the body alone as `bytes` for an `ArrayBuffer`, else `v8`. An unroutable
+  message is forwarded the same way, its copy's `error` naming its own reason
   (`body is not a job envelope` or `no processor registered`, none past `maxRetries`). On a queue
   with no dead-letter target (producer-only), an unroutable message on its last attempt is retried
   for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or

@@ -42,8 +42,48 @@ const DEFAULT_CONCURRENCY = 1;
 /** The platform's default `max_retries`, and this queue's default `maxRetries`. */
 const DEFAULT_MAX_RETRIES = 3;
 
-/** Serialization for a forwarded body this adapter did not write: structured clone, lossless. */
-const LOSSLESS: QueueSendOptions = { contentType: 'v8' };
+/** Serialization for a forwarded body JSON cannot carry: structured clone. */
+const STRUCTURED_CLONE: QueueSendOptions = { contentType: 'v8' };
+
+/** Serialization for a binary body forwarded as it arrived: pull consumers can read `bytes`. */
+const BYTES: QueueSendOptions = { contentType: 'bytes' };
+
+/** Nesting past this depth is not walked; such a body is sent with structured clone. */
+const JSON_CHECK_DEPTH = 64;
+
+/**
+ * Whether JSON carries `value` unchanged: strings, finite numbers, booleans,
+ * `null`, and arrays and plain objects of those, acyclic and within
+ * {@linkcode JSON_CHECK_DEPTH}.
+ *
+ * @param value - A message body
+ * @returns `true` when JSON serialization loses nothing
+ */
+function isJsonCarried(value: unknown): boolean {
+  return carried(value, 0, new Set());
+}
+
+/** {@linkcode isJsonCarried}'s walk; `path` holds the objects above `value`. */
+function carried(value: unknown, depth: number, path: Set<object>): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object' || depth >= JSON_CHECK_DEPTH || path.has(value)) return false;
+  const isArray = Array.isArray(value);
+  if (!isArray) {
+    const proto: unknown = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return false;
+  }
+  path.add(value);
+  const items: unknown[] = isArray ? value : Object.values(value);
+  const ok = items.every((item) => carried(item, depth + 1, path));
+  path.delete(value);
+  return ok;
+}
+
+/** How a forwarded original JSON cannot carry is sent: bytes alone as `bytes`. */
+function originalSerialization(body: unknown): QueueSendOptions {
+  return body instanceof ArrayBuffer ? BYTES : STRUCTURED_CLONE;
+}
 
 /** The platform's largest `max_retries`. */
 const MAX_RETRIES_LIMIT = 100;
@@ -524,7 +564,8 @@ export class WorkersQueue implements IQueue {
       envelope === undefined ? { messageId: message.id } : { job: envelope.name, id: envelope.id };
     if (target === false) {
       message.ack();
-      this.#logger?.()?.warn(
+      this.#reportQuietly(
+        'warn',
         `cloudflare-queue: job discarded after ${message.attempts} attempts; deadLetterQueue is false`,
         { queue, ...where, attempts: message.attempts },
       );
@@ -540,13 +581,13 @@ export class WorkersQueue implements IQueue {
       attempts: message.attempts,
       ...(lastChance ? {} : { error: describeError(reason) }),
     };
-    // A body that is not this adapter's envelope came from another producer
-    // and may not survive JSON (an ArrayBuffer becomes `{}`), so it is
-    // forwarded with the structured-clone serialization. Envelopes keep the
-    // default JSON one.
-    const lossless = envelope === undefined;
+    // A body from another producer that JSON cannot carry (an ArrayBuffer
+    // becomes `{}`, a Date a string) is forwarded with structured clone.
+    // Everything else, envelopes included, stays JSON: pull consumers and the
+    // dashboard cannot decode `v8`.
+    const lossless = envelope === undefined && !isJsonCarried(message.body);
     try {
-      await (lossless ? target.send(copy, LOSSLESS) : target.send(copy));
+      await (lossless ? target.send(copy, STRUCTURED_CLONE) : target.send(copy));
     } catch (error: unknown) {
       // On the last delivery the added fields can push a job near the Queues
       // size limit over it; the original body is sent instead, once, so
@@ -588,7 +629,7 @@ export class WorkersQueue implements IQueue {
    * Sends the message's body as it arrived (a job envelope, or an unroutable
    * body as is), so nothing is added to a message near the size limit.
    *
-   * @param lossless - Whether to send with the structured-clone serialization
+   * @param lossless - Whether the body needs more than JSON to arrive intact
    * @returns Whether the send succeeded
    */
   async #sendOriginal(
@@ -597,7 +638,9 @@ export class WorkersQueue implements IQueue {
     lossless: boolean,
   ): Promise<boolean> {
     try {
-      await (lossless ? target.send(message.body, LOSSLESS) : target.send(message.body));
+      await (lossless
+        ? target.send(message.body, originalSerialization(message.body))
+        : target.send(message.body));
       return true;
     } catch {
       return false;
@@ -605,7 +648,7 @@ export class WorkersQueue implements IQueue {
   }
 
   /** Logs a settled message's outcome; a logger that throws does not reach dispatch. */
-  #reportQuietly(level: 'warn' | 'error', text: string, meta: LogMetadata): void {
+  #reportQuietly(level: 'warn' | 'error', text: string, meta?: LogMetadata): void {
     try {
       this.#logger?.()?.[level](text, meta);
     } catch {
@@ -627,13 +670,14 @@ export class WorkersQueue implements IQueue {
       seconds = Number.NaN;
     }
     if (!Number.isFinite(seconds)) {
+      message.retry();
       if (!this.#retryDelayWarned) {
         this.#retryDelayWarned = true;
-        this.#logger?.()?.warn(
+        this.#reportQuietly(
+          'warn',
           "cloudflare-queue: retryDelaySeconds threw or returned a non-finite value; retried with the queue's own retry_delay",
         );
       }
-      message.retry();
       return;
     }
     // Passed even when 0: a bare retry() keeps the consumer's `retry_delay`,

@@ -608,11 +608,13 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cloudflare-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/runtime`, `@setu-ts/kernel`
   (M143o, #619, review).**
   - **Queues:** on its last delivery, a Workers job whose dead-letter copy is refused is forwarded
-    as it arrived, without the dead-letter fields. A body that is not the adapter's own job envelope
-    is forwarded with `contentType: 'v8'`, so a binary body is not turned into `{}` by JSON.
-    `retryDelaySeconds: 0` overrides the queue's `retry_delay`, also when a dead-letter send fails
-    and the job is retried. A forwarded job is acknowledged before its outcome is logged, so a
-    logger that throws cannot cause a second dead-letter copy.
+    as it arrived, without the dead-letter fields. A body from another producer that JSON would
+    change (binary, a `Date` or `Map`, a cycle) is forwarded with `contentType: 'v8'` (the original
+    alone as `bytes` when it is an `ArrayBuffer`), so it is not turned into `{}`; every other body,
+    envelopes included, stays JSON for pull consumers. `retryDelaySeconds: 0` overrides the queue's
+    `retry_delay`, also when a dead-letter send fails and the job is retried. A forwarded job is
+    acknowledged before its outcome is logged, so a logger that throws cannot cause a second
+    dead-letter copy.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not. A link closed while it opens, with nothing queued, hands the open to
     `waitUntil`, so its socket is still closed at the hub after the connection's request ends. While

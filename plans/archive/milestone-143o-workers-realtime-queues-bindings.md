@@ -1626,7 +1626,10 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     - **CodeRabbit on `7d1918ea6`.** Fixed:
       - a dead-letter outcome is acknowledged before it is logged, and both log lines are guarded;
       - a failed dead-letter send retries through `#retry`, honouring `retryDelaySeconds: 0`;
-      - a non-envelope body is forwarded with `contentType: 'v8'`;
+      - a foreign body JSON would change is forwarded with `contentType: 'v8'` (an `ArrayBuffer`
+        original as `bytes`); every other body stays JSON, which pull consumers can read;
+      - the `retryDelaySeconds` and `deadLetterQueue: false` warnings follow their settlement and
+        are guarded;
       - `open()` still reports `false` when the logger throws, so the 1011 close happens;
       - a heartbeat stop that throws no longer skips the peer's close cleanup;
       - README and PUBLIC_API wording on the Workers fallback, `onClose` after an `await` and the
