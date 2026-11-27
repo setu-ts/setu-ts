@@ -559,7 +559,7 @@ wrangler open
 | Worker threads            | ❌     | worker-pool-plugin registers, but `run()` throws `WorkerPoolUnavailableError` |
 | Raw sockets (WebSocket)   | ✅     | Via WebSocket upgrade; rooms need the Durable Object arm                      |
 | Cron                      | ✅     | Via Wrangler triggers                                                         |
-| Queues                    | ✅     | Via Workers Queues; a consumer needs a dead-letter target                     |
+| Queues                    | ✅     | Via Workers Queues; a consumer needs a dead-letter target or `false`          |
 | Messaging (pub/sub)       | ✅     | Via Workers Queues                                                            |
 | Messaging (request/reply) | ✅     | Via a Durable Object reply inbox                                              |
 | KV                        | ✅     | Via KV bindings                                                               |

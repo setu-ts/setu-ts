@@ -17593,12 +17593,14 @@ up to 1 MiB (1,048,576 bytes) of frame data, counted on `frame.data.length`. A f
 that budget, or whose serialized form is above the hub's 33,554,432-byte cap, is refused (`publish`
 returns `false`), so `websocket-plugin` POSTs it through `publishViaHub`. The hub answers 413 above
 the cap, logged as `cloudflare: backplane publish failed` with `status: 413`. A sender whose own
-link refuses its broadcast gets it locally, and the hub's copy excludes it. Frames sent through the
-hub while queued ones wait can arrive before them. A link reopens a lost socket three times (0.5 s,
-1 s, 2 s), then logs `cloudflare: backplane link lost` once with `{ topic, connection }`. The
-isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and receives only: it opens lazily (on
-`connect` or the first `publish`), and a socket that reports a close or an error is retired and
-closed rather than left open at the hub, so the next call reopens it. `publish(frame)` sends through
+link refuses a broadcast with no `except` gets it locally, and the hub's copy excludes it. With an
+`except` naming another member the sender relies on the hub's copy, which its link can miss if the
+hub has not accepted the link yet. Frames sent through the hub while queued ones wait can arrive
+before them. A link reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs
+`cloudflare: backplane link lost` once with `{ topic, connection }`. The isolate socket
+(`connect`/`subscribe`) stays for `sse-plugin` and receives only: it opens lazily (on `connect` or
+the first `publish`), and a socket that reports a close or an error is retired and closed rather
+than left open at the hub, so the next call reopens it. `publish(frame)` sends through
 `POST /publish`, never over that socket, so publishes from different requests never touch a socket
 another request owns; a failed POST is logged as `cloudflare: backplane publish failed`, never
 thrown. The hub fans the POST out to every socket, the publisher's own included, and the replica
