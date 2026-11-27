@@ -611,8 +611,11 @@ All notable changes to this project are documented here. The format follows
     closing link could not.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a retained room still delivers to members it regains, and a connection whose link
-    cannot open is closed with 1011.
-  - **Shutdown:** `closeAll` closes every connection when one close throws.
+    cannot open is closed with 1011. A room the application kept beside another room of the same
+    name gets remote frames on every runtime, once per room, and takes the name when the other
+    empties.
+  - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
+    link close or the logger throws.
   - **Cleanup:** a stream's own end hands an asynchronous `ctx.defer` cleanup to `waitUntil`.
 - **`@setu-ts/static-plugin` (M143o, #619).** A static asset served with CORS keeps `Vary: Origin`:
   the handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no

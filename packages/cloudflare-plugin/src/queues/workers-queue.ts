@@ -535,7 +535,7 @@ export class WorkersQueue implements IQueue {
       await target.send(copy);
     } catch (error: unknown) {
       // On the last delivery the added fields can push a job near the Queues
-      // size limit over it; the original envelope is sent instead, once, so
+      // size limit over it; the original body is sent instead, once, so
       // the job still reaches the dead-letter queue.
       if (lastChance && (await this.#sendOriginal(target, message))) {
         this.#logger?.()?.warn(

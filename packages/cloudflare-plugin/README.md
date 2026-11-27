@@ -497,7 +497,7 @@ when that connection is a member of the room. Without the arm, `ws.room()` and `
 **SSE channels** use one isolate-level socket to the hub, for receiving only. A channel publish is
 POSTed to the hub, so publishes from concurrent requests never touch a socket another request owns.
 The hub sends the frame back to the publisher's socket too, and the replica drops it by its own
-`origin`. Two limits remain:
+`origin`. Three limits remain:
 
 - A replica hears frames only once its socket has joined the hub. The socket opens on the first SSE
   stream or publish, so frames published before then do not reach it.
