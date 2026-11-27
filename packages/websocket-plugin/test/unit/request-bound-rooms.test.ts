@@ -507,4 +507,50 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
     expect(tb.sent).toContain('to b');
     expect(ta.sent).not.toContain('to b');
   });
+
+  it('closeAll closes every link when one throws, and reports it', () => {
+    const logger = createFakeLogger();
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const closed: string[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      openConnectionLink: (id: string) => ({
+        publish: () => true,
+        close: () => {
+          if (id === 'a') throw new Error('foreign request');
+          closed.push(id);
+        },
+      }),
+    };
+    const rooms = new RequestBoundRooms(backplane, logger);
+    for (const id of ['a', 'b']) {
+      rooms.open(
+        { id, isOpen: true, send: () => {} } as unknown as IWebSocketConnection,
+        () => true,
+      );
+    }
+
+    rooms.closeAll();
+
+    expect(closed).toEqual(['b']);
+    expect(rooms.linkCount).toBe(0);
+    expect(logger.entries.map((e) => e.message)).toContain(
+      'websocket: backplane link failed to close',
+    );
+  });
+
+  it('closeAll clears its state when a heartbeat stop throws', async () => {
+    const h = await rooms();
+    await h.connect('a');
+    const runtime = h.runtime as { clearInterval: (handle: unknown) => void };
+    runtime.clearInterval = () => {
+      throw new Error('no timer here');
+    };
+
+    expect(() => {
+      h.service.closeAll();
+    }).not.toThrow();
+    expect(h.service.connectionCount).toBe(0);
+  });
 });

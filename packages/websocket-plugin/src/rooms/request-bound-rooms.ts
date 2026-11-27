@@ -95,10 +95,21 @@ export class RequestBoundRooms {
     link.close();
   }
 
-  /** Closes every link. */
+  /** Closes every link; one that throws does not keep the rest open. */
   closeAll(): void {
-    for (const link of this.#links.values()) link.close();
-    this.#links.clear();
+    try {
+      for (const link of this.#links.values()) {
+        try {
+          link.close();
+        } catch (error: unknown) {
+          this.#logger?.warn('websocket: backplane link failed to close', {
+            error: describeError(error),
+          });
+        }
+      }
+    } finally {
+      this.#links.clear();
+    }
   }
 
   /**

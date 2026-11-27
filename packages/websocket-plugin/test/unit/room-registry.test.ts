@@ -465,3 +465,56 @@ describe('RoomRegistry.peek (M74 / X3-8)', () => {
     expect(registry.size).toBe(0);
   });
 });
+
+describe('a room the application keeps after it empties', () => {
+  it('counts its members again, even after a route took its name and an evict ran', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const lobby = registry.get('lobby');
+    lobby.add(a.conn);
+    lobby.remove(a.conn);
+
+    // A route asks for the name meanwhile, creating a fresh, empty room.
+    const fresh = registry.get('lobby');
+    expect(fresh).not.toBe(lobby);
+    lobby.add(b.conn);
+    expect(registry.isMember('lobby', b.conn)).toBe(true);
+
+    // The never-joined fresh room is reclaimed; the kept one still delivers.
+    registry.evict(a.conn);
+    expect(registry.isMember('lobby', b.conn)).toBe(true);
+    expect(registry.peek('lobby')).toBe(lobby);
+  });
+
+  it('is put back in the name index when a member joins and the name is free', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const chat = registry.get('chat');
+    chat.add(a.conn);
+    chat.remove(a.conn);
+    expect(registry.peek('chat')).toBeUndefined();
+
+    chat.add(a.conn);
+
+    expect(registry.peek('chat')).toBe(chat);
+    expect(registry.isMember('chat', a.conn)).toBe(true);
+  });
+
+  it('leaves a name held by a room with members to that room', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const live = registry.get('chat');
+    live.add(b.conn);
+
+    kept.add(a.conn);
+
+    expect(registry.peek('chat')).toBe(live);
+    expect(registry.isMember('chat', a.conn)).toBe(true);
+    expect(registry.isMember('chat', b.conn)).toBe(true);
+  });
+});

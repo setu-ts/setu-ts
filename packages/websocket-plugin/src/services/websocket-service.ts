@@ -800,7 +800,8 @@ export class WebSocketService implements IWebSocketService {
     try {
       this.#requestBound?.closeAll();
     } catch {
-      // A link that fails to close must not keep the connections open.
+      // Only a logger that throws while reporting a link gets here; the
+      // connections below are still closed.
     }
     for (const conn of [...this.#connections]) {
       try {

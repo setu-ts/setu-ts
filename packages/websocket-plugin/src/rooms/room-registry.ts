@@ -307,11 +307,16 @@ export class RoomRegistry {
       {
         onJoin: (conn: IWebSocketConnection): void => {
           this.#onMemberJoined?.();
-          this.#neverJoined.delete(room);
           // A room the application kept after it emptied left the name index;
-          // a member joining puts it back when the name is free, so `peek`,
-          // remote delivery and `isMember` find it on every runtime.
-          if (!this.#rooms.has(room.name)) this.#rooms.set(room.name, room);
+          // a member joining puts it back when the name is free, or held by a
+          // room nobody ever joined, so `peek`, remote delivery and `isMember`
+          // find it on every runtime.
+          const holder = this.#rooms.get(room.name);
+          if (holder === undefined || (holder !== room && this.#neverJoined.has(holder))) {
+            if (holder !== undefined) this.#neverJoined.delete(holder);
+            this.#rooms.set(room.name, room);
+          }
+          this.#neverJoined.delete(room);
           let joined = this.#membership.get(conn);
           if (joined === undefined) {
             joined = new Set<Room>();
@@ -407,13 +412,22 @@ export class RoomRegistry {
 
   /**
    * Whether a connection is a member of the named room, without creating it.
+   * Read from the connection's own memberships too, so a `Room` the
+   * application kept while another took its name still counts its members: a
+   * frame is addressed to a room name, and both objects carry that name.
    * @param name - Room name
    * @param conn - The connection
-   * @returns `true` when the room exists and holds the connection
+   * @returns `true` when the connection is in a room of that name
    * @since 0.14.0
    */
   isMember(name: string, conn: IWebSocketConnection): boolean {
-    return this.#rooms.get(name)?.has(conn) ?? false;
+    if (this.#rooms.get(name)?.has(conn) === true) return true;
+    const joined = this.#membership.get(conn);
+    if (joined === undefined) return false;
+    for (const room of joined) {
+      if (room.name === name) return true;
+    }
+    return false;
   }
 
   /** Discards every room. */

@@ -194,10 +194,13 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   and the budget stops one short, so a dead-letter send that fails is retried on a later delivery
   (on the default budget that is the last one, and the copy then carries no error text, to stay
   under the message size limit; on an earlier one its `error` is the fixed reason
-  `attempt budget exhausted`). If that send fails too, the job is sent once more as it arrived,
-  without the dead-letter fields, in case they pushed it over the size limit; if that fails as well,
-  the job leaves the adapter's hands: the platform writes it to `dead_letter_queue` when one is
-  configured, or deletes it. That is why the stanza above sets both.
+  `attempt budget exhausted`). On the platform's last delivery, if that send fails too, the message
+  body is sent once more exactly as it arrived (the job envelope, or an unroutable body as is),
+  without the dead-letter fields, in case they pushed it over the size limit; only if that fails as
+  well does the job leave the adapter's hands: the platform writes it to `dead_letter_queue` when
+  one is configured, or deletes it. That is why the stanza above sets both. A dead-letter consumer
+  therefore sees two shapes: the copy with `failedAt`, `attempts` and `error` (an unroutable body
+  under `body`), and, rarely, the message body alone.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
   retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
   own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past

@@ -537,7 +537,7 @@ export class WorkersQueue implements IQueue {
       // On the last delivery the added fields can push a job near the Queues
       // size limit over it; the original envelope is sent instead, once, so
       // the job still reaches the dead-letter queue.
-      if (lastChance && (await this.#sendOriginal(target, message, envelope))) {
+      if (lastChance && (await this.#sendOriginal(target, message))) {
         this.#logger?.()?.warn(
           'cloudflare-queue: dead-letter copy refused on the last delivery; the original job was sent',
           { queue, ...where, attempts: message.attempts },
@@ -564,18 +564,14 @@ export class WorkersQueue implements IQueue {
   }
 
   /**
-   * Sends the job as it arrived: the envelope, or a body that was not one,
-   * unwrapped, so nothing is added to a message near the size limit.
+   * Sends the message's body as it arrived (a job envelope, or an unroutable
+   * body as is), so nothing is added to a message near the size limit.
    *
    * @returns Whether the send succeeded
    */
-  async #sendOriginal(
-    target: IQueueProducer,
-    message: IQueueMessage,
-    envelope: JobEnvelope | undefined,
-  ): Promise<boolean> {
+  async #sendOriginal(target: IQueueProducer, message: IQueueMessage): Promise<boolean> {
     try {
-      await target.send(envelope ?? message.body);
+      await target.send(message.body);
       return true;
     } catch {
       return false;
