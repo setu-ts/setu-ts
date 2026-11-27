@@ -209,6 +209,9 @@ ws.route('/ws/chat', {
 });
 ```
 
+A room object is a handle onto its name's members: one kept from an earlier `ws.room('lobby')` and a
+new `ws.room('lobby')` reach the same connections, once each.
+
 ## Options
 
 | Option             | Type                                                                 | Default     | Description                                                                                                                                                                 |

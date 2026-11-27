@@ -10,6 +10,11 @@
  * - `GET /size`: this isolate's `lobby` size.
  * - `GET /opens`: how many `/chat` connections this isolate has opened.
  * - `GET /rooms-without-arm`: `ws.room()` on an app with no Durable Object arm.
+ * - `GET /kept/hold`: keeps a `kept` room object at module scope.
+ * - `GET /kept/chat?via=kept|fresh` (WebSocket): joins `kept` through the kept
+ *   object or through `ws.room('kept')`; each message is broadcast through the
+ *   kept object.
+ * - `POST /kept/broadcast` and `GET /kept/size`: `ws.room('kept')` from a route.
  * - `POST /iso/publish?id=<id>`: publishes one frame on this isolate's own
  *   `DurableObjectBackplane` (the isolate-level path `sse-plugin` uses).
  * - `GET /iso/stats`: that backplane's socket opens, hub POSTs, warnings, and
@@ -20,7 +25,7 @@
 import { env, waitUntil } from 'cloudflare:workers';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
-import type { IWebSocketService } from '@setu-ts/common';
+import type { IWebSocketService, WebSocketRoom } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
@@ -71,6 +76,32 @@ function build(withArm: boolean): Promise<IKernelApplication> {
           .broadcast(data, { except: conn });
       },
     });
+    ws().route('/kept/chat', {
+      onOpen: (conn, context) => {
+        const handle = context.query['via'] === 'kept' ? kept : ws().room('kept');
+        handle?.add(conn);
+      },
+      onMessage: (_conn, data) => {
+        kept?.broadcast(data);
+      },
+    });
+    app.router.get('/kept/hold', {
+      handler: (ctx) => {
+        kept = ws().room('kept');
+        return ctx.response.status(204).send();
+      },
+    });
+    app.router.post('/kept/broadcast', {
+      handler: async (ctx) => {
+        ws()
+          .room('kept')
+          .broadcast(await ctx.request.text());
+        return ctx.response.status(204).send();
+      },
+    });
+    app.router.get('/kept/size', {
+      handler: (ctx) => ctx.response.text(String(ws().room('kept').size)),
+    });
     app.router.post('/broadcast', {
       handler: async (ctx) => {
         ws()
@@ -95,6 +126,9 @@ function build(withArm: boolean): Promise<IKernelApplication> {
 
 /** `/chat` connections this isolate has opened, for the handshake e2e. */
 let opens = 0;
+
+/** The room object an application keeps, for the kept-handle e2e. */
+let kept: WebSocketRoom | undefined;
 
 /** What this isolate's own backplane did, for the isolate-publish e2e. */
 const iso = { opens: 0, posts: 0, warnings: [] as string[], received: [] as string[] };

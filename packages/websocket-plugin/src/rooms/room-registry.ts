@@ -80,13 +80,36 @@ export interface LocalBroadcastOptions extends RoomBroadcastOptions {
 }
 
 /**
+ * Where a registry's room finds its name's one member set. Kept in a
+ * module-private map rather than on the constructor, so `Room`'s public
+ * signature is unchanged.
+ */
+interface MemberSource {
+  /** The name's set, or `undefined` while the name has no members. */
+  current(): Set<IWebSocketConnection> | undefined;
+  /** The name's set, created when the name has none. */
+  acquire(): Set<IWebSocketConnection>;
+}
+
+/** Set by {@linkcode RoomRegistry.get} on each room it creates. */
+const MEMBER_SOURCES = new WeakMap<Room, MemberSource>();
+
+/** Read when a name has no members; never written. */
+const NO_MEMBERS: ReadonlySet<IWebSocketConnection> = new Set<IWebSocketConnection>();
+
+/**
  * A named group of connections that can be addressed as one.
+ *
+ * A room from a {@linkcode RoomRegistry} is a handle onto its name's one member
+ * set: a join, a leave, a broadcast or a membership check through any handle,
+ * a kept one included, acts on the same members as `ws.room(name)`. A room
+ * built directly has its own set.
  *
  * @since 0.1.0
  */
 export class Room implements WebSocketRoom {
   readonly #name: string;
-  readonly #members = new Set<IWebSocketConnection>();
+  readonly #own = new Set<IWebSocketConnection>();
   readonly #listener: RoomMembershipListener | undefined;
   readonly #publish: RoomPublisher | undefined;
   readonly #broadcaster: RoomBroadcaster | undefined;
@@ -118,9 +141,15 @@ export class Room implements WebSocketRoom {
     return this.#name;
   }
 
+  /** The members this handle reads: its name's set, or its own when standalone. */
+  #members(): ReadonlySet<IWebSocketConnection> {
+    const source = MEMBER_SOURCES.get(this);
+    return source === undefined ? this.#own : (source.current() ?? NO_MEMBERS);
+  }
+
   get size(): number {
     let count = 0;
-    for (const member of this.#members) {
+    for (const member of this.#members()) {
       if (member.isOpen) {
         count++;
       }
@@ -130,16 +159,18 @@ export class Room implements WebSocketRoom {
 
   /** Total membership including connections that have since closed. */
   get rawSize(): number {
-    return this.#members.size;
+    return this.#members().size;
   }
 
   add(conn: IWebSocketConnection): void {
-    if (this.#members.has(conn)) {
-      // Re-adding an existing member must not emit a second join, or the
-      // registry's reverse index would count it twice.
+    const members = MEMBER_SOURCES.get(this)?.acquire() ?? this.#own;
+    if (members.has(conn)) {
+      // Re-adding an existing member, through this handle or another of the
+      // same name, must not emit a second join, or the registry's reverse
+      // index would count it twice.
       return;
     }
-    this.#members.add(conn);
+    members.add(conn);
     this.#listener?.onJoin(conn);
   }
 
@@ -154,7 +185,7 @@ export class Room implements WebSocketRoom {
    * @since 0.14.0
    */
   has(conn: IWebSocketConnection): boolean {
-    return this.#members.has(conn);
+    return this.#members().has(conn);
   }
 
   broadcast(data: string | Uint8Array, options?: RoomBroadcastOptions): void {
@@ -190,7 +221,7 @@ export class Room implements WebSocketRoom {
   broadcastLocal(data: string | Uint8Array, options?: LocalBroadcastOptions): void {
     const except = options?.except;
     const exceptId = options?.exceptId;
-    for (const member of this.#members) {
+    for (const member of this.#members()) {
       if (member === except || (exceptId !== undefined && member.id === exceptId)) {
         continue;
       }
@@ -220,7 +251,9 @@ export class Room implements WebSocketRoom {
    * @param conn - The connection to drop
    */
   #drop(conn: IWebSocketConnection): void {
-    if (this.#members.delete(conn)) {
+    const source = MEMBER_SOURCES.get(this);
+    const members = source === undefined ? this.#own : source.current();
+    if (members?.delete(conn) === true) {
       this.#listener?.onLeave(conn);
     }
   }
@@ -238,7 +271,10 @@ export class Room implements WebSocketRoom {
  * @since 0.1.0
  */
 export class RoomRegistry {
+  /** One handle per name, for `peek`, remote delivery and the room count. */
   readonly #rooms = new Map<string, Room>();
+  /** Each name's one member set, present only while the name has members. */
+  readonly #sets = new Map<string, Set<IWebSocketConnection>>();
   readonly #publish: RoomPublisher | undefined;
 
   /**
@@ -262,7 +298,7 @@ export class RoomRegistry {
   readonly #onMemberJoined: (() => void) | undefined;
 
   /**
-   * Reverse index: which rooms each connection currently belongs to.
+   * Reverse index: which room names each connection currently belongs to.
    *
    * Without it, evicting a disconnecting peer means scanning every live room —
    * O(rooms) on every single close, which degrades as a server accumulates
@@ -270,7 +306,7 @@ export class RoomRegistry {
    * the {@linkcode RoomMembershipListener} each room is created with, so every
    * join, removal, and mid-broadcast drop updates it.
    */
-  readonly #membership = new Map<IWebSocketConnection, Set<Room>>();
+  readonly #membership = new Map<IWebSocketConnection, Set<string>>();
   /**
    * Rooms created by {@linkcode RoomRegistry.get} that nobody has joined yet.
    *
@@ -300,53 +336,65 @@ export class RoomRegistry {
     if (existing !== undefined) {
       return existing;
     }
-    // `room` is referenced by the listener closures, which only ever run after
-    // the constructor has returned.
+    // `room` is referenced by the closures, which only ever run after the
+    // constructor has returned.
     const room: Room = new Room(
       name,
       {
         onJoin: (conn: IWebSocketConnection): void => {
           this.#onMemberJoined?.();
-          // A room the application kept after it emptied left the name index;
-          // a member joining puts it back when the name is free, or held by a
-          // room nobody ever joined, so `peek`, remote delivery and `isMember`
-          // find it on every runtime.
-          const holder = this.#rooms.get(room.name);
-          if (holder === undefined || (holder !== room && this.#neverJoined.has(holder))) {
-            if (holder !== undefined) this.#neverJoined.delete(holder);
-            this.#rooms.set(room.name, room);
-          }
-          this.#neverJoined.delete(room);
           let joined = this.#membership.get(conn);
           if (joined === undefined) {
-            joined = new Set<Room>();
+            joined = new Set<string>();
             this.#membership.set(conn, joined);
           }
-          joined.add(room);
+          joined.add(name);
         },
         onLeave: (conn: IWebSocketConnection): void => {
           const joined = this.#membership.get(conn);
           if (joined !== undefined) {
-            joined.delete(room);
+            joined.delete(name);
             if (joined.size === 0) {
               this.#membership.delete(conn);
             }
           }
-          // Disposal lives here, not only in `evict`, so a room emptied by a
-          // mid-broadcast drop is discarded too. The identity check matters: the
-          // name may already have been rebound to a fresh room by a `get` that
-          // ran after this one emptied.
-          if (room.rawSize === 0 && this.#rooms.get(room.name) === room) {
-            this.#rooms.delete(room.name);
+          // Disposal lives here, not only in `evict`, so a name emptied by a
+          // mid-broadcast drop is released too, with its handle.
+          if (this.#sets.get(name)?.size === 0) {
+            this.#sets.delete(name);
+            this.#rooms.delete(name);
           }
         },
       },
       this.#publish,
       this.#broadcaster,
     );
+    MEMBER_SOURCES.set(room, {
+      current: () => this.#sets.get(name),
+      acquire: () => this.#acquire(room),
+    });
     this.#rooms.set(name, room);
     this.#neverJoined.add(room);
     return room;
+  }
+
+  /**
+   * The name's member set for a join through `room`, created when the name has
+   * none. A kept handle whose name was released puts itself back as the
+   * name's handle; one whose name another handle holds joins that handle's set.
+   */
+  #acquire(room: Room): Set<IWebSocketConnection> {
+    const name = room.name;
+    let members = this.#sets.get(name);
+    if (members === undefined) {
+      members = new Set<IWebSocketConnection>();
+      this.#sets.set(name, members);
+      if (!this.#rooms.has(name)) this.#rooms.set(name, room);
+    }
+    const holder = this.#rooms.get(name);
+    if (holder !== undefined) this.#neverJoined.delete(holder);
+    this.#neverJoined.delete(room);
+    return members;
   }
 
   /**
@@ -383,8 +431,8 @@ export class RoomRegistry {
       // instead of mutating the set being iterated here. Discarding a room
       // left empty is `onLeave`'s job.
       this.#membership.delete(conn);
-      for (const room of joined) {
-        room.remove(conn);
+      for (const name of joined) {
+        this.#rooms.get(name)?.remove(conn);
       }
     }
     this.#reclaimNeverJoined();
@@ -397,7 +445,8 @@ export class RoomRegistry {
    * A room is looked up but never CREATED here. A remote frame naming a room
    * nobody on this replica has joined has no local audience, and creating one
    * per arriving name would let a cluster-wide namespace grow this replica's
-   * room map without bound.
+   * room map without bound. It reaches the name's one member set, so every
+   * member joined through any handle of that name, once.
    *
    * @param name - The room the frame was addressed to
    * @param data - The decoded payload
@@ -411,28 +460,21 @@ export class RoomRegistry {
   }
 
   /**
-   * Whether a connection is a member of the named room, without creating it.
-   * Read from the connection's own memberships too, so a `Room` the
-   * application kept while another took its name still counts its members: a
-   * frame is addressed to a room name, and both objects carry that name.
+   * Whether a connection is a member of the named room, without creating it:
+   * whether it is in the name's one member set, joined through any handle.
    * @param name - Room name
    * @param conn - The connection
-   * @returns `true` when the connection is in a room of that name
+   * @returns `true` when the connection is in the room of that name
    * @since 0.14.0
    */
   isMember(name: string, conn: IWebSocketConnection): boolean {
-    if (this.#rooms.get(name)?.has(conn) === true) return true;
-    const joined = this.#membership.get(conn);
-    if (joined === undefined) return false;
-    for (const room of joined) {
-      if (room.name === name) return true;
-    }
-    return false;
+    return this.#sets.get(name)?.has(conn) === true;
   }
 
   /** Discards every room. */
   clear(): void {
     this.#rooms.clear();
+    this.#sets.clear();
     this.#membership.clear();
     this.#neverJoined.clear();
   }
@@ -440,15 +482,16 @@ export class RoomRegistry {
   /**
    * Discards rooms that were looked up but never joined.
    *
-   * Every member of the set is, by construction, both empty and still the room
-   * bound to its name: the only `add` path removes it from the set, `onLeave`
-   * disposal can only fire for a room that had a member, and `clear` empties
-   * `#rooms` and this set together. So each entry can be dropped by name
-   * without re-checking either property.
+   * A handle is dropped only while it is still its name's handle and the name
+   * has no members: a join through another handle of the name takes this one
+   * out of the set, but a handle left here after its name was released and
+   * taken again must not drop the new one.
    */
   #reclaimNeverJoined(): void {
     for (const room of this.#neverJoined) {
-      this.#rooms.delete(room.name);
+      if (this.#rooms.get(room.name) === room && !this.#sets.has(room.name)) {
+        this.#rooms.delete(room.name);
+      }
     }
     this.#neverJoined.clear();
   }

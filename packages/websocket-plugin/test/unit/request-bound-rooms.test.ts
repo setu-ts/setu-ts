@@ -508,6 +508,32 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
     expect(ta.sent).not.toContain('to b');
   });
 
+  it('is one member set through a kept handle and ws.room(name), once per connection', async () => {
+    const h = await rooms();
+    const { conn: a } = await h.connect('a');
+    const { conn: b, transport: tb } = await h.connect('b');
+    const { conn: c, transport: tc } = await h.connect('c');
+    const kept = h.service.room('chat');
+    kept.add(a);
+    kept.remove(a); // the name empties and is released
+    h.service.room('chat').add(b); // a fresh handle takes the name
+    kept.add(c);
+    kept.add(b); // through both handles: still one member
+
+    h.world.run('a', () => {
+      kept.broadcast('via kept');
+    });
+    h.service.room('chat').broadcast('via route');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    for (const t of [tb, tc]) {
+      expect(t.sent.filter((m) => m === 'via kept')).toHaveLength(1);
+      expect(t.sent.filter((m) => m === 'via route')).toHaveLength(1);
+    }
+    expect(h.service.room('chat').size).toBe(2);
+    expect(h.world.violations).toEqual([]);
+  });
+
   it('closeAll closes every link when one throws, and reports it', () => {
     const logger = createFakeLogger();
     const world = new RequestWorld();

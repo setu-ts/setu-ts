@@ -1545,14 +1545,34 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     request that made it. It was reverted. A 50-frame burst from one request arrived in order
     locally with a stub per POST, but the platform does not promise that, so no test asserts it.
     Cross-replica order is a documented limit (class doc, cloudflare README, PUBLIC_API).
-  - **Two room objects with members under one name (code review of c6c71c983): held for the
-    maintainer.** Workers counts a kept room's members through `isMember`, while `deliverRemote` on
-    other runtimes reaches only the room holding the name. A registry-side set of rooms beside the
-    holder was tried and reverted: review showed it split Node in turn, since local broadcasts and
-    remote frames then reached different members, and a connection in both rooms got remote frames
-    twice. Resolving it needs a decision on whether a kept `Room` is addressed by name at all.
+  - **Two room objects with members under one name (code review of c6c71c983).** Workers counted a
+    kept room's members through `isMember`, while `deliverRemote` on other runtimes reached only the
+    room holding the name. A set of rooms "beside" the holder was tried and reverted: it split Node,
+    because local broadcasts and remote frames reached different members.
     `RequestBoundRooms.closeAll` now guards its logger, so the service's catch around it was
     removed.
+- **One member set per room name (maintainer decision, thread 4716760586; built inline with the
+  user's OK).**
+  - **Design.** The registry keeps `#sets`, each name's one member set, present only while the name
+    has members. Every `Room` it creates is a handle: a module-private `WeakMap` gives it
+    `current()` and `acquire()` onto its name's set, so `Room`'s constructor is unchanged. `add`
+    acquires the set (a kept handle whose name was released puts itself back as the name's handle);
+    `remove`, `has`, `size` and `broadcastLocal` read it. The reverse index maps a connection to
+    names. `isMember` reads the set. This matches Socket.IO, Phoenix and Centrifugo, which key rooms
+    by name only.
+  - **Reclamation.** The last member's leave deletes the set and the name's handle. Never-joined
+    handles are reclaimed on `evict`, but only while still the name's handle and with no set.
+  - **Tests.** `room-registry.test.ts`:
+    - the kept-object scenario with local and remote delivery once each;
+    - a connection joined through both handles is one member;
+    - the name is released through any handle;
+    - an earlier handle cannot reclaim the name taken since;
+    - `evict` and `clear` act on the shared set. `request-bound-rooms.test.ts`: the scenario in
+      Workers mode, with no cross-request write. `workerd-realtime-rooms.test.ts`: on local workerd,
+      a member and a route broadcast reach both members once, and `size` is 2.
+  - **Changed assertion.** One existing test asserted that `peek` returned the kept object. With one
+    set, both handles are equivalent, so it now asserts the members.
+  - **Negative control.** The two-set registry fails six unit tests and the workerd e2e.
 - **CodeRabbit on #619 (review body, connection-link.ts): link queue byte budget (maintainer
   decision (b), 1 MiB).** Application broadcasts were unbounded, so a link could queue 64 frames of
   up to the hub's 32 MiB cap each while it opened.

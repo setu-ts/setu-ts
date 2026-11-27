@@ -614,8 +614,9 @@ All notable changes to this project are documented here. The format follows
     64-frame bound; a broadcast past that, or above the hub's 32 MiB cap, goes through the hub's
     HTTP publish.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
-  - **Rooms:** a retained room still delivers to members it regains, and a connection whose link
-    cannot open is closed with 1011.
+  - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
+    or a remote frame through either reaches the same members, once each, on every runtime; a
+    connection whose link cannot open is closed with 1011.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws.
   - **Cleanup:** a stream's own end hands an asynchronous `ctx.defer` cleanup to `waitUntil`.

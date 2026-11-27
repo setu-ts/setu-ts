@@ -5491,6 +5491,11 @@ ws.route(
   replacement implementation of `IWebSocketService` must supply it. At the registry level,
   `RoomRegistry.get(name)` creates on lookup too; use `RoomRegistry.peek(name)` for reads of
   client-supplied room names.
+- **A room object is a handle onto its name's one member set (0.14.0).** A `WebSocketRoom` kept
+  after it emptied and a later `room(name)` act on the same members: a join, leave, broadcast,
+  `size` or `has` through either reaches the same connections, a connection joined through both is
+  one member, and remote frames reach each member once, on every runtime. A name with no members is
+  still released, and a name looked up but never joined is still reclaimed.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`

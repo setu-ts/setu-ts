@@ -379,6 +379,41 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
   );
 
   it(
+    'a kept room object and ws.room(name) are one member set, once per connection',
+    async () => {
+      expect((await text('/a/kept/hold')).status).toBe(204);
+      // Join through the kept object, then leave: the name empties.
+      const first = await client('/a/kept/chat?via=kept');
+      await sleep(300);
+      first.socket.close(1000);
+      await until(() => first.socket.readyState === WebSocket.CLOSED, 5000, 'first close');
+      await sleep(300);
+      // A fresh handle takes the name; another member joins through the kept one.
+      const b = await client('/a/kept/chat?via=fresh');
+      const c = await client('/a/kept/chat?via=kept');
+      await sleep(300);
+
+      // b joined through ws.room('kept'); its message is broadcast through the
+      // kept object, so both handles must reach both members.
+      b.socket.send('member');
+      expect((await text('/a/kept/broadcast', { method: 'POST', body: 'route' })).status).toBe(204);
+      await until(
+        () => [b, c].every((x) => x.got.includes('member') && x.got.includes('route')),
+        5000,
+        'both broadcasts at both members',
+      );
+      await sleep(300);
+
+      for (const x of [b, c]) {
+        expect(x.got.filter((m) => m === 'member')).toHaveLength(1);
+        expect(x.got.filter((m) => m === 'route')).toHaveLength(1);
+      }
+      expect((await text('/a/kept/size')).body).toBe('2');
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  it(
     'isolate-level publishes from concurrent requests all reach the hub, with no socket churn',
     async () => {
       // The hub's own socket hears every frame it fans out.
