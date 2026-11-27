@@ -205,9 +205,10 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   and the dashboard can read, unless the body, a job envelope or not, is one JSON would change (an
   envelope whose `data` another producer filled with such a value included): an `ArrayBuffer` or
   typed array, a `Date`, `Map` or other non-plain object, a `bigint`, `undefined`, `-0` or a
-  non-finite number, an array with a hole or an extra key, an object reached twice (a cycle, or one
-  shared by two references), or nesting past 64 levels. Then the copy is sent with
-  `contentType: 'v8'`, and the body alone as `bytes` when it is an `ArrayBuffer`, else `v8`.
+  non-finite number, an array with a hole or an extra key, or an object reached twice (a cycle, or
+  one shared by two references). The check also stops at 64 levels and treats anything deeper the
+  same way, job envelopes included. Then the copy is sent with `contentType: 'v8'`, and the body
+  alone as `bytes` when it is an `ArrayBuffer`, else `v8`.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
   retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
   own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past

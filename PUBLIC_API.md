@@ -17606,25 +17606,26 @@ up to 1 MiB (1,048,576 bytes) of frame data, counted on `frame.data.length`. A f
 that budget, or whose serialized form (the exclusion fields the plugin adds included) is above the
 hub's 33,554,432-byte cap, is refused (`publish` returns `false`), so `websocket-plugin` POSTs it
 through `publishViaHub`. The hub answers 413 above the cap, logged as
-`cloudflare: backplane publish failed` with `status: 413`. A sender whose own link refuses a
-broadcast gets it locally, exactly once, when `except` names nobody or another member; a sender that
-names itself as `except` gets no copy, as on every runtime. The hub's copy excludes the sender: as
-`exceptId` when the broadcast has no `except`, otherwise in `exceptIds` beside the caller's
-`except`, so its link drops that copy whether or not the hub had accepted the link yet. Frames sent
-through the hub while queued ones wait can arrive before them. A link reopens a lost socket three
-times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
-`{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and
-receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a
-close or an error is retired and closed rather than left open at the hub, so the next call reopens
-it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
-different requests never touch a socket another request owns; a failed POST is logged as
-`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
-publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
-backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
-frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
-local workerd it keeps receiving after that request has answered, which is unverified on the
-platform. Each publish is its own call to the hub and the platform orders calls only within one
-stub, so other replicas may receive one replica's frames out of order.
+`cloudflare: backplane publish failed` with `status: 413`. A sender that is an open member of the
+room and whose own link refuses a broadcast gets it locally, exactly once, when `except` names
+nobody or another member; a sender that names itself as `except` gets no copy, as on every runtime.
+The hub's copy excludes the sender: as `exceptId` when the broadcast has no `except`, otherwise in
+`exceptIds` beside the caller's `except`, so its link drops that copy whether or not the hub had
+accepted the link yet. Frames sent through the hub while queued ones wait can arrive before them. A
+link reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs
+`cloudflare: backplane link lost` once with `{ topic, connection }`. The isolate socket
+(`connect`/`subscribe`) stays for `sse-plugin` and receives only: it opens lazily (on `connect` or
+the first `publish`), and a socket that reports a close or an error is retired and closed rather
+than left open at the hub, so the next call reopens it. `publish(frame)` sends through
+`POST /publish`, never over that socket, so publishes from different requests never touch a socket
+another request owns; a failed POST is logged as `cloudflare: backplane publish failed`, never
+thrown. The hub fans the POST out to every socket, the publisher's own included, and the replica
+drops a frame whose `origin` is its own (the rule every backplane transport applies, along with
+dropping a frame that is not well-formed). A replica hears a frame only once its socket has joined
+the hub. The socket belongs to the request that opened it: on local workerd it keeps receiving after
+that request has answered, which is unverified on the platform. Each publish is its own call to the
+hub and the platform orders calls only within one stub, so other replicas may receive one replica's
+frames out of order.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses
@@ -17749,15 +17750,15 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   (`failedAt`, `attempts`, `error`; an unroutable body under `body`) or, rarely, the body alone.
   Both go as JSON, except a body, envelope or not, that JSON would change (binary, a non-plain
   object, a `bigint`, `undefined`, `-0` or a non-finite number, an array with a hole or an extra
-  key, an object reached twice, nesting past 64 levels): its copy is sent with `contentType: 'v8'`,
-  and the body alone as `bytes` for an `ArrayBuffer`, else `v8`. An unroutable message is forwarded
-  the same way, its copy's `error` naming its own reason (`body is not a job envelope` or
-  `no processor registered`, none past `maxRetries`). On a queue with no dead-letter target
-  (producer-only), an unroutable message on its last attempt is retried for the platform's own
-  `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or a `deadLetter` that is
-  its own producer, is refused, since each exhausted job would loop. `retryDelaySeconds` (a number,
-  or a function of the failed attempt) passes `retry({ delaySeconds })`, bounded by
-  `maxDelaySeconds`.
+  key, an object reached twice; the check stops at 64 levels and treats anything deeper the same
+  way): its copy is sent with `contentType: 'v8'`, and the body alone as `bytes` for an
+  `ArrayBuffer`, else `v8`. An unroutable message is forwarded the same way, its copy's `error`
+  naming its own reason (`body is not a job envelope` or `no processor registered`, none past
+  `maxRetries`). On a queue with no dead-letter target (producer-only), an unroutable message on its
+  last attempt is retried for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the
+  queue's own binding, or a `deadLetter` that is its own producer, is refused, since each exhausted
+  job would loop. `retryDelaySeconds` (a number, or a function of the failed attempt) passes
+  `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
   a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never

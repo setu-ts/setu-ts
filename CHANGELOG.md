@@ -622,10 +622,10 @@ All notable changes to this project are documented here. The format follows
     it opens, a link queues at most 1 MiB of frame data beside the 64-frame bound. A broadcast past
     that budget goes through the hub's HTTP publish and can arrive before the queued frames. One
     above the hub's 32 MiB cap in serialized bytes is refused with a logged 413 and reaches no other
-    member. A sender gets its own such broadcast exactly once, locally, when `except` names nobody
-    or another member, and the hub's copy excludes it: as `exceptId` when nobody else is excluded,
-    otherwise in the new `RealtimeFrame.exceptIds`. A sender that names itself as `except` gets no
-    copy, as on every runtime.
+    member. A sender that is an open member of the room gets its own such broadcast exactly once,
+    locally, when `except` names nobody or another member, and the hub's copy excludes it: as
+    `exceptId` when nobody else is excluded, otherwise in the new `RealtimeFrame.exceptIds`. A
+    sender that names itself as `except` gets no copy, as on every runtime.
   - **`RealtimeFrame.exceptIds` (`@setu-ts/common`):** an optional list of further connection IDs a
     broadcast excludes, beside `exceptId`. Every receiver skips a member named in either; both
     backplane guards refuse a non-array, a non-string entry, or more than

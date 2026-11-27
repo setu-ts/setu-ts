@@ -432,11 +432,12 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   closing connection's link is closed once the handler's synchronous part returns, so a later
   broadcast goes through the hub and can arrive before that member's earlier frames. The exception
   is a link still opening whose 1 MiB queue budget the next frame would pass: that frame goes
-  through the hub and can arrive before the queued ones. The sender still gets its own such
-  broadcast exactly once when `except` names nobody or another member: it is sent locally, and the
-  hub's copy excludes the sender. A sender that names itself as `except` gets no copy, as on every
-  runtime. A broadcast from a route is published through the hub with no order relative to members'
-  frames, as with any cross-replica backplane.
+  through the hub and can arrive before the queued ones. A sender that is an open member of the room
+  still gets its own such broadcast exactly once when `except` names nobody or another member (a
+  send that throws on a closing socket is dropped): it is sent locally, and the hub's copy excludes
+  the sender. A sender that names itself as `except` gets no copy, as on every runtime. A broadcast
+  from a route is published through the hub with no order relative to members' frames, as with any
+  cross-replica backplane.
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
   left as a member that receives nothing. Only a backplane built without its timers fails this way;
   `CloudflarePlugin` always passes them.
