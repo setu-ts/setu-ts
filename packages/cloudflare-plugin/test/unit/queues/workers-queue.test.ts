@@ -757,12 +757,20 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     const { queue, dlq } = build();
     queue.process('known', () => {});
     const at = new Date(0);
+    // A hole (`[, 1]`) and an extra array key both read as JSON-unsafe.
+    const holed: unknown[] = [];
+    holed[1] = 1;
+    const extra = Object.assign([1], { extra: 2 });
     const bodies: unknown[] = [
       'text',
       { order: 7, items: [1, 'two', null, { ok: true }] },
       { at },
       new Map([['k', 1]]),
       [new Uint8Array([1])],
+      holed,
+      [-0],
+      extra,
+      { n: 1n },
     ];
 
     await queue.dispatch(
@@ -775,9 +783,7 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(dlq.sends.map((s) => s.options)).toEqual([
       undefined,
       undefined,
-      { contentType: 'v8' },
-      { contentType: 'v8' },
-      { contentType: 'v8' },
+      ...Array.from({ length: 7 }, () => ({ contentType: 'v8' })),
     ]);
   });
 
@@ -797,6 +803,22 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     );
 
     expect(dlq.sends.map((s) => s.options)).toEqual([{ contentType: 'v8' }, { contentType: 'v8' }]);
+  });
+
+  it('checks a body that shares one object many times in linear time, sending it as v8', async () => {
+    // JSON writes a shared object out at every reference, so `x = [x, x]`
+    // repeated n times is 2^n copies; structured clone stores it once. 26 levels
+    // take seconds walked once per reference, and microseconds walked once.
+    const { queue, dlq } = build();
+    queue.process('known', () => {});
+    let shared: unknown = 'leaf';
+    for (let i = 0; i < 26; i++) shared = [shared, shared];
+
+    const started = performance.now();
+    await queue.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('cf-s', shared, 3)]));
+
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(dlq.sends.map((s) => s.options)).toEqual([{ contentType: 'v8' }]);
   });
 
   it('retries, then reports, when the retry-delay function throws and so does the logger', async () => {

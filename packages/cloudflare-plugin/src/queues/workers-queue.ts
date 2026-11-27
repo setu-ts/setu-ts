@@ -52,9 +52,11 @@ const BYTES: QueueSendOptions = { contentType: 'bytes' };
 const JSON_CHECK_DEPTH = 64;
 
 /**
- * Whether JSON carries `value` unchanged: strings, finite numbers, booleans,
- * `null`, and arrays and plain objects of those, acyclic and within
- * {@linkcode JSON_CHECK_DEPTH}.
+ * Whether JSON carries `value` unchanged: strings, finite numbers other than
+ * `-0`, booleans, `null`, and arrays (dense, with no other keys) and plain
+ * objects of those, within {@linkcode JSON_CHECK_DEPTH}. An object reached a
+ * second time (a cycle, or one shared by two references, which JSON would
+ * write out at each) is not, so the walk visits each object once.
  *
  * @param value - A message body
  * @returns `true` when JSON serialization loses nothing
@@ -63,21 +65,23 @@ function isJsonCarried(value: unknown): boolean {
   return carried(value, 0, new Set());
 }
 
-/** {@linkcode isJsonCarried}'s walk; `path` holds the objects above `value`. */
-function carried(value: unknown, depth: number, path: Set<object>): boolean {
+/** {@linkcode isJsonCarried}'s walk; `seen` holds every object visited so far. */
+function carried(value: unknown, depth: number, seen: Set<object>): boolean {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object' || depth >= JSON_CHECK_DEPTH || path.has(value)) return false;
-  const isArray = Array.isArray(value);
-  if (!isArray) {
+  if (typeof value === 'number') return Number.isFinite(value) && !Object.is(value, -0);
+  if (typeof value !== 'object' || depth >= JSON_CHECK_DEPTH || seen.has(value)) return false;
+  seen.add(value);
+  let items: unknown[];
+  if (Array.isArray(value)) {
+    // A hole or an extra key: JSON writes `null` for one and drops the other.
+    if (Object.keys(value).length !== value.length) return false;
+    items = value;
+  } else {
     const proto: unknown = Object.getPrototypeOf(value);
     if (proto !== Object.prototype && proto !== null) return false;
+    items = Object.values(value);
   }
-  path.add(value);
-  const items: unknown[] = isArray ? value : Object.values(value);
-  const ok = items.every((item) => carried(item, depth + 1, path));
-  path.delete(value);
-  return ok;
+  return items.every((item) => carried(item, depth + 1, seen));
 }
 
 /** How a forwarded original JSON cannot carry is sent: bytes alone as `bytes`. */

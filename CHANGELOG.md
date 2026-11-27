@@ -614,7 +614,8 @@ All notable changes to this project are documented here. The format follows
     envelopes included, stays JSON for pull consumers. `retryDelaySeconds: 0` overrides the queue's
     `retry_delay`, also when a dead-letter send fails and the job is retried. A forwarded job is
     acknowledged before its outcome is logged, so a logger that throws cannot cause a second
-    dead-letter copy.
+    dead-letter copy; the `retryDelaySeconds` and `deadLetterQueue: false` warnings also follow
+    their settlement and are guarded.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not. A link closed while it opens, with nothing queued, hands the open to
     `waitUntil`, so its socket is still closed at the hub after the connection's request ends. While
