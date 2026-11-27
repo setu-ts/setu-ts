@@ -387,7 +387,14 @@ describe.skipIf(skip)('rooms on workerd across two Workers (V13-195, V13-196, V1
       await sleep(300);
       first.socket.close(1000);
       await until(() => first.socket.readyState === WebSocket.CLOSED, 5000, 'first close');
-      await sleep(300);
+      // The scenario needs the name emptied on the server, not only the client closed.
+      let size = '';
+      const emptied = Date.now() + 5000;
+      while (size !== '0' && Date.now() < emptied) {
+        size = (await text('/a/kept/size')).body;
+        if (size !== '0') await sleep(50);
+      }
+      expect(size).toBe('0');
       // A fresh handle takes the name; another member joins through the kept one.
       const b = await client('/a/kept/chat?via=fresh');
       const c = await client('/a/kept/chat?via=kept');

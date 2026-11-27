@@ -149,7 +149,7 @@ export class RequestBoundRooms {
   broadcast(room: Room, data: string | Uint8Array, options?: RoomBroadcastOptions): void {
     const except = options?.except;
     const payload = encodeFrameData(data);
-    const frame: RealtimeFrame = {
+    let frame: RealtimeFrame = {
       kind: 'ws-room',
       origin: this.#backplane.origin,
       name: room.name,
@@ -168,6 +168,15 @@ export class RequestBoundRooms {
           sendQuietly(current, data);
         }
         return;
+      }
+      if (except === undefined && room.has(current) && current.isOpen) {
+        // The link refused the frame (still opening with its queue full, or
+        // the frame is above the hub's cap), so it goes through the hub, which
+        // reaches only links already open. The sender gets it here, before
+        // the transport as on every runtime, and is excluded from the hub's
+        // copy so it never gets two.
+        sendQuietly(current, data);
+        frame = { ...frame, exceptId: current.id };
       }
     }
     if (except !== undefined && except !== current) {

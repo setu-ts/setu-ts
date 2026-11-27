@@ -141,6 +141,19 @@ describe('ConnectionLink', () => {
     expect(namespace.clients[0]?.sent).toEqual([]);
   });
 
+  it('measures the hub cap in UTF-8 bytes of the whole frame, not characters', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const sender = link(namespace, () => {});
+    await setImmediate();
+    // 12,000,000 characters of three bytes each: under the cap in characters,
+    // 36,000,000 bytes on the wire.
+    const wide = '€'.repeat(12_000_000);
+
+    expect(sender.publish(frame(wide))).toBe(false);
+    expect(sender.publish(frame('é'.repeat(1000)))).toBe(true);
+    expect(namespace.clients[0]?.sent).toHaveLength(1);
+  });
+
   it('gives a drained frame its bytes back, so a reopen can queue the full budget again', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();

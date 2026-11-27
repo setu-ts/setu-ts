@@ -1590,3 +1590,12 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     frame arrives; a frame above the cap gives the 413 log.
   - **Negative controls.** The count-only queue fails five of these. A `#shift` that keeps the bytes
     fails the two accounting tests.
+- **Code review of the budget and one-set range.**
+  - **The hub cap is measured right.** It is now the UTF-8 bytes of the serialized frame (the hub's
+    unit), not characters of the payload.
+  - **A sender gets its own refused broadcast.** When its link refuses a broadcast with no `except`,
+    the sender gets it locally, before the transport as on every runtime. The hub's copy carries the
+    sender as `exceptId`, so it never gets two.
+  - **The ordering exception is documented.** Frames sent through the hub while queued ones wait can
+    arrive first.
+  - **The workerd e2e waits** for the name to empty on the server.

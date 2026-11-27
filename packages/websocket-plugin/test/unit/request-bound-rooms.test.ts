@@ -414,6 +414,69 @@ describe('RequestBoundRooms', () => {
     }).not.toThrow();
   });
 
+  it("delivers the sender's own broadcast locally when its link refuses it, excluded from the hub copy", () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const posted: RealtimeFrame[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      // A link still opening with its byte budget used refuses every frame.
+      openConnectionLink: () => ({ publish: () => false, close: () => {} }),
+      publishViaHub: (frame: RealtimeFrame) => {
+        posted.push(frame);
+        return Promise.resolve();
+      },
+    };
+    const rooms = new RequestBoundRooms(backplane);
+    const got: unknown[] = [];
+    const sender = {
+      id: 'sender',
+      isOpen: true,
+      send: (d: unknown) => got.push(d),
+    } as unknown as IWebSocketConnection;
+    rooms.open(sender, () => true);
+    const room = new Room('lobby');
+    room.add(sender);
+
+    rooms.dispatching(sender, () => {
+      rooms.broadcast(room, 'mine');
+    });
+
+    expect(got).toEqual(['mine']);
+    expect(posted.map((f) => f.exceptId)).toEqual(['sender']);
+  });
+
+  it('keeps the caller except on the hub copy when its link refuses, and sends the sender nothing', () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const posted: RealtimeFrame[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => ({ publish: () => false, close: () => {} }),
+      publishViaHub: (frame: RealtimeFrame) => {
+        posted.push(frame);
+        return Promise.resolve();
+      },
+    };
+    const rooms = new RequestBoundRooms(backplane);
+    const got: unknown[] = [];
+    const sender = {
+      id: 'sender',
+      isOpen: true,
+      send: (d: unknown) => got.push(d),
+    } as unknown as IWebSocketConnection;
+    rooms.open(sender, () => true);
+    const room = new Room('lobby');
+    room.add(sender);
+
+    rooms.dispatching(sender, () => {
+      rooms.broadcast(room, 'others', { except: sender });
+    });
+
+    expect(got).toEqual([]);
+    expect(posted.map((f) => f.exceptId)).toEqual(['sender']);
+  });
+
   it('logs a link that cannot open, and a hub publish that rejects', async () => {
     const logger = createFakeLogger();
     const world = new RequestWorld();

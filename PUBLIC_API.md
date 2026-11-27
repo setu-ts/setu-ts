@@ -17589,23 +17589,25 @@ connection from that connection's own request, and `publishViaHub(frame)` POSTs 
 (`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
 request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
 (request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning) and
-up to 1 MiB of frame data (`LINK_QUEUE_BYTE_BUDGET` = 1,048,576, counted on `frame.data.length`): a
-frame that would pass the budget, or one above the hub's 33,554,432 cap, is not queued and `publish`
-returns `false`, so `websocket-plugin` POSTs it through `publishViaHub` (where the hub answers 413
-above the cap, logged as `cloudflare: backplane publish failed` with `status: 413`). reopens a lost
-socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
-`{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and
-receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a
-close or an error is retired and closed rather than left open at the hub, so the next call reopens
-it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
-different requests never touch a socket another request owns; a failed POST is logged as
-`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
-publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
-backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
-frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
-local workerd it keeps receiving after that request has answered, which is unverified on the
-platform. Each publish is its own call to the hub and the platform orders calls only within one
-stub, so other replicas may receive one replica's frames out of order.
+up to 1 MiB (1,048,576 bytes) of frame data, counted on `frame.data.length`. A frame that would pass
+that budget, or whose serialized form is above the hub's 33,554,432-byte cap, is refused (`publish`
+returns `false`), so `websocket-plugin` POSTs it through `publishViaHub`. The hub answers 413 above
+the cap, logged as `cloudflare: backplane publish failed` with `status: 413`. A sender whose own
+link refuses its broadcast gets it locally, and the hub's copy excludes it. Frames sent through the
+hub while queued ones wait can arrive before them. A link reopens a lost socket three times (0.5 s,
+1 s, 2 s), then logs `cloudflare: backplane link lost` once with `{ topic, connection }`. The
+isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and receives only: it opens lazily (on
+`connect` or the first `publish`), and a socket that reports a close or an error is retired and
+closed rather than left open at the hub, so the next call reopens it. `publish(frame)` sends through
+`POST /publish`, never over that socket, so publishes from different requests never touch a socket
+another request owns; a failed POST is logged as `cloudflare: backplane publish failed`, never
+thrown. The hub fans the POST out to every socket, the publisher's own included, and the replica
+drops a frame whose `origin` is its own (the rule every backplane transport applies, along with
+dropping a frame that is not well-formed). A replica hears a frame only once its socket has joined
+the hub. The socket belongs to the request that opened it: on local workerd it keeps receiving after
+that request has answered, which is unverified on the platform. Each publish is its own call to the
+hub and the platform orders calls only within one stub, so other replicas may receive one replica's
+frames out of order.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses

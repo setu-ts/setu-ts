@@ -611,8 +611,9 @@ All notable changes to this project are documented here. The format follows
     `retry_delay`.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not. While it opens, a link queues at most 1 MiB of frame data beside the
-    64-frame bound; a broadcast past that, or above the hub's 32 MiB cap, goes through the hub's
-    HTTP publish.
+    64-frame bound; a broadcast past that, or above the hub's 32 MiB cap in serialized bytes, goes
+    through the hub's HTTP publish and can arrive before the queued frames. The sender still gets
+    its own such broadcast, once.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a

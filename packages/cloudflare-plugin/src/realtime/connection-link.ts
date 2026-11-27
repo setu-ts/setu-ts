@@ -108,10 +108,12 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   publish(frame: RealtimeFrame): boolean {
     if (this.#closed) return false;
+    const message = JSON.stringify(frame);
+    // Above the hub's cap (bytes of the whole serialized frame) no socket
+    // message can carry it either; the hub's HTTP publish answers it with a
+    // 413 the caller reports.
+    if (exceedsHubCap(message)) return false;
     const size = frame.data.length;
-    // Above the hub's cap no socket message can carry it either; the hub's
-    // HTTP publish answers it with a 413 the caller reports.
-    if (size > MAX_FRAME_BYTES) return false;
     const socket = this.#socket;
     if (socket === undefined) {
       // A full queue drops its oldest frame to take this one, so those bytes
@@ -135,7 +137,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       return true;
     }
     try {
-      socket.send(JSON.stringify(frame));
+      socket.send(message);
       return true;
     } catch {
       // A call from a request that does not own this socket throws in workerd;
@@ -341,4 +343,14 @@ export function keepAliveQuietly(
   } catch {
     // The work still runs; only the extension is lost.
   }
+}
+
+/**
+ * Whether `message` is more than the hub's cap in UTF-8 bytes. Each UTF-16
+ * unit encodes to at most three bytes, so a short message is answered without
+ * encoding it.
+ */
+function exceedsHubCap(message: string): boolean {
+  if (message.length * 3 <= MAX_FRAME_BYTES) return false;
+  return new TextEncoder().encode(message).byteLength > MAX_FRAME_BYTES;
 }
