@@ -882,14 +882,14 @@ export class QueueService implements IQueue {
         });
       } catch (error) {
         this.#loopFailed(
-          `recurring-enqueue:${rec.name}`,
+          `recurring-enqueue:${rec.id}`,
           error,
           { name: rec.name },
           'queue recurring enqueue failed',
         );
         continue;
       }
-      this.#loopRecovered(`recurring-enqueue:${rec.name}`, 'queue recurring enqueue recovered', {
+      this.#loopRecovered(`recurring-enqueue:${rec.id}`, 'queue recurring enqueue recovered', {
         name: rec.name,
       });
 

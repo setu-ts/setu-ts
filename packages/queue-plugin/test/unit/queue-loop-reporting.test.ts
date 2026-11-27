@@ -37,6 +37,48 @@ function recordingLogger() {
 }
 
 describe('QueueService loop-failure reporting (M131a X88-9)', () => {
+  it.each([false, true])(
+    'keeps same-name recurring entries in separate failure episodes, failedFirst=%s',
+    async (failedFirst) => {
+      const runtime = new FakeRuntimeServices(0);
+      const adapter = new MemoryQueue();
+      const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() };
+      const service = new QueueService(adapter, runtime, { logger, pollIntervalMs: 100 });
+      const failedData = { entry: 'A' };
+      const a = { id: 'A', name: 'one', data: failedData, cron: '* * * * *', nextRunAtMs: 0 };
+      const b = { id: 'B', name: 'one', data: { entry: 'B' }, cron: '* * * * *', nextRunAtMs: 0 };
+      vi.spyOn(adapter, 'fetchRecurringDue').mockResolvedValue(failedFirst ? [a, b] : [b, a]);
+      let healthy = false;
+      const enqueue = vi
+        .spyOn(adapter, 'enqueue')
+        .mockImplementation((job) =>
+          job.data === failedData && !healthy
+            ? Promise.reject(new Error('entry A unavailable'))
+            : Promise.resolve(),
+        );
+      await service.connect();
+      try {
+        await runtime.advanceMs(300);
+        expect(enqueue).toHaveBeenCalledTimes(6);
+        expect(logger.warn).toHaveBeenCalledExactlyOnceWith('queue recurring enqueue failed', {
+          error: 'Error: entry A unavailable',
+          name: 'one',
+        });
+        expect(logger.info).not.toHaveBeenCalled();
+        healthy = true;
+        await runtime.advanceMs(100);
+        expect(logger.info).toHaveBeenCalledExactlyOnceWith('queue recurring enqueue recovered', {
+          failures: 3,
+          name: 'one',
+        });
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+      } finally {
+        await service.disconnect();
+        expect(runtime.timerCount).toBe(0);
+      }
+    },
+  );
+
   it.each(
     (['reserve', 'poll', 'recurring enqueue', 'recurring', 'depth-probe'] as const).flatMap(
       (loop) => [false, true].map((errorOnly) => ({ loop, errorOnly })),
