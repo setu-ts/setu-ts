@@ -7,7 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setImmediate } from 'node:timers/promises';
 import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
-import { BackendOutcomeUnknownError } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, REALTIME_FRAME_EXCEPT_IDS_LIMIT } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 
 /**
@@ -109,6 +109,15 @@ describe('isRealtimeFrame', () => {
     expect(isRealtimeFrame({ ...FRAME, exceptId: 42 })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, exceptIds: 'conn-2' })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, exceptIds: ['conn-2', 3] })).toBe(false);
+    // The contract's cap: 16 entries pass, 17 are dropped as malformed.
+    const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => `conn-${String(i)}`);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ids(REALTIME_FRAME_EXCEPT_IDS_LIMIT) })).toBe(
+      true,
+    );
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ids(REALTIME_FRAME_EXCEPT_IDS_LIMIT + 1) })).toBe(
+      false,
+    );
+    expect(REALTIME_FRAME_EXCEPT_IDS_LIMIT).toBe(16);
   });
 });
 

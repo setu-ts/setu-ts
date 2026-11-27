@@ -1617,6 +1617,12 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       an `exceptIds` round trip on all four transports, and a workerd row (fails when the link
       ignores `exceptIds`; local workerd always has the link accepted, so the 0-copy side is
       unit-only).
+    - **`exceptIds` cap (re-audit L1, maintainer decision 2026-11-27: "(a) Cap at 16").** Every
+      receiver checks each member against the list, so an unbounded forged list cost CPU per member.
+      `REALTIME_FRAME_EXCEPT_IDS_LIMIT = 16` (common) bounds it; both guards drop a longer list as
+      malformed. Guard rows at 16 and 17 and a four-transport row fail without the cap.
+    - **`createQueueHandler` example.** Its JSDoc composed a queue arm with no `deadLetterQueue`,
+      which `process()` refuses; it now names `JOBS_DLQ`.
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as

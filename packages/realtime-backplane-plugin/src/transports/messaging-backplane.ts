@@ -15,7 +15,12 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
-import { BackendOutcomeUnknownError, dispatchRealtimeFrame, toBackendFault } from '@setu-ts/common';
+import {
+  BackendOutcomeUnknownError,
+  dispatchRealtimeFrame,
+  REALTIME_FRAME_EXCEPT_IDS_LIMIT,
+  toBackendFault,
+} from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { createTransportHandlerReporter } from './handler-errors.ts';
 
@@ -44,6 +49,7 @@ export function isRealtimeFrame(value: unknown): value is RealtimeFrame {
     (frame.exceptId === undefined || typeof frame.exceptId === 'string') &&
     (frame.exceptIds === undefined ||
       (Array.isArray(frame.exceptIds) &&
+        frame.exceptIds.length <= REALTIME_FRAME_EXCEPT_IDS_LIMIT &&
         frame.exceptIds.every((id: unknown) => typeof id === 'string')))
   );
 }

@@ -712,6 +712,7 @@ export type {
   RealtimeFrameHandler,
   RealtimeFrameKind,
 } from './services/realtime.ts';
+export { REALTIME_FRAME_EXCEPT_IDS_LIMIT } from './services/realtime.ts';
 export { hasConnectionLinks } from './services/realtime-links.ts';
 export type { IRealtimeConnectionLink, IRealtimeLinkBackplane } from './services/realtime-links.ts';
 export { decodeFrameData, encodeFrameData } from './realtime-codec.ts';

@@ -622,8 +622,9 @@ All notable changes to this project are documented here. The format follows
     copy, as on every runtime.
   - **`RealtimeFrame.exceptIds` (`@setu-ts/common`):** an optional list of further connection IDs a
     broadcast excludes, beside `exceptId`. Every receiver skips a member named in either; both
-    backplane guards refuse a non-array or a non-string entry. `LocalBroadcastOptions.exceptIds` and
-    a fourth `deliverRemote` argument carry it into a room.
+    backplane guards refuse a non-array, a non-string entry, or more than
+    `REALTIME_FRAME_EXCEPT_IDS_LIMIT` (16, exported from `@setu-ts/common`) entries.
+    `LocalBroadcastOptions.exceptIds` and a fourth `deliverRemote` argument carry it into a room.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a

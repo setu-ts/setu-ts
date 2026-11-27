@@ -21,6 +21,7 @@ import type {
   MessageHandler,
   RealtimeFrame,
 } from '@setu-ts/common';
+import { REALTIME_FRAME_EXCEPT_IDS_LIMIT } from '@setu-ts/common';
 import { MemoryBackplane } from '../packages/realtime-backplane-plugin/src/transports/memory-backplane.ts';
 import { MessagingBackplane } from '../packages/realtime-backplane-plugin/src/transports/messaging-backplane.ts';
 import { RedisBackplane } from '../packages/realtime-backplane-plugin/src/transports/redis-backplane.ts';
@@ -271,7 +272,7 @@ describe.each(TRANSPORTS)('the $name backplane and the frame origin', ({ build }
     }
   });
 
-  it('carries both exclusion fields across, unchanged', async () => {
+  it('carries both exclusion fields across, unchanged, up to the exceptIds cap', async () => {
     // A transport that rebuilt the frame from known fields would drop one.
     const { pair, seenA, seenB, done } = await open();
     try {
@@ -279,10 +280,21 @@ describe.each(TRANSPORTS)('the $name backplane and the frame origin', ({ build }
         ...FRAME('a'),
         kind: 'ws-room',
         exceptId: 'conn-1',
-        exceptIds: ['conn-2'],
+        exceptIds: Array.from(
+          { length: REALTIME_FRAME_EXCEPT_IDS_LIMIT },
+          (_, i) => `c${String(i)}`,
+        ),
       };
       await pair.a.publish(excluding);
       await pair.inject({ ...FRAME('x'), exceptIds: ['conn-2', 3] });
+      // One entry above the contract's cap is dropped as malformed too.
+      await pair.inject({
+        ...FRAME('x'),
+        exceptIds: Array.from(
+          { length: REALTIME_FRAME_EXCEPT_IDS_LIMIT + 1 },
+          (_, i) => `c${String(i)}`,
+        ),
+      });
       await setImmediate();
 
       expect(seenB).toEqual([excluding]);

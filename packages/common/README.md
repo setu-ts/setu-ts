@@ -462,6 +462,7 @@ package fits the plugin architecture.
 | `PER_VISITOR_RESPONSE_STATE_KEY`      | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `RATE_LIMIT_METADATA`                 | const     |
+| `REALTIME_FRAME_EXCEPT_IDS_LIMIT`     | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |

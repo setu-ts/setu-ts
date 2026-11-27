@@ -524,10 +524,6 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
-The message limit is enforced at the transport while reading on Node. Bun retains its per-server 16
-MB transport cap; Bun and Deno apply the plugin limit after buffering. Connection caps, idle
-timeouts and application heartbeats remain off by default.
-
 ## Full API
 
 Every export and option is documented in
