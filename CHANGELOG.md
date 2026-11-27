@@ -202,10 +202,10 @@ All notable changes to this project are documented here. The format follows
   `CloudflareRequestTimeoutError` and `CloudflareRemoteHandlerError` carry the status hints, and the
   remote message never reaches the response body.
 - **BREAKING — `@setu-ts/cloudflare-plugin` (M143o, #619; V13-217 R2 half).** A missing R2 object
-  throws `StorageObjectNotFoundError` from `@setu-ts/common`, the class every `storage-plugin`
-  provider throws, so a route that reads it answers 404 instead of a masked 500, with the key kept
-  out of the body. `CloudflareObjectNotFoundError` is removed; narrow on
-  `StorageObjectNotFoundError`.
+  throws `StorageObjectNotFoundError` from `@setu-ts/common`, the class `storage-plugin`'s
+  `StorageService` throws for every provider, so a route that reads it answers 404 instead of a
+  masked 500, with the key kept out of the body. `CloudflareObjectNotFoundError` is removed; narrow
+  on `StorageObjectNotFoundError`.
 - **BREAKING — `@setu-ts/websocket-plugin` (M143o, #619).** A negative, infinite or `NaN`
   `heartbeatMs` or `idleTimeoutMs`, or a `heartbeatMs` above 2147483647, now throws when
   `WebSocketPlugin()` is called; use `0` to disable. A negative value used to turn the option off; a

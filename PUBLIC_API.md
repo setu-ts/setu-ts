@@ -17674,9 +17674,9 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
 - **A missing R2 object throws `StorageObjectNotFoundError` (0.14.0).** `R2Storage.get` and
-  `getStream` throw common's class, as every `storage-plugin` provider does, so the kernel answers
-  `404` with the fixed detail and the key stays out of the body. `CloudflareObjectNotFoundError` is
-  removed.
+  `getStream` throw common's class, as `storage-plugin`'s `StorageService` does for every provider,
+  so the kernel answers `404` with the fixed detail and the key stays out of the body.
+  `CloudflareObjectNotFoundError` is removed.
 - **`R2Storage.getSignedUrl` rejects.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.
 - **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the

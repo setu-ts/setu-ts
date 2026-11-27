@@ -169,14 +169,15 @@ export class RequestBoundRooms {
         }
         return;
       }
-      if (except === undefined && room.has(current) && current.isOpen) {
-        // The link refused the frame (still opening with its queue full, or
+      if (current !== except && room.has(current) && current.isOpen) {
+        // The link refused the frame (still opening with its budget used, or
         // the frame is above the hub's cap), so it goes through the hub, which
         // reaches only links already open. The sender gets it here, before
-        // the transport as on every runtime, and is excluded from the hub's
-        // copy so it never gets two.
+        // the transport as on every runtime. With no `except` it is also
+        // excluded from the hub's copy; with one, the refusing link is not on
+        // the hub yet, or the hub refuses the frame, so no second copy reaches it.
         sendQuietly(current, data);
-        frame = { ...frame, exceptId: current.id };
+        if (except === undefined) frame = { ...frame, exceptId: current.id };
       }
     }
     if (except !== undefined && except !== current) {

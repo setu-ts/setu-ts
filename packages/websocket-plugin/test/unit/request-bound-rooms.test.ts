@@ -477,6 +477,39 @@ describe('RequestBoundRooms', () => {
     expect(posted.map((f) => f.exceptId)).toEqual(['sender']);
   });
 
+  it('delivers the sender its own refused broadcast when except names another member', () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const posted: RealtimeFrame[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => ({ publish: () => false, close: () => {} }),
+      publishViaHub: (frame: RealtimeFrame) => {
+        posted.push(frame);
+        return Promise.resolve();
+      },
+    };
+    const rooms = new RequestBoundRooms(backplane);
+    const got: unknown[] = [];
+    const sender = {
+      id: 'sender',
+      isOpen: true,
+      send: (d: unknown) => got.push(d),
+    } as unknown as IWebSocketConnection;
+    const other = { id: 'other', isOpen: true, send: () => {} } as unknown as IWebSocketConnection;
+    rooms.open(sender, () => true);
+    const room = new Room('lobby');
+    room.add(sender);
+    room.add(other);
+
+    rooms.dispatching(sender, () => {
+      rooms.broadcast(room, 'not for other', { except: other });
+    });
+
+    expect(got).toEqual(['not for other']);
+    expect(posted.map((f) => f.exceptId)).toEqual(['other']);
+  });
+
   it('logs a link that cannot open, and a hub publish that rejects', async () => {
     const logger = createFakeLogger();
     const world = new RequestWorld();

@@ -2758,10 +2758,12 @@ not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hon
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
 copy the fix from a fresh scaffold:
 
-- **Workers:** pin `"wrangler": "~4.148.0"` and `"@cloudflare/workers-types": "^5.20261006.1"` as a
-  fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
-  `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
-  new entry carries, so a bindings-only deploy is picked up.
+- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
+  `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
+  `ERESOLVE`; for the current pins see
+  [Raise the Workers toolchain pins](#raise-the-workers-toolchain-pins-setu-tscli)), and replace
+  `src/index.ts`'s single memoized application with the per-`env` cache the new entry carries, so a
+  bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** run the build before production start. Use start:dev for
   development; see the M120 production scripts above.
 - **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which

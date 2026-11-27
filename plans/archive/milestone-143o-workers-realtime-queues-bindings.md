@@ -1599,3 +1599,12 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
   - **The ordering exception is documented.** Frames sent through the hub while queued ones wait can
     arrive first.
   - **The workerd e2e waits** for the name to empty on the server.
+  - **Second pass, and the re-audit's one Low finding.**
+    - **Sender with `except`.** When a broadcast's `except` names another member and the sender's
+      link refuses it, the sender also gets it locally. The refusing link is not on the hub yet, or
+      the hub refuses the frame, so no second copy reaches it.
+    - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
+      is never serialized for measuring. Only an open link's send measures the serialized bytes.
+    - **Docs.** The websocket README now has the ordering exception. The storage class is named as
+      `StorageService`'s for every provider. An old upgrade note points to the current Workers pins.
+      The Workers limitations table names the Durable Object arm and the dead-letter target.

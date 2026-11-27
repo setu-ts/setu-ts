@@ -151,7 +151,11 @@ describe('ConnectionLink', () => {
 
     expect(sender.publish(frame(wide))).toBe(false);
     expect(sender.publish(frame('é'.repeat(1000)))).toBe(true);
-    expect(namespace.clients[0]?.sent).toHaveLength(1);
+    // Long enough to be encoded and measured, and still under the cap.
+    expect(sender.publish(frame('x'.repeat(12_000_000)))).toBe(true);
+    // Above the cap in characters: refused before serializing.
+    expect(sender.publish(frame('x'.repeat(33_554_433)))).toBe(false);
+    expect(namespace.clients[0]?.sent).toHaveLength(2);
   });
 
   it('gives a drained frame its bytes back, so a reopen can queue the full budget again', async () => {

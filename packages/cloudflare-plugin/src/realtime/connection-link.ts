@@ -108,14 +108,16 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   publish(frame: RealtimeFrame): boolean {
     if (this.#closed) return false;
-    const message = JSON.stringify(frame);
-    // Above the hub's cap (bytes of the whole serialized frame) no socket
-    // message can carry it either; the hub's HTTP publish answers it with a
-    // 413 the caller reports.
-    if (exceedsHubCap(message)) return false;
     const size = frame.data.length;
+    // Above the hub's cap no socket message can carry it either; the hub's
+    // HTTP publish answers it with a 413 the caller reports. The serialized
+    // frame is never shorter than its data, so this is checked before
+    // serializing.
+    if (size > MAX_FRAME_BYTES) return false;
     const socket = this.#socket;
     if (socket === undefined) {
+      // Within the budget a frame serializes far below the hub's cap, so a
+      // queued frame needs no measuring.
       // A full queue drops its oldest frame to take this one, so those bytes
       // are free for it.
       const full = this.#queue.length >= LINK_QUEUE_LIMIT;
@@ -136,6 +138,9 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       this.#queuedBytes += size;
       return true;
     }
+    const message = JSON.stringify(frame);
+    // The cap is on the bytes of the whole serialized frame.
+    if (exceedsHubCap(message)) return false;
     try {
       socket.send(message);
       return true;

@@ -485,9 +485,10 @@ when that connection is a member of the room. Without the arm, `ws.room()` and `
 
 - **Ordering.** A broadcast from inside a member's handler (as `setu g ws-route` writes it, with
   `except: connection`) travels over that member's link, so one member's frames arrive in order. The
-  exception is a link still opening with 1 MiB already queued: later frames go through the hub and
-  can arrive before the queued ones. A broadcast from a route has no sender connection: it is POSTed
-  to the hub, with no order relative to members' frames, as with any cross-replica backplane.
+  exception is a link still opening whose 1 MiB queue budget the next frame would pass: that frame
+  goes through the hub and can arrive before the queued ones. A broadcast from a route has no sender
+  connection: it is POSTed to the hub, with no order relative to members' frames, as with any
+  cross-replica backplane.
 - **Cost.** The hub sends every frame of a topic to every link of that topic, so one topic per
   application area keeps fan-out small. The hub object's soft limit is 1,000 requests per second,
   which route broadcasts count against.
