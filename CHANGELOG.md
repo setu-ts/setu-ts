@@ -510,18 +510,33 @@ All notable changes to this project are documented here. The format follows
   A failed quarantine move emits a safe warning with its source, without exposing driver text or
   rejecting reserve for that move. Service Bus adds `publishTimeoutMs` (15000 ms, 0 unbounded),
   `maxConcurrentCalls` (1, range 1–1000), five-minute idle reply-inbox cleanup, and receive-side
-  outage and delivery evidence. Service Bus refusal codes take precedence over `retryable` and stay
-  unchanged without marking it down. An aggregate stays a refusal only when its last inner error has
-  a refusal code; every other aggregate is an outage, regardless of the last error's `retryable`
-  value. Pub/Sub adds `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms.
-  **Prerelease removal:** the unused `PubSubSdkModule.topic().exists?` facade member is removed;
-  substitute SDK modules use `getMetadata` for inspection. `IPubSubTransport.topicExists` remains
-  supported. The exported `ICustomMessageBroker` documents optional trace-header members; every
-  custom publish validates options and consumers use `subscribe` metadata headers. Queue adds
-  `retryDelayMs` and `health` probe settings. Retry delay accepts a function or a finite
-  non-negative number; omitted/undefined keeps backoff, while other runtime types (including null)
-  and invalid numbers throw `RangeError` at plugin-factory and service construction. Every queue
-  loop-failure line (`queue reserve failed`, `queue poll failed`, `queue recurring failed`,
+  outage and delivery evidence. A receive-side outage longer than the five-minute inbox idle
+  lifetime can expire it: a missing-entity receive report or a send confirming the shared reply
+  topic is missing invalidates the local cached inbox, and the next request recreates it once that
+  topic exists (a missing topic fails with `ReplyInboxUnavailableError`; the broker creates no
+  topics); requests in flight may time out. Fan-out receivers also recreate their same per-instance
+  subscription after a missing-entity receive report, resuming after an outage longer than the idle
+  lifetime. Recovery retries every second through outages and transient administration failures
+  (each create bounded at 5 s); the first failure logs one warning, and any other failure, such as
+  401/403/404, stops recovery for that subscription. Copies published during the
+  missing-subscription gap are lost, without replay. Transient receive failures retain inboxes and
+  fan-out receivers; durable competing subscriptions are not recreated. Service Bus refusal codes
+  take precedence over `retryable` and stay unchanged without marking it down. An aggregate stays a
+  refusal only when its last inner error has a refusal code; every other aggregate is an outage,
+  regardless of the last error's `retryable` value. Non-aggregate outages include `retryable: true`,
+  SDK codes `ServiceCommunicationProblem`, `ServiceTimeout` and `ServiceBusy`, and socket codes
+  `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and
+  `EAI_AGAIN`. The fallback requires undefined `code` and `retryable` and no numeric `statusCode`;
+  numeric status-only errors stay unchanged without changing reachability evidence. Pub/Sub adds
+  `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms. **Prerelease
+  removal:** the unused `PubSubSdkModule.topic().exists?` facade member is removed; substitute SDK
+  modules use `getMetadata` for inspection. `IPubSubTransport.topicExists` remains supported. The
+  exported `ICustomMessageBroker` documents optional trace-header members; every custom publish
+  validates options and consumers use `subscribe` metadata headers. Queue adds `retryDelayMs` and
+  `health` probe settings. Retry delay accepts a function or a finite non-negative number;
+  omitted/undefined keeps backoff, while other runtime types (including null) and invalid numbers
+  throw `RangeError` at plugin-factory and service construction. Every queue loop-failure line
+  (`queue reserve failed`, `queue poll failed`, `queue recurring failed`,
   `queue depth-probe failed`, `queue recurring enqueue failed`) warns once per episode (error when
   warn is absent) and recovers at info with a failure count. Its `error` uses one-line
   `describeError`, including the error name and available classifiers/causes, masking URL userinfo

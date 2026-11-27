@@ -11,6 +11,61 @@ import {
 } from '../../src/brokers/service-bus-faults.ts';
 
 describe('Service Bus publish bound', () => {
+  it.each([
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'EHOSTUNREACH',
+    'ENETUNREACH',
+    'EPIPE',
+    'ENOTFOUND',
+    'EAI_AGAIN',
+  ])('classifies raw socket %s as an uncertain publish and records an outage', async (code) => {
+    const error = Object.assign(new Error('socket failed'), { code });
+    const h = serviceBusTransport();
+    vi.mocked(h.transport.send).mockRejectedValueOnce(error);
+    const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {
+      client: h.transport,
+    });
+    await broker.connect();
+    try {
+      const result: unknown = await broker
+        .publish('orders', {})
+        .catch((failure: unknown) => failure);
+      expect(result).toBeInstanceOf(BackendOutcomeUnknownError);
+      expect(httpStatusHintOf(result)?.status).toBe(504);
+      expect((result as Error).cause).toBe(error);
+      expect(isServiceBusOutage(error)).toBe(true);
+      expect(await broker.reachability()).toBe(false);
+    } finally {
+      await broker.disconnect();
+    }
+  });
+  it.each(
+    [404, 500, NaN, Infinity].flatMap((statusCode) =>
+      [false, true].map((positive) => ({ statusCode, positive })),
+    ),
+  )(
+    'preserves a status-only rejection $statusCode and prior positive=$positive evidence',
+    async ({ statusCode, positive }) => {
+      const error = Object.assign(new Error('status refusal'), { statusCode });
+      const h = serviceBusTransport();
+      const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {
+        client: h.transport,
+      });
+      await broker.connect();
+      try {
+        if (positive) await broker.publish('orders', {});
+        vi.mocked(h.transport.send).mockRejectedValueOnce(error);
+        await expect(broker.publish('orders', {})).rejects.toBe(error);
+        expect(isServiceBusOutage(error)).toBe(false);
+        expect(await broker.reachability()).toBe(positive ? true : undefined);
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
+
   it('uses SDK translations, including retryable authorization refusals', () => {
     for (const { error, code } of serviceBusFaults) expect(error).toMatchObject({ code });
     expect(serviceBusFaults.find(({ code }) => code === 'UnauthorizedAccess')!.error).toMatchObject(

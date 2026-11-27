@@ -1,6 +1,18 @@
 /** Service Bus data-plane outage classification shared by sends and receives. @module */
 
-const OUTAGE_CODES = new Set(['ServiceCommunicationProblem', 'ServiceTimeout', 'ServiceBusy']);
+const OUTAGE_CODES = new Set([
+  'ServiceCommunicationProblem',
+  'ServiceTimeout',
+  'ServiceBusy',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+]);
 const REFUSAL_CODES = new Set([
   'UnauthorizedAccess',
   'MessagingEntityNotFound',
@@ -8,6 +20,23 @@ const REFUSAL_CODES = new Set([
   'MessageSizeExceeded',
   'QuotaExceeded',
 ]);
+
+/**
+ * Identifies a confirmed missing Service Bus entity, using the last aggregate
+ * entry just as the outage predicate does, not an earlier failure.
+ * @param error - Translated SDK receive or send failure
+ * @returns Whether the SDK reports MessagingEntityNotFound
+ * @since 0.14.0
+ * @internal
+ */
+export function isServiceBusEntityMissing(error: unknown): boolean {
+  const failure: unknown = error instanceof AggregateError ? error.errors.at(-1) : error;
+  return (
+    failure !== null &&
+    typeof failure === 'object' &&
+    (failure as { code?: unknown }).code === 'MessagingEntityNotFound'
+  );
+}
 
 /**
  * Determines whether a Service Bus failure is evidence of a transport outage.
@@ -25,12 +54,16 @@ export function isServiceBusOutage(error: unknown): boolean {
     );
   }
   if (error === null || typeof error !== 'object') return true;
-  const { code, retryable } = error as { code?: unknown; retryable?: unknown };
+  const { code, retryable, statusCode } = error as {
+    code?: unknown;
+    retryable?: unknown;
+    statusCode?: unknown;
+  };
   if (REFUSAL_CODES.has(String(code))) return false;
   return (
     retryable === true ||
     OUTAGE_CODES.has(String(code)) ||
-    (code === undefined && retryable === undefined)
+    (code === undefined && retryable === undefined && typeof statusCode !== 'number')
   );
 }
 

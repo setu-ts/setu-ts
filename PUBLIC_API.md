@@ -7182,8 +7182,13 @@ Provides message broker abstraction for cross-service integration events.
 - Both Service Bus plugin arms and `ServiceBusOptions` add `publishTimeoutMs?: number` (15000 ms, 0
   unbounded, validated through `deadlineRangeError`) and `maxConcurrentCalls?: number` (integer
   1–1000, default 1). Every application subscription, fan-out included, receives that concurrency;
-  reply inboxes remain at 1 and expire after 300000 idle ms. `IServiceBusTransport.send` adds a
-  fifth optional `{ abortSignal?: AbortSignal }`; `open` adds a fourth optional
+  reply inboxes remain at 1 and expire after 300000 idle ms, including during a longer receive-side
+  outage. A receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic
+  is missing, invalidates the local cached inbox; the next request recreates it once the shared
+  reply topic exists (a missing topic fails with `ReplyInboxUnavailableError`; the broker creates no
+  topics), while requests already in flight may time out. Transient receive errors retain it.
+  `IServiceBusTransport.send` adds a fifth optional `{ abortSignal?: AbortSignal }`; `open` adds a
+  fourth optional
   `{ maxConcurrentCalls?: number; onReceiveError?: (error: unknown, errorSource: string) => void }`.
   The SDK adapter forwards both, including `processError`. Publish expiry aborts and throws
   `PublishTimeoutError` (504); outages throw `BackendOutcomeUnknownError` (504). Classification
@@ -7193,7 +7198,10 @@ Provides message broker abstraction for cross-service integration events.
   `AggregateError` stays a refusal only when its last inner error has one of these refusal codes;
   every other aggregate is an outage, even with a final `SessionLockLost` and `retryable: false`.
   For non-aggregate errors, outages are `retryable: true`, codes `ServiceCommunicationProblem`,
-  `ServiceTimeout` or `ServiceBusy`, and raw socket errors with neither `code` nor `retryable`.
+  `ServiceTimeout` or `ServiceBusy`, and socket codes `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`,
+  `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and `EAI_AGAIN`. The fallback applies only
+  when `code` and `retryable` are undefined and `statusCode` is not a number. Status-only errors
+  with a numeric `statusCode` are returned unchanged without changing reachability evidence.
   Evidence includes real publish outcomes (including deadlines), receive outages only from source
   `receive`, and delivered application and reply-inbox messages. A successful publish, delivery or
   positive management probe restores reachability.

@@ -27,11 +27,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
   unchanged and do not mark the data plane down. An `AggregateError` stays a refusal only when its
   last inner error has one of these refusal codes; every other aggregate is an outage, even with a
   final `SessionLockLost` and `retryable: false`. For non-aggregate errors, outages are
-  `retryable: true`, codes `ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and raw
-  socket errors with neither `code` nor `retryable`. `maxConcurrentCalls` defaults to 1, so existing
+  `retryable: true`, codes `ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and
+  socket codes `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`,
+  `ENOTFOUND` and `EAI_AGAIN`. The fallback applies only when `code` and `retryable` are undefined
+  and `statusCode` is not a number. Status-only errors with a numeric `statusCode` are returned
+  unchanged without changing reachability evidence. `maxConcurrentCalls` defaults to 1, so existing
   ordering stays intact; opt into 1–1000 for throughput, allowing later messages to run first. A
-  live reply inbox is unchanged; a crashed requester's subscription now expires after five idle
-  minutes.
+  reply inbox expires after five idle minutes, including during a longer receive-side outage. A
+  receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic is
+  missing, invalidates the local cached inbox; the next request recreates it once the shared reply
+  topic exists (a missing topic fails the request with `ReplyInboxUnavailableError`; the broker
+  creates no topics). Requests already in flight may still time out. Transient receive errors retain
+  the inbox; clean shutdown deletes it. No option changes are needed.
 - Service Bus evidence now includes real publish outcomes (including timeouts), receive outages only
   from source `receive`, and delivered application and reply-inbox messages. Consume-only services
   become not-ready on receive transport outages, recovering on a successful publish, delivery or

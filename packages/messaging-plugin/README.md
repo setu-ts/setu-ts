@@ -566,8 +566,11 @@ SDK `UnauthorizedAccess` with `retryable: true` is returned unchanged and does n
 plane down. An `AggregateError` whose last inner error has one of these refusal codes stays a
 refusal; every other aggregate is an outage, even with a final `SessionLockLost` and
 `retryable: false`. For non-aggregate errors, outages are `retryable: true`, codes
-`ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and raw socket errors with neither
-`code` nor `retryable`. Publish deadline expiry is `PublishTimeoutError` (504).
+`ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and socket codes `ECONNREFUSED`,
+`ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and `EAI_AGAIN`. The
+fallback applies only when `code` and `retryable` are undefined and `statusCode` is not a number.
+Status-only errors with a numeric `statusCode` are returned unchanged without changing reachability
+evidence. Publish deadline expiry is `PublishTimeoutError` (504).
 
 Since 0.14.0 a failing Service Bus handler is retried with a delay by default. The broker holds the
 message for the delay while the SDK renews its lock, then abandons it; on the final attempt, or when
@@ -755,7 +758,16 @@ Per-broker limits:
   `TypeError` naming the missing method (add both methods to the client; other subscriptions are
   unaffected).
 - **Service Bus.** Creating and deleting the subscription needs the `Manage` right; a refusal is
-  logged as such. A failed delete on close is logged and left to the 5-minute idle deletion.
+  logged as such. A failed delete on close is logged and left to the 5-minute idle deletion. A
+  receive-side outage longer than that idle lifetime can expire the subscription. When its receiver
+  reports `MessagingEntityNotFound`, the broker retires it and recreates the same per-instance
+  subscription and receiver, so delivery resumes. Recovery retries every second through receive
+  outages and transient administration failures (408, 429, most 5xx, a request that got no answer,
+  or a create that does not answer within 5 seconds). Its first failure logs one warning; any other
+  failure, such as 401, 403 or 404 or a missing `Manage` right, stops recovery for that
+  subscription. Copies published while the subscription is missing are lost; recovery does not
+  replay them. Transient receive errors and durable competing subscriptions do not trigger this
+  recreation.
 - **Pub/Sub.** A failed delete on close is logged and left to the one-day idle expiry.
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.
@@ -809,9 +821,14 @@ the broker. The fixed timeout detail says the request may have been handled; the
 stays on `remoteMessage` and is never served in the response body.
 
 Service Bus reply subscriptions use `autoDeleteOnIdleMs: 300000` (five idle minutes) so a crashed
-requester leaves no permanent inbox. A live receiver keeps it active; clean shutdown still deletes
-it. `MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the
-Kafka broker's former refusal and no broker throws it now.
+requester leaves no permanent inbox. A live receiver keeps it active, but a receive-side outage
+longer than that idle lifetime can expire it. A receive report of `MessagingEntityNotFound`, or a
+send confirming that the shared reply topic is missing, invalidates the local cached inbox. The next
+request recreates it once the shared reply topic exists; when the topic itself is missing the
+request fails with `ReplyInboxUnavailableError`, because the broker creates no topics. Requests
+already in flight may still time out. Transient receive errors retain the inbox, and clean shutdown
+still deletes it. `MessagingNotSupportedError` is also still exported but **deprecated** — it
+existed for the Kafka broker's former refusal and no broker throws it now.
 
 ## Writing a custom broker
 

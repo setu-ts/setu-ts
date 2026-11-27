@@ -42,6 +42,7 @@ import { PublishTimeoutError, ReplyInboxUnavailableError } from '../errors.ts';
 import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 import {
   isServiceBusOutage,
+  isServiceBusEntityMissing,
   serviceBusPublishCause,
   resolveServiceBusConcurrency,
 } from './service-bus-faults.ts';
@@ -56,6 +57,22 @@ const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 const DEFAULT_QUEUE = 'messaging-consumers';
 
 const SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS = 300000;
+
+/** Yield between failed fan-out recovery operations without sharing job retry policy. */
+const SERVICE_BUS_RECOVERY_RETRY_MS = 1000;
+
+/** Bound on one fan-out recovery administration call, in ms. */
+const SERVICE_BUS_RECOVERY_CALL_MS = 5000;
+
+/** A fan-out recovery administration call that did not answer within its bound. */
+class RecoveryCallTimeoutError extends Error {
+  /** Read by `errorName`, so the recovery warning names the timeout. */
+  readonly code = 'RecoveryCallTimeout';
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecoveryCallTimeoutError';
+  }
+}
 
 /** Reachability outcome cache lifetime for the broker probe (M90b), in ms. */
 const PROBE_TTL_MS = 5000;
@@ -378,6 +395,22 @@ function unauthorized(error: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Retryable administration failures, without reclassifying data-plane send
+ * failures: 408, 429 and most 5xx answers, a `RestError` with no numeric status
+ * (the HTTP client's wrapper for a request that never got an answer, such as
+ * `REQUEST_SEND_ERROR`, `ECONNABORTED`, `ENETDOWN` or a TLS failure), and a
+ * recovery call that ran out of time.
+ */
+function isTransientManagementFailure(error: unknown): boolean {
+  if (error instanceof RecoveryCallTimeoutError) return true;
+  const failure = error as { name?: unknown; statusCode?: unknown } | null;
+  if (failure?.name !== 'RestError') return false;
+  const status = failure.statusCode;
+  if (typeof status !== 'number') return true;
+  return status === 408 || status === 429 || (status >= 500 && status !== 501 && status !== 505);
 }
 
 /**
@@ -788,6 +821,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #ready = false;
   #subscriptions: Map<string, IServiceBusSubscription>;
   #rr: RequestReplyCore;
+  #replyInbox: { invalidate(): void } | null = null;
   #retryOptions: ServiceBusRetryOptions | undefined;
   readonly #publishTimeoutMs: number;
   readonly #maxConcurrentCalls: number;
@@ -853,69 +887,96 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * subscription created through the administration client.
    *
    * On failure after admin creation, compensates by deleting the subscription
-   * so a later retry can succeed (B6).
+   * so a later retry can succeed (B6). A confirmed missing-entity receive
+   * retires this inbox's cache entry. Cleanup always uses its original transport.
    */
   async #openReplyInbox(onReply: (message: unknown) => void): Promise<ReplyInbox> {
-    if (!this.#transport) {
-      throw new Error('ServiceBusBroker is not connected');
-    }
-
+    const transport = this.#transport;
+    if (transport === null) throw new Error('ServiceBusBroker is not connected');
     const generation = this.#generation;
     const inboxSub = `rr-inbox-${this.#runtime.uuid()}`;
-
+    let retired = false;
+    let created = false;
+    let subscription: IServiceBusSubscription | undefined;
+    let closing: Promise<void> | undefined;
+    const current = (): boolean =>
+      !retired && generation === this.#generation && transport === this.#transport;
+    const owner = {
+      invalidate: (): void => {
+        if (!current() || this.#replyInbox !== owner) return;
+        retired = true;
+        this.#replyInbox = null;
+        this.#rr.invalidateInbox(onReply);
+      },
+    };
+    this.#replyInbox = owner;
+    const close = (): Promise<void> => {
+      if (closing !== undefined) return closing;
+      retired = true;
+      if (this.#replyInbox === owner) this.#replyInbox = null;
+      closing = (async () => {
+        let failed = false;
+        let failure: unknown;
+        try {
+          await subscription?.close();
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+        if (created) {
+          created = false;
+          try {
+            await transport.deleteSubscription(this.#replyTopic, inboxSub);
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+            }
+          }
+        }
+        if (failed) throw failure;
+      })();
+      return closing;
+    };
     try {
-      await this.#transport.createSubscription(this.#replyTopic, inboxSub, {
-        autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
-      });
-    } catch {
-      throw new ReplyInboxUnavailableError(this.#replyTopic);
-    }
-
-    let closed = false;
-    try {
-      const sub = await this.#transport.open(
+      try {
+        await transport.createSubscription(this.#replyTopic, inboxSub, {
+          autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
+        });
+        created = true;
+      } catch {
+        throw new ReplyInboxUnavailableError(this.#replyTopic);
+      }
+      if (!current()) throw new Error('ServiceBusBroker disconnected while opening reply inbox');
+      subscription = await transport.open(
         this.#replyTopic,
         inboxSub,
         async (msg) => {
-          if (closed || generation !== this.#generation) return;
+          if (!current()) return;
           this.#recordDataPlaneOutcome(true);
           try {
             const deserialized = this.#serializer.deserialize(msg.payload);
             onReply(deserialized);
-            // Await settlement so the delivery callback does not resolve
-            // before ack/nack completes.
             await msg.ack();
           } catch (err) {
-            if (this.#logger) {
-              this.#logger.error(`Service Bus reply deserialization error: ${describeError(err)}`);
-            }
+            this.#write(`Service Bus reply deserialization error: ${describeError(err)}`, 'error');
             await msg.nack();
           }
         },
         {
           onReceiveError: (error, source) => {
-            if (!closed && generation === this.#generation) this.#onReceiveError(error, source);
+            if (!current()) return;
+            if (source === 'receive' && isServiceBusEntityMissing(error)) owner.invalidate();
+            else this.#onReceiveError(error, source);
           },
         },
       );
-
-      return {
-        address: this.#replyTopic,
-        close: async () => {
-          if (closed) return;
-          closed = true;
-          await sub.close();
-          await this.#transport!.deleteSubscription(this.#replyTopic, inboxSub);
-        },
-      };
-    } catch (err) {
-      // Compensate: open failed after admin create, delete the subscription
-      try {
-        await this.#transport.deleteSubscription(this.#replyTopic, inboxSub);
-      } catch {
-        // Best-effort cleanup; original error is more important.
-      }
-      throw err;
+      if (generation !== this.#generation || transport !== this.#transport)
+        throw new Error('ServiceBusBroker disconnected while opening reply inbox');
+      return { address: this.#replyTopic, close };
+    } catch (error) {
+      await close().catch(() => {});
+      throw error;
     }
   }
 
@@ -1043,10 +1104,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * rejects. The clear is skipped when the probe is no longer current: a
    * `disconnect()` drops it, and every newly recorded failure rebuilds it —
    * so a late `true` can never erase a failure recorded after it started.
+   * The evidence record must also still be current, preserving newer publish
+   * or delivery evidence even when the probe itself has not changed.
    */
   #clearNegativeOutcomeInBackground(probe: () => Promise<boolean | undefined>): void {
+    const negative = this.#evidence;
     void probe().then((reachable) => {
-      if (reachable === true && this.#probe === probe) {
+      if (reachable === true && this.#probe === probe && this.#evidence === negative) {
         this.#evidence = null;
       }
     });
@@ -1139,6 +1203,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     }
     const transport = this.#transport;
     const generation = this.#generation;
+    const replyInbox = this.#replyInbox;
     const validated = await validatePublishOptions(options);
     if (generation !== this.#generation || transport !== this.#transport)
       throw new Error('ServiceBusBroker is not connected');
@@ -1161,6 +1226,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         },
       );
     } catch (error) {
+      if (
+        generation === this.#generation &&
+        transport === this.#transport &&
+        topic === this.#replyTopic &&
+        isServiceBusEntityMissing(error)
+      )
+        replyInbox?.invalidate();
       // M95b: narrowed by ORIGIN — the guard and the serializer above threw
       // before the transport was reached and say nothing about the network;
       // only a send rejection is offered to the evidence predicate.
@@ -1194,6 +1266,20 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     let ended = false;
     let created = false;
     let current: IServiceBusSubscription | undefined;
+    let receiverGeneration = 0;
+    let cancelRecovery: (() => void) | undefined;
+    const retirements = new Set<Promise<void>>();
+    const active = (): boolean =>
+      !ended && generation === this.#generation && transport === this.#transport;
+    const retire = (sub: IServiceBusSubscription | undefined): Promise<void> => {
+      const work = Promise.resolve().then(() => sub?.close());
+      retirements.add(work);
+      void work.then(
+        () => retirements.delete(work),
+        () => retirements.delete(work),
+      );
+      return work;
+    };
     const holds = new Set<() => Promise<void>>();
     let cancelInspection: (() => void) | undefined;
     const warnings = independent ? new Set<string>() : this.#warnings;
@@ -1203,7 +1289,8 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // Best effort: the subscription also deletes itself after 5 idle minutes,
       // so a failed delete never stops the close.
       await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
-        this.#write(
+        warnOnce(
+          'delete',
           `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
         );
       });
@@ -1212,12 +1299,18 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const close = (): Promise<void> => {
       if (closing !== undefined) return closing;
       ended = true;
+      receiverGeneration++;
+      cancelRecovery?.();
       cancelInspection?.();
       if (independent) warnings.clear();
       closing = (async () => {
         await Promise.all([...holds].map((cancel) => cancel()));
         try {
-          await current?.close();
+          const sub = current;
+          current = undefined;
+          const results = await Promise.allSettled([retire(sub), ...retirements]);
+          const failed = results.find((result) => result.status === 'rejected');
+          if (failed !== undefined) throw failed.reason;
         } finally {
           await deleteCreated();
         }
@@ -1234,6 +1327,243 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       warnings.add(key);
       this.#write(message);
     };
+    const openReceiver = async (receiver: number): Promise<void> => {
+      const receiverCurrent = (): boolean => active() && receiver === receiverGeneration;
+      const sub = await transport.open(
+        topic,
+        queue,
+        async (msg) => {
+          // Only a closed subscription or a replaced receiver drops a delivery
+          // (unsettled, as before). While disconnect() drains, deliveries still
+          // run and settle; only the reachability evidence is fenced.
+          const live = (): boolean => !ended && receiver === receiverGeneration;
+          if (!live()) return;
+          if (receiverCurrent()) this.#recordDataPlaneOutcome(true);
+          const receivedAt = this.#runtime.hrtime();
+          let failed = false;
+          let failure: unknown;
+          try {
+            await handler(this.#serializer.deserialize<T>(msg.payload), {
+              topic,
+              headers: msg.applicationProperties ?? {},
+              ...(msg.messageId === undefined ? {} : { messageId: msg.messageId }),
+              ...(msg.timestamp === undefined ? {} : { timestamp: msg.timestamp }),
+            });
+          } catch (error) {
+            failed = true;
+            failure = error;
+          }
+          if (!live()) return;
+          if (!failed) return msg.ack();
+          this.#write('Service Bus handler failed', 'error');
+          if (!this.#retry.retry) return msg.nack();
+          const count = msg.deliveryCount;
+          if (
+            count === undefined ||
+            !Number.isSafeInteger(count) ||
+            count < 0 ||
+            msg.deadLetter === undefined
+          ) {
+            warnOnce(
+              'legacy',
+              'Service Bus deliveryCount or deadLetter unavailable; abandoning without consumer retry policy',
+            );
+            return msg.nack();
+          }
+          let retryable = true;
+          if (this.#retry.isRetryable !== undefined) {
+            try {
+              retryable = this.#retry.isRetryable(failure);
+            } catch {
+              this.#write('Service Bus retry classifier failed', 'error');
+            }
+          }
+          const attempt = count + 1;
+          if (!retryable || attempt >= budget)
+            return msg.deadLetter(retryable ? 'setu-attempts-exhausted' : 'setu-not-retryable');
+          const delay =
+            this.#retry.delaysMs[Math.min(attempt - 1, this.#retry.delaysMs.length - 1)]!;
+          if (300000 - (this.#runtime.hrtime() - receivedAt) - 60000 < delay) {
+            warnOnce(
+              'lock',
+              'Service Bus retry delay exceeds remaining lock renewal budget; abandoning immediately',
+            );
+            return msg.nack();
+          }
+          const wait = new Promise<boolean>((resolve) => {
+            const cancel = async (): Promise<void> => {
+              this.#runtime.clearTimeout(timer);
+              holds.delete(cancel);
+              resolve(false);
+              try {
+                await msg.nack();
+              } catch {
+                /* Teardown abandons best effort before closing. */
+              }
+            };
+            const timer: TimerHandle = this.#runtime.setTimeout(() => {
+              holds.delete(cancel);
+              resolve(true);
+            }, delay);
+            holds.add(cancel);
+          });
+          if ((await wait) && live()) return msg.nack();
+        },
+        {
+          maxConcurrentCalls: this.#maxConcurrentCalls,
+          onReceiveError: (error, source) => {
+            if (!receiverCurrent()) return;
+            if (independent && source === 'receive' && isServiceBusEntityMissing(error))
+              recoverReceiver(receiver);
+            else this.#onReceiveError(error, source);
+          },
+        },
+      );
+      if (!receiverCurrent()) {
+        try {
+          await retire(sub);
+        } finally {
+          if (!active()) await deleteCreated();
+        }
+        if (!active()) {
+          throw new Error('ServiceBusBroker disconnected while subscribing');
+        }
+        return;
+      }
+      current = sub;
+    };
+    const recoverReceiver = (receiver: number): void => {
+      if (!active() || receiver !== receiverGeneration) return;
+      cancelRecovery?.();
+      receiverGeneration++;
+      const previous = current;
+      current = undefined;
+      // Missing means the old entity is gone. A later successful creation
+      // reacquires cleanup ownership, including when close happened meanwhile.
+      created = false;
+      let retryTimer: TimerHandle | undefined;
+      let releaseCreate: (() => void) | undefined;
+      let warned = false;
+      const cancel = (): void => {
+        if (retryTimer !== undefined) {
+          this.#runtime.clearTimeout(retryTimer);
+          retryTimer = undefined;
+        }
+        if (cancelRecovery === cancel) cancelRecovery = undefined;
+        // Settles a pending bounded create now; the attempt then sees itself retired.
+        releaseCreate?.();
+      };
+      cancelRecovery = cancel;
+      const taskCurrent = (): boolean => active() && cancelRecovery === cancel;
+      const report = (error: unknown): void => {
+        if (warned) return;
+        warned = true;
+        this.#write(`Service Bus fan-out receiver recovery failed (${errorName(error)})`);
+      };
+      const stop = (error: unknown): void => {
+        if (!taskCurrent()) return;
+        report(error);
+        cancel();
+      };
+      const attempt = async (): Promise<void> => {
+        if (!taskCurrent()) return;
+        const successor = receiverGeneration;
+        let creating = true;
+        try {
+          try {
+            let abandoned = false;
+            const creation = transport.createSubscription(topic, queue, {
+              autoDeleteOnIdleMs: SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS,
+            });
+            // A create answered after its bound or after close still leaves an
+            // entity: the SDK keeps retrying it, so it can land even after close
+            // deleted a later create's copy. Once the handle has closed, delete
+            // it here; the name is this handle's alone, and not found is success.
+            void creation.then(
+              async () => {
+                if (!abandoned || active()) return;
+                await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
+                  if ((error as { statusCode?: unknown } | null)?.statusCode === 404) return;
+                  warnOnce(
+                    'delete',
+                    `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
+                  );
+                });
+              },
+              () => undefined,
+            );
+            await withDeadline(() => creation, {
+              timeoutMs: SERVICE_BUS_RECOVERY_CALL_MS,
+              onTimeout: () => {
+                abandoned = true;
+                return new RecoveryCallTimeoutError(
+                  `Service Bus fan-out subscription create exceeded ${SERVICE_BUS_RECOVERY_CALL_MS}ms`,
+                );
+              },
+              timing: {
+                setTimer: (fn, ms) => {
+                  releaseCreate = fn;
+                  return this.#runtime.setTimeout(fn, ms);
+                },
+                clearTimer: (handle) => {
+                  this.#runtime.clearTimeout(handle);
+                  releaseCreate = undefined;
+                },
+              },
+            });
+          } catch (error) {
+            // Recovery owns this final name already; an existing entity is the
+            // same subscription, never a reason to mint another fan-out name.
+            if (!(error instanceof SubscriptionNameExistsError)) throw error;
+          }
+          creating = false;
+          created = true;
+          if (!active()) {
+            await deleteCreated();
+            return;
+          }
+          if (!taskCurrent() || successor !== receiverGeneration) return;
+          await openReceiver(successor);
+          if (taskCurrent() && successor === receiverGeneration) cancel();
+        } catch (error) {
+          if (!taskCurrent() || successor !== receiverGeneration) return;
+          // An open may install callbacks before rejecting. Fence them before
+          // cleanup or the retry wait, rather than letting them revive this task.
+          receiverGeneration++;
+          await deleteCreated();
+          if (!taskCurrent()) return;
+          report(error);
+          if (!isServiceBusOutage(error) && !(creating && isTransientManagementFailure(error))) {
+            stop(error);
+            return;
+          }
+          retryTimer = this.#runtime.setTimeout(() => {
+            retryTimer = undefined;
+            runAttempt();
+          }, SERVICE_BUS_RECOVERY_RETRY_MS);
+        }
+      };
+      const runAttempt = (): void => {
+        void attempt().catch(stop);
+      };
+      const retiring = Promise.all([...holds].map((cancelHold) => cancelHold())).then(() =>
+        retire(previous),
+      );
+      retirements.add(retiring);
+      void retiring.then(
+        () => retirements.delete(retiring),
+        () => retirements.delete(retiring),
+      );
+      void (async () => {
+        try {
+          await retiring;
+        } catch {
+          this.#write('Service Bus retired fan-out receiver could not be closed');
+        }
+        if (taskCurrent()) runAttempt();
+      })().catch(stop);
+    };
+
     try {
       if (independent) {
         try {
@@ -1295,94 +1625,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       }
       if (ended || generation !== this.#generation)
         throw new Error('ServiceBusBroker disconnected while subscribing');
-      const sub = await transport.open(
-        topic,
-        queue,
-        async (msg) => {
-          if (ended) return;
-          this.#recordDataPlaneOutcome(true);
-          const receivedAt = this.#runtime.hrtime();
-          let failed = false;
-          let failure: unknown;
-          try {
-            await handler(this.#serializer.deserialize<T>(msg.payload), {
-              topic,
-              headers: msg.applicationProperties ?? {},
-              ...(msg.messageId === undefined ? {} : { messageId: msg.messageId }),
-              ...(msg.timestamp === undefined ? {} : { timestamp: msg.timestamp }),
-            });
-          } catch (error) {
-            failed = true;
-            failure = error;
-          }
-          if (ended) return;
-          if (!failed) return msg.ack();
-          this.#write('Service Bus handler failed', 'error');
-          if (!this.#retry.retry) return msg.nack();
-          const count = msg.deliveryCount;
-          if (
-            count === undefined ||
-            !Number.isSafeInteger(count) ||
-            count < 0 ||
-            msg.deadLetter === undefined
-          ) {
-            warnOnce(
-              'legacy',
-              'Service Bus deliveryCount or deadLetter unavailable; abandoning without consumer retry policy',
-            );
-            return msg.nack();
-          }
-          let retryable = true;
-          if (this.#retry.isRetryable !== undefined) {
-            try {
-              retryable = this.#retry.isRetryable(failure);
-            } catch {
-              this.#write('Service Bus retry classifier failed', 'error');
-            }
-          }
-          const attempt = count + 1;
-          if (!retryable || attempt >= budget)
-            return msg.deadLetter(retryable ? 'setu-attempts-exhausted' : 'setu-not-retryable');
-          const delay =
-            this.#retry.delaysMs[Math.min(attempt - 1, this.#retry.delaysMs.length - 1)]!;
-          if (300000 - (this.#runtime.hrtime() - receivedAt) - 60000 < delay) {
-            warnOnce(
-              'lock',
-              'Service Bus retry delay exceeds remaining lock renewal budget; abandoning immediately',
-            );
-            return msg.nack();
-          }
-          const wait = new Promise<boolean>((resolve) => {
-            const cancel = async (): Promise<void> => {
-              this.#runtime.clearTimeout(timer);
-              holds.delete(cancel);
-              resolve(false);
-              try {
-                await msg.nack();
-              } catch {
-                /* Teardown abandons best effort before closing. */
-              }
-            };
-            const timer: TimerHandle = this.#runtime.setTimeout(() => {
-              holds.delete(cancel);
-              resolve(true);
-            }, delay);
-            holds.add(cancel);
-          });
-          if (await wait) return msg.nack();
-        },
-        {
-          maxConcurrentCalls: this.#maxConcurrentCalls,
-          onReceiveError: (error, source) => {
-            if (!ended && generation === this.#generation) this.#onReceiveError(error, source);
-          },
-        },
-      );
-      if (ended || generation !== this.#generation) {
-        await sub.close();
-        throw new Error('ServiceBusBroker disconnected while subscribing');
-      }
-      current = sub;
+      await openReceiver(receiverGeneration);
     } catch (error) {
       if (independent && !created && !(error instanceof SubscriptionNameExistsError))
         this.#write(

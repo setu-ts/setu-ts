@@ -43,14 +43,15 @@ export const messaging = MessagingPlugin({
 - Memory is process-local. Queue-less subscribers each get a copy; shared queues compete. `publish`
   resolves before handlers finish; make consumers idempotent.
 - Factories resolve at `onInit`; this example needs `LoggerPlugin`.
-- `name` provides `messaging.<name>` instead of the bare token.
+- `name` provides `messaging.<name>`, not the bare token.
 - Pub/Sub and Service Bus retry by default; `consumerRetry: false` disables.
-- `{ fanOut: true }` requests one copy per instance; verify `subscription.fanOut`.
-- Service Bus `publishTimeoutMs`: 15000, 0 unbounded. `maxConcurrentCalls`: 1, integer 1–1000; above
-  1 delivery can reorder. Reply inboxes expire after 5 min idle; receive outages affect readiness.
-- RPC timeout answers 504, remote handler failure 502 through `errorHandler`, without remote text.
+- `{ fanOut: true }`: one copy per instance; verify `subscription.fanOut`.
+- Service Bus `publishTimeoutMs`: 15000, 0 unbounded. `maxConcurrentCalls`: 1 (1–1000); above 1
+  delivery can reorder. Reply inboxes and fan-out subscriptions expire after 5 min idle (recovery:
+  README); receive outages affect readiness.
+- RPC timeout is 504, remote handler failure 502 via `errorHandler`, without remote text.
 - Call `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` latency. Full failure-free
-  sweeps continue with a macrotask yield; saturation warns once, recovery logs at info.
+  sweeps yield a macrotask; saturation warns once, recovery logs at info.
 
 ## Other options
 

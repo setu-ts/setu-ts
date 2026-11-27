@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IServiceBusTransport } from '../../src/brokers/service-bus-broker.ts';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { clockRuntime } from '../fixtures/clock-runtime.ts';
+import { serviceBusTransport, flushCloud } from '../fixtures/cloud-transports.ts';
+import { serviceBusFaults } from '../fixtures/service-bus-errors.ts';
 
 function makeTransport(options?: {
   isHealthy?: () => Promise<boolean | undefined>;
@@ -81,21 +84,16 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
   });
 
   it('a non-retryable entity refusal leaves reachability untouched', async () => {
+    const refusal = serviceBusFaults.find(({ code }) => code === 'MessagingEntityNotFound')!.error;
     const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
       connectionString: 'Endpoint=sb://test/',
       client: makeTransport({
         isHealthy: () => Promise.resolve(undefined),
-        send: () =>
-          Promise.reject(
-            Object.assign(new Error('MessagingEntityNotFound'), {
-              code: 'MessagingEntityNotFound',
-              retryable: false,
-            }),
-          ),
+        send: () => Promise.reject(refusal),
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('MessagingEntityNotFound');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toBe(refusal);
     // A deleted topic is an application-level fact, not a network outage:
     // no evidence recorded, so the management probe answers.
     expect(await broker.reachability()).toBeUndefined();
@@ -301,6 +299,49 @@ describe('dataPlaneEvidenceMs is validated at construction (M95b review)', () =>
 });
 
 describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8-1)', () => {
+  it.each(['publish', 'delivery'] as const)(
+    'preserves newer positive %s evidence when an older recovery probe succeeds',
+    async (outcome) => {
+      const clock = clockRuntime();
+      const h = serviceBusTransport();
+      const held = Promise.withResolvers<boolean | undefined>();
+      const probe = vi
+        .fn(() => Promise.resolve<boolean | undefined>(undefined))
+        .mockReturnValueOnce(held.promise);
+      Object.assign(h.transport, { isHealthy: probe });
+      const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+        client: h.transport,
+        dataPlaneEvidenceMs: 20000,
+      });
+      await broker.connect();
+      try {
+        if (outcome === 'delivery') await broker.subscribe('orders', () => {});
+        vi.mocked(h.transport.send).mockRejectedValueOnce(new Error('socket'));
+        await expect(broker.publish('orders', {})).rejects.toMatchObject({
+          name: 'BackendOutcomeUnknownError',
+        });
+        expect(await broker.reachability()).toBe(false);
+        await flushCloud();
+        expect(probe).toHaveBeenCalledTimes(1);
+        if (outcome === 'publish') await broker.publish('orders', {});
+        else await h.opens[0]!.deliver({ payload: '{}', ack: () => {}, nack: () => {} });
+        expect(await broker.reachability()).toBe(true);
+        held.resolve(true);
+        await flushCloud();
+        await clock.advance(6000);
+        expect(await broker.reachability()).toBe(true);
+        expect(probe).toHaveBeenCalledTimes(1);
+        await clock.advance(14000);
+        expect(await broker.reachability()).toBeUndefined();
+        expect(probe).toHaveBeenCalledTimes(2);
+      } finally {
+        held.resolve(true);
+        await broker.disconnect();
+        expect(clock.timerCount()).toBe(0);
+      }
+    },
+  );
+
   function failingBroker(isHealthy: () => Promise<boolean | undefined>): ServiceBusBroker {
     return new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
       connectionString: 'Endpoint=sb://test/',

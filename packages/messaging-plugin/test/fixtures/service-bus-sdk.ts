@@ -10,6 +10,8 @@ export function serviceBusSdk() {
   const sendMessages = vi.fn(() => Promise.resolve());
   const createSubscription = vi.fn(() => Promise.resolve());
   const deleteSubscription = vi.fn(() => Promise.resolve());
+  const completeMessage = vi.fn(() => Promise.resolve());
+  const abandonMessage = vi.fn(() => Promise.resolve());
   const module: ServiceBusSdkModule = {
     RetryMode: { Fixed: 0, Exponential: 1 },
     ServiceBusClient: class {
@@ -19,8 +21,8 @@ export function serviceBusSdk() {
       createReceiver() {
         return {
           subscribe,
-          completeMessage: async () => {},
-          abandonMessage: async () => {},
+          completeMessage,
+          abandonMessage,
           close: async () => {},
         };
       }
@@ -31,5 +33,13 @@ export function serviceBusSdk() {
       deleteSubscription = deleteSubscription;
     },
   };
-  return { module, subscribe, sendMessages, createSubscription, deleteSubscription };
+  return {
+    module,
+    subscribe,
+    sendMessages,
+    createSubscription,
+    deleteSubscription,
+    completeMessage,
+    abandonMessage,
+  };
 }

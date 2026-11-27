@@ -130,11 +130,13 @@ export class RequestReplyCore {
   #deps: RequestReplyDeps;
   #pending: Map<string, PendingRequest> = new Map();
   /**
-   * The in-flight or settled inbox open. This is the SINGLE handle on the
-   * inbox: tracking a resolved `ReplyInbox` separately meant `close()` could
-   * observe a null one while the open was still pending, and miss it.
+   * The in-flight or settled active inbox open. Detached opens remain tracked
+   * until retirement completes, so invalidation and close cannot lose an
+   * allocation that is still pending.
    */
   #inboxInit: Promise<ReplyInbox> | null = null;
+  #inboxReply: ((message: unknown) => void) | null = null;
+  readonly #retiringInboxes = new Set<Promise<void>>();
   /**
    * Lifecycle generation counter. Incremented on every `close()` call.
    * A request captures the current generation during inbox initialization.
@@ -289,14 +291,37 @@ export class RequestReplyCore {
     // owned, and a later `request()` would open a second one on top of it.
     const init = this.#inboxInit;
     this.#inboxInit = null;
-    if (init) {
-      try {
-        const inbox = await init;
-        await inbox.close();
-      } catch {
-        // The open itself failed, so there is no subscription to release.
-      }
-    }
+    this.#inboxReply = null;
+    if (init) this.#retireInbox(init);
+    await Promise.all([...this.#retiringInboxes]);
+  }
+
+  /**
+   * Drops only the inbox owned by this reply callback and closes it in the
+   * background. Existing requests retain their original reply deadlines.
+   * @param onReply - Identity supplied to the transport's inbox open
+   * @returns Nothing; close also waits for detached inbox cleanup
+   * @throws Never; retirement failures are contained as during close
+   * @since 0.14.0
+   * @internal
+   */
+  invalidateInbox(onReply: (message: unknown) => void): void {
+    if (this.#inboxReply !== onReply) return;
+    const init = this.#inboxInit;
+    this.#inboxInit = null;
+    this.#inboxReply = null;
+    if (init) this.#retireInbox(init);
+  }
+
+  /** Tracks detached opens through cleanup, without leaking a rejection. */
+  #retireInbox(init: Promise<ReplyInbox>): void {
+    const retiring = init
+      .then((inbox) => inbox.close())
+      .catch(() => {
+        // An open or close failure must not prevent other inbox cleanup.
+      })
+      .finally(() => this.#retiringInboxes.delete(retiring));
+    this.#retiringInboxes.add(retiring);
   }
 
   /**
@@ -319,14 +344,18 @@ export class RequestReplyCore {
     const generationAtStart = this.#generation;
 
     if (!this.#inboxInit) {
-      this.#inboxInit = this.#deps
-        .openInbox((message) => {
-          this.#onReply(message);
-        })
-        .catch((error: unknown) => {
+      const onReply = (message: unknown): void => {
+        if (this.#inboxReply === onReply) this.#onReply(message);
+      };
+      this.#inboxReply = onReply;
+      const init = this.#deps.openInbox(onReply).catch((error: unknown) => {
+        if (this.#inboxInit === init) {
           this.#inboxInit = null;
-          throw error;
-        });
+          this.#inboxReply = null;
+        }
+        throw error;
+      });
+      this.#inboxInit = init;
     }
     return this.#inboxInit.then((inbox) => ({ inbox, generation: generationAtStart }));
   }
