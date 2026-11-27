@@ -12,14 +12,15 @@ The Data lane's second letter, after M143q (#617). Fifteen rows where a database
 client as a masked `500` or as a status that says something false, where several conflicts look the
 same to a client, and where a store fails without saying why. When it ships: a serialization
 conflict raised through the framework's own Drizzle handle, a foreign-key or NOT NULL violation, a
-value too long or out of range, and a lock wait timeout each answer a named status on every SQL
-cell; a call that timed out answers `504` and claims nothing about the write; a Prisma `P1017` and a
-MongoDB pool-cleared subclass are classified; the three kinds of `409` carry different problem
-types; a full pg pool reads as saturation in both the response and readiness, and gets its counters
-without hand-wiring; an audit entry can be written inside the caller's transaction; the vector-store
-indicator and the agent-run loop log the cause of a failure; the pgvector index check says "wrong
-operator class" rather than "missing"; the run-budget recipe works outside this repository; and a
-resolver-name array in multi-tenancy is refused at startup instead of resolving no tenant.
+lock wait timeout each answer a named status on every SQL cell, and a value too long or out of range
+does on every repository call; a call that timed out answers `504` and claims nothing about the
+write; a Prisma `P1017` and a MongoDB pool-cleared subclass are classified; the three kinds of `409`
+carry different problem types; a full pg pool reads as saturation in both the response and
+readiness, and gets its counters without hand-wiring; an audit entry can be written inside the
+caller's transaction; the vector-store indicator and the agent-run loop log the cause of a failure;
+the pgvector index check says "wrong operator class" rather than "missing"; the run-budget recipe
+works outside this repository; and a resolver-name array in multi-tenancy is refused at startup
+instead of resolving no tenant.
 
 Code changes are in the Data lane's packages: `database-plugin`, `exceptions` (`ERROR_TYPE_BASE`'s
 source and docs, §3.13), `audit-plugin`, `agent-runs-plugin`, `vector-store-plugin`,
@@ -106,14 +107,14 @@ All references read at `1f21e029a`.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                                                                                       | Resolution (picked side)                                                                                                                           | Doc deliverable (same PR)                                                                                                             |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | `packages/database-plugin/README.md` "Errors your own transaction work throws are not classified (M128)" against the X38-1 decision that a serialization conflict answers 409 (V13-115).                                                       | The X38-1 decision. A driver error the work throws is classified by §3.7's rule; a foreign error still reaches the caller as itself.               | README paragraph rewritten; `docs/upgrading.md` 0.14.0 entry.                                                                         |
-| C2  | The exceptions README: "Read `status` to distinguish errors" against three 409s with different client actions (V13-139).                                                                                                                       | Distinguish by problem `type` (D-5).                                                                                                               | `packages/exceptions/README.md` sentence; `docs/problem-types.md`.                                                                    |
-| C3  | The lanes table lists no owner for the files outside the lane named in §0.                                                                                                                                                                     | They join the Data lane for this letter, as M143q's D-10 did for its files.                                                                        | `ROADMAP.md` lanes table, Data row (the first three are in since `fba09340d`; the rest are added in the first implementation commit). |
-| C4  | README connection-loss table puts the Prisma `P1001` row under 503, with no row for `P1017`.                                                                                                                                                   | §3.9.                                                                                                                                              | README table row.                                                                                                                     |
-| C5  | README: "The older `ECONNRESET`/`EPIPE`/`MongoNetworkError` arms still answer `503` even for a write in flight; that is a known limitation" (`README.md:1668-1669`), and "Every other commit rejection is still rethrown unchanged" (`:1643`). | §3.8 ends the limitation on DynamoDB and Cosmos (smithy renames those codes to `TimeoutError`); §3.7 maps commit-time conflicts and FK violations. | Both sentences rewritten; the `503` row stops implying the AWS names.                                                                 |
-| C6  | The committed problem-type base (`exceptions` `ERROR_TYPE_BASE = 'https://setu-ts.dev/errors'`, used by `validation-plugin` and documented at `exceptions/README.md:133-136`) against a first draft of D-5 that used a second scheme.          | The committed base (§3.13); its source moves to `common` and `exceptions` re-exports it.                                                           | Exceptions README paragraph extended with the database types.                                                                         |
+| #   | Conflict                                                                                                                                                                                                                                       | Resolution (picked side)                                                                                                                                           | Doc deliverable (same PR)                                                                                                             |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | `packages/database-plugin/README.md` "Errors your own transaction work throws are not classified (M128)" against the X38-1 decision that a serialization conflict answers 409 (V13-115).                                                       | The X38-1 decision. A driver error the work throws is classified by §3.7's rule; a foreign error still reaches the caller as itself.                               | README paragraph rewritten; `docs/upgrading.md` 0.14.0 entry.                                                                         |
+| C2  | The exceptions README: "Read `status` to distinguish errors" against three 409s with different client actions (V13-139).                                                                                                                       | Distinguish by problem `type` (D-5).                                                                                                                               | `packages/exceptions/README.md` sentence; `docs/problem-types.md`.                                                                    |
+| C3  | The lanes table lists no owner for the files outside the lane named in §0.                                                                                                                                                                     | They join the Data lane for this letter, as M143q's D-10 did for its files.                                                                                        | `ROADMAP.md` lanes table, Data row (the first three are in since `fba09340d`; the rest are added in the first implementation commit). |
+| C4  | README connection-loss table puts the Prisma `P1001` row under 503, with no row for `P1017`.                                                                                                                                                   | §3.9.                                                                                                                                                              | README table row.                                                                                                                     |
+| C5  | README: "The older `ECONNRESET`/`EPIPE`/`MongoNetworkError` arms still answer `503` even for a write in flight; that is a known limitation" (`README.md:1668-1669`), and "Every other commit rejection is still rethrown unchanged" (`:1643`). | §3.8 ends the limitation on DynamoDB (smithy renames those codes to `TimeoutError`); it still holds for Cosmos; §3.7 maps commit-time conflicts and FK violations. | Both sentences rewritten; the `503` row stops implying the AWS names.                                                                 |
+| C6  | The committed problem-type base (`exceptions` `ERROR_TYPE_BASE = 'https://setu-ts.dev/errors'`, used by `validation-plugin` and documented at `exceptions/README.md:133-136`) against a first draft of D-5 that used a second scheme.          | The committed base (§3.13); its source moves to `common` and `exceptions` re-exports it.                                                                           | Exceptions README paragraph extended with the database types.                                                                         |
 
 ## 3. Design decisions
 
@@ -193,9 +194,12 @@ row beside each new arm).
   the indicator's wrapper is where the timeout is seen. A rejection is `report(error)`ed; the timer
   firing reports an `Error("did not answer within 2000 ms")` built there; a `false` with no error
   (pgvector saturated and not progressing, `pgvector-store.ts:368-370`; Qdrant's collection absent,
-  `qdrant-store.ts:349`) reports `Error("reported unreachable")`; a `true` calls `recovered()`.
-  Nothing is thrown out of the wrapper beyond what `createCachedProbe` already handles, and the
-  health payload is unchanged (`reachable: false`), so `details: true` discloses nothing new.
+  `qdrant-store.ts:349`) reports `Error("reported unreachable")`; a `true` calls `recovered()`. The
+  first outcome of a probe wins: a settlement after the wrapper's timer fired is ignored (no late
+  `recovered()`, no second line), and the adapter's own `undefined` (it could not tell, e.g.
+  pgvector saturated and progressing) reports nothing. Nothing is thrown out of the wrapper beyond
+  what `createCachedProbe` already handles, and the health payload is unchanged
+  (`reachable: false`), so `details: true` discloses nothing new.
 - **Why:** the sibling indicators log the cause this way (service-discovery, M139f; the
   connection-error reporter, M119g); a log line is where an operator tells a revoked key from a dead
   backend.
@@ -211,7 +215,7 @@ row beside each new arm).
 - **Decision:** `describeStatement` returns two more columns, `vector_index_present` and
   `source_index_present`: an index of the expected name exists at all
   (`to_regclass(<name>) IS NOT NULL`). The check says "is missing its HNSW index" (or source index)
-  only when it is absent; otherwise "has an index named `<name>` that is not the expected valid,
+  only when it is absent; otherwise "has a relation named `<name>` that is not the expected valid,
   non-partial `<definition>` index on `<table>`; drop it and create it as expected". The neutral
   sentence covers every reason the existing `EXISTS` is false while the name exists: another method
   or operator class, an invalid index (a failed `CREATE INDEX CONCURRENTLY`), a partial index, or
@@ -248,8 +252,10 @@ row beside each new arm).
   `DatabaseUnavailableError` with a new read-only `reason: 'pool-saturated'` (other cases
   `'unreachable'`), served `503` with the detail "The database connection pool is busy. The request
   was not applied." and the problem type `database-pool-saturated` (D-5); the outage keeps today's
-  sentence and `database-unavailable`. The error-handler log level is unchanged (`error` per served
-  5xx), as for every other 5xx: §12 records the alternative of logging this case at `warn`.
+  sentence and `database-unavailable`. Saturation is read from pg-pool only
+  (`isPoolAcquireTimeout`); the mariadb pool timeout `45028` stays `reason: 'unreachable'`, and the
+  README says so. The error-handler log level is unchanged (`error` per served 5xx), as for every
+  other 5xx: §12 records the alternative of logging this case at `warn`.
 - **Why:** the response then agrees with readiness (`isSaturated`, M101a) instead of calling the
   same state an outage. One line per failed request is what every compared framework logs for an
   acquire timeout (§12.1 T-4).
@@ -270,30 +276,45 @@ row beside each new arm).
   call raises them too: the errno family (C-3); the AWS/Cosmos `TimeoutError` and `NetworkingError`
   names; and every **numeric** code (Bigtable's gRPC `4`/`10`/`14` are what every google-gax client
   raises, and Cosmos's `429`/`449`/`503` are HTTP statuses). What remains are string codes in a
-  database namespace (SQLSTATE, Prisma `P`-codes, mysql2 `ER_*`, mariadb codes under the adapter
-  namespace), Prisma adapter kinds, MongoDB labels and the pg/SQLite message anchors. This keeps
-  V11-5 closed (a refused webhook, a Pub/Sub `UNAVAILABLE`, an HTTP 503 are not "database
-  unavailable") while a SQLSTATE `40001` from `getDrizzleTransaction(...)` answers 409 again.
+  signals the classifier reads that only a database client raises; the set is the data of
+  `transaction-work-classification.test.ts`, one row per signal, marked in or out:
+  - **in:** SQLSTATE codes (5 characters, including the `08` class), Prisma `P`-codes and adapter
+    kinds, mysql2 `ER_*` codes and `PROTOCOL_CONNECTION_LOST`, mariadb codes under the adapter
+    namespace, libsql `SQLITE_BUSY`, MongoDB labels and Mongo error names (`Mongo*`, read with the
+    prototype walk of §3.10), DynamoDB `TransactionConflictException`, and the pg and SQLite message
+    anchors (node:sqlite's `ERR_SQLITE_ERROR` carries the SQLite text);
+  - **out:** the errno family, `TimeoutError`/`NetworkingError`, and every numeric code. This keeps
+    V11-5 closed (a refused webhook, a Pub/Sub `UNAVAILABLE`, an HTTP 503 are not "database
+    unavailable") while a SQLSTATE `40001` from `getDrizzleTransaction(...)` answers 409 again.
 - **Commit-time verdicts:** `commit()` already maps `'duplicate'`; it also maps `'conflict'`
   (`40001`/`40P01`, which PostgreSQL may raise at `COMMIT` under SERIALIZABLE; drizzle wraps
   `COMMIT` in `DrizzleQueryError` too, T-5) and `'foreign-key'` (a deferred constraint checked at
-  `COMMIT`). Each is the server refusing the whole transaction, so nothing was applied. A MongoDB
-  commit error carrying the `UnknownTransactionCommitResult` label is never mapped (the driver adds
-  it when the outcome is unknown, `mongodb/lib/sessions.js:326-336, 550-565`), and unavailable and
-  timeout at commit stay unclassified: the acknowledgement may have been lost after the write.
-- **Consumers that branch on `409` (D-8).** Three first-party paths treat any `409` hint as a
-  conflict and now see new 409s (commit-time conflicts, foreign-key violations):
-  `idempotency-plugin/src/within/within.ts:103-147` (`isConflict` → "another call holds this key;
-  retry"), `agent-runs-plugin/src/loop/tool-runner.ts:115` (`ToolConflict`, which
-  `step-loop.ts:285-293` ends silently), and `sdk/src/retry/retry-strategy.ts:163` (a keyed request
-  retries every `409`). Recommended (D-8): the two server-side consumers narrow to the classes that
-  mean "the key or the write raced another call" — `DuplicateKeyError` and
-  `SerializationConflictError`, matched by `instanceof` and by their problem `type` across copies —
-  so a foreign-key violation is a store failure in `within` and a tool failure in the run.
-  `idempotency-plugin` is in no lane; it joins the Data lane for this change (lanes table row, C3).
-  The SDK keeps retrying a keyed `409` (CLI lane, unchanged): an FK violation is retried up to the
-  retry limit and then surfaces, which costs requests but loses nothing; §11 hands the narrowing to
-  the CLI lane.
+  `COMMIT`), and `'not-null'` (D1's atomic batch and the buffered adapters raise it at `commit()`,
+  where the same write outside a transaction answers 400). Each is the server refusing the whole
+  transaction, so nothing was applied. A MongoDB commit error carrying the
+  `UnknownTransactionCommitResult` label is never mapped (the driver adds it when the outcome is
+  unknown, `mongodb/lib/sessions.js:326-336, 550-565`), and unavailable and timeout at commit stay
+  unclassified: the acknowledgement may have been lost after the write.
+- **Consumers that branch on `409` (D-8).** Two first-party paths treat any `409` as a conflict and
+  now see new 409s (commit-time conflicts, foreign-key violations):
+  `idempotency-plugin/src/within/within.ts:103-147` (`isConflict` →
+  `IdempotencyWithinError ('conflict')`, "another call holds this key; retry") and
+  `sdk/src/retry/retry-strategy.ts:163` (a keyed request retries every `409`). The agent-run tool
+  runner (`tool-runner.ts:115`) is **not** one: the only `409` it sees is `within`'s own
+  `IdempotencyWithinError('conflict')`, which carries no cause
+  (`idempotency-plugin/src/errors.ts:131-153`); a tool's own database error is wrapped in
+  `ToolFailure` inside `fn` and already fails the tool. Recommended (D-8): `within`'s `isConflict`
+  narrows to "the key raced another call": `DuplicateKeyError` by `instanceof` (a `common` class)
+  and `SerializationConflictError` by its `write-conflict` problem type from `common` (D-5), since
+  `idempotency-plugin` has `database-plugin` only as a devDependency. `lock-timeout` counts too: the
+  key's row was held by another call. A foreign-key violation at a `within` commit then becomes
+  `store-failed` (503), which the tool runner rethrows, so the run fails rather than retrying a
+  write that cannot succeed. `idempotency-plugin` is in no lane; it joins the Data lane for this
+  change (C3). An application-supplied `ITransactionalIdempotencyStore` that signals a holder with a
+  `409` of its own then reads as `store-failed`; the idempotency README says to raise
+  `DuplicateKeyError`. The SDK keeps retrying a keyed `409` (CLI lane, unchanged): an FK violation
+  is retried up to the retry limit and then surfaces, which costs requests but loses nothing; §11
+  hands the narrowing to the CLI lane.
 - **Why:** frameworks that hand out a native handle translate its errors at the connection layer
   (§12.1 T-5); wrapping the handle in a proxy is machinery none of them has, so the transaction
   boundary is the one site this package owns.
@@ -305,13 +326,14 @@ row beside each new arm).
   directly → classified; a `DrizzleQueryError`-shaped wrapper → classified; a Prisma `P2034` →
   classified; an app error with a driver `cause` → itself; `ECONNREFUSED`, a `TimeoutError`,
   `{ code: 14 }` under `bigtable` and `{ code: 503 }` under `cosmos` → itself; a commit `40001` →
-  409; a commit `23503` → 409; a commit `ECONNRESET` → itself; a Mongo commit with
-  `UnknownTransactionCommitResult` → itself); guarded real cell in
+  409; a commit `23503` → 409; a commit `NOT NULL constraint failed:` → 400; a commit `ECONNRESET` →
+  itself; a Mongo commit with `UnknownTransactionCommitResult` → itself); guarded real cell in
   `test/integration/real-drizzle-adapter.test.ts`: two SERIALIZABLE transactions through
   `getDrizzleTransaction` → one 200, one 409. `idempotency-plugin/test/unit/within.test.ts`
-  (extended): an FK at commit inside `within` is a store failure, not "another call holds this key";
-  `agent-runs-plugin/test/unit/tool-runner.test.ts` (extended): an FK 409 from a tool's write fails
-  the tool.
+  (extended): an FK at commit inside `within` is `store-failed`, not "another call holds this key";
+  a `SerializationConflictError`-typed and a `DuplicateKeyError` rejection stay `conflict`;
+  `agent-runs-plugin/test/unit/tool-runner.test.ts` (extended): `IdempotencyWithinError('conflict')`
+  still gives `ToolConflict`.
 
 ### 3.8 V13-237: a timed-out call answers 504 and claims nothing
 
@@ -343,9 +365,10 @@ row beside each new arm).
 - **Why:** the README's own rule — no verdict on a sent request means the outcome is unknown — and
   gRPC's definition of `DEADLINE_EXCEEDED` (§12.1 T-3).
 - **Developer impact:** a DynamoDB or Cosmos request timeout answers 504 "did not answer in time"
-  instead of 503 "not applied"; a client stops repeating writes that landed. On DynamoDB and Cosmos
-  a smithy-renamed `ECONNRESET`/`EPIPE` therefore answers 504, which ends the README's "known
-  limitation" for those two arms (§2 C5).
+  instead of 503 "not applied"; a client stops repeating writes that landed. On DynamoDB a
+  smithy-renamed `ECONNRESET`/`EPIPE` on **DynamoDB** therefore answers 504, which ends the README's
+  "known limitation" there (§2 C5). Cosmos is built on `@azure/core-rest-pipeline`, not smithy, so a
+  Cosmos `ECONNRESET` stays 503 and the limitation sentence still holds for it.
 - **Test home:** `test/unit/classify-driver-error.test.ts` rows
   (`{ name: 'TimeoutError', code: 'ETIMEDOUT' }`, `{ name: 'TimeoutError', code: 'ECONNRESET' }`, a
   bare `TimeoutError`, Cosmos C-8, Bigtable `{ code: 4 }` under `bigtable`, `{ code: 4 }` under
@@ -360,12 +383,12 @@ row beside each new arm).
   `SocketTimeout` (Prisma's engine turns them into `P1017` and `P1008`, §12.1 T-7).
   `DatabaseNotReachable` and `TooManyConnections` (`P2037`) map to `'unavailable'` (503), and so do
   the raw codes they come from on the other cells: SQLSTATE `53300` (Drizzle with pg) and mysql2
-  `ER_CON_COUNT_ERROR` (1040) and mariadb `1040`/`1203` under the adapter namespace. The kind is
-  read even when the adapter cause carries no `originalCode` (C-5: socket errors never do), which
-  M143q's reader required. `P1017` and `ConnectionClosed` are a connection lost under a sent
-  statement, so they join `isConnectionLostMidCall` and log "connection closed … outcome unknown";
-  `P1008` and `SocketTimeout` are a bound elapsing and keep "did not answer within the driver call
-  bound".
+  `ER_CON_COUNT_ERROR` (1040) and `ER_TOO_MANY_USER_CONNECTIONS` (1203); adapter-mariadb already
+  maps 1040/1203 to the `TooManyConnections` kind. The kind is read even when the adapter cause
+  carries no `originalCode` (C-5: socket errors never do), which M143q's reader required. `P1017`
+  and `ConnectionClosed` are a connection lost under a sent statement, so they join
+  `isConnectionLostMidCall` and log "connection closed … outcome unknown"; `P1008` and
+  `SocketTimeout` are a bound elapsing and keep "did not answer within the driver call bound".
 - **Why:** M128's rule (README "Connection loss during an outage") puts a connection dropped under a
   statement with no verdict at 504. `ConnectionClosed` is Prisma's mapping of `ECONNRESET` (C-5),
   and the bare `ECONNRESET` arm is a documented limitation at 503; this letter does not extend the
@@ -426,8 +449,12 @@ row beside each new arm).
   - Value too long and numeric out of range join the existing value refusal (C-13):
     `InvalidFieldValueError` (400) on repository calls, where an entity is known. Signals: SQLSTATE
     `22001` (`22003` already), Prisma `P2000`/`P2020` and kinds `LengthMismatch`/`ValueOutOfRange`,
-    mysql2 `ER_DATA_TOO_LONG` and `ER_WARN_DATA_OUT_OF_RANGE`. `22001` joining `VALUE_REFUSAL_CODES`
-    also changes `isValueTypeRefusal`, which the Drizzle and Prisma keyset cursors read
+    mysql2 `ER_DATA_TOO_LONG` and `ER_WARN_DATA_OUT_OF_RANGE`. `refusedInputOf` and
+    `isValueTypeRefusal` switch from `causeChainMembers` to `classificationMembers`, so the Prisma
+    adapter cause (its kind, and its `originalCode` `22001`/`22003`) is read; today a Prisma `P2020`
+    is a masked 500 although `22003` is in the set. Prisma's own `P2000`/`P2020` are read only on a
+    `PrismaClientKnownRequestError`, as `P2007` is. `22001` joining `VALUE_REFUSAL_CODES` also
+    changes `isValueTypeRefusal`, which the Drizzle and Prisma keyset cursors read
     (`drizzle-adapter.ts:1199`, `prisma-adapter.ts:910`): a forged cursor value too long for its
     column then answers `InvalidCursorError` like a mistyped one, which is intended. Through
     `query()` and the transaction's own work they stay unclassified: `InvalidFieldValueError` is
@@ -435,11 +462,14 @@ row beside each new arm).
     cannot name; the README says so. (`NotNullViolationError` is served there because its sentence
     names no field.)
   - A lock wait timeout is `'conflict'`: `SerializationConflictError` (409, "safe to retry"),
-    constructed with `reason: 'lock-timeout'`, which gives it its own problem type `lock-timeout`
-    (§3.13) and the same detail. Signals: SQLSTATE `55P03` (`lock_not_available`), mysql2
-    `ER_LOCK_WAIT_TIMEOUT`, mariadb `1205` under the `mysql-adapter` namespace. PostgreSQL aborts
-    the transaction; MySQL rolls back the statement, and the framework then rolls back the unit of
-    work, so in both the write was not applied.
+    constructed with `reason: 'lock-timeout'` when the internal predicate
+    `isLockTimeout(error, adapterType)` holds (false unless the class is `'conflict'`, then `55P03`,
+    `ER_LOCK_WAIT_TIMEOUT` or mariadb `1205` under `mysql-adapter` on the same members, the shape of
+    `isConnectionLostMidCall`), which gives it its own problem type `lock-timeout` (§3.13) and the
+    same detail. Signals: SQLSTATE `55P03` (`lock_not_available`), mysql2 `ER_LOCK_WAIT_TIMEOUT`,
+    mariadb `1205` under the `mysql-adapter` namespace. PostgreSQL aborts the transaction; MySQL
+    rolls back the statement, and the framework then rolls back the unit of work, so in both the
+    write was not applied.
 - **Why:** Spring's error-code table maps `55P03` and MySQL 1205 to the transient
   `CannotAcquireLockException`; Rails has `LockWaitTimeout` (§12.1 T-2).
 - **Developer impact:** 400 or 409 with a fixed sentence instead of a masked 500.
@@ -481,27 +511,33 @@ row beside each new arm).
 
 ### 3.14 V12-8: a run-budget recipe that works outside this repository
 
-- **Decision:** the recipe in `docs/durable-runs.md` imports nothing from `apps/`. Its body:
+- **Decision:** the recipe in `docs/durable-runs.md` imports nothing from `apps/`. It builds the
+  quota **once**, at composition, from the application's runtime:
+  `const quota = memoryQuota(runtime)` (`docs/ai.md:375`) beside the plugin list, and the same
+  `quota` is passed to the chat route's middleware for one budget. The definition's body:
   `model: (run) => wrapLanguageModel({ model, middleware: budgetMiddleware(run, quota, runtime, prices, (record) => writeUsage(db, outbox, record)) })`,
-  where `budgetMiddleware` is the fence of `docs/ai.md` "Budget middleware" (`docs/ai.md:498`, whose
-  `BudgetScope` an `AgentRunContext` satisfies), `writeUsage` the fence of "Usage delivery"
-  (`:639`), the quota the `memoryQuota(runtime)` of that page (`:375`), the model built with the
-  provider package `docs/ai.md`'s fences already use, `runtime`, `db` and `outbox` read from
-  `run.services` by their capability tokens, and `prices` a literal `BudgetPrices`. The prose names
-  the two files the reader saved from `docs/ai.md` (`./chat.budget.ts` and `./usage.ts`) and the
-  services the application registers (database and outbox). The sentence about `budgetedModel` and
-  the paragraph about `chatQuota()` separate budgets are replaced by "pass the same `quota` to the
-  chat route's middleware for one budget".
+  where `budgetMiddleware` is the fence of `docs/ai.md` "Budget middleware" (`:498`, whose
+  `BudgetScope` an `AgentRunContext` satisfies structurally), `writeUsage` the fence of "Usage
+  delivery" (`:639`), the model built with the provider package `docs/ai.md`'s fences already use
+  (`@ai-sdk/openai-compatible`), `db` and `outbox` read from `run.services` by their capability
+  tokens, and `prices` a literal `BudgetPrices`. The prose names the two files the reader saved from
+  `docs/ai.md` (`./chat.budget.ts` and `./usage.ts`) and the services the application registers
+  (database and outbox), and keeps the sentence that a run started with `tenantId: ''` fails at its
+  first model call (`budgetMiddleware` refuses a falsy tenant, `docs/ai.md:499-500`). The sentences
+  about `budgetedModel` and about `chatQuota()` keeping separate budgets are removed.
 - **Fence gate:** `test/guide-fence-compiler.test.ts` compiles the fence through
-  `test/fixtures/snippets/fence-engine.ts`, which resolves a relative import only through
-  `writeProjectStubs` (`:894-…`). Two stubs are added there, `chat.budget.ts` (re-declaring
-  `budgetMiddleware`'s and `BudgetPrices`' signatures) and `usage.ts` (`writeUsage`'s), following
-  the Prisma-client stub precedent, and the count table (`:242`) is updated. Both root test files
-  join the Data lane for this change (C3).
+  `test/fixtures/snippets/fence-engine.ts`, which resolves a relative import only through files it
+  writes beside the scratch directory (`writeProjectStubs`, `:894-…`). The two files are not
+  hand-written: at test time the engine writes `chat.budget.ts` and `usage.ts` from the `docs/ai.md`
+  fences themselves (its `extractFences`/`assembleSource`), so the durable-runs fence compiles
+  against the real fence text and a change to `budgetMiddleware` or `writeUsage` that breaks the
+  recipe fails the gate. The count table (`:242`) is updated. Both root test files join the Data
+  lane for this change (C3).
 - **Developer impact:** the recipe copies into a scaffolded project that has saved the two
   `docs/ai.md` fences.
-- **Test home:** `test/guide-fence-compiler.test.ts` (the changed fence compiles; a stub signature
-  that drifts from `docs/ai.md`'s fence fails the same gate, since that fence is compiled too).
+- **Test home:** `test/guide-fence-compiler.test.ts` (the changed fence compiles against the
+  generated files; a negative control renames `budgetMiddleware` in a copy of the `docs/ai.md` fence
+  and the durable-runs fence then fails).
 
 ### 3.15 V12-15: a resolver array holds resolvers
 
@@ -548,7 +584,8 @@ row beside each new arm).
 ### 3.17 E-3: the conditional-write refusal names the adapter
 
 - **Decision:** `BaseRepository` takes the adapter type as an optional second constructor argument;
-  `DatabaseService` passes `_adapterType` to `InternalRepo`, and
+  `DatabaseService` passes `_adapterType` to `InternalRepo` at both construction sites
+  (`getRepository` and the unit of work's factory, `database-service.ts:333`), and
   `PrismaRepository`/`DrizzleRepository` pass theirs. `BaseRepository.updateWhere`/`deleteWhere`
   name it in `UnsupportedQueryFeatureError`, falling back to `'database-plugin'` for a directly
   constructed repository. A `'custom'` registration (D1 included) is named `'custom'`.
@@ -563,9 +600,10 @@ row beside each new arm).
   pump swallows its own abort), so `ctx.defer` cleanups run after the last store read. The wait is
   not bounded here: it settles when the store read in flight settles (`deps.store.chunks(...)` /
   `get(...)`, `respond.ts:126-140`). The inventory row becomes `kind: 'cancel-awaits-work'` with
-  `cancelSettles: 'may-hang'` and the named case "a store read with no call bound of its own (a pg
-  store without `query_timeout`)", new evidence, and no `handOver`: the row then meets the contract,
-  and the hang is the store's bound, which the database README already documents.
+  `cancelSettles: 'may-hang'`, new evidence, and a `handOver` as the test requires for a non-Core
+  `may-hang` row (`test/response-stream-cancel-inventory.test.ts:429-446`, as the gRPC rows have):
+  "Data lane: cancel() awaits a store read that has no bound of its own; bound the store (pg
+  `query_timeout`), as the database README documents".
 - **Test home:** `packages/agent-runs-plugin/test/unit/respond.test.ts` (extended: a store read held
   open — `cancel()` does not settle until it returns);
   `test/response-stream-cancel-inventory.test.ts`.
@@ -576,16 +614,18 @@ row beside each new arm).
 existing implementation still satisfies (ships in minor 0.14.0). `DriverErrorClass` and
 `classifyDriverError` are internal and stay unexported.
 
-| Exported symbol                                                                            | Kind  | Consumer / real code path that READS it                                                                                                                |
-| ------------------------------------------------------------------------------------------ | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AuditLogOptions` (`common`)                                                               | type  | `IAuditLogger.log`; `AuditService.log` reads `scope`                                                                                                   |
-| `ERROR_TYPE_BASE`, `DATABASE_PROBLEM_TYPES` (`common`, new file `errors/problem-types.ts`) | const | `DuplicateKeyError`, `InvalidFieldValueError` (`common`), this package's error classes, and `exceptions`, whose `ERROR_TYPE_BASE` export re-exports it |
-| `AuditScopeUnsupportedError` (`audit-plugin`)                                              | class | thrown by `AuditService.log` for a scope on memory/log/file; applications `instanceof` it                                                              |
-| `ForeignKeyViolationError` (`database-plugin`)                                             | class | built by `classifiedOrOriginal` for `'foreign-key'`; `errorHandler` serves its hint; `within`/`tool-runner` do not treat it as a conflict (D-8)        |
-| `NotNullViolationError` (`database-plugin`)                                                | class | built by `classifiedOrOriginal` for `'not-null'`                                                                                                       |
-| `DatabaseUnavailableError.reason`                                                          | field | read by its own constructor to pick detail and type; applications branch on it                                                                         |
-| `SerializationConflictError.reason` (`'write-conflict' \| 'lock-timeout'`)                 | field | the same                                                                                                                                               |
-| `DatabaseTimeoutError.reason` (`'bound' \| 'connection-lost'`)                             | field | the same; `classifiedOrOriginal` already picks the message by `isConnectionLostMidCall`                                                                |
+| Exported symbol                                                                            | Kind        | Consumer / real code path that READS it                                                                                                                |
+| ------------------------------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AuditLogOptions` (`common`)                                                               | type        | `IAuditLogger.log`; `AuditService.log` reads `scope`                                                                                                   |
+| `ERROR_TYPE_BASE`, `DATABASE_PROBLEM_TYPES` (`common`, new file `errors/problem-types.ts`) | const       | `DuplicateKeyError`, `InvalidFieldValueError` (`common`), this package's error classes, and `exceptions`, whose `ERROR_TYPE_BASE` export re-exports it |
+| `AuditScopeUnsupportedError` (`audit-plugin`)                                              | class       | thrown by `AuditService.log` for a scope on memory/log/file; applications `instanceof` it                                                              |
+| `ForeignKeyViolationError` (`database-plugin`)                                             | class       | built by `classifiedOrOriginal` for `'foreign-key'`; `errorHandler` serves its hint; `within`/`tool-runner` do not treat it as a conflict (D-8)        |
+| `NotNullViolationError` (`database-plugin`)                                                | class       | built by `classifiedOrOriginal` for `'not-null'`                                                                                                       |
+| `PrismaRepository`, `DrizzleRepository` (existing classes)                                 | constructor | a new optional adapter-type argument, passed by their adapters (§3.17); read by `BaseRepository`'s refusals                                            |
+| `DatabaseAuditStorage.appendIn(scope, entry)` (`audit-plugin`)                             | method      | called by `AuditService.log` when a scope is given; a third-party `IAuditStorage` may implement it                                                     |
+| `DatabaseUnavailableError.reason`                                                          | field       | read by its own constructor to pick detail and type; applications branch on it                                                                         |
+| `SerializationConflictError.reason` (`'write-conflict' \| 'lock-timeout'`)                 | field       | the same                                                                                                                                               |
+| `DatabaseTimeoutError.reason` (`'bound' \| 'connection-lost'`)                             | field       | the same; `classifiedOrOriginal` already picks the message by `isConnectionLostMidCall`                                                                |
 
 ### 4.1 Options — every option names its consumer
 
@@ -611,7 +651,7 @@ existing implementation still satisfies (ships in minor 0.14.0). `DriverErrorCla
 | `packages/database-plugin/src/adapters/dynamo/dynamo-adapter.ts`, `cosmos/cosmos-adapter.ts`                                                                      | none expected (their probe reads the classifier); listed because their behaviour changes (§3.8) |
 | `packages/database-plugin/src/repositories/base-repository.ts`, `adapters/prisma/*-repository.ts`, `adapters/drizzle/drizzle-repository.ts`                       | adapter name (§3.17)                                                                            |
 | `packages/idempotency-plugin/src/within/within.ts`                                                                                                                | `isConflict` narrowed (D-8)                                                                     |
-| `packages/agent-runs-plugin/src/runtime/ai-runtime.ts`, `loop/step-loop.ts`, `loop/tool-runner.ts`, `log/respond.ts`                                              | §3.2, D-8, §3.18                                                                                |
+| `packages/agent-runs-plugin/src/runtime/ai-runtime.ts`, `loop/step-loop.ts`, `log/respond.ts`                                                                     | §3.2, §3.18                                                                                     |
 | `packages/vector-store-plugin/src/health/indicator.ts`, `plugin/vector-store-plugin.ts`, `adapters/pgvector/pgvector-sql.ts`, `pgvector-store.ts`                 | §3.3, §3.4                                                                                      |
 | `packages/multi-tenancy-plugin/src/plugin/multi-tenancy-plugin.ts`                                                                                                | §3.15                                                                                           |
 | `test/fixtures/snippets/fence-engine.ts`, `test/guide-fence-compiler.test.ts`                                                                                     | two stubs and the count table (§3.14)                                                           |
@@ -619,26 +659,28 @@ existing implementation still satisfies (ships in minor 0.14.0). `DriverErrorCla
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                                                                                                  | src covered                                                                           | Key assertions                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `database-plugin/test/unit/classify-driver-error.test.ts` (extended)                                                                                                                                       | `errors/classify.ts`                                                                  | the signal table of §3.0 as data; every new row with a negative row beside it |
-| `database-plugin/test/unit/errors.test.ts`, `error-status-hints.test.ts` (extended)                                                                                                                        | `errors.ts`                                                                           | each class's hint field by field; the three `reason`s                         |
-| `database-plugin/test/unit/transaction-work-classification.test.ts` (new)                                                                                                                                  | `services/database-service.ts`                                                        | §3.7 table                                                                    |
-| `database-plugin/test/unit/drizzle-default-pool-stats.test.ts` (new)                                                                                                                                       | `adapters/drizzle/drizzle-adapter.ts`                                                 | §3.5                                                                          |
-| `database-plugin/test/unit/dynamo-data-source.test.ts` (extended)                                                                                                                                          | `adapters/dynamo/dynamo-data-source.ts`                                               | §3.16                                                                         |
-| `database-plugin/test/unit/nosql-readiness-probe.test.ts` (extended)                                                                                                                                       | `adapters/dynamo/dynamo-adapter.ts`, `cosmos/cosmos-adapter.ts`                       | §3.8 probe rows                                                               |
-| `database-plugin/test/unit/base-repository-conditional.test.ts` (extended)                                                                                                                                 | `repositories/base-repository.ts`, the two adapter repositories                       | §3.17                                                                         |
-| `database-plugin/test/integration/problem-type-status.test.ts` (new)                                                                                                                                       | (consumer proof through `errorHandler`)                                               | §3.13                                                                         |
-| `database-plugin/test/unit/barrel-exports.test.ts` (extended)                                                                                                                                              | `src/index.ts`                                                                        | the two new classes                                                           |
-| guarded real cells (`real-drizzle-adapter`, `real-prisma-adapter`, `real-prisma-mysql`, `real-drizzle-mysql`, `real-mongo-adapter`, `real-dynamo-adapter`, `real-bigtable-adapter`, `real-cosmos-adapter`) | real drivers                                                                          | the measured signal of every new row                                          |
-| `audit-plugin/test/unit/audit-service.test.ts`, `database-audit.test.ts`, `barrel-exports.test.ts` (extended); `test/integration/audit-in-transaction.test.ts` (new)                                       | `services/audit-service.ts`, `storage/*.ts`, `src/errors.ts`, `src/index.ts`          | §3.1                                                                          |
-| `idempotency-plugin/test/unit/within.test.ts` (extended)                                                                                                                                                   | `within/within.ts`                                                                    | D-8                                                                           |
-| `agent-runs-plugin/test/unit/step-loop.test.ts`, `ai-runtime.test.ts`, `tool-runner.test.ts`, `respond.test.ts` (extended); `test/integration/real-ai.test.ts` (extended)                                  | `runtime/ai-runtime.ts`, `loop/step-loop.ts`, `loop/tool-runner.ts`, `log/respond.ts` | §3.2, D-8, §3.18                                                              |
-| `vector-store-plugin/test/unit/health-indicator.test.ts`, `pgvector-store.test.ts`, `test/integration/vector-store-plugin.test.ts`, `conformance.test.ts` (`PGVECTOR_URL`) (extended)                      | `health/indicator.ts`, `plugin/vector-store-plugin.ts`, `adapters/pgvector/*`         | §3.3, §3.4                                                                    |
-| `multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts` (extended)                                                                                                                                   | `plugin/multi-tenancy-plugin.ts`                                                      | §3.15                                                                         |
-| `common/test/unit/problem-types.test.ts`, `duplicate-key.test.ts` (new); `barrel-exports.test.ts` (extended)                                                                                               | `errors/problem-types.ts`, `duplicate-key.ts`, `invalid-field-value.ts`               | §3.13                                                                         |
-| `exceptions` existing formatter tests                                                                                                                                                                      | `formatters/problem-details.ts`                                                       | `ERROR_TYPE_BASE` value unchanged                                             |
-| `test/response-stream-cancel-inventory.test.ts`, `test/guide-fence-compiler.test.ts`                                                                                                                       | (inventory, fence gate)                                                               | §3.18, §3.14                                                                  |
+| Test file                                                                                                                                                                                                                                                                                                                                                                                  | src covered                                                                                               | Key assertions                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `database-plugin/test/unit/classify-driver-error.test.ts` (extended)                                                                                                                                                                                                                                                                                                                       | `errors/classify.ts`                                                                                      | the signal table of §3.0 as data; every new row with a negative row beside it |
+| `database-plugin/test/unit/errors.test.ts`, `error-status-hints.test.ts` (extended)                                                                                                                                                                                                                                                                                                        | `errors.ts`                                                                                               | each class's hint field by field; the three `reason`s                         |
+| `database-plugin/test/unit/transaction-work-classification.test.ts` (new)                                                                                                                                                                                                                                                                                                                  | `services/database-service.ts`                                                                            | §3.7 table                                                                    |
+| `database-plugin/test/unit/drizzle-default-pool-stats.test.ts` (new)                                                                                                                                                                                                                                                                                                                       | `adapters/drizzle/drizzle-adapter.ts`                                                                     | §3.5                                                                          |
+| `database-plugin/test/unit/dynamo-data-source.test.ts` (extended)                                                                                                                                                                                                                                                                                                                          | `adapters/dynamo/dynamo-data-source.ts`                                                                   | §3.16                                                                         |
+| `database-plugin/test/unit/nosql-readiness-probe.test.ts` (extended)                                                                                                                                                                                                                                                                                                                       | `adapters/dynamo/dynamo-adapter.ts`, `cosmos/cosmos-adapter.ts`                                           | §3.8 probe rows                                                               |
+| `database-plugin/test/unit/base-repository-conditional.test.ts` (extended)                                                                                                                                                                                                                                                                                                                 | `repositories/base-repository.ts`, the two adapter repositories                                           | §3.17                                                                         |
+| `database-plugin/test/integration/problem-type-status.test.ts` (new)                                                                                                                                                                                                                                                                                                                       | (consumer proof through `errorHandler`)                                                                   | §3.13                                                                         |
+| `database-plugin/test/unit/barrel-exports.test.ts` (extended)                                                                                                                                                                                                                                                                                                                              | `src/index.ts`                                                                                            | the two new classes                                                           |
+| guarded real cells (`real-drizzle-adapter`, `real-prisma-adapter`, `real-prisma-mysql`, `real-drizzle-mysql`, `real-mongo-adapter`, `real-dynamo-adapter`, `real-bigtable-adapter`, `real-cosmos-adapter`)                                                                                                                                                                                 | real drivers                                                                                              | the measured signal of every new row                                          |
+| `audit-plugin/test/unit/audit-service.test.ts`, `database-audit.test.ts`, `barrel-exports.test.ts` (extended); `test/integration/audit-in-transaction.test.ts` (new)                                                                                                                                                                                                                       | `services/audit-service.ts`, `storage/*.ts`, `src/errors.ts`, `src/index.ts`                              | §3.1                                                                          |
+| `idempotency-plugin/test/unit/within.test.ts` (extended)                                                                                                                                                                                                                                                                                                                                   | `within/within.ts`                                                                                        | D-8                                                                           |
+| `agent-runs-plugin/test/unit/step-loop.test.ts`, `ai-runtime.test.ts`, `tool-runner.test.ts`, `respond.test.ts` (extended); `test/integration/real-ai.test.ts` (extended)                                                                                                                                                                                                                  | `runtime/ai-runtime.ts`, `loop/step-loop.ts`, `log/respond.ts` (tool-runner: unchanged, a regression row) | §3.2, D-8, §3.18                                                              |
+| `vector-store-plugin/test/unit/health-indicator.test.ts`, `pgvector-store.test.ts`, `test/integration/vector-store-plugin.test.ts`, `conformance.test.ts` (`PGVECTOR_URL`) (extended)                                                                                                                                                                                                      | `health/indicator.ts`, `plugin/vector-store-plugin.ts`, `adapters/pgvector/*`                             | §3.3, §3.4                                                                    |
+| `multi-tenancy-plugin/test/unit/multi-tenancy-plugin.test.ts` (extended)                                                                                                                                                                                                                                                                                                                   | `plugin/multi-tenancy-plugin.ts`                                                                          | §3.15                                                                         |
+| `common/test/unit/problem-types.test.ts`, `duplicate-key.test.ts` (new); `barrel-exports.test.ts` (extended)                                                                                                                                                                                                                                                                               | `errors/problem-types.ts`, `duplicate-key.ts`, `invalid-field-value.ts`                                   | §3.13                                                                         |
+| `exceptions` existing formatter tests                                                                                                                                                                                                                                                                                                                                                      | `formatters/problem-details.ts`                                                                           | `ERROR_TYPE_BASE` value unchanged                                             |
+| `common/test/unit/invalid-field-value.test.ts` (extended)                                                                                                                                                                                                                                                                                                                                  | `errors/invalid-field-value.ts`                                                                           | its type and title                                                            |
+| Existing assertions that change by design (edit them; never revert the behaviour): `database-plugin/test/integration/versioned-write-status.test.ts:75,124`, `duplicate-key-status.test.ts:107`, `real-drizzle-adapter.test.ts:1658`, `real-prisma-adapter.test.ts:758` (`about:blank` → the class's type); `classify-driver-error.test.ts:121` (`{ name: 'TimeoutError' }` → `'timeout'`) | —                                                                                                         | D-5, §3.8                                                                     |
+| `test/response-stream-cancel-inventory.test.ts`, `test/guide-fence-compiler.test.ts`                                                                                                                                                                                                                                                                                                       | (inventory, fence gate)                                                                                   | §3.18, §3.14                                                                  |
 
 ## 7. Verification gates
 
@@ -649,7 +691,7 @@ pnpm run fmt:check
 pnpm run lint
 pnpm run check
 pnpm run test:tooling
-/home/dkpaul91/.local/bin/setu-suite-queue pnpm test:coverage database-plugin audit-plugin agent-runs-plugin vector-store-plugin multi-tenancy-plugin exceptions common
+/home/dkpaul91/.local/bin/setu-suite-queue pnpm test:coverage database-plugin idempotency-plugin audit-plugin agent-runs-plugin vector-store-plugin multi-tenancy-plugin exceptions common
 /home/dkpaul91/.local/bin/setu-suite-queue pnpm run ci:local   # once, on the final commit
 pnpm run test:deno-lane
 pnpm run release:publish --dry-run
@@ -687,7 +729,8 @@ the committed-tree audit:
 
 - S-1: no new served string carries driver text, a constraint or column name, a value, or an id;
   each new detail is a fixed sentence (assert field by field).
-- S-2: problem `type` URIs are constants; nothing request- or driver-derived enters them.
+- S-2: problem `type` URIs are constants (each class's JSDoc links `docs/problem-types.md`, since
+  the URIs themselves resolve nowhere); nothing request- or driver-derived enters them.
 - S-3: the transaction-work rule cannot turn an application's own 4xx/`HttpError` into a database
   error (negative control).
 - S-4: the audit scope path writes the same redacted row as the client path (negative control: a
@@ -710,16 +753,16 @@ the committed-tree audit:
 Each is written into §3 as the recommended option, so the plan is complete if every recommendation
 is taken; a different answer changes only the named section.
 
-| #   | Section     | Question                                                                                                                                                                                           | Recommended                                                                                                                                                                                                                                                 | Alternative and its cost                                                                                                                                                                                                                           |
-| --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D-1 | §3.1, §3.13 | Where do the `common` edits ship? Existing contracts: `IAuditLogger.log` options, `DuplicateKeyError`'s and `InvalidFieldValueError`'s problem types. Additive: the new `errors/problem-types.ts`. | A small "M143 Core follow-up" pull request first, as #612/#613 did, then this letter on top of it (the lane rule, C-31).                                                                                                                                    | In this letter, with the lanes table naming the files: one pull request fewer, against the written rule.                                                                                                                                           |
-| D-2 | §3.1        | A scope given to the memory, log or file audit storage.                                                                                                                                            | Reject with `AuditScopeUnsupportedError`; nothing written.                                                                                                                                                                                                  | Write at once and warn once: keeps tests on memory storage working, and keeps an entry for a write that rolls back.                                                                                                                                |
-| D-3 | §3.7        | Which errors the transaction's own work throws are classified.                                                                                                                                     | The thrown driver error, its Prisma adapter cause, or drizzle's wrapper around one; string-namespace codes, Prisma kinds, Mongo labels and pg/SQLite anchors only (no errno, no AWS timeout names, no numeric codes); plus server verdicts at `commit()`.   | Classify the whole cause chain: also catches an app error wrapping a driver error, and replaces the app's error. Or document only (today), which leaves X38-1 open.                                                                                |
-| D-4 | §3.6        | A pool acquire timeout.                                                                                                                                                                            | Same class, `reason: 'pool-saturated'`, its own detail and type; log level unchanged (`error` per served 5xx).                                                                                                                                              | Also log it at `warn`: needs a log-level channel on the hint, a `common` change; HikariCP logs at DEBUG, EF Core at Error, Spring's health check at WARN (T-4).                                                                                    |
-| D-5 | §3.13       | Problem `type` URIs.                                                                                                                                                                               | The committed base `https://setu-ts.dev/errors/<slug>` (as `validation-plugin`'s `/errors/validation`), its source moved to `common`; one type per classified driver-condition class, as the ROADMAP outcome lists; `docs/problem-types.md` documents them. | `tag:setu-ts.dev,2026:<slug>` (RFC 9457 allows non-resolving types), a second scheme beside the committed one; or only the three 409s the row names, short of the ROADMAP outcome.                                                                 |
-| D-6 | §3.9        | Prisma `P1017` / `ConnectionClosed`.                                                                                                                                                               | 504 (outcome unknown), the M128 rule.                                                                                                                                                                                                                       | 503, as the bare `ECONNRESET` it maps from: consistent with a documented limitation, and says "not applied" for a write that may have run.                                                                                                         |
-| D-7 | §3.11       | Statuses for FK and NOT NULL.                                                                                                                                                                      | FK 409 `ForeignKeyViolationError`; NOT NULL 400 `NotNullViolationError`.                                                                                                                                                                                    | Both 409 under one `ConstraintViolationError`, as Spring Data REST answers every integrity violation (T-2).                                                                                                                                        |
-| D-8 | §3.7, §3.11 | First-party code that treats any `409` as a conflict (`idempotency-plugin` `within`, `agent-runs` tool runner, `sdk` keyed retry).                                                                 | Narrow `within` and the tool runner to `DuplicateKeyError`/`SerializationConflictError` (by class and type); `idempotency-plugin` joins the Data lane for it; the SDK keeps retrying a keyed 409 (bounded; handed to the CLI lane).                         | Give FK a status no consumer reads as a conflict (422): no consumer edits, unlike Spring Data REST's 409. Or leave the consumers: an FK at a `within` commit reads "another call holds this key; retry" and a tool's FK ends the attempt silently. |
+| #   | Section     | Question                                                                                                                                                                                           | Recommended                                                                                                                                                                                                                                                                                               | Alternative and its cost                                                                                                                                                                                                                  |
+| --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-1 | §3.1, §3.13 | Where do the `common` edits ship? Existing contracts: `IAuditLogger.log` options, `DuplicateKeyError`'s and `InvalidFieldValueError`'s problem types. Additive: the new `errors/problem-types.ts`. | A small "M143 Core follow-up" pull request first, as #612/#613 did, then this letter on top of it (the lane rule, C-31).                                                                                                                                                                                  | In this letter, with the lanes table naming the files: one pull request fewer, against the written rule.                                                                                                                                  |
+| D-2 | §3.1        | A scope given to the memory, log or file audit storage.                                                                                                                                            | Reject with `AuditScopeUnsupportedError`; nothing written.                                                                                                                                                                                                                                                | Write at once and warn once: keeps tests on memory storage working, and keeps an entry for a write that rolls back.                                                                                                                       |
+| D-3 | §3.7        | Which errors the transaction's own work throws are classified.                                                                                                                                     | The thrown driver error, its Prisma adapter cause, or drizzle's wrapper around one; string-namespace codes, Prisma kinds, Mongo labels and pg/SQLite anchors only (no errno, no AWS timeout names, no numeric codes); plus server verdicts at `commit()`.                                                 | Classify the whole cause chain: also catches an app error wrapping a driver error, and replaces the app's error. Or document only (today), which leaves X38-1 open.                                                                       |
+| D-4 | §3.6        | A pool acquire timeout.                                                                                                                                                                            | Same class, `reason: 'pool-saturated'`, its own detail and type; log level unchanged (`error` per served 5xx).                                                                                                                                                                                            | Also log it at `warn`: needs a log-level channel on the hint, a `common` change; HikariCP logs at DEBUG, EF Core at Error, Spring's health check at WARN (T-4).                                                                           |
+| D-5 | §3.13       | Problem `type` URIs.                                                                                                                                                                               | The committed base `https://setu-ts.dev/errors/<slug>` (as `validation-plugin`'s `/errors/validation`), its source moved to `common`; one type per classified driver-condition class, as the ROADMAP outcome lists; `docs/problem-types.md` documents them.                                               | `tag:setu-ts.dev,2026:<slug>` (RFC 9457 allows non-resolving types), a second scheme beside the committed one; or only the three 409s the row names, short of the ROADMAP outcome.                                                        |
+| D-6 | §3.9        | Prisma `P1017` / `ConnectionClosed`.                                                                                                                                                               | 504 (outcome unknown), the M128 rule.                                                                                                                                                                                                                                                                     | 503, as the bare `ECONNRESET` it maps from: consistent with a documented limitation, and says "not applied" for a write that may have run.                                                                                                |
+| D-7 | §3.11       | Statuses for FK and NOT NULL.                                                                                                                                                                      | FK 409 `ForeignKeyViolationError`; NOT NULL 400 `NotNullViolationError`.                                                                                                                                                                                                                                  | Both 409 under one `ConstraintViolationError`, as Spring Data REST answers every integrity violation (T-2).                                                                                                                               |
+| D-8 | §3.7, §3.11 | First-party code that treats any `409` as a conflict (`idempotency-plugin` `within`; `sdk` keyed retry).                                                                                           | Narrow `within`'s `isConflict` to `DuplicateKeyError` (`instanceof`) and the `write-conflict`/`lock-timeout` types, so an FK at a `within` commit fails the run as `store-failed`; `idempotency-plugin` joins the Data lane for it; the SDK keeps retrying a keyed 409 (bounded; handed to the CLI lane). | Give FK a status no consumer reads as a conflict (422): no consumer edits, unlike Spring Data REST's 409. Or leave `within`: an FK at its commit reads "another call holds this key; retry" and the tool is retried as a holder conflict. |
 
 ### 12.1 Framework comparison (primary sources, read 2026-11-27)
 
@@ -821,5 +864,7 @@ whose `lastError` is the `APICallError` (`statusCode`, `isRetryable`).
 transaction-work paragraph, the pool default, DynamoDB consistency), `AGENT_CARD.md`,
 `packages/audit-plugin/README.md`, `packages/agent-runs-plugin/README.md`,
 `packages/vector-store-plugin/README.md`, `packages/multi-tenancy-plugin/README.md`,
-`packages/exceptions/README.md`, `docs/problem-types.md`, `docs/durable-runs.md`, `PUBLIC_API.md`,
-`CHANGELOG.md`, `docs/upgrading.md`, the ROADMAP M143h row list (E-1) and lanes table (C3).
+`packages/exceptions/README.md`, `packages/idempotency-plugin/README.md` (D-8),
+`packages/common/README.md` (exports table), `docs/problem-types.md`, `docs/durable-runs.md`,
+`PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, the ROADMAP M143h row list (E-1) and lanes
+table (C3).
