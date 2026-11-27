@@ -1,10 +1,11 @@
 # Milestone 143h — Database errors a client can act on, and store signals (`@setu-ts/database-plugin` + 5)
 
-> **Status:** Approved by the maintainer on 2026-11-27 (IST): D-1 to D-8 as recommended (§12).
-> Implementation, the Core follow-up of D-1 included, waits for the maintainer's explicit go.
-> Branch: `feat/m143h-database-errors-store-signals`, cut from `origin/develop` at `1f21e029a`
-> (after #617 M143q and #618 M143c). `develop` and `main` are protected; all work, implementation
-> and fixes, stays on this branch until it merges through one pull request into `develop`.
+> **Status:** Approved by the maintainer on 2026-11-27 (IST): D-2 to D-8 as recommended, and D-1
+> changed to its alternative (the `common` edits ship in this pull request; §12). Implementation
+> waits for the maintainer's explicit go. Branch: `feat/m143h-database-errors-store-signals`, cut
+> from `origin/develop` at `1f21e029a` (after #617 M143q and #618 M143c). `develop` and `main` are
+> protected; all work, implementation and fixes, stays on this branch until it merges through one
+> pull request into `develop`.
 
 ## 0. Objective & scope
 
@@ -26,8 +27,9 @@ Code changes are in the Data lane's packages: `database-plugin`, `exceptions` (`
 source and docs, §3.13), `audit-plugin`, `agent-runs-plugin`, `vector-store-plugin`,
 `multi-tenancy-plugin`, their tests and READMEs, plus the per-letter entries in `PUBLIC_API.md`,
 `CHANGELOG.md` and `docs/upgrading.md`. Changes in `packages/common` (D-1, D-5) include edits to
-existing `common` classes, which the lane rule routes through the Core lane; §12 puts that to the
-maintainer. Files outside the lane's packages are named in the lanes table first (C3):
+existing `common` contracts, which the lane rule routes through the Core lane; by the maintainer's
+decision D-1 they ship in this pull request instead, named in the lanes table as an approved
+out-of-lane edit. Files outside the lane's packages are named in the lanes table first (C3):
 `docs/durable-runs.md` and `docs/problem-types.md`, the agent-runs row of
 `test/response-stream-cancel-inventory.test.ts`, `test/guide-fence-compiler.test.ts` and
 `test/fixtures/snippets/fence-engine.ts` (§3.14), `packages/idempotency-plugin` (§3.7, D-8; in no
@@ -155,8 +157,11 @@ row beside each new arm).
   are `toAuditRow`'s snake_case keys — `resource_id`, `user_id` — since the SQL adapters refuse
   unknown fields, M119e; the README recipe says so). A memory-storage test that passes a scope gets
   the named rejection; the way out is `storage: 'database'` or dropping the scope.
-- **Lane routing (D-1):** this edits an existing `common` contract. §12 asks whether it ships as a
-  small Core follow-up pull request first (the lane rule, as #612/#613 did) or in this letter.
+- **Lane routing (D-1, decided):** this edits an existing `common` contract. By the maintainer's
+  decision of 2026-11-27 ("Do D1 in the same PR") it ships in M143h's own pull request, with no
+  separate Core follow-up. This departs from the lane rule that a change to an existing `common`
+  contract is made by the Core lane first (C-31); the `common` files are named in the lanes table as
+  a maintainer-approved out-of-lane edit (C3).
 - **Test home:** `packages/audit-plugin/test/unit/audit-service.test.ts` and
   `database-audit.test.ts` (scoped write reaches `scope.getRepository(table).create` with
   `toAuditRow`'s row; no scope uses the client; memory, log and file reject
@@ -499,7 +504,8 @@ row beside each new arm).
 - **The `default` format** is unchanged (it ignores `problem`); the exceptions README says that
   distinguishing by type needs a Problem Details format, which every starter and template uses.
 - **`common` edits** (`DuplicateKeyError`, `InvalidFieldValueError` and `ERROR_TYPE_BASE`'s source)
-  share D-1's routing question in §12.
+  ship in this pull request by D-1 (decided: same pull request, an approved departure from the lane
+  rule).
 - **Developer impact:** under `rfc9457` the body's `type` and `title` change from `about:blank` and
   `Conflict` to the class's own; `status` and `detail` are unchanged.
 - **Test home:** `test/unit/error-status-hints.test.ts` (each class's hint, field by field, with the
@@ -750,11 +756,12 @@ the committed-tree audit:
 
 ## 12. Decisions for the maintainer (decided 2026-11-27)
 
-**Decided 2026-11-27 (maintainer: "Yes, all eight"):** every decision below takes its recommended
-column, as already written into §3.
+**Decided 2026-11-27:** the maintainer took every recommendation ("Yes, all eight"), then changed
+D-1 to its alternative ("Do D1 in the same PR"). §3 is written to match.
 
-- D-1: the `common` edits ship first as a small "M143 Core follow-up" pull request; M143h builds on
-  it.
+- D-1 (changed by the maintainer: "Do D1 in the same PR"): the `common` edits ship in M143h's own
+  pull request, with no Core follow-up; a departure from the lane rule (C-31), recorded in the lanes
+  table.
 - D-2: a scope on the memory, log or file audit storage rejects with `AuditScopeUnsupportedError`.
 - D-3: only the thrown driver error, its Prisma adapter cause, or drizzle's wrapper is classified in
   the transaction catch, from database-only signals; plus server verdicts at `commit()`.
