@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker, MessageHandler } from '@setu-ts/common';
+import type { IMessageBroker, MessageHandler, PublishOptions } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { MessagingPlugin } from '../../src/index.ts';
 import type { ICustomMessageBroker } from '../../src/index.ts';
 import { asBrokerAdapter } from '../../src/brokers/custom-adapter.ts';
+import { PUBLISH_REQUIRE_ROUTE } from '../../src/brokers/publish-options.ts';
 import { TelemetryService } from '../../../telemetry-plugin/src/services/telemetry-service.ts';
 import { createFakeTracerHost } from '../../../telemetry-plugin/test/fixtures/fake-tracer-host.ts';
 
@@ -36,6 +37,48 @@ function custom(headers: boolean): ICustomMessageBroker {
 }
 
 describe('Custom broker contract', () => {
+  it.each(
+    [false, true].flatMap((headers) =>
+      (['publish', 'publishWithHeaders'] as const).map((entry) => ({ headers, entry })),
+    ),
+  )(
+    'preserves required-route intent through $entry, header channel=$headers',
+    async ({ headers, entry }) => {
+      const instance = custom(headers);
+      const publish = vi.fn<ICustomMessageBroker['publish']>(() => Promise.resolve());
+      const publishWithHeaders = vi.fn<NonNullable<ICustomMessageBroker['publishWithHeaders']>>(
+        () => Promise.resolve(),
+      );
+      Object.assign(instance, { publish, ...(headers ? { publishWithHeaders } : {}) });
+      const readMarker = vi.fn(() => true);
+      const userHeaders = Object.freeze({ 'x-user': 'value' });
+      const options = Object.freeze(
+        Object.defineProperty(
+          { orderingKey: 'ordered', deduplicationId: 'deduplicated', headers: userHeaders },
+          PUBLISH_REQUIRE_ROUTE,
+          { get: readMarker, enumerable: true },
+        ),
+      );
+      const adapter = asBrokerAdapter(instance);
+      if (entry === 'publish') await adapter.publish('orders', {}, options);
+      else await adapter.publishWithHeaders('orders', {}, { traceparent: 'parent' }, options);
+      const received = headers ? publishWithHeaders.mock.calls[0]![3] : publish.mock.calls[0]![2];
+      expect(
+        (received as PublishOptions & { [PUBLISH_REQUIRE_ROUTE]?: unknown })[PUBLISH_REQUIRE_ROUTE],
+      ).toBe(true);
+      expect(readMarker).toHaveBeenCalledTimes(1);
+      expect(received).toMatchObject({
+        orderingKey: 'ordered',
+        deduplicationId: 'deduplicated',
+        headers: { 'x-user': 'value' },
+      });
+      expect(received).not.toBe(options);
+      expect(Object.isFrozen(options)).toBe(true);
+      expect(options.headers).toBe(userHeaders);
+      expect(Object.getOwnPropertyDescriptor(options, PUBLISH_REQUIRE_ROUTE)?.get).toBe(readMarker);
+    },
+  );
+
   it.each(['publish', 'request'] as const)(
     'warns only when %s drops headers',
     async (operation) => {

@@ -16,6 +16,7 @@
 import type { ICustomMessageBroker } from '../interfaces/index.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import {
+  PUBLISH_REQUIRE_ROUTE,
   registerRoutedPublish,
   routedPublishAvailable,
   validatePublishOptions,
@@ -82,7 +83,14 @@ export function asBrokerAdapter(
       await adapter.publishWithHeaders(topic, message, {}, options);
     },
     publishWithHeaders: async (topic, message, headers, options) => {
-      const validated = await validatePublishOptions(options);
+      const requireRoute =
+        (options as typeof options & { readonly [PUBLISH_REQUIRE_ROUTE]?: unknown })?.[
+          PUBLISH_REQUIRE_ROUTE
+        ] === true;
+      const parsed = await validatePublishOptions(options);
+      const validated = requireRoute
+        ? Object.freeze({ ...parsed, [PUBLISH_REQUIRE_ROUTE]: true })
+        : parsed;
       if (instance.publishWithHeaders !== undefined) {
         await instance.publishWithHeaders(topic, message, headers, validated);
       } else {
