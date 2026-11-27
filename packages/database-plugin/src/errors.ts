@@ -573,8 +573,11 @@ export class SerializationConflictError extends Error {
 
 /**
  * Thrown when the database, its connection pool, or its network is
- * temporarily unreachable (X35-2, M90f). The operation did **not** happen and
- * **may be retried**.
+ * temporarily unreachable (X35-2, M90f). In the usual case the operation did
+ * **not** happen and **may be retried**; a connection reset on a call that
+ * was already sent (a bare `ECONNRESET`, `EPIPE` or `MongoNetworkError`) can
+ * also read as unavailable, so retry a write only when it is idempotent (see
+ * `docs/problem-types.md`).
  *
  * The condition reaches the client as `503 Service Unavailable` — the
  * load-shedding status — instead of a masked `500`. **No `Retry-After` is

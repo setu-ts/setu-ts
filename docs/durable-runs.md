@@ -88,8 +88,9 @@ A run has no request, but `AgentRunContext` carries the tenant, principal, abort
 required by `BudgetScope`. Save the **Budget middleware** and **Usage delivery** fences from
 [the AI guide](ai.md) as `./chat.budget.ts` and `./usage.ts`. Register the database and outbox
 services (`CAPABILITIES.DATABASE` and `CAPABILITIES.OUTBOX`) in the application. Build the quota
-once at composition using the application runtime, and pass that same quota to the chat route's
-budget middleware so HTTP calls and durable runs share one budget.
+once at composition and pass that same quota to the chat route's budget middleware, so HTTP calls
+and durable runs share one budget. The application's own runtime exists only after `app.start()`, so
+pass `createRuntimeServices()` from `@setu-ts/runtime`, created once beside the plugin list.
 
 ```ts
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';

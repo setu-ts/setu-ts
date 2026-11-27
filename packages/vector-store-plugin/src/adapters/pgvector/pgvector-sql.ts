@@ -108,7 +108,8 @@ export function createExtensionStatement(sql: SqlTag): Statement {
  *
  * @param sql - The `sql` tag
  * @param spec - The collection
- * @returns The statement; one row `{ dimensions, source_index, vector_index, source_version }` or none
+ * @returns The statement; one row `{ dimensions, source_index, vector_index, source_version,
+ *   vector_index_present, source_index_present }` or none
  */
 export function describeStatement(sql: SqlTag, spec: VectorCollectionSpec): Statement {
   const { table, sourceIndex, vectorIndex } = tableNames(spec);

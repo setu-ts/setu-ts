@@ -16,12 +16,12 @@
  * @internal
  */
 export function errorLabel(error: unknown): string {
-  if (!(error instanceof Error)) return typeof error;
-  let name: unknown;
   try {
-    name = error.name;
+    // `instanceof` runs a Proxy's `getPrototypeOf` trap, so it is inside too.
+    if (!(error instanceof Error)) return typeof error;
+    const name: unknown = error.name;
+    return typeof name === 'string' ? name : typeof name;
   } catch {
     return 'object';
   }
-  return typeof name === 'string' ? name : typeof name;
 }

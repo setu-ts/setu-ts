@@ -723,7 +723,11 @@ function safeMembers(value: object): DriverErrorMembers | undefined {
   }
 }
 
-/** Read own names only: an inherited lookup must not jump beyond the eight-hop bound. */
+/**
+ * Collects `name` along the prototype chain, at most eight levels. Each level
+ * reads only its OWN `name` descriptor, so an inherited lookup cannot reach
+ * past the bound; a getter runs against the original value.
+ */
 function prototypeNames(value: object): string[] {
   const names: string[] = [];
   const visited = new Set<object>();

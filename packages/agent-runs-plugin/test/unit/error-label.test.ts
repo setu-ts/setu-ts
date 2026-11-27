@@ -34,3 +34,20 @@ describe('errorLabel', () => {
     expect(errorLabel(error)).toBe('object');
   });
 });
+
+describe('errorLabel with a hostile Proxy', () => {
+  it('labels a revoked Proxy and a throwing getPrototypeOf trap without throwing', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    expect(errorLabel(proxy)).toBe('object');
+    const trap = new Proxy(
+      {},
+      {
+        getPrototypeOf: () => {
+          throw new Error('boom');
+        },
+      },
+    );
+    expect(errorLabel(trap)).toBe('object');
+  });
+});

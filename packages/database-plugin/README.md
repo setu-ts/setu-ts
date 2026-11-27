@@ -1727,7 +1727,8 @@ the transaction's next statement answers `503`.
 a driver error thrown by a native handle, including `getDrizzleTransaction`, is classified from its
 own database-specific signals or a Drizzle query wrapper. An application error with a driver cause
 stays itself, including an error carrying an HTTP status hint; bound values in its Drizzle cause are
-still scrubbed. Already-classified repository errors keep their hints. Generic errno codes,
+still scrubbed. A frozen error whose cause must be relinked is replaced by a scrubbed copy that
+keeps its status. Already-classified repository errors keep their hints. Generic errno codes,
 AWS/Cosmos timeout names and numeric codes are excluded here, so a refused webhook is not reported
 as database unavailability. Outside a transaction, `getDrizzleDatabase` errors reach the application
 as thrown; inspect the Drizzle `cause` when handling them. Value length/type refusals require a

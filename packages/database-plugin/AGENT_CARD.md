@@ -54,7 +54,7 @@ await db.transaction(async (uow) => {
 - `query` rejects on memory; `migrate` on every adapter.
 - DynamoDB/Cosmos/Bigtable calls end at `requestTimeoutMs` (15000, `0` off): 504.
 - `/ready`: DynamoDB/Bigtable read `readinessEntity`; Cosmos `database.read()`.
-- pg releases include native queries; hung pools fail readiness.
+- A full pg pool with no clean release in 10 s fails readiness.
 
 ## Other options
 
