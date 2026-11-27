@@ -79,8 +79,17 @@ interface Client {
 const openClients = new Set<WebSocket>();
 const openRawSockets = new Set<Socket>();
 
-/** Closes every tracked client and waits until each has closed. */
+/** How long one client may take to close before the cleanup fails. */
+const CLOSE_TIMEOUT_MS = 5000;
+
+/**
+ * Closes every tracked client and waits until each has closed, then until the
+ * server is back at its baseline: no member in any room the tests use, and no
+ * link at the hub. A client that does not close in time, or a server that
+ * keeps a member, fails the cleanup rather than skewing a later test.
+ */
 async function closeTracked(): Promise<void> {
+  const stuck: string[] = [];
   const closing = [...openClients].map(
     (socket) =>
       new Promise<void>((resolve) => {
@@ -88,7 +97,10 @@ async function closeTracked(): Promise<void> {
           resolve();
           return;
         }
-        const timer = setTimeout(resolve, 2000);
+        const timer = setTimeout(() => {
+          stuck.push(socket.url);
+          resolve();
+        }, CLOSE_TIMEOUT_MS);
         socket.addEventListener('close', () => {
           clearTimeout(timer);
           resolve();
@@ -96,10 +108,47 @@ async function closeTracked(): Promise<void> {
         if (socket.readyState !== WebSocket.CLOSING) socket.close(1000);
       }),
   );
-  await Promise.all(closing);
+  const rawClosing = [...openRawSockets].map(
+    (raw) =>
+      new Promise<void>((resolve) => {
+        if (raw.closed) {
+          resolve();
+          return;
+        }
+        const timer = setTimeout(() => {
+          stuck.push('raw socket');
+          resolve();
+        }, CLOSE_TIMEOUT_MS);
+        raw.once('close', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        raw.destroy();
+      }),
+  );
+  await Promise.all([...closing, ...rawClosing]);
   openClients.clear();
-  for (const raw of openRawSockets) raw.destroy();
   openRawSockets.clear();
+  if (stuck.length > 0) throw new Error(`cleanup: clients did not close: ${stuck.join(', ')}`);
+  await serverAtBaseline();
+}
+
+/**
+ * Waits until every room the tests use is empty on both Workers and the hub
+ * holds no link. A vanished client's link takes up to about 15 s to close.
+ */
+async function serverAtBaseline(): Promise<void> {
+  const reads = ['/a/size', '/b/size', '/a/kept/size', '/b/kept/size', '/hub-count'];
+  const deadline = Date.now() + 20_000;
+  let last: string[] = [];
+  while (Date.now() < deadline) {
+    last = await Promise.all(reads.map(async (path) => (await text(path)).body));
+    if (last.every((value) => value === '0')) return;
+    await sleep(100);
+  }
+  throw new Error(
+    `cleanup: server not at baseline: ${reads.map((r, i) => `${r}=${last[i]}`).join(' ')}`,
+  );
 }
 
 /** A raw TCP connection to the front Worker, tracked for cleanup. */

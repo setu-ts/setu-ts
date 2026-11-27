@@ -161,6 +161,13 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       if (this.#opening !== undefined) keepAliveQuietly(this.#options.waitUntil, this.#opening);
       return;
     }
+    if (this.#socket === undefined && this.#timer === undefined && this.#opening !== undefined) {
+      // An open is in flight with nothing to send: `#attach` closes its socket
+      // when it arrives. Kept alive past this connection's request, or a
+      // request that has ended takes that close with it and the hub keeps the
+      // socket open.
+      keepAliveQuietly(this.#options.waitUntil, this.#opening);
+    }
     if (this.#queue.length > 0) {
       // Closed while waiting to reopen: nothing can carry these any more.
       this.#options.logger?.()?.warn('cloudflare: backplane link closed with frames unsent', {

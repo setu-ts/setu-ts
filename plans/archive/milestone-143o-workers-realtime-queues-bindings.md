@@ -1610,3 +1610,12 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as
       `StorageService`'s for every provider. An old upgrade note points to the current Workers pins.
       The Workers limitations table names the Durable Object arm and the dead-letter target.
+- **CodeRabbit, second round on thread 4716760572 (e2e cleanup).** `closeTracked` now waits for
+  every WebSocket and raw-socket close and fails on a 5 s timeout. It then waits for the server's
+  baseline (`/a/size`, `/b/size`, `/a/kept/size`, `/b/kept/size`, `/hub-count` all `0`), or fails.
+  - **A real leak, found by the baseline check.** A link closed while its open was in flight, with
+    nothing queued, did not hand the open to `waitUntil`. On workerd the socket that arrived after
+    the connection's request ended was never closed, and the hub kept it. The Worker-to-Worker test
+    left one, and the next test's baseline caught it.
+  - **Fix.** `ConnectionLink.close` keeps such an open alive.
+  - **Tests.** A unit test, and the e2e baseline. Both fail without the fix.

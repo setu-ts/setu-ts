@@ -465,6 +465,31 @@ describe('ConnectionLink', () => {
     expect(namespace.clients[0]?.closed).toBe(true);
   });
 
+  it('hands an open in flight to waitUntil when closed with nothing queued, and closes its socket', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const held: Promise<unknown>[] = [];
+    const early = new ConnectionLink({
+      hub: () => namespace.get(namespace.idFromName('chat')),
+      binding: 'REALTIME',
+      topic: 'chat',
+      connectionId: 'c',
+      deliver: () => {},
+      timers: manualTimers(),
+      waitUntil: (p) => {
+        held.push(p);
+      },
+    });
+
+    // Closed before its socket arrives: the close of that socket must outlive
+    // this connection's request, or the hub keeps it open.
+    early.close();
+    expect(held).toHaveLength(1);
+    await held[0];
+
+    expect(namespace.clients[0]?.closed).toBe(true);
+    expect(namespace.state('chat').getWebSockets()).toHaveLength(0);
+  });
+
   it('hands an early close flush to waitUntil, and warns when closed while waiting to reopen', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const held: Promise<unknown>[] = [];
