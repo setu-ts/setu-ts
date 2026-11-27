@@ -80,10 +80,11 @@ itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the 
   The rate window uses ten buckets of `timeout / 10` ms: expiry is bucket-granular, so a call counts
   for between `0.9 * timeout` and `timeout`. Success never clears failures. Only a successful
   half-open probe resets the window. Already-aborted calls are not recorded. The breaker records the
-  result of its inner layers (retry and timeout): rejection is failure, resolution is success. With
-  a timeout enabled, its rejection counts as failure even if the function ignores the signal and
-  later resolves. Without a timeout, a function ignoring a mid-flight abort and resolving records
-  success.
+  result of its inner layers (retry and timeout): rejection is failure, resolution is success. It
+  sees the final result after retries, not each attempt: a timed-out attempt followed by a
+  successful retry records success. With a timeout and no successful retry, the timeout counts as
+  failure even if the function ignores the signal and later resolves. Without a timeout, a function
+  ignoring a mid-flight abort and resolving records success.
 - Policies use the shared `breakerPolicyRangeError` validation: `threshold` and `minimumCalls` are
   positive safe integers, `failureRateThreshold` is finite from 1 to 100, `timeout` is finite and
   greater than 0 (count) or at least 10 (rate), at most 2147483647; `resetTimeout` is finite from 0

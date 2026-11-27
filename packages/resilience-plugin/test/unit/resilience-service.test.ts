@@ -92,6 +92,21 @@ describe('ResilienceService.wrap', () => {
     await expect(guarded()).rejects.toBeInstanceOf(CircuitOpenError);
     expect(calls).toBe(1);
   });
+  it('records success when a retry succeeds after an inner timeout', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const hung = deferred<string>();
+    let calls = 0;
+    const guarded = service.wrap(() => (++calls === 1 ? hung.promise : Promise.resolve('ok')), {
+      timeout: 5,
+      retry: { limit: 2, delay: 1, backoff: 'fixed' },
+      circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
+    });
+    expect(await guarded()).toBe('ok');
+    expect(calls).toBe(2);
+    // threshold 1: a recorded failure would open the breaker and refuse this call.
+    expect(await guarded()).toBe('ok');
+    expect(calls).toBe(3);
+  });
   it('returns a callable that passes through when no patterns are selected', async () => {
     const service = new ResilienceService(new FakeRuntime());
     const guarded = service.wrap(() => Promise.resolve('plain'));

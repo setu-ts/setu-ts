@@ -41,8 +41,8 @@ export function registerBillingRoutes(router: IRouterApi): void {
 - `retry.limit` counts total attempts (safe integer at least 1); delay is finite and non-negative.
   Invalid defaults throw RangeError at registration; selected policies at wrap. All timing is ms;
   timeout applies per attempt.
-- Breakers skip already-aborted calls and count their inner layers' result. A timeout fails even if
-  the function ignores abort and later resolves; without timeout, that resolution succeeds.
+- Breakers skip already-aborted calls and count the final result after retries. An unrecovered
+  timeout fails even if the function ignores abort and later resolves; without timeout, it succeeds.
 - Timeout aborts the attempt's signal. Forward it to the underlying I/O to cancel that work;
   ignoring it only rejects the caller's wait. Caller cancellation stops retries and queued work.
 - A full bulkhead rejects after its queue fills; omitted `maxQueue` means no waiting queue.

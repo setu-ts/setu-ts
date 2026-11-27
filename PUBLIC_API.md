@@ -9686,8 +9686,10 @@ it simply cannot be cancelled.
 Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across instances.
 
 Breaker accounting skips already-aborted calls and records the result of the inner retry/timeout
-layers: rejection is failure, resolution is success. A timeout rejection is failure even if the
-function ignores its signal and later resolves; without a timeout, that resolution records success.
+layers: rejection is failure, resolution is success. It sees the final result after retries, so a
+timed-out attempt followed by a successful retry records success. A timeout that no retry recovers
+is failure even if the function ignores its signal and later resolves; without a timeout, that
+resolution records success.
 
 ---
 
