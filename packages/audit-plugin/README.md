@@ -113,7 +113,7 @@ AuditPlugin({ storage: 'file', options: { path: './audit.log' } });
 | `options.level`  | `log`      | `'info'`        | `'info'` \| `'warn'` \| `'error'`.                                    |
 | `options.logger` | `log`      | `ctx.logger`    | Injected `ILogger`; throws at registration when neither is present.   |
 | `options.client` | `database` | —               | Injected `IAuditDbClient`; required (throws when absent).             |
-| `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`.                                          |
+| `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`, and the entity name for a scoped write.  |
 | `options.path`   | `file`     | `'./audit.log'` | Throws at registration when `runtime.fs` is absent (Workers/edge).    |
 
 ## Database row shape

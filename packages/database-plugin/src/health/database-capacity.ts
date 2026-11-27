@@ -34,8 +34,8 @@ export const DATABASE_POOL_CAPACITY: unique symbol = Symbol.for(
 /**
  * Validates a value as a {@linkcode DatabasePoolCapacity} snapshot.
  *
- * The reader returns whatever the application's `poolStats` callback
- * returned — application-owned code this package cannot type-check at the
+ * The reader returns whatever the application's `poolStats` callback, or the
+ * default pg-pool counter reader, returned — application-owned code this package cannot type-check at the
  * boundary — so the plugin validates before publishing. Every field must be
  * a finite, non-negative counter, and `idle` cannot exceed `total` (the
  * published type documents `total` as idle + in use): a `NaN`, an infinite

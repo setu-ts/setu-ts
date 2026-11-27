@@ -210,8 +210,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // clock, 2-second bound on the runtime's timers) now owns every
       // adapter call and coalesces concurrent polls, so a driver that
       // answers readiness slowly cannot hold `/health` past the bound. A
-      // Drizzle registration with `poolStats` publishes the
-      // application-supplied capacity snapshot — data, never a threshold.
+      // Drizzle registration publishes a capacity snapshot from `poolStats`,
+      // or from pg-pool's public counters — data, never a threshold.
       const probe = createCachedProbe({
         probe: () => service.isHealthy(),
         ttlMs: PROBE_TTL_MS,

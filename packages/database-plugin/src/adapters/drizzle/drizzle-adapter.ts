@@ -557,7 +557,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * Pool saturation is NOT an outage (M101a V8-3), and the probe REJECTS for
    * it rather than answering `false`, so the service reports `undefined`:
    *
-   * - When `poolStats` reports every connection busy with callers waiting
+   * - When the capacity snapshot (`poolStats`, or pg-pool's counters) reports every connection busy with callers waiting
    *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
    *   queued probe is one more waiter on the pool it is measuring.
    * - A pool-wait, new-connection or query-read timeout is rethrown,
