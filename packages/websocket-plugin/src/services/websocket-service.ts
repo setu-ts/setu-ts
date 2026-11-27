@@ -797,12 +797,7 @@ export class WebSocketService implements IWebSocketService {
    */
   closeAll(): void {
     this.#heartbeat.stop();
-    try {
-      this.#requestBound?.closeAll();
-    } catch {
-      // Only a logger that throws while reporting a link gets here; the
-      // connections below are still closed.
-    }
+    this.#requestBound?.closeAll();
     for (const conn of [...this.#connections]) {
       try {
         conn.close(CLOSE_GOING_AWAY, 'Server shutting down');

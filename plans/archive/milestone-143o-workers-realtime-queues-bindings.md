@@ -1545,8 +1545,11 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     request that made it. It was reverted. A 50-frame burst from one request arrived in order
     locally with a stub per POST, but the platform does not promise that, so no test asserts it.
     Cross-replica order is a documented limit (class doc, cloudflare README, PUBLIC_API).
-  - **Rooms beside the name holder (code review of c6c71c983).** Workers counted a kept room's
-    members through `isMember`, but `deliverRemote` on other runtimes reached only the indexed room.
-    The registry now records a room with members beside the holder. `deliverRemote` reaches it, and
-    it takes the name when the holder empties. A connection in two such rooms receives a frame once
-    per room. `RequestBoundRooms.closeAll` guards its logger.
+  - **Two room objects with members under one name (code review of c6c71c983): held for the
+    maintainer.** Workers counts a kept room's members through `isMember`, while `deliverRemote` on
+    other runtimes reaches only the room holding the name. A registry-side set of rooms beside the
+    holder was tried and reverted: review showed it split Node in turn, since local broadcasts and
+    remote frames then reached different members, and a connection in both rooms got remote frames
+    twice. Resolving it needs a decision on whether a kept `Room` is addressed by name at all.
+    `RequestBoundRooms.closeAll` now guards its logger, so the service's catch around it was
+    removed.

@@ -560,7 +560,9 @@ All notable changes to this project are documented here. The format follows
   settled connect and closes a retired socket instead of leaving it open at the hub (V13-196). Its
   `publish` goes through the hub's `POST /publish` rather than the shared socket, so publishes from
   concurrent requests no longer retire and reopen a socket another request owns, and no frame is
-  lost to that churn; the frame's existing `origin` drops the replica's own echo. The memory
+  lost to that churn; the frame's existing `origin` drops the replica's own echo. Each publish is
+  its own call to the hub, and the platform orders calls only within one stub, so other replicas may
+  receive one replica's frames out of order; the shared socket kept one request's order. The memory
   transport now drops a frame that is not well-formed, as the other transports do. The Workers
   adapter answers a peer's close frame at once, so a clean close no longer waits 30 seconds at a
   compatibility date before 2026-04-07, and tracks the socket's state without reading the native
@@ -611,9 +613,7 @@ All notable changes to this project are documented here. The format follows
     closing link could not.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a retained room still delivers to members it regains, and a connection whose link
-    cannot open is closed with 1011. A room the application kept beside another room of the same
-    name gets remote frames on every runtime, once per room, and takes the name when the other
-    empties.
+    cannot open is closed with 1011.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws.
   - **Cleanup:** a stream's own end hands an asynchronous `ctx.defer` cleanup to `waitUntil`.
