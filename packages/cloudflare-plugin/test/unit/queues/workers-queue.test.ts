@@ -860,6 +860,31 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(message.disposition).toBe('acked');
   });
 
+  it('forwards an envelope whose data JSON would change losslessly, on both paths', async () => {
+    // Another producer can put binary data inside a well-formed envelope.
+    const { queue, dlq } = build();
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const refused: unknown[] = [];
+    let first = true;
+    dlq.send = (body: unknown, options?: unknown) => {
+      if (first) {
+        first = false;
+        refused.push(options);
+        return Promise.reject(new RangeError('message too large'));
+      }
+      dlq.sends.push({ body, options: options as never });
+      return Promise.resolve();
+    };
+    queue.process('j', always);
+
+    const reserve = delivered('j', bytes, { attempts: 4 });
+    await queue.dispatch(new FakeQueueBatch('q', [reserve]));
+
+    expect(reserve.disposition).toBe('acked');
+    expect(refused).toEqual([{ contentType: 'v8' }]);
+    expect(dlq.sends.map((s) => s.options)).toEqual([{ contentType: 'v8' }]);
+  });
+
   it('keeps a job envelope on the default JSON serialization when forwarding it', async () => {
     const { queue, dlq } = build();
     queue.process('j', always);

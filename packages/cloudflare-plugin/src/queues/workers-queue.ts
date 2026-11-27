@@ -590,11 +590,11 @@ export class WorkersQueue implements IQueue {
       attempts: message.attempts,
       ...(lastChance ? {} : { error: describeError(reason) }),
     };
-    // A body from another producer that JSON cannot carry (an ArrayBuffer
-    // becomes `{}`, a Date a string) is forwarded with structured clone.
-    // Everything else, envelopes included, stays JSON: pull consumers and the
-    // dashboard cannot decode `v8`.
-    const lossless = envelope === undefined && !isJsonCarried(message.body);
+    // A body JSON cannot carry (an ArrayBuffer becomes `{}`, a Date a string),
+    // whether or not it is a job envelope, is forwarded with structured clone.
+    // Everything else stays JSON: pull consumers and the dashboard cannot
+    // decode `v8`.
+    const lossless = !isJsonCarried(message.body);
     try {
       await (lossless ? target.send(copy, STRUCTURED_CLONE) : target.send(copy));
     } catch (error: unknown) {

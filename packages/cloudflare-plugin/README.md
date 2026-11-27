@@ -202,12 +202,12 @@ Cloudflare deletes a message that runs out of retries, so the adapter keeps the 
   one is configured, or deletes it. That is why the stanza above sets both. A dead-letter consumer
   therefore sees two shapes: the copy with `failedAt`, `attempts` and `error` (an unroutable body
   under `body`), and, rarely, the message body alone. Both are sent as JSON, which pull consumers
-  and the dashboard can read, unless a body from another producer (never the adapter's own envelope)
-  is one JSON would change: an `ArrayBuffer` or typed array, a `Date`, `Map` or other non-plain
-  object, a `bigint`, `undefined`, `-0` or a non-finite number, an array with a hole or an extra
-  key, an object reached twice (a cycle, or one shared by two references), or nesting past 64
-  levels. Then the copy is sent with `contentType: 'v8'`, and the body alone as `bytes` when it is
-  an `ArrayBuffer`, else `v8`.
+  and the dashboard can read, unless the body, a job envelope or not, is one JSON would change (an
+  envelope whose `data` another producer filled with such a value included): an `ArrayBuffer` or
+  typed array, a `Date`, `Map` or other non-plain object, a `bigint`, `undefined`, `-0` or a
+  non-finite number, an array with a hole or an extra key, an object reached twice (a cycle, or one
+  shared by two references), or nesting past 64 levels. Then the copy is sent with
+  `contentType: 'v8'`, and the body alone as `bytes` when it is an `ArrayBuffer`, else `v8`.
 - **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
   retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
   own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past

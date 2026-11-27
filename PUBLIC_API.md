@@ -5510,13 +5510,14 @@ ws.route(
   `hasConnectionLinks` (`@setu-ts/common`; the Durable Object arm of `@setu-ts/cloudflare-plugin`)
   each connection opens its own link in its sink's `onOpen`, and `Room.broadcast` publishes once —
   over the link of the connection whose event is dispatching, else over the `except` connection's
-  link, else through `publishViaHub`. The sender gets its own broadcast locally, once, unless it
-  names itself as `except`: when its link carried the frame, and when its link refused it too, with
-  the hub's copy then excluding the sender. Each link delivers to its connection when that
-  connection is a member of the frame's room and is not excluded. The isolate-level subscription and
-  the shared heartbeat interval are not used; each connection runs its own heartbeat. Without such a
-  backplane, `room()` and `peek()` throw `WebSocketRoomsUnavailableError` and the startup notice
-  names the Durable Object arm. `WebSocketService.isRequestBound` reports the mode;
+  link, else through `publishViaHub`. When the sender is an open member of the room and not the
+  `except` connection, it is sent its own broadcast locally, once (a send that throws on a closing
+  socket is dropped): when its link carried the frame, and when its link refused it too, with the
+  hub's copy then excluding the sender. Each link delivers to its connection when that connection is
+  a member of the frame's room and is not excluded. The isolate-level subscription and the shared
+  heartbeat interval are not used; each connection runs its own heartbeat. Without such a backplane,
+  `room()` and `peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the
+  Durable Object arm. `WebSocketService.isRequestBound` reports the mode;
   `RoomRegistry.isMember(name, conn)` and `Room.has(conn)` read membership without creating a room.
 - A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
   costs only the rooms that peer had actually joined rather than a scan of every live room. The
@@ -17746,17 +17747,17 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   acked; only if that fails as well does the job leave the adapter (the platform's
   `dead_letter_queue`, or deleted), which is logged. A dead-letter consumer therefore sees the copy
   (`failedAt`, `attempts`, `error`; an unroutable body under `body`) or, rarely, the body alone.
-  Both go as JSON, except a body from another producer (never an envelope) that JSON would change
-  (binary, a non-plain object, a `bigint`, `undefined`, `-0` or a non-finite number, an array with a
-  hole or an extra key, an object reached twice, nesting past 64 levels): its copy is sent with
-  `contentType: 'v8'`, and the body alone as `bytes` for an `ArrayBuffer`, else `v8`. An unroutable
-  message is forwarded the same way, its copy's `error` naming its own reason
-  (`body is not a job envelope` or `no processor registered`, none past `maxRetries`). On a queue
-  with no dead-letter target (producer-only), an unroutable message on its last attempt is retried
-  for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or
-  a `deadLetter` that is its own producer, is refused, since each exhausted job would loop.
-  `retryDelaySeconds` (a number, or a function of the failed attempt) passes
-  `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
+  Both go as JSON, except a body, envelope or not, that JSON would change (binary, a non-plain
+  object, a `bigint`, `undefined`, `-0` or a non-finite number, an array with a hole or an extra
+  key, an object reached twice, nesting past 64 levels): its copy is sent with `contentType: 'v8'`,
+  and the body alone as `bytes` for an `ArrayBuffer`, else `v8`. An unroutable message is forwarded
+  the same way, its copy's `error` naming its own reason (`body is not a job envelope` or
+  `no processor registered`, none past `maxRetries`). On a queue with no dead-letter target
+  (producer-only), an unroutable message on its last attempt is retried for the platform's own
+  `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or a `deadLetter` that is
+  its own producer, is refused, since each exhausted job would loop. `retryDelaySeconds` (a number,
+  or a function of the failed attempt) passes `retry({ delaySeconds })`, bounded by
+  `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
   a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never
