@@ -121,15 +121,22 @@ export function callOutcome(
   return 'failure';
 }
 
+/** Prefix of the message Connect gives the `Internal` it raises for a status it cannot decode. */
+const INVALID_STATUS_PREFIX = 'invalid grpc-status: ';
+
 /**
- * Follow Connect's decoder: details take precedence; exact '0' succeeds,
- * otherwise parse a decimal integer prefix and require a Code enum member.
+ * Whether Connect raised this `Internal` because it could not decode the trailer's status.
+ * Connect decodes only the trailer but merges response headers into `metadata`, so the
+ * metadata cannot say which fields it read; the status it rejected is in its own message.
+ * The value must also fail Connect's rule (exact '0', else a decimal integer prefix naming
+ * a Code member), so a valid status whose message merely says this counts as an answer.
  */
 function hasInvalidGrpcStatus(error: unknown): boolean {
-  const metadata = (error as { metadata?: unknown }).metadata;
-  if (!(metadata instanceof Headers) || metadata.has('grpc-status-details-bin')) return false;
-  const status = metadata.get('grpc-status');
-  return status !== null && status !== '0' && !GRPC_STATUS_CODES.has(Number.parseInt(status, 10));
+  const { rawMessage, details } = error as { rawMessage?: unknown; details?: unknown };
+  if (typeof rawMessage !== 'string' || !rawMessage.startsWith(INVALID_STATUS_PREFIX)) return false;
+  if (Array.isArray(details) && details.length > 0) return false;
+  const status = rawMessage.slice(INVALID_STATUS_PREFIX.length);
+  return status !== '0' && !GRPC_STATUS_CODES.has(Number.parseInt(status, 10));
 }
 
 /**

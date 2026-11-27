@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest';
-import { findTrailerError, setTrailerStatus } from '@connectrpc/connect/protocol-grpc';
+import {
+  findTrailerError,
+  setTrailerStatus,
+  validateTrailer,
+} from '@connectrpc/connect/protocol-grpc';
 import { Code, ConnectError } from '@connectrpc/connect';
 import { codeFromHttpStatus, errorFromJson } from '@connectrpc/connect/protocol-connect';
 import { loadConnectModule } from '../../src/transports/connect-loader.ts';
@@ -429,6 +433,60 @@ it('prefers real status details over a garbage grpc-status header', async () => 
   expect(decoded?.rawMessage).toBe(application.rawMessage);
   expect(runtime.isWireError(decoded)).toBe(true);
   expect(callOutcome(decoded, undefined, runtime.isWireError)).toBe('success');
+});
+
+/** Runs Connect's trailer validation, which merges response headers into the error metadata. */
+function trailerError(trailer: Headers, header: Headers): unknown {
+  try {
+    validateTrailer(trailer, header);
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Expected validateTrailer to throw');
+}
+
+it('fails an undecodable trailer status even when the headers carry status details', async () => {
+  const runtime = await loadConnectModule();
+  const answer = new ConnectError('header answer', Code.Internal);
+  answer.details.push({ type: 'example.Detail', value: new Uint8Array([8, 1]) });
+  const header = setTrailerStatus(new Headers(), answer);
+  expect(header.has('grpc-status-details-bin')).toBe(true);
+  const error = trailerError(new Headers({ 'grpc-status': '99' }), header);
+  expect(error).toBeInstanceOf(ConnectError);
+  expect((error as ConnectError).rawMessage).toBe('invalid grpc-status: 99');
+  expect((error as ConnectError).metadata.has('grpc-status-details-bin')).toBe(true);
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('failure');
+});
+
+it('keeps trailer status details without detail entries as an application answer', async () => {
+  const runtime = await loadConnectModule();
+  // A google.rpc.Status of code 13 and message "answer" with no details: field 1 = 13, field 2 = "answer".
+  const status = btoa(String.fromCharCode(0x08, 13, 0x12, 6) + 'answer');
+  const trailer = new Headers({ 'grpc-status-details-bin': status, 'grpc-status': 'garbage' });
+  const error = trailerError(trailer, new Headers({ 'grpc-status': '99' }));
+  expect((error as ConnectError).code).toBe(Code.Internal);
+  expect((error as ConnectError).details).toEqual([]);
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
+});
+
+it('keeps a valid status whose message imitates the invalid-status text as an answer', async () => {
+  const runtime = await loadConnectModule();
+  const error = trailerError(
+    new Headers({ 'grpc-status': '13', 'grpc-message': 'invalid grpc-status: 13' }),
+    new Headers(),
+  );
+  expect((error as ConnectError).code).toBe(Code.Internal);
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
+});
+
+it('keeps decoded status details whose message imitates the invalid-status text as an answer', async () => {
+  const runtime = await loadConnectModule();
+  const answer = new ConnectError('invalid grpc-status: 99', Code.Internal);
+  answer.details.push({ type: 'example.Detail', value: new Uint8Array([8, 1]) });
+  const error = trailerError(setTrailerStatus(new Headers(), answer), new Headers());
+  expect((error as ConnectError).rawMessage).toBe('invalid grpc-status: 99');
+  expect((error as ConnectError).details).toHaveLength(1);
+  expect(callOutcome(error, undefined, runtime.isWireError)).toBe('success');
 });
 
 it('retains the HTTP fallback for unknown real Connect JSON error codes', () => {
