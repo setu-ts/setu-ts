@@ -17122,12 +17122,14 @@ Cancelling a response stream aborts the handler's combined `ctx.signal` before a
 cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals
 are unchanged.
 
-A wire `Internal` for a status Connect itself cannot decode is a protocol failure. Status details
-(`grpc-status-details-bin`) take precedence over the header. A valid `grpc-status: 13` remains an
-application answer. The resend's remaining deadline is checked after discovery picks again; an
-exhausted budget sends nothing and records no outcome for that attempt. Header-list size uses Node's
-Latin-1 encoding, one octet per UTF-16 code unit in names and values, plus 32 per field. Bun sends
-UTF-8, so values above U+007F are undercounted there; gRPC metadata values are ASCII by spec.
+A wire `Internal` for a status Connect itself cannot decode is a protocol failure when the server
+sent it as its own status; a peer relaying a downstream's invalid-status message under a valid
+status stays an answer. Status details (`grpc-status-details-bin`) take precedence over the header.
+A valid `grpc-status: 13` remains an application answer. The resend's remaining deadline is checked
+after discovery picks again; an exhausted budget sends nothing and records no outcome for that
+attempt. Header-list size uses Node's Latin-1 encoding, one octet per UTF-16 code unit in names and
+values, plus 32 per field. Bun sends UTF-8, so values above U+007F are undercounted there; gRPC
+metadata values are ASCII by spec.
 
 ### Notes
 

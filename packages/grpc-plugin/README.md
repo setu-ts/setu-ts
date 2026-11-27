@@ -113,19 +113,20 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   discovery: an instance fails when it did not answer, refused the stream, returned `Unavailable`,
   `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
   server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`.
-  A status Connect itself cannot decode (such as 99) is a protocol failure. Status details
-  (`grpc-status-details-bin`) take precedence over the header; valid status 13 remains an
-  application answer. The same codes without a server answer fail. A request that makes a healthy
-  handler throw must not eject replicas. A replica whose handlers fail every call with `Internal` (a
-  broken dependency, say) is not ejected by call outcomes. Take it out through readiness (health
-  checks) instead. On the default `connect` protocol a well-formed JSON error object
-  (`application/json`) on any non-200 unary answer is read as a server answer, its code taken from
-  the body's `code` field or else from the HTTP status (404 `Unimplemented`; 429, 502, 503, 504
-  `Unavailable`; 400 `Internal`; 401 and 403 their auth codes; any other status `Unknown`). It fails
-  only when that code is `Unavailable`, `Unimplemented`, `DeadlineExceeded` or `Canceled`, so a
-  wrong service or proxy that answers every call with, say, a JSON 400, 401, 403 or 500 counts as
-  answered and is not ejected by call outcomes either; an HTML error page is no answer and fails. A
-  stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by
+  A status Connect itself cannot decode (such as 99) is a protocol failure when the server sent it
+  as its own status; a peer relaying a downstream's invalid-status message under a valid status
+  stays an answer. Status details (`grpc-status-details-bin`) take precedence over the header; valid
+  status 13 remains an application answer. The same codes without a server answer fail. A request
+  that makes a healthy handler throw must not eject replicas. A replica whose handlers fail every
+  call with `Internal` (a broken dependency, say) is not ejected by call outcomes. Take it out
+  through readiness (health checks) instead. On the default `connect` protocol a well-formed JSON
+  error object (`application/json`) on any non-200 unary answer is read as a server answer, its code
+  taken from the body's `code` field or else from the HTTP status (404 `Unimplemented`; 429, 502,
+  503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their auth codes; any other status `Unknown`).
+  It fails only when that code is `Unavailable`, `Unimplemented`, `DeadlineExceeded` or `Canceled`,
+  so a wrong service or proxy that answers every call with, say, a JSON 400, 401, 403 or 500 counts
+  as answered and is not ejected by call outcomes either; an HTML error page is no answer and fails.
+  A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by
   this client's own HTTP/2 session when it is over its memory cap) means this client's behaviour
   looked excessive (Node's server says so for more than 128 header fields): it is never counted
   against the instance and is not resent, and the call fails as `ResourceExhausted` with

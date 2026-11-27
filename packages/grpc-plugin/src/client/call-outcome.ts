@@ -125,11 +125,12 @@ export function callOutcome(
 const INVALID_STATUS_PREFIX = 'invalid grpc-status: ';
 
 /**
- * Whether Connect raised this `Internal` because it could not decode the trailer's status.
- * Connect decodes only the trailer but merges response headers into `metadata` after it, so
- * presence of a metadata field cannot say which fields it read. The rejected value is in
- * Connect's own message, and it must also be the first `grpc-status` value in `metadata`
- * (the trailer's own), so a peer relaying a downstream's message under a valid status, or
+ * Whether Connect raised this `Internal` because it could not decode the peer's status.
+ * Connect decodes one set of fields (the trailer, or the response header when there is no
+ * trailer) and appends the response header to `metadata` after it, so presence of a
+ * metadata field cannot say which fields it read. The rejected value is in Connect's own
+ * message, and it must also be the first `grpc-status` value in `metadata` (from the fields
+ * Connect decoded), so a peer relaying a downstream's message under a valid status, or
  * as a Connect-protocol error with no `grpc-status`, stays an answer. The value must fail
  * Connect's rule (exact '0', else a decimal integer prefix naming a Code member).
  */
