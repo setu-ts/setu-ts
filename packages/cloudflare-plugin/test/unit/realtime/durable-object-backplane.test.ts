@@ -542,6 +542,37 @@ describe('DurableObjectBackplane links and hub publish', () => {
     ]);
   });
 
+  it('reports a non-Error a hub POST rejects with, without losing the value', async () => {
+    const logger = new RecordingLogger();
+    const namespace: IDurableObjectNamespace = {
+      idFromName: (n) => n,
+      // A DOMException-style string rejection, which `error.message` would drop.
+      get: () => ({ fetch: (): Promise<Response> => Promise.reject('hub gone') }),
+    };
+
+    await build(namespace, () => logger).publishViaHub(FRAME);
+
+    expect(logger.records.map((r) => r.meta)).toEqual([{ topic: 'realtime', error: 'hub gone' }]);
+  });
+
+  it('opens a link without a waitUntil host', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'o',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+    });
+    const got: RealtimeFrame[] = [];
+    const link = backplane.openConnectionLink('c1', (f) => got.push(f));
+    await setImmediate();
+
+    await backplane.publishViaHub(FRAME);
+    link.close();
+
+    expect(got).toEqual([FRAME]);
+  });
+
   it('passes its waitUntil to each link, and survives a host that throws', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const held: Promise<unknown>[] = [];

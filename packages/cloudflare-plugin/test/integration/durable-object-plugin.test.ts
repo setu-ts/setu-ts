@@ -31,6 +31,7 @@ import type {
 
 import { CloudflareBindingMissingError, CloudflarePlugin } from '../../src/index.ts';
 import { FakeDurableObjectNamespace } from '../do-fakes.ts';
+import type { IDurableObjectNamespace } from '../../src/bindings/facades.ts';
 import { FakeKv, RecordingLogger } from '../fakes.ts';
 
 /** Runs a named health indicator the way `health-plugin` would. */
@@ -150,7 +151,9 @@ describe('CloudflarePlugin durableObject arm', () => {
       data: 'hi',
     });
 
-    expect(namespace.requestedNames).toEqual(['realtime']);
+    // One lookup opens the receiving socket, one POSTs the frame to the hub.
+    expect(namespace.requestedNames).toEqual(['realtime', 'realtime']);
+    expect(namespace.states.get('realtime')?.accepted).toHaveLength(1);
     await app.stop();
   });
 
@@ -199,7 +202,17 @@ describe('CloudflarePlugin durableObject arm', () => {
     // The M52b defect class: capturing `ctx.logger` by value at register() time
     // reads `undefined`, because the kernel answers that until a logger exists.
     // A logger registered imperatively afterwards would then be silenced.
-    const namespace = new FakeDurableObjectNamespace('realtime');
+    const real = new FakeDurableObjectNamespace('realtime');
+    // The hub refuses every POST, so the publish fails and is reported.
+    const namespace: IDurableObjectNamespace = {
+      idFromName: (name) => real.idFromName(name),
+      get: (id) => ({
+        fetch: (input: Request | string, init?: RequestInit): Promise<Response> =>
+          init?.method === 'POST'
+            ? Promise.reject(new Error('hub unreachable'))
+            : real.get(id).fetch(input, init),
+      }),
+    };
     const logger = new RecordingLogger();
     const lateLoggerPlugin: IPlugin = {
       name: 'late-logger',
@@ -221,10 +234,6 @@ describe('CloudflarePlugin durableObject arm', () => {
 
     const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
     await backplane.connect();
-    // Break the live socket, and the reopen the resend tries, so the publish
-    // fails for good and is reported.
-    namespace.clients[0]!.failSend = true;
-    namespace.omitSocket = true;
 
     await backplane.publish({
       kind: 'ws-room',
