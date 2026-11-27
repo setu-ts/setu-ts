@@ -614,7 +614,8 @@ All notable changes to this project are documented here. The format follows
     64-frame bound. A broadcast past that budget goes through the hub's HTTP publish and can arrive
     before the queued frames. One above the hub's 32 MiB cap in serialized bytes is refused with a
     logged 413 and reaches no other member. A sender with no `except` gets its own such broadcast
-    once; with an `except` naming another member it relies on the hub's copy.
+    once; with an `except` naming another member it relies on the hub's copy, which a link the hub
+    has not yet accepted misses and which a frame above the cap never has.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a

@@ -17595,21 +17595,21 @@ returns `false`), so `websocket-plugin` POSTs it through `publishViaHub`. The hu
 the cap, logged as `cloudflare: backplane publish failed` with `status: 413`. A sender whose own
 link refuses a broadcast with no `except` gets it locally, and the hub's copy excludes it. With an
 `except` naming another member the sender relies on the hub's copy, which its link can miss if the
-hub has not accepted the link yet. Frames sent through the hub while queued ones wait can arrive
-before them. A link reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs
-`cloudflare: backplane link lost` once with `{ topic, connection }`. The isolate socket
-(`connect`/`subscribe`) stays for `sse-plugin` and receives only: it opens lazily (on `connect` or
-the first `publish`), and a socket that reports a close or an error is retired and closed rather
-than left open at the hub, so the next call reopens it. `publish(frame)` sends through
-`POST /publish`, never over that socket, so publishes from different requests never touch a socket
-another request owns; a failed POST is logged as `cloudflare: backplane publish failed`, never
-thrown. The hub fans the POST out to every socket, the publisher's own included, and the replica
-drops a frame whose `origin` is its own (the rule every backplane transport applies, along with
-dropping a frame that is not well-formed). A replica hears a frame only once its socket has joined
-the hub. The socket belongs to the request that opened it: on local workerd it keeps receiving after
-that request has answered, which is unverified on the platform. Each publish is its own call to the
-hub and the platform orders calls only within one stub, so other replicas may receive one replica's
-frames out of order.
+hub has not accepted the link yet, and which does not exist for a frame above the cap. Frames sent
+through the hub while queued ones wait can arrive before them. A link reopens a lost socket three
+times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
+`{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and
+receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a
+close or an error is retired and closed rather than left open at the hub, so the next call reopens
+it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
+different requests never touch a socket another request owns; a failed POST is logged as
+`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
+publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
+backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
+frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
+local workerd it keeps receiving after that request has answered, which is unverified on the
+platform. Each publish is its own call to the hub and the platform orders calls only within one
+stub, so other replicas may receive one replica's frames out of order.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses
