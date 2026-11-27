@@ -651,6 +651,27 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     );
   });
 
+  it('on the last delivery, forwards an unroutable body unwrapped when its copy is refused', async () => {
+    const { queue, dlq } = build();
+    const accepted: unknown[] = [];
+    let first = true;
+    dlq.send = (body: unknown) => {
+      if (first) {
+        first = false;
+        return Promise.reject(new RangeError('message too large'));
+      }
+      accepted.push(body);
+      return Promise.resolve();
+    };
+    queue.process('known', () => {});
+
+    const garbage = new FakeQueueMessage('cf-g', 'not an envelope', 4);
+    await queue.dispatch(new FakeQueueBatch('q', [garbage]));
+
+    expect(garbage.disposition).toBe('acked');
+    expect(accepted).toEqual(['not an envelope']);
+  });
+
   it('on the last delivery, retries when the original job is refused too', async () => {
     const { queue, dlq } = build();
     dlq.send = () => Promise.reject(new TypeError('queue unavailable'));

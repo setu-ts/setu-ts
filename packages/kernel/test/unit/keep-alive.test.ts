@@ -171,6 +171,29 @@ describe('the cleanup paths that outlive the response', () => {
     expect(order).toEqual(['cleanup', 'complete']);
   });
 
+  it('(b) a consumer cancel hands the asynchronous cleanup over, once', async () => {
+    const { registry, held } = recording();
+    const order: string[] = [];
+    const body = wrapDeferredStream(
+      new ReadableStream<Uint8Array>({ pull() {} }),
+      [
+        async () => {
+          await Promise.resolve();
+          order.push('cleanup');
+        },
+      ],
+      registry,
+      () => order.push('complete'),
+    );
+
+    await body.cancel();
+    await settle();
+
+    expect(held).toHaveLength(1);
+    await held[0];
+    expect(order).toEqual(['cleanup', 'complete']);
+  });
+
   it('(c) a handler still running after an early response is kept alive with its cleanups', async () => {
     const { createApplication } = await import('../../src/index.ts');
     const { RuntimePlugin } = await import('@setu-ts/runtime');

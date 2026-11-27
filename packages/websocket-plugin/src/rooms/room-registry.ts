@@ -308,6 +308,10 @@ export class RoomRegistry {
         onJoin: (conn: IWebSocketConnection): void => {
           this.#onMemberJoined?.();
           this.#neverJoined.delete(room);
+          // A room the application kept after it emptied left the name index;
+          // a member joining puts it back when the name is free, so `peek`,
+          // remote delivery and `isMember` find it on every runtime.
+          if (!this.#rooms.has(room.name)) this.#rooms.set(room.name, room);
           let joined = this.#membership.get(conn);
           if (joined === undefined) {
             joined = new Set<Room>();
@@ -403,21 +407,13 @@ export class RoomRegistry {
 
   /**
    * Whether a connection is a member of the named room, without creating it.
-   * Read from the connection's own memberships, so a `Room` the application
-   * retained after it emptied (and so left the name index) still counts the
-   * members it gained again.
    * @param name - Room name
    * @param conn - The connection
-   * @returns `true` when the connection is in a room of that name
+   * @returns `true` when the room exists and holds the connection
    * @since 0.14.0
    */
   isMember(name: string, conn: IWebSocketConnection): boolean {
-    const joined = this.#membership.get(conn);
-    if (joined === undefined) return false;
-    for (const room of joined) {
-      if (room.name === name) return true;
-    }
-    return false;
+    return this.#rooms.get(name)?.has(conn) ?? false;
   }
 
   /** Discards every room. */

@@ -797,7 +797,11 @@ export class WebSocketService implements IWebSocketService {
    */
   closeAll(): void {
     this.#heartbeat.stop();
-    this.#requestBound?.closeAll();
+    try {
+      this.#requestBound?.closeAll();
+    } catch {
+      // A link that fails to close must not keep the connections open.
+    }
     for (const conn of [...this.#connections]) {
       try {
         conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
@@ -807,7 +811,14 @@ export class WebSocketService implements IWebSocketService {
         continue;
       }
     }
-    for (const stop of this.#heartbeatStops.values()) stop();
+    for (const stop of this.#heartbeatStops.values()) {
+      try {
+        stop();
+      } catch {
+        // One timer that refuses must not keep the state below.
+        continue;
+      }
+    }
     this.#heartbeatStops.clear();
     this.#connections.clear();
     this.#rooms.clear();

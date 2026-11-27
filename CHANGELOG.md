@@ -601,7 +601,8 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cloudflare-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/runtime`, `@setu-ts/kernel`
   (M143o, #619, review).**
   - **Queues:** on its last delivery, a Workers job whose dead-letter copy is refused is forwarded
-    as it arrived. `retryDelaySeconds: 0` overrides the queue's `retry_delay`.
+    as it arrived, without the dead-letter fields. `retryDelaySeconds: 0` overrides the queue's
+    `retry_delay`.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.

@@ -17410,7 +17410,7 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `queue.maxDelaySeconds`          | `number`                         | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                                                                         |
 | `queue.maxRetries`               | `number`                         | `3`          | `WorkersQueue` — the consumer's `max_retries`; whole number 1 to 100, refused at `register()` otherwise; a job's budget is `min(maxAttempts, maxRetries)` (0.14.0) |
 | `queue.deadLetterQueue`          | `string \| false`                | —            | `WorkersQueue.process` — a producer binding for exhausted jobs (shape-checked at `register()`), or `false` to discard them; absent, `process()` throws (0.14.0)    |
-| `queue.retryDelaySeconds`        | `number \| (attempts) => number` | —            | `WorkersQueue` — redelivery delay, bounded by `maxDelaySeconds`; absent keeps the queue's `retry_delay` (0.14.0)                                                   |
+| `queue.retryDelaySeconds`        | `number \| (attempts) => number` | —            | `WorkersQueue` — redelivery delay, bounded by `maxDelaySeconds`; `0` overrides the queue's `retry_delay`, absent keeps it (0.14.0)                                 |
 | `messaging.binding`              | `string`                         | —            | `WorkersBroker` — the producer binding serving `CAPABILITIES.MESSAGING`; validated at `register()`                                                                 |
 | `messaging.name`                 | `string`                         | `'default'`  | Plugin factory — derives `messaging.<name>` when not `'default'`                                                                                                   |
 | `messaging.rpc.binding`          | `string`                         | —            | `WorkersBroker` — the Durable Object namespace serving reply inboxes; absent, `request`/`respond` throw                                                            |
@@ -17704,14 +17704,16 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   warned about, never the payload. The platform's last delivery is kept in reserve: a failed send
   retries, and the redelivery forwards again without a second `onFailed`, its `error` then the fixed
   reason `attempt budget exhausted` (or, past `maxRetries`, no error text at all); if that send
-  fails too, the job leaves the adapter (the platform's `dead_letter_queue`, or deleted) and that is
-  logged. An unroutable message is forwarded the same way, its copy's `error` naming its own reason
-  (`body is not a job envelope` or `no processor registered`, none past `maxRetries`). On a queue
-  with no dead-letter target (producer-only), an unroutable message on its last attempt is retried
-  for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or
-  a `deadLetter` that is its own producer, is refused, since each exhausted job would loop.
-  `retryDelaySeconds` (a number, or a function of the failed attempt) passes
-  `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
+  fails too, the job is sent once more as it arrived (the envelope, or an unroutable body
+  unwrapped), without the dead-letter fields, and only then leaves the adapter (the platform's
+  `dead_letter_queue`, or deleted), which is logged. An unroutable message is forwarded the same
+  way, its copy's `error` naming its own reason (`body is not a job envelope` or
+  `no processor registered`, none past `maxRetries`). On a queue with no dead-letter target
+  (producer-only), an unroutable message on its last attempt is retried for the platform's own
+  `dead_letter_queue`. A `deadLetterQueue` naming the queue's own binding, or a `deadLetter` that is
+  its own producer, is refused, since each exhausted job would loop. `retryDelaySeconds` (a number,
+  or a function of the failed attempt) passes `retry({ delaySeconds })`, bounded by
+  `maxDelaySeconds`.
 - **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
   `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
   a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never

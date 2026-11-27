@@ -498,8 +498,10 @@ export class WorkersQueue implements IQueue {
    * Settles an exhausted message: forwards it to the dead-letter producer and
    * acks, or acks and warns when the target is `false`. A failed send retries,
    * so the payload is not lost while a delivery remains; on the platform's
-   * last delivery the job leaves the adapter's hands (the platform writes it
-   * to `dead_letter_queue` or deletes it), which is logged.
+   * last delivery a refused copy is sent once more as the job arrived, without
+   * the dead-letter fields, and only if that fails too does the job leave the
+   * adapter's hands (the platform writes it to `dead_letter_queue` or deletes
+   * it), which is logged.
    * @param reason - The processor's error, or the reason no processor ran
    */
   async #settleExhausted(
@@ -562,7 +564,8 @@ export class WorkersQueue implements IQueue {
   }
 
   /**
-   * Sends the job as it arrived, without the dead-letter fields.
+   * Sends the job as it arrived: the envelope, or a body that was not one,
+   * unwrapped, so nothing is added to a message near the size limit.
    *
    * @returns Whether the send succeeded
    */
@@ -572,7 +575,7 @@ export class WorkersQueue implements IQueue {
     envelope: JobEnvelope | undefined,
   ): Promise<boolean> {
     try {
-      await target.send(envelope === undefined ? { body: message.body } : envelope);
+      await target.send(envelope ?? message.body);
       return true;
     } catch {
       return false;

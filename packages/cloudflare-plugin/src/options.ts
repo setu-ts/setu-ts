@@ -99,7 +99,8 @@ export interface WorkersQueueArm {
   /**
    * Seconds before a failed job is redelivered: a number, or a function of the
    * attempt that failed (1 on the first delivery). Bounded to 0 to
-   * `maxDelaySeconds`. Omitted, the queue's own `retry_delay` applies.
+   * `maxDelaySeconds`; `0` redelivers at once, overriding the queue's
+   * `retry_delay`. Omitted, the queue's own `retry_delay` applies.
    * @since 0.14.0
    */
   readonly retryDelaySeconds?: number | ((attempts: number) => number);
