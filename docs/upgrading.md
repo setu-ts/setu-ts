@@ -106,6 +106,89 @@ milliseconds from 1 to 2147483647 (it used to grant every caller for `Infinity`,
 negative value). `isKvNamespace` refuses an R2-shaped binding, and `bindings.d1()` and
 `bindings.service()` throw `CloudflareBindingMissingError` for a binding of another kind.
 
+### Discovery and gRPC calls (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`)
+
+Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`
+is the age that starts a refresh; `0` refreshes every warm call, coalesced. Failed refreshes retain
+the last list indefinitely with retries after 1, 2, 4, 8, 16, then 30 s. Alert on `staleForMs` and
+`degraded` (warm read failures or held empty answers); warm lists at any age stay ready. Cold reads
+use `resolveTimeoutMs` (2000 ms default, `0` unbounded). Both new timing options accept finite
+values from 0 to 2147483647.
+
+Empty answers hold warm nonempty lists for `emptyAnswerGraceMs` (30000 ms default); set `0` to
+replace immediately. Reads and watches share this rule. At the grace deadline a per-name timer
+starts a coalesced background read, respecting failure retry spacing. A still-empty answer replaces
+the list and notifies all watchers, even without a repeated backend event. Nonempty answers,
+replacement and close clear the timer. Changes from background reads also reach watchers once.
+Missing DNS names now resolve `[]`, as static unknown names do, rather than causing a cold 503 or
+retaining removed records indefinitely. Use a trusted host resolver. Other DNS errors remain
+failures, reflected in health, including hung lookups. Reads and watches now share one pending raw
+DNS lookup per name across caller aborts and timeouts. Stopping a caller does not cancel the query.
+Discovery close invalidates all watches, attempts every provider stop, then surfaces cleanup errors
+(a watch still in setup is stopped when setup settles, and its stop failure rejects every `watch()`
+waiting on it); a read still queued at close never calls the provider. A nested watch delivery
+supersedes the older broadcast.
+
+No DNS configuration change is required. To select name servers, add the DNS arm's `servers` option
+with IP literals (optional ports; IPv6 ports need brackets). This requires a runtime with
+`createDnsResolver` (Node, Bun or Deno; not Workers). Fractional `resolveTimeoutMs` values round up
+for the runtime's integer whole-lookup bound. On Deno SERVFAIL reads as absence after the grace
+rule, and the underlying lookup may end about 2 s past the bound.
+
+Consul defaults the registration id to `<serviceName>@<address>:<port>` so restarts replace their
+own entry. `%` and `@` inside serviceName/address become `%25` and `%40`; other characters,
+including IPv6 colons, remain readable. Explicit ids still win. Once after upgrading, list
+`/v1/agent/services`, identify old uuid entries left by crashed processes, and deregister each via
+`PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot remove those old ids.
+
+Connect and connect-node now require `^2.2.0` or newer, which first supplies `isWireError`; update
+older peer installations. A wire `Internal` for a status Connect itself cannot decode now fails;
+valid status 13 remains an application answer.
+
+The gRPC client reports instance failure when it did not answer, refused the stream, returned
+`Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own.
+Every other server answer reports success, including application codes and `Internal`, `Unknown`,
+`DataLoss`, except an `Internal` for a status Connect itself cannot decode. The same codes without a
+server answer fail. A request that makes a healthy handler throw must not eject replicas. A replica
+whose handlers fail every call with `Internal` (a broken dependency, say) is not ejected by call
+outcomes. Take it out through readiness (health checks) instead; the same holds for a wrong service
+or proxy answering a well-formed JSON error object on a non-200 that does not map to `Unavailable`,
+`Unimplemented`, `DeadlineExceeded` or `Canceled` (a 400, 401, 403 or 500, say) on the default
+`connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers, by
+the server or by this client's own session over its memory cap, is never counted against the
+instance or resent; the call fails as `ResourceExhausted` with `GrpcExcessiveLoadError` as its
+`cause`; send fewer headers or fewer concurrent streams, or keep fewer large replies in flight on
+one connection. A few client-side faults raised before the request leaves (binary serialization,
+`writeMaxBytes`, a request header Node refuses) report nothing, and a header `Headers` rejects fails
+the call before any instance is picked. Caller abort reports nothing. Tight deadlines can therefore
+eject healthy instances; size deadlines for normal latency. Streaming still reports success at
+response headers only. A unary `Unavailable` carrying exactly `x-setu-unprocessed: shutdown` now
+gets one resend on a new pick within the remaining deadline, regardless of wire status. This covers
+the kernel's pre-pipeline drain 503, including custom error responders, which reaches a client over
+HTTP/1.1 or through a proxy (over HTTP/2 a draining Node server refuses the stream, resent as
+before). The header is reserved: remove it from application errors unless the request was not
+processed and one resend is safe. Setting it on an application's own `Unavailable` makes that claim
+and gets the same resend; the kernel does not strip it. Streaming calls, other codes and unmarked
+errors are not resent. The instance still reports failure, a second marked failure surfaces, and
+retry setup races caller abort and the remaining deadline. If stopped before sending, it returns the
+original refusal and records no unsent outcome; a late pick cannot dispatch it. Discover individual
+pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a single Service address pins a
+connection to one pod. Cancelling a response stream aborts the handler's `ctx.signal` before
+awaiting cleanup without a bound; handlers must observe it to exit promptly.
+
+Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
+the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause
+chain, with no report or resend. A list at or under 8 KiB that exceeds the advertised limit instead
+counts as `failure` against the instance; unary calls are resent once to another pick within the
+remaining deadline, like a refused stream: that peer advertised less than any gRPC default. If the
+resend meets the same fault, `Unavailable` names the header size and advertised limit. When no
+header-list limit was known when the call started, a sent list over 65536 octets becomes that same
+caller error only on `REFUSED_STREAM` (on Node the client's HTTP/2 library refused to send it);
+`size` is the RFC 7541 §4.1 list size and `limit` is the client's 65536 threshold. Neither case
+reports an outcome or resends. At or under 65536, refused-stream failure and resend remain; an
+accepted larger list is unaffected. Shrink the headers on this error. A refusal from a peer shutting
+down (its session closed or destroyed) stays a refused stream and is resent.
+
 ### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
 
 `WorkerRunOptions.signal` now withdraws queued work or terminates and replaces a running call's
@@ -316,7 +399,7 @@ may send that request again.
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
 
-### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`)
+### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`, `@setu-ts/resilience-plugin`)
 
 - **Reading a policy.** `CircuitBreakerPolicy` is now a union of the count arm
   (`{ threshold, timeout, resetTimeout }`) and the rate arm
@@ -338,8 +421,13 @@ may send that request again.
   code coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
   negative, infinite or over-range `resetTimeout`, or a missing one. A `timeout: Infinity` once
   meant "failures in a row": use a finite window, or the rate arm.
-- **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
-  rate policy throws a `RangeError` when `wrap()` builds the breaker.
+- **The resilience plugin.** `ResiliencePlugin` now takes both arms through the same shared window.
+  Existing valid count policies keep their behavior. Invalid `defaultCircuitBreaker` now throws
+  `RangeError` at plugin registration, and invalid explicit policies at `wrap()`. Use a positive
+  safe integer `threshold`/`minimumCalls`, finite 1–100 `failureRateThreshold`, finite `timeout`
+  greater than 0 (count) or at least 10 (rate), at most 2147483647, and finite `resetTimeout` from 0
+  to 2147483647. Choose one arm: combining count and rate fields is refused. Rate expiry uses ten
+  buckets; choose `minimumCalls` to avoid tripping on low-volume noise.
 
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 
@@ -471,6 +559,107 @@ and that the handler marks `public` is stored and replayed, so never mark a pers
 The Swagger UI page, the spec and the self-hosted assets no longer commit a session, so a `rolling`
 session is not refreshed by them. The plugin adds `GET <docs endpoint>/csrf-token`, which Swagger
 UI's Try-it-out calls read; an application route at that path now conflicts with it.
+
+### Databases off PostgreSQL (`@setu-ts/database-plugin`)
+
+- **A bound on every DynamoDB, Cosmos DB and Bigtable call.** A call still running after 15 s now
+  rejects with `DatabaseTimeoutError` (`504`, outcome unknown) where it used to wait. A long scan or
+  a large Bigtable read needs more: raise `requestTimeoutMs` on that arm, or set `0` to restore the
+  SDK's own behaviour. The bound holds even where the SDK waits without observing cancellation:
+  under sustained `429`s a throttled Cosmos call used to wait out the SDK's retry-after (up to 30 s)
+  and now ends at the bound. If those waits should run to completion, raise `requestTimeoutMs`.
+- **Bigtable client-side metrics are off whenever an endpoint is set**: `apiEndpoint` (a real
+  private endpoint included), `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST`. To keep
+  them, pass `clientOptions: { metricsEnabled: true }`.
+- **A NoSQL unit of work whose commit loses a precondition answers `409`.** A DynamoDB, Cosmos DB or
+  Bigtable commit that fails a conditional write's precondition, or a buffered plain update of a row
+  deleted meanwhile, now throws `SerializationConflictError` (`409`, rolled back, safe to retry)
+  where it was a masked `500`; so does a DynamoDB `TransactionCanceledException` with a
+  `TransactionConflict` reason, the same rule as a PostgreSQL serialization failure. A retry loop
+  keyed on `409` now retries these; stop it on the conflict if retrying is wrong for the work.
+- **One write per row in a NoSQL unit of work that writes it conditionally.** A conditional write to
+  a row the unit of work has already written, or any write to the row after one, is refused at the
+  call (`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, DynamoDB's existing
+  one-write-per-key refusal), and on Bigtable a conditional write must be the unit of work's only
+  write. Write the row once per unit of work, merging the changes.
+- **`/ready` can now report the three stores down.** The probe reads `readinessEntity` (DynamoDB and
+  Bigtable; default the first mapped entity) or the database (Cosmos DB). An application with no
+  entity mapped gets one `warn` at `connect()` and no probe. Set `readinessEntity` to a table the
+  application's role can read.
+- **The probe costs one read per uncached health check**, billed by the provider: a DynamoDB or
+  Bigtable point read, or a Cosmos `database.read()`. The probe is cached for 5 s, so it costs at
+  most one read per 5 s per connection; poll `/ready` less often to read less.
+- **An injected Bigtable facade must accept the new filter variant and call options.**
+  `BigtableFilter` gains `{ column: { cellLimit: number } }`, and `readRows` and `conditionalMutate`
+  take an optional `{ timeoutMs }` (a facade may ignore it: the call is still rejected at
+  `requestTimeoutMs`, `504`, though its own work runs on). Every data-source read now asks for the
+  latest cell only: handle the variant in a facade that switches over the union.
+- **Bigtable on an emulator gets `universeDomain: 'googleapis.com'`.** When `BIGTABLE_EMULATOR_HOST`
+  is set, or `apiEndpoint` is set without your own `sslCreds`, and no universe domain is configured
+  (`clientOptions.universeDomain`, `clientOptions.universe_domain` or
+  `GOOGLE_CLOUD_UNIVERSE_DOMAIN`), the lazy arm passes it so the first call skips the SDK's
+  credentials lookup. Emulator boot gets faster. A project with no `apiEndpoint` and no emulator
+  variable, or with `sslCreds` beside its `apiEndpoint` and no emulator variable, keeps its universe
+  domain (client-side metrics still turn off whenever an endpoint is set, as the metrics bullet
+  says). A private `apiEndpoint` without `sslCreds` and with no universe configured also gets the
+  `googleapis.com` default; if that endpoint serves another universe, set
+  `clientOptions.universeDomain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` to it.
+- **Prisma conditional and versioned writes off PostgreSQL run in a short transaction.** On every
+  connector except `postgresql` / `postgres` (and when the connector cannot be determined),
+  `updateWhere` and `updateVersioned` run `updateMany` with the key and the predicate, then a
+  `findUnique` read-back; `deleteWhere` and `deleteVersioned` run `deleteMany` and decide from its
+  count. A lost race on MySQL now answers `409` / `404` instead of reporting success. A `keyColumns`
+  that matches several rows throws, rolling back the root client's short transaction (inside a unit
+  of work, the unit of work rolls back when the throw reaches it, so rethrow it if you catch it
+  there): make `keyColumns` name the table's key.
+- **A Prisma entity with `compositeKeyName` and no `keyColumns` stops the application at boot.**
+  Constructing the adapter now throws `UnsupportedQueryFeatureError` (`'composite-key'`) naming the
+  entity and the fix. Before, such an application could look as if it worked, but its key fell back
+  to `['id']`: a conditional delete on MySQL addressed every row sharing that `id` and could delete
+  another tenant's row while answering `true`. Set `entities.<Entity>.keyColumns` to the `@@id`
+  columns in schema declaration order (for example `['tenantId', 'id']`). An empty `keyColumns` is
+  refused the same way, since a conditional write would then match rows by its predicate alone: name
+  the columns, or omit `keyColumns` for an `id` key.
+- **Prisma conditional writes refuse `relationMode = "prisma"` off PostgreSQL.** On every connector
+  except `postgresql` / `postgres`, `updateWhere`, `deleteWhere`, `updateVersioned` and
+  `deleteVersioned` throw `UnsupportedRelationModeError` when the client's schema sets
+  `relationMode = "prisma"`: Prisma's emulation drops the write's predicate (`updateMany` updates
+  the selected ids without it; the emulated cascade of `deleteMany` runs before it is checked), so a
+  lost race reported success. Set `relationMode = "foreignKeys"` (the default) in the datasource
+  block and regenerate the client, or keep the mode and wait for prisma/orm#30758 (fix
+  prisma-engines#5868) and a Setu release that accepts it. If `connect()` logs that it could not
+  read the client's relationMode, the same writes are refused: confirm the schema uses
+  `relationMode = "foreignKeys"`, then add `relationMode: 'foreignKeys'` to the Prisma adapter
+  options (the last argument of `createPrismaDataSource` takes it too). On MongoDB, which allows
+  only `\"prisma\"`, they are always refused: use Setu's native MongoDB backend
+  (`DatabasePlugin({ type: 'mongodb', … })`). No application meets this today, since Prisma 7 has no
+  MongoDB adapter.
+- **Prisma hooks for `update` / `delete` do not see those writes.** A client extension (`$extends`
+  query hook) or middleware written for `update` / `delete` (soft delete, audit) no longer sees
+  conditional and versioned writes on those connectors: hook `updateMany` / `deleteMany` too.
+- **Such a write holds a pool connection.** On the root client it runs in a `$transaction` with the
+  unit of work's own `maxWait` of 2 s, so pool exhaustion answers `503` (`P2028`) as a unit of work
+  already does. Size the pool for the concurrent writes.
+- **Drizzle with MySQL writes through the repository** (it was a masked `500`), and its `contains`
+  filter escapes with `!`. On mysql-proxy a write's read-back runs outside a transaction and the
+  adapter logs one `warn`; use mysql2 when the read-back must be the row this write produced. Pass
+  `dialect: 'mysql'` when the instance's class name does not reveal MySQL.
+- **Drizzle on mysql2 refuses `NO_BACKSLASH_ESCAPES`.** Under that mode a bound string holding `'`
+  could end its literal and change the statement, so `connect()` now throws
+  `UnsupportedSqlModeError` when `@@SESSION.sql_mode` includes it (on the primary or any
+  `withReplicas()` replica), and every later call refuses once a connection the pool opened later
+  reported it (that connection's session first has the flag stripped, so the statement it was opened
+  for runs without it). Remove `NO_BACKSLASH_ESCAPES` from the global `sql_mode`, from
+  `init_connect`, and from any `SET SESSION` the application runs. A mysql2 release containing
+  sidorares/node-mysql2#4684 fixes the escaping once it is stable, but this version still refuses
+  the mode whatever mysql2 is installed.
+- **Drizzle on mysql2 reads the session mode at `connect()`.** Start now fails when MySQL is
+  unreachable or gives no answer within 2 s, where it used to come up and fail on the first query.
+  Start the application after MySQL is up, or retry the start.
+- **Errors through `query()` on MySQL.** A Prisma `P2010` carrying a duplicate key or a write
+  conflict now answers `409` where it was `500`, mysql2 `ER_LOCK_DEADLOCK` answers `409`, and a
+  closed mysql2 connection answers `503`. Code that caught the `500` should catch
+  `DuplicateKeyError`, `SerializationConflictError` or `DatabaseUnavailableError`.
 
 ## 0.13.0
 

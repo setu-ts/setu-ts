@@ -8,6 +8,7 @@
  * @module
  */
 import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+import type { SQL } from 'drizzle-orm';
 
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import type { FilterComparison, TransactionOptions } from '@setu-ts/common';
@@ -58,7 +59,17 @@ import {
   MissingKeyColumnError,
   UnsupportedIsolationLevelError,
   UnsupportedQueryFeatureError,
+  UnsupportedSqlModeError,
 } from '../../errors.ts';
+import {
+  guardMysql2Pool,
+  hasNoBackslashEscapes,
+  mysql2Targets,
+  type Mysql2Target,
+  READ_SESSION_MODE,
+  READ_SESSION_MODE_TIMEOUT_MS,
+  readSessionModeWithin,
+} from './mysql2-escape-guard.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,
@@ -99,7 +110,7 @@ type DrizzleSelect = {
 type DrizzleSelectQuery = PromiseLike<Record<string, unknown>[]> & {
   where(expr: unknown): DrizzleSelectQuery;
   orderBy(...expressions: unknown[]): DrizzleSelectQuery;
-  limit(value: number): DrizzleSelectQuery;
+  limit(value: number | SQL): DrizzleSelectQuery;
   offset(value: number): DrizzleSelectQuery;
 };
 
@@ -108,8 +119,10 @@ type DrizzleInsert = {
 };
 
 type DrizzleWriteQuery = {
+  then?: PromiseLike<unknown>['then'];
   where?(expr: unknown): DrizzleWriteQuery;
-  returning(): PromiseLike<Record<string, unknown>[]>;
+  returning?(): PromiseLike<Record<string, unknown>[]>;
+  $returningId?(): PromiseLike<Record<string, unknown>[]>;
 };
 
 type DrizzleUpdate = {
@@ -157,6 +170,8 @@ class Deferred<T> {
 
 /** Drizzle operator functions loaded once at connect. */
 export type DrizzleOperators = {
+  /** Whether the database is Drizzle's transactionless MySQL proxy. */
+  mysqlProxy?: boolean;
   eq: (col: unknown, val: unknown) => unknown;
   and: (...exprs: unknown[]) => unknown;
   or?: (...exprs: unknown[]) => unknown;
@@ -250,6 +265,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * {@link #probeAcquireTimedOut}.
    */
   #probeGeneration: object | null = null;
+  /**
+   * Whether a mysql2 session reported `NO_BACKSLASH_ESCAPES` (see
+   * `mysql2-escape-guard.ts`). Once set, every call refuses for the life of
+   * this adapter: the pool connection that reported it was stripped of the
+   * mode, but the deployment still sets it.
+   */
+  #sqlModeRefused = false;
+  /** Removes each guarded pool's `'connection'` listener (primary and replicas). */
+  readonly #unguardPools: (() => void)[] = [];
 
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
@@ -272,7 +296,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    */
   isHealthy?: () => Promise<boolean>;
 
-  constructor(options?: DatabaseAdapterOptions) {
+  private readonly _warn: ((message: string) => void) | undefined;
+  private _proxyWarned = false;
+
+  /** Creates the adapter; warn reports a transactionless MySQL proxy read-back once. */
+  constructor(
+    options?: DatabaseAdapterOptions | DrizzleAdapterOptions,
+    warn?: (message: string) => void,
+  ) {
+    this._warn = warn;
     this._options = options ?? undefined;
     // The application owns the pool callback; the adapter only publishes
     // what it returns, validated at read time by the plugin.
@@ -291,6 +323,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       if (!this._db || !this._configuredDatabase) {
         throw new Error('DrizzleAdapter is not connected — call connect() first');
       }
+      this.#assertSqlModeAccepted();
       this.#nativeHandleIssued = true;
       return { database: this._configuredDatabase, query: this._db, scope: 'outer' };
     };
@@ -303,9 +336,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._configuredDatabase = configured.configured;
     this._transactionBridge = configured.transaction;
     this._supportsIsolation = configured.supportsIsolation;
+    let entityKind: unknown;
 
     try {
       const orm = await import('drizzle-orm');
+      const { MySqlRemoteDatabase } = await import('drizzle-orm/mysql-proxy');
       const ns = orm as Record<string, unknown>;
       // The explicit option wins; otherwise the instance's own dialect object
       // names it. Drizzle publishes no dialect discriminant, so the class name
@@ -317,7 +352,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
           (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)?.dialect
             ?.constructor?.name,
         );
+      entityKind = ns.entityKind;
       const operators: DrizzleOperators = {
+        mysqlProxy: orm.is(this._db, MySqlRemoteDatabase),
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
         and: ns.and as (...exprs: unknown[]) => unknown,
         or: ns.or as (...exprs: unknown[]) => unknown,
@@ -355,6 +392,12 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         throw new Error('drizzle-orm did not export the required query operators');
       }
       this._operators = operators;
+      if (operators.mysqlProxy && !this._proxyWarned) {
+        this._proxyWarned = true;
+        this._warn?.(
+          'Drizzle mysql-proxy writes read back committed data outside a transaction; a later writer may already have changed the row.',
+        );
+      }
     } catch (error) {
       throw new Error(
         `Failed to load Drizzle query operators: ${
@@ -396,6 +439,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       }
     }
 
+    const mysql2 = mysql2Targets(this._db, entityKind);
+    if (mysql2.length > 0) await this.#refuseNoBackslashEscapes(mysql2);
+
     // M95b §3.5: the probe exists only when the instance can execute raw
     // SQL. A SQLite-Proxy/libsql instance has no execute() and the adapter
     // already refuses `rawQuery` for that shape — the member is OMITTED
@@ -407,8 +453,57 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._connected = true;
   }
 
+  /**
+   * Refuses Drizzle over mysql2 while a session reports
+   * `NO_BACKSLASH_ESCAPES`, and guards every connection a pool opens later.
+   * A `withReplicas()` instance is read and guarded on its primary and on
+   * every replica. Each read is bounded at the readiness probe's 2000 ms.
+   * The guard is attached first, so a connection this read opens is guarded
+   * too. A Drizzle mysql-proxy instance is not checked: its callback owns how
+   * a statement reaches the server, and the adapter holds no connection.
+   *
+   * @throws {UnsupportedSqlModeError} When the session reports the mode
+   */
+  async #refuseNoBackslashEscapes(targets: readonly Mysql2Target[]): Promise<void> {
+    this.#unguard();
+    const onRefused = (): void => {
+      if (this.#sqlModeRefused) return;
+      this.#sqlModeRefused = true;
+      this._warn?.(
+        'A new mysql2 pool connection reported sql_mode NO_BACKSLASH_ESCAPES; the Drizzle adapter now refuses every call with UnsupportedSqlModeError.',
+      );
+    };
+    for (const client of new Set(targets.map((target) => target.$client))) {
+      const unguard = guardMysql2Pool(client, onRefused);
+      if (unguard !== undefined) this.#unguardPools.push(unguard);
+    }
+    try {
+      // `connect()` refuses an operator set without `sql.raw`.
+      const statement = this._operators!.sql!.raw(READ_SESSION_MODE);
+      for (const target of targets) {
+        const mode = await readSessionModeWithin(target, statement, READ_SESSION_MODE_TIMEOUT_MS);
+        if (hasNoBackslashEscapes(mode)) this.#sqlModeRefused = true;
+      }
+      this.#assertSqlModeAccepted();
+    } catch (error) {
+      this.#unguard();
+      throw error;
+    }
+  }
+
+  /** Removes every pool guard this adapter attached. */
+  #unguard(): void {
+    for (const unguard of this.#unguardPools.splice(0)) unguard();
+  }
+
+  /** @throws {UnsupportedSqlModeError} Once a mysql2 session reported `NO_BACKSLASH_ESCAPES` */
+  #assertSqlModeAccepted(): void {
+    if (this.#sqlModeRefused) throw new UnsupportedSqlModeError();
+  }
+
   /** @inheritdoc */
   disconnect(): Promise<void> {
+    this.#unguard();
     this._connected = false;
     this._db = null;
     this._configuredDatabase = null;
@@ -470,6 +565,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this.isReady()) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    this.#assertSqlModeAccepted();
     const configuredDatabase = this._configuredDatabase!;
     const transactionBridge = this._transactionBridge!;
     if (options?.isolation !== undefined && !this._supportsIsolation) {
@@ -503,13 +599,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
     const handle: IAdapterTransaction & DrizzleQueryHandleProvider = {
       [DRIZZLE_QUERY_HANDLE]: (): NativeDrizzleQueryHandle => {
+        this.#assertSqlModeAccepted();
         this.#nativeHandleIssued = true;
         return { database: configuredDatabase, query: tx, scope: 'transaction' };
       },
 
       createDataSource: (entity: string): DataSource =>
         this.#countingCompletions(
-          createDrizzleDataSourceInner(tx, entity, tables, operators, entities),
+          createDrizzleDataSourceInner(tx, entity, tables, operators, entities, 'transaction'),
         ),
 
       async commit(): Promise<void> {
@@ -536,6 +633,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this.isReady()) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    this.#assertSqlModeAccepted();
     const execute = this._db!.execute;
     if (typeof execute !== 'function') {
       // SQLite Proxy and libsql-shaped instances expose `all()` instead, but
@@ -572,6 +670,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     if (!this._db) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
+    this.#assertSqlModeAccepted();
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
     return this.#countingCompletions(
       createDrizzleDataSourceInner(
@@ -587,7 +686,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   /**
    * Wraps every method of a data source so each call that RESOLVES counts as
    * a completed query (M101a V8-3). A rejection is not progress: a hung
-   * database rejects at the pool's connection timeout, if at all.
+   * database rejects at the pool's connection timeout, if at all. Each call
+   * first refuses once a mysql2 session reported `NO_BACKSLASH_ESCAPES`, so a
+   * repository obtained before the report refuses too.
    *
    * @param source - The data source to wrap
    * @returns A data source with the same methods and behavior
@@ -596,6 +697,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const wrapped: Record<string, unknown> = { ...source };
     for (const [name, method] of Object.entries(source)) {
       wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
+        this.#assertSqlModeAccepted();
         const result = await (method as (...a: unknown[]) => Promise<unknown>)(...args);
         this.#completedQueries++;
         return result;
@@ -717,6 +819,7 @@ function createDrizzleDataSourceInner(
   tables: Record<string, unknown>,
   operators: DrizzleOperators,
   entities?: Readonly<Record<string, { primaryKey?: string | readonly string[] }>>,
+  scope: 'root' | 'transaction' = 'root',
 ): DataSource & { [FIELD_FOR_COLUMN]: (name: string) => string | undefined } {
   const table = tables[entity];
   if (table == null || typeof table !== 'object') {
@@ -736,6 +839,42 @@ function createDrizzleDataSourceInner(
         throw new UnknownPayloadFieldError(entity, field);
       }
     }
+  };
+
+  const pair = async <T>(run: (db: DrizzleInstance) => Promise<T>): Promise<T> =>
+    scope === 'transaction' || operators.mysqlProxy === true
+      ? await run(instance)
+      : await instance.transaction(run);
+  const readBack = async (
+    db: DrizzleInstance,
+    id: import('@setu-ts/common').EntityKey,
+  ): Promise<Record<string, unknown> | null> => {
+    const values = keyValues(id, keyColumns, `read-back on '${entity}'`);
+    const predicates = keyColumns.map((column, index) =>
+      operators.eq(columnFor(drizzleTable, entity, column), values[index]),
+    );
+    const rows = await db
+      .select()
+      .from(drizzleTable)
+      .where(operators.and(...predicates));
+    return rows[0] ?? null;
+  };
+  const write = async (
+    operation: 'create' | 'update' | 'delete',
+    make: (db: DrizzleInstance) => DrizzleWriteQuery,
+    id: import('@setu-ts/common').EntityKey,
+    conditional = false,
+  ): Promise<Record<string, unknown>[]> => {
+    const query = make(instance);
+    if (typeof query.returning === 'function') return await query.returning();
+    const run = async (db: DrizzleInstance): Promise<Record<string, unknown>[]> => {
+      const count = affectedRowsOf(await (make(db) as unknown), entity, operation);
+      if (operation === 'delete') return count > 0 ? [{}] : [];
+      if (conditional && count === 0) return [];
+      const row = await readBack(db, id);
+      return row === null ? [] : [row];
+    };
+    return operation === 'delete' ? await run(instance) : await pair(run);
   };
 
   return {
@@ -763,6 +902,8 @@ function createDrizzleDataSourceInner(
       }
       if (query.limit > 0) {
         builder = builder.limit(query.limit);
+      } else if (query.offset > 0 && operators.jsonDialect === 'mysql') {
+        builder = builder.limit(operators.sql!.raw('18446744073709551615') as SQL);
       }
       if (query.offset > 0) {
         builder = builder.offset(query.offset);
@@ -778,11 +919,52 @@ function createDrizzleDataSourceInner(
       // caller's object cannot show the check one value and the write another.
       data = { ...data };
       assertPayloadColumns(data);
-      const rows = await returningRows(
-        instance.insert(drizzleTable).values(data),
-        entity,
-        'create',
-      );
+      const query = instance.insert(drizzleTable).values(data);
+      if (typeof query.returning === 'function')
+        return oneReturnedRow(entity, 'create', await query.returning());
+      const missing = keyColumns.filter((column) => data[column] === undefined);
+      const generated =
+        missing.length === 1
+          ? (drizzleTable[missing[0]!] as {
+              primary?: boolean;
+              autoIncrement?: boolean;
+              defaultFn?: unknown;
+            })
+          : undefined;
+      if (
+        missing.length > 0 &&
+        !(
+          generated?.primary === true &&
+          (generated.autoIncrement === true || typeof generated.defaultFn === 'function') &&
+          typeof query.$returningId === 'function' &&
+          operators.mysqlProxy !== true
+        )
+      ) {
+        throw new UnsupportedQueryFeatureError(
+          'create',
+          'drizzle',
+          `Drizzle create on ${entity} cannot learn the new key: the key is filled by a database default and the driver has no RETURNING`,
+        );
+      }
+      const rows = await pair(async (db) => {
+        const insert = db.insert(drizzleTable).values(data);
+        let key = { ...data };
+        if (missing.length > 0) {
+          const ids = await insert.$returningId!();
+          if (ids[0] === undefined)
+            throw new Error(`Drizzle create on '${entity}' returned no generated key`);
+          key = { ...key, ...ids[0] };
+        } else {
+          affectedRowsOf(await (insert as unknown), entity, 'create');
+        }
+        const row = await readBack(
+          db,
+          Object.fromEntries(
+            keyColumns.map((column) => [column, key[column]]),
+          ) as import('@setu-ts/common').EntityKey,
+        );
+        return row === null ? [] : [row];
+      });
       return oneReturnedRow(entity, 'create', rows);
     },
 
@@ -795,10 +977,10 @@ function createDrizzleDataSourceInner(
         operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
-      const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(predicate),
-        entity,
+      const rows = await write(
         'update',
+        (db) => db.update(drizzleTable).set(data).where!(predicate),
+        id,
       );
       return oneReturnedRow(entity, 'update', rows);
     },
@@ -809,11 +991,7 @@ function createDrizzleDataSourceInner(
         operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
-      const rows = await returningRows(
-        instance.delete(drizzleTable).where(predicate),
-        entity,
-        'delete',
-      );
+      const rows = await write('delete', (db) => db.delete(drizzleTable).where(predicate), id);
       return rows.length > 0;
     },
 
@@ -837,10 +1015,11 @@ function createDrizzleDataSourceInner(
         ...keyPredicates,
         predicateFor(drizzleTable, entity, where, operators),
       );
-      const rows = await returningRows(
-        instance.update(drizzleTable).set(data).where!(predicate),
-        entity,
+      const rows = await write(
         'update',
+        (db) => db.update(drizzleTable).set(data).where!(predicate),
+        id,
+        true,
       );
       return rows[0] ?? null;
     },
@@ -859,10 +1038,11 @@ function createDrizzleDataSourceInner(
         ...keyPredicates,
         predicateFor(drizzleTable, entity, where, operators),
       );
-      const rows = await returningRows(
-        instance.delete(drizzleTable).where(predicate),
-        entity,
+      const rows = await write(
         'delete',
+        (db) => db.delete(drizzleTable).where(predicate),
+        id,
+        true,
       );
       return rows.length > 0;
     },
@@ -1160,9 +1340,12 @@ function filterPredicateFor(
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${baseColumn} like ${`%${escapeLikePattern(
+      return containsExpression(
+        baseColumn,
         filter.value,
-      )}%`} escape '\\'`;
+        filterOperators.sql,
+        operators.jsonDialect,
+      );
     case 'gt':
       return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
@@ -1264,7 +1447,7 @@ function jsonPathPredicate(
         ? ops.sql`${text()} is null`
         : ops.sql`${text()} = ${String(filter.value)}`;
     case 'contains':
-      return ops.sql`${text()} like ${`%${escapeLikePattern(filter.value)}%`} escape '\\'`;
+      return containsExpression(text(), filter.value, ops.sql, dialect);
     case 'gt':
       return ops.sql`${ordered} > ${filter.value}`;
     case 'gte':
@@ -1365,19 +1548,48 @@ function oneReturnedRow(
     throw new Error(`Entity '${entity}' not found`);
   }
   throw new Error(
-    `Drizzle ${operation} for entity '${entity}' returned no row; configure a driver that supports RETURNING.`,
+    `Drizzle ${operation} for entity '${entity}' returned no row: RETURNING produced none, or on MySQL the read-back by key found none.`,
   );
 }
 
-function returningRows(
-  query: DrizzleWriteQuery,
-  entity: string,
-  operation: 'create' | 'update' | 'delete',
-): PromiseLike<Record<string, unknown>[]> {
-  if (typeof query.returning !== 'function') {
-    throw new Error(
-      `Drizzle ${operation} for entity '${entity}' requires a driver that supports RETURNING.`,
-    );
-  }
-  return query.returning();
+/** Reads only the mysql2 matched-row result shapes established by the MySQL conformance cell. */
+function affectedRowsOf(result: unknown, entity: string, operation: string): number {
+  const header: unknown = Array.isArray(result) ? result[0] : result;
+  const count =
+    typeof header === 'object' && header !== null
+      ? (header as { affectedRows?: unknown }).affectedRows
+      : undefined;
+  if (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0) return count;
+  throw new UnsupportedQueryFeatureError(
+    'write',
+    'drizzle',
+    `Drizzle ${operation} on ${entity}: the driver reported no affected-row count this adapter can read (no RETURNING either)`,
+  );
+}
+
+/** Builds the same literal-substring predicate for scalar and nested fields. */
+function containsExpression(
+  column: unknown,
+  value: string,
+  sql: NonNullable<DrizzleOperators['sql']>,
+  dialect: SqlJsonDialect | undefined,
+): unknown {
+  const pattern = `%${escapeLikePattern(value, dialect === 'mysql' ? '!' : '\\')}%`;
+  if (dialect !== 'mysql') return sql`${column} like ${pattern} escape '\\'`;
+  // mysql2.query interpolates bound strings into the query text with
+  // backslash escapes, so a backslash in the value is sent as char(92),
+  // outside any literal. That does not make NO_BACKSLASH_ESCAPES supported:
+  // mysql2 escapes a quote as \', which does not parse under that mode, so
+  // the adapter refuses the mode on mysql2 (`mysql2-escape-guard.ts`).
+  const segments = pattern.split('\\');
+  if (segments.length === 1) return sql`${column} like ${pattern} escape '!'`;
+  // One flat `concat(seg, char(92), seg, …)` with every segment bound. Nesting
+  // one `concat` per backslash made the SQL builder recurse once per backslash,
+  // so a search value of a few thousand backslashes overflowed the stack.
+  const strings = ['concat(', ...segments.slice(1).map(() => ', char(92), '), ')'];
+  const expression = sql(
+    Object.assign(strings, { raw: strings }) as unknown as TemplateStringsArray,
+    ...segments,
+  );
+  return sql`${column} like ${expression} escape '!'`;
 }

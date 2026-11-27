@@ -3619,10 +3619,12 @@
           "npm:@aws-sdk/client-dynamodb@3",
           "npm:@azure/cosmos@4",
           "npm:@google-cloud/bigtable@6",
+          "npm:@prisma/adapter-mariadb@^7.10.1",
           "npm:@prisma/adapter-pg@^7.10.0",
           "npm:@prisma/client@^7.10.0",
           "npm:drizzle-orm@0.45.2",
           "npm:mongodb@^6.21.0",
+          "npm:mysql2@^3.24.4",
           "npm:pg@8",
           "npm:vitest@5.0.3"
         ]
@@ -3673,8 +3675,8 @@
       "jsr:@setu-ts/grpc-plugin@0.13.0": {
         "dependencies": [
           "npm:@bufbuild/protobuf@^2.7.0",
-          "npm:@connectrpc/connect-node@^2.1.2",
-          "npm:@connectrpc/connect@^2.1.2",
+          "npm:@connectrpc/connect-node@^2.2.0",
+          "npm:@connectrpc/connect@^2.2.0",
           "npm:vitest@5.0.3"
         ]
       },

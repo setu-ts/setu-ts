@@ -25,8 +25,17 @@
 import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
 import { DatabaseService } from '../../src/services/database-service.ts';
+import { DatabasePlugin } from '../../src/plugin/database-plugin.ts';
+import { DatabaseTimeoutError, SerializationConflictError } from '../../src/errors.ts';
+import {
+  readinessAcrossFreeze,
+  relayTarget,
+  startFrozenRelay,
+  timed,
+} from '../fixtures/frozen-relay.ts';
+import { cleanupAll } from '../fixtures/cleanup-all.ts';
 import { matchesFilter } from '../../src/query/query-builder.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import type {
@@ -667,6 +676,149 @@ describe('CosmosAdapter against a real emulator — duplicate key', () => {
         expect(((refusal as Error).cause as { code?: unknown }).code).toBe(409);
       } finally {
         await service.close();
+      }
+    },
+  );
+});
+
+describe('CosmosAdapter against a real emulator — a unit of work whose row was deleted', () => {
+  for (const kind of ['updateWhere', 'deleteWhere'] as const) {
+    it(
+      `commits a buffered ${kind} as a serialization conflict when the row was deleted (service 404)`,
+      { skip: skipReal },
+      async () => {
+        const container = await provision(`deleted_${kind}_${suffix}`, '/id');
+        const adapter = new CosmosAdapter({
+          endpoint: endpoint as string,
+          key,
+          database: databaseId,
+          containers: { Row: { container, partitionKey: 'id' } },
+        });
+        await adapter.connect();
+        try {
+          const root = adapter.createDataSource('Row');
+          await root.create({ id: 'a', version: 1 });
+          const tx = await adapter.beginTransaction();
+          const source = tx.createDataSource('Row');
+          if (kind === 'updateWhere')
+            await source.updateWhere!('a', { version: 1 }, { version: 2 });
+          else await source.deleteWhere!('a', { version: 1 });
+          await root.delete('a');
+          const error: unknown = await tx.commit().catch((caught: unknown) => caught);
+          expect(error).toBeInstanceOf(SerializationConflictError);
+          // The service checks existence before the ETag: 404, not 412.
+          expect(((error as Error).cause as { code?: unknown }).code).toBe(404);
+          expect(await root.findById('a')).toBeNull();
+        } finally {
+          await adapter.disconnect();
+        }
+      },
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// A frozen store: the adapter talks to the emulator through a TCP relay that
+// stops forwarding while keeping every socket open, so a call hangs exactly as
+// it would on a hung backend. The container itself is never touched. The SDK's
+// endpoint discovery keeps every request on the relay here (measured: frozen
+// calls time out), so no connection-policy override is needed.
+// ---------------------------------------------------------------------------
+
+/** The bound every outage cell configures, in milliseconds. */
+const OUTAGE_BOUND_MS = 1000;
+/** Allowed slack past the bound for the SDK to unwind the aborted request. */
+const OUTAGE_SLACK_MS = 1000;
+
+describe('CosmosAdapter behind a frozen relay (guarded)', () => {
+  it(
+    'ends a point read, a page, a write and a unit of work with 504 within requestTimeoutMs',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const container = await provision(`outage_${suffix}`, '/id');
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      const adapter = new CosmosAdapter({
+        endpoint: `http://${relay.host}:${relay.port}/`,
+        key,
+        database: databaseId,
+        requestTimeoutMs: OUTAGE_BOUND_MS,
+        containers: { Outage: { container, partitionKey: 'id' } },
+      });
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'cosmos');
+      try {
+        await adapter.connect();
+        const repository = service.getRepository<{ id: string; value: number }>('Outage');
+        await repository.create({ id: 'before', value: 1 });
+        // The first point read resolves and caches the container's partition
+        // key; the cells below measure the bound on the data calls themselves.
+        await expect(repository.findById('before')).resolves.toMatchObject({ value: 1 });
+        await expect(adapter.isHealthy()).resolves.toBe(true);
+
+        relay.freeze();
+        const calls: Readonly<Record<string, () => Promise<unknown>>> = {
+          'point read': () => repository.findById('before'),
+          page: () => repository.findPage({ limit: 2 }),
+          write: () => repository.create({ id: 'during', value: 2 }),
+          'unit of work': () =>
+            service.transaction(async (uow) => {
+              await uow.getRepository<{ id: string; value: number }>('Outage').create({
+                id: 'in-unit',
+                value: 3,
+              });
+            }),
+        };
+        for (const [name, call] of Object.entries(calls)) {
+          const settled = await timed(call);
+          expect({ name, outcome: settled.outcome }).toEqual({ name, outcome: 'rejected' });
+          if (settled.outcome !== 'rejected') continue;
+          expect(settled.error, name).toBeInstanceOf(DatabaseTimeoutError);
+          expect(httpStatusHintOf(settled.error)?.status, name).toBe(504);
+          expect(settled.elapsedMs, name).toBeLessThan(OUTAGE_BOUND_MS + OUTAGE_SLACK_MS);
+        }
+
+        // The probe's own bound is min(requestTimeoutMs, 2000): it rejects
+        // (unknown) or answers false, never true, and does not outlive it.
+        const probe = await timed(() => adapter.isHealthy());
+        expect(probe.outcome === 'resolved' ? probe.value : 'rejected').not.toBe(true);
+        expect(probe.elapsedMs).toBeLessThan(OUTAGE_BOUND_MS + 500);
+
+        relay.thaw();
+        await expect(repository.findById('before')).resolves.toMatchObject({ value: 1 });
+        await expect(adapter.isHealthy()).resolves.toBe(true);
+      } finally {
+        relay.thaw();
+        await cleanupAll([() => service.close(), () => relay.close()]);
+      }
+    },
+  );
+
+  it(
+    'reports /ready as not ready within the indicator bound, and ready again once thawed',
+    { skip: skipReal, timeout: 60_000 },
+    async () => {
+      const container = await provision(`ready_${suffix}`, '/id');
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      try {
+        const result = await readinessAcrossFreeze(
+          relay,
+          DatabasePlugin({
+            type: 'cosmos',
+            options: {
+              endpoint: `http://${relay.host}:${relay.port}/`,
+              key,
+              database: databaseId,
+              requestTimeoutMs: OUTAGE_BOUND_MS,
+              containers: { Ready: { container, partitionKey: 'id' } },
+            },
+          }),
+        );
+        expect(result.baseline).toBe(200);
+        expect(result.frozen.status).toBe(503);
+        expect(result.frozen.elapsedMs).toBeLessThan(2000 + 500);
+        expect(['down', 'degraded']).toContain(result.frozenCheck);
+        expect(result.recovered).toBe(200);
+      } finally {
+        await relay.close();
       }
     },
   );

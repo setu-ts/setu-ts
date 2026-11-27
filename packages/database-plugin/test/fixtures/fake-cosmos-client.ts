@@ -238,6 +238,44 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
     batch: (operations, partitionKey): Promise<CosmosBatchResponse> => {
       recorder.batches.push({ container, partitionKey, operations });
       const code = options.batchCode ?? 200;
+      if (code === 200) {
+        const pending = new Map(documents);
+        for (const [index, operation] of operations.entries()) {
+          const body = 'resourceBody' in operation ? operation.resourceBody : {};
+          const id =
+            'id' in operation ? operation.id : String((body as Record<string, unknown>).id);
+          const key = documentKey(container, partitionKey, id);
+          const found = pending.get(key);
+          // Measured on the emulator: existence is checked before the ETag,
+          // so an `ifMatch` write to a row deleted since answers 404, not 412.
+          const status =
+            ['Replace', 'Patch', 'Delete'].includes(operation.operationType) && found === undefined
+              ? 404
+              : operation.ifMatch !== undefined && operation.ifMatch !== found?.['_etag']
+                ? 412
+                : operation.operationType === 'Create' && found !== undefined
+                  ? 409
+                  : 200;
+          if (status !== 200)
+            return Promise.resolve({
+              code: 207,
+              result: operations.map((_, i) => ({ statusCode: i === index ? status : 424 })),
+            });
+          if (operation.operationType === 'Delete') {
+            pending.delete(key);
+            continue;
+          }
+          const document: Record<string, unknown> =
+            operation.operationType === 'Patch' ? { ...found } : { ...body };
+          if (operation.operationType === 'Patch')
+            for (const patch of operation.resourceBody.operations)
+              document[patch.path.slice(1)] = patch.value;
+          document['_etag'] = `etag-${++etagCounter}`;
+          pending.set(key, document);
+        }
+        documents.clear();
+        for (const [key, document] of pending) documents.set(key, document);
+      }
       return Promise.resolve({
         code,
         // Measured: a batch that did not apply answers 207 overall, with 424

@@ -43,6 +43,7 @@ import {
   UnsupportedFilterOperatorError,
   UnsupportedIsolationLevelError,
   UnsupportedQueryFeatureError,
+  UnsupportedRelationModeError,
 } from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { jsonPathString } from '../../query/json-path.ts';
@@ -82,6 +83,116 @@ const PROVIDERS: ReadonlySet<string> = new Set<string>([
   ...ESCAPING_PROVIDERS,
   ...PASSTHROUGH_PROVIDERS,
   'sqlite',
+]);
+
+/** Only PostgreSQL's single-statement conditional path has a guarded race proof. */
+function conditionalPathFor(provider: PrismaSqlProvider | undefined): 'single' | 'count' {
+  return provider === 'postgresql' || provider === 'postgres' ? 'single' : 'count';
+}
+
+/**
+ * Why the count path's conditional writes are refused: the schema reads
+ * `relationMode = "prisma"`, or the mode could not be read and the application
+ * did not assert `relationMode: 'foreignKeys'`. `undefined` means allowed.
+ */
+type RelationModeRefusal = 'prisma' | 'unread' | 'mongodb' | undefined;
+
+/**
+ * Decides the refusal for one client. The single-statement path is never
+ * refused. A read `"prisma"` is refused even under the assertion, which only
+ * vouches for a schema the adapter cannot read.
+ *
+ * @param conditionalPath - The connector's conditional-write path
+ * @param client - The root, transaction or extended client
+ * @param asserted - The application's `relationMode` option
+ * @returns The refusal, or `undefined` when conditional writes may run
+ * @internal
+ */
+function relationModeRefusalFor(
+  conditionalPath: 'single' | 'count',
+  client: unknown,
+  asserted: 'foreignKeys' | undefined,
+  provider?: string,
+): RelationModeRefusal {
+  if (conditionalPath === 'single') return undefined;
+  // Prisma on MongoDB allows only emulated relations, so no assertion can lift it.
+  if (provider === 'mongodb') return 'mongodb';
+  const mode = relationModeOf(client);
+  if (mode === 'prisma') return 'prisma';
+  if (mode === undefined && asserted !== 'foreignKeys') return 'unread';
+  return undefined;
+}
+
+/**
+ * Reads `relationMode` from the datasource block of a generated client's
+ * inline schema, `client._engineConfig.inlineSchema`.
+ *
+ * Prisma does not expose the mode on any public surface, and its runtime data
+ * model omits it; the generated client carries the schema text it was built
+ * from. The root, `$transaction` and `$extends` clients all reach the same
+ * `_engineConfig`. The field is underscore-prefixed, so it is read
+ * structurally and an absent or unrecognisable one is `undefined` (the
+ * caller warns), never a guess. Only lines inside `datasource <name> { … }`
+ * are read, so a model field or a comment naming `relationMode` cannot answer.
+ * The deprecated `referentialIntegrity` name counts the same. A header or line
+ * it cannot read, or a key outside Prisma's datasource keys, answers
+ * `undefined`, so the caller warns rather than trusting a guess.
+ * A datasource block without the setting answers Prisma's default for the SQL
+ * connectors, `'foreignKeys'`.
+ *
+ * @param client - The injected Prisma client
+ * @returns The mode, or `undefined` when the schema cannot be read
+ * @internal
+ */
+export function relationModeOf(client: unknown): string | undefined {
+  const config = (client as { _engineConfig?: unknown } | null | undefined)?._engineConfig;
+  const schema = (config as { inlineSchema?: unknown } | null | undefined)?.inlineSchema;
+  if (typeof schema !== 'string') return undefined;
+  let inDatasource = false;
+  let found = false;
+  let mode: string | undefined;
+  let provider: string | undefined;
+  for (const raw of schema.split('\n')) {
+    // A trailing `//` comment is not part of the setting.
+    const line = raw.replace(/\/\/.*$/, '').trim();
+    if (!inDatasource) {
+      if (/^datasource\s+\w+\s*\{$/.test(line)) inDatasource = found = true;
+      else if (/^datasource\b/.test(line)) return undefined;
+      continue;
+    }
+    if (line === '') continue;
+    if (line.startsWith('}')) {
+      inDatasource = false;
+      continue;
+    }
+    const setting = /^(\w+)\s*=\s*(.*)$/.exec(line);
+    // An unreadable line or an unknown key fails toward the warning, never a guess.
+    if (setting === null || !DATASOURCE_KEYS.has(setting[1]!)) return undefined;
+    if (setting[1] === 'provider') provider = /^"(\w+)"$/.exec(setting[2]!.trim())?.[1];
+    if (setting[1] === 'relationMode' || setting[1] === 'referentialIntegrity') {
+      const value = /^"(\w+)"$/.exec(setting[2]!.trim())?.[1];
+      if (value === undefined) return undefined;
+      mode = value;
+    }
+  }
+  if (!found) return undefined;
+  // On MongoDB Prisma allows only "prisma" emulation, so that is its default.
+  return mode ?? (provider === 'mongodb' ? 'prisma' : 'foreignKeys');
+}
+
+/**
+ * The datasource keys Prisma's schema accepts. `referentialIntegrity` is the
+ * deprecated name of `relationMode`, which Prisma still maps to the same mode.
+ */
+const DATASOURCE_KEYS: ReadonlySet<string> = new Set([
+  'provider',
+  'url',
+  'directUrl',
+  'shadowDatabaseUrl',
+  'relationMode',
+  'referentialIntegrity',
+  'extensions',
+  'schemas',
 ]);
 
 function prismaIsolationLevel(
@@ -162,6 +273,11 @@ type ModelDelegate = {
     data: Record<string, unknown>;
   }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  updateMany(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<{ count: number }>;
+  deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
   count(args?: { where?: Record<string, unknown> }): Promise<number>;
 };
 
@@ -216,6 +332,11 @@ export class PrismaAdapter implements IDatabaseAdapter {
   private readonly _options: DatabaseAdapterOptions | PrismaAdapterOptions | undefined;
   /** The resolved connector, or `undefined` when it could not be determined. */
   private _provider: PrismaSqlProvider | undefined;
+  private _conditionalPath: 'single' | 'count' = 'count';
+  /** Set at `connect()` when the count path refuses conditional writes. */
+  private _relationModeRefusal: RelationModeRefusal;
+  private readonly _warn: ((message: string) => void) | undefined;
+  private _relationModeWarned = false;
 
   /** Portable levels available from the resolved Prisma connector. */
   get transactionIsolationLevels(): readonly TransactionIsolationLevel[] {
@@ -228,14 +349,81 @@ export class PrismaAdapter implements IDatabaseAdapter {
     return PRISMA_ALL_ISOLATION_LEVELS;
   }
 
-  constructor(options?: DatabaseAdapterOptions) {
+  /**
+   * Creates an adapter over the application's generated client and entity key mappings.
+   *
+   * @param options - The injected client and its per-entity key mappings
+   * @param warn - Receives the one `warn` logged at `connect()` when the
+   *   client's `relationMode` cannot be read on the count path
+   * @throws {UnsupportedQueryFeatureError} When an entity names a
+   *   `compositeKeyName` without its `keyColumns`: the key would default to
+   *   `['id']`, so a conditional write on the affected-row count would address
+   *   every row sharing that `id` (another tenant's row, for one). Also when
+   *   an entity sets an empty `keyColumns`: a conditional write would then
+   *   match rows by its predicate alone.
+   */
+  constructor(
+    options?: DatabaseAdapterOptions | PrismaAdapterOptions,
+    warn?: (message: string) => void,
+  ) {
+    this._warn = warn;
+    const entities = (options as PrismaAdapterOptions | undefined)?.entities ?? {};
+    for (const [entity, key] of Object.entries(entities)) {
+      if (key.compositeKeyName !== undefined && (key.keyColumns?.length ?? 0) === 0) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `Prisma entity '${entity}' names compositeKeyName '${key.compositeKeyName}' without ` +
+            `keyColumns. Set entities.${entity}.keyColumns to the @@id columns in schema ` +
+            `declaration order (for example ['tenantId', 'id']).`,
+        );
+      }
+      if (key.keyColumns !== undefined && key.keyColumns.length === 0) {
+        throw new UnsupportedQueryFeatureError(
+          'composite-key',
+          'prisma',
+          `Prisma entity '${entity}' sets an empty entities.${entity}.keyColumns: a conditional write would match ` +
+            `rows by its predicate alone. Name the key columns, or omit keyColumns for an 'id' key.`,
+        );
+      }
+    }
     this._options = options ?? undefined;
   }
 
-  /** @inheritdoc */
+  /**
+   * @inheritdoc
+   *
+   * On the count path (every connector except `postgresql` / `postgres`) this
+   * also reads the client's `relationMode`: under `"prisma"` every later
+   * conditional write throws `UnsupportedRelationModeError`. When the mode
+   * cannot be read, they throw it too, unless the options assert
+   * `relationMode: 'foreignKeys'`; an unreadable mode also logs one `warn`.
+   */
   async connect(): Promise<void> {
     this._client = await this.resolveClient();
     this._provider = this.resolveProvider();
+    this._conditionalPath = conditionalPathFor(this._provider);
+    const asserted = (this._options as PrismaAdapterOptions | undefined)?.relationMode;
+    this._relationModeRefusal = relationModeRefusalFor(
+      this._conditionalPath,
+      this._client,
+      asserted,
+      this._provider,
+    );
+    if (
+      this._conditionalPath === 'count' &&
+      relationModeOf(this._client) === undefined &&
+      !this._relationModeWarned
+    ) {
+      this._relationModeWarned = true;
+      this._warn?.(
+        "Prisma conditional writes could not read the client's relationMode (client._engineConfig.inlineSchema); " +
+          'under relationMode = "prisma" Prisma drops the write\'s predicate, so a lost race reads as success. ' +
+          (asserted === 'foreignKeys'
+            ? "They run because the options assert relationMode: 'foreignKeys'."
+            : "They are refused until the options assert relationMode: 'foreignKeys' for a schema confirmed to use that mode."),
+      );
+    }
     await this._client.$connect();
     this._connected = true;
   }
@@ -283,6 +471,9 @@ export class PrismaAdapter implements IDatabaseAdapter {
     // Capture for the returned transaction's data-source factory, whose `this`
     // is the transaction object, not this adapter.
     const provider = this._provider;
+    const conditionalPath = this._conditionalPath;
+    const relationModeRefusal = this._relationModeRefusal;
+    const transactionTimeout = this._options?.transactionTimeout ?? 30_000;
     const entities = (this._options as PrismaAdapterOptions | undefined)?.entities;
 
     const txReady = new Deferred<PrismaClient>();
@@ -325,6 +516,10 @@ export class PrismaAdapter implements IDatabaseAdapter {
           provider,
           entities?.[entity]?.keyColumns ?? ['id'],
           entities?.[entity]?.compositeKeyName,
+          'transaction',
+          conditionalPath,
+          transactionTimeout,
+          relationModeRefusal,
         );
       },
 
@@ -390,6 +585,10 @@ export class PrismaAdapter implements IDatabaseAdapter {
       this._provider,
       entities?.[entity]?.keyColumns ?? ['id'],
       entities?.[entity]?.compositeKeyName,
+      'root',
+      this._conditionalPath,
+      this._options?.transactionTimeout ?? 30_000,
+      this._relationModeRefusal,
     );
   }
 
@@ -739,11 +938,19 @@ async function findPrismaPage(
  * error names the entity and the convention so the caller can fix the entity
  * name.
  *
+ * On a connector other than `postgresql` / `postgres`, a client whose schema
+ * sets `relationMode = "prisma"` gets a source whose `updateWhere` and
+ * `deleteWhere` throw `UnsupportedRelationModeError`, as through
+ * {@linkcode PrismaAdapter}; so does a client whose mode cannot be read,
+ * unless `options.relationMode` asserts `'foreignKeys'`.
+ *
  * @param client - The Prisma client (or transaction client) instance
  * @param entity - Entity / model name (e.g. `'User'`)
  * @param provider - The Prisma SQL provider (connector)
  * @param keyColumns - The resolved primary-key columns (defaults to `['id']`)
  * @param compoundKeyField - The compound-key field name, or `undefined` for scalar keys
+ * @param options - `relationMode: 'foreignKeys'` asserts the mode of a schema
+ *   the source cannot read (since 0.14.0); see {@linkcode PrismaAdapterOptions.relationMode}
  * @returns A data source bound to the Prisma model
  * @since 0.1.0
  */
@@ -753,13 +960,19 @@ export function createPrismaDataSource(
   provider?: PrismaSqlProvider,
   keyColumns?: readonly string[],
   compoundKeyField?: string,
+  options?: Pick<PrismaAdapterOptions, 'relationMode'>,
 ): DataSource {
+  const conditionalPath = conditionalPathFor(provider);
   return createPrismaDataSourceInner(
     client,
     entity,
     provider,
     keyColumns ?? ['id'],
     compoundKeyField,
+    'root',
+    conditionalPath,
+    30_000,
+    relationModeRefusalFor(conditionalPath, client, options?.relationMode, provider),
   );
 }
 
@@ -771,6 +984,10 @@ export function createPrismaDataSource(
  * @param provider - The Prisma SQL provider (connector)
  * @param keyColumns - The resolved primary-key columns
  * @param compoundKeyField - The compound-key field name, or `undefined` for scalar keys
+ * @param scope - Whether `client` is the root client or a transaction client
+ * @param conditionalPath - The conditional-write strategy chosen for the connector
+ * @param transactionTimeout - The root client's short-transaction timeout
+ * @param relationModeRefusal - Why conditional writes throw `UnsupportedRelationModeError`, if they do
  * @returns A data source bound to the Prisma model
  * @internal
  */
@@ -780,6 +997,10 @@ function createPrismaDataSourceInner(
   provider?: PrismaSqlProvider,
   keyColumns: readonly string[] = ['id'],
   compoundKeyField?: string,
+  scope: 'root' | 'transaction' = 'root',
+  conditionalPath: 'single' | 'count' = conditionalPathFor(provider),
+  transactionTimeout = 30_000,
+  relationModeRefusal: RelationModeRefusal = undefined,
 ): DataSource {
   // Resolve delegate: 'User' → client.user
   const delegateKey = entity.charAt(0).toLowerCase() + entity.slice(1);
@@ -818,6 +1039,45 @@ function createPrismaDataSourceInner(
         'Prisma write preconditions may not name operators or the compound-key field.',
       );
     }
+  };
+
+  const countedWrite = async (
+    operation: 'updateWhere' | 'deleteWhere',
+    id: EntityKey,
+    where: Readonly<Record<string, string | number>>,
+    data?: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null | boolean> => {
+    const values = keyValues(id, keyColumns, `${operation} on '${entity}'`);
+    const columnsWhere = Object.fromEntries(
+      keyColumns.map((column, index) => [column, values[index]]),
+    );
+    const args = { where: { ...columnsWhere, AND: [where] } };
+    // Built from the SAME values the write filter uses, read from the key once:
+    // a caller that changes its key object while the write is in flight, or a
+    // getter that answers differently on a second read, cannot make the
+    // read-back address a different row than the one the write matched.
+    const readBack =
+      compoundKeyField === undefined
+        ? { [keyColumns[0]]: values[0] }
+        : { [compoundKeyField]: columnsWhere };
+    const run = async (tx: PrismaClient): Promise<Record<string, unknown> | null | boolean> => {
+      const model = (tx as unknown as Record<string, ModelDelegate>)[delegateKey]!;
+      const { count } =
+        operation === 'updateWhere'
+          ? await model.updateMany({ ...args, data: data! })
+          : await model.deleteMany(args);
+      if (count > 1) {
+        throw new Error(
+          `Prisma ${operation} on '${entity}' matched ${count} rows for one key; keyColumns do not name the table's key`,
+        );
+      }
+      if (operation === 'deleteWhere') return count === 1;
+      if (count === 0) return null;
+      return await model.findUnique({ where: readBack });
+    };
+    return scope === 'transaction'
+      ? await run(client)
+      : await client.$transaction(run, { maxWait: 2000, timeout: transactionTimeout });
   };
 
   return {
@@ -899,6 +1159,13 @@ function createPrismaDataSourceInner(
     },
 
     async updateWhere(id, where, data) {
+      if (relationModeRefusal !== undefined)
+        throw new UnsupportedRelationModeError(
+          'updateWhere',
+          entity,
+          provider,
+          relationModeRefusal,
+        );
       const checked = checkWritePrecondition(where, data);
       if (!checked.ok) {
         throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
@@ -907,6 +1174,12 @@ function createPrismaDataSourceInner(
       data = withoutKeyColumns(id, checked.data);
       assertPreconditionFields(where);
       try {
+        if (conditionalPath === 'count') {
+          return (await countedWrite('updateWhere', id, where, data)) as Record<
+            string,
+            unknown
+          > | null;
+        }
         return await delegate.update({
           where: {
             ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'updateWhere'),
@@ -922,6 +1195,13 @@ function createPrismaDataSourceInner(
       }
     },
     async deleteWhere(id, where) {
+      if (relationModeRefusal !== undefined)
+        throw new UnsupportedRelationModeError(
+          'deleteWhere',
+          entity,
+          provider,
+          relationModeRefusal,
+        );
       const checked = checkWritePrecondition(where);
       if (!checked.ok) {
         throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
@@ -929,6 +1209,8 @@ function createPrismaDataSourceInner(
       where = checked.where;
       assertPreconditionFields(where);
       try {
+        if (conditionalPath === 'count')
+          return (await countedWrite('deleteWhere', id, where)) as boolean;
         await delegate.delete({
           where: {
             ...buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'deleteWhere'),

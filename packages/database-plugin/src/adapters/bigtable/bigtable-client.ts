@@ -10,6 +10,7 @@
  * @module
  */
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import { requestBound } from '../request-bound.ts';
 import type {
   BigtableFilter,
   BigtableMutation,
@@ -28,6 +29,11 @@ import type {
  * @since 0.2.0
  */
 export interface BigtableClientConfiguration {
+  /**
+   * Further `Bigtable` constructor options, passed through to the SDK.
+   * `projectId` and `apiEndpoint` given beside it win over the same keys here.
+   */
+  readonly clientOptions?: Readonly<Record<string, unknown>>;
   /** The GCP project the instance lives in. */
   readonly projectId: string;
   /**
@@ -40,17 +46,46 @@ export interface BigtableClientConfiguration {
   readonly apiEndpoint?: string;
 }
 
+/**
+ * What the plugin read from the runtime environment for the lazy arm.
+ *
+ * Not on the exported configuration: an adapter built directly decides from
+ * its options alone, and only the plugin reads the environment.
+ *
+ * @internal
+ */
+export interface BigtableEnvironmentFacts {
+  /** `BIGTABLE_EMULATOR_HOST` is set. */
+  readonly emulatorFromEnvironment?: boolean;
+  /** `GOOGLE_CLOUD_UNIVERSE_DOMAIN` is set. */
+  readonly universeFromEnvironment?: boolean;
+}
+
+/** The options handed to the native `Bigtable` constructor. */
+type BigtableSdkClientOptions = Readonly<Record<string, unknown>> & { readonly projectId: string };
+
 /** The native SDK's per-row write surface, as this adapter uses it. */
 interface BigtableSdkRow {
   /** CheckAndMutateRow. Resolves to a one-element `[matched]` tuple. */
   filter(
     test: readonly unknown[],
-    branches: { onMatch?: readonly unknown[]; onNoMatch?: readonly unknown[] },
+    branches: {
+      onMatch?: readonly unknown[];
+      onNoMatch?: readonly unknown[];
+      gaxOptions?: { timeout: number };
+    },
   ): Promise<[boolean, ...unknown[]]>;
 }
 
 /** The native SDK's per-table surface, as this adapter uses it. */
+interface BigtableReadStream {
+  on(event: string, listener: (value?: unknown) => void): unknown;
+  end(): void;
+}
+
 interface BigtableSdkTable {
+  /** Streaming ReadRows permits the whole-call bound to stop resumption retries. */
+  createReadStream?(options: unknown): BigtableReadStream;
   /** ReadRows. Resolves to a one-element tuple holding the row array. */
   getRows(options: unknown): Promise<[readonly BigtableSdkReadRow[], ...unknown[]]>;
   /** Returns the row handle for one key. */
@@ -89,7 +124,7 @@ interface BigtableSdkClientInstance {
  */
 export interface BigtableSdkModule {
   /** The Bigtable client constructor. */
-  Bigtable: new (configuration: BigtableClientConfiguration) => BigtableSdkClientInstance;
+  Bigtable: new (options: BigtableSdkClientOptions) => BigtableSdkClientInstance;
 }
 
 /** The deferred client-resolution seam the adapter lifecycle drives. */
@@ -129,6 +164,21 @@ export function createInjectedBigtableLoader(client: IBigtableClient): BigtableC
 export function createLazyBigtableLoader(
   configuration: BigtableClientConfiguration,
 ): BigtableClientLoader {
+  return createBigtableSdkLoader(configuration, {});
+}
+
+/**
+ * The lazy SDK loader with the plugin's environment facts.
+ *
+ * @param configuration - Settings passed to the native `Bigtable` constructor
+ * @param environment - What the plugin read from the runtime environment
+ * @returns A loader that imports and adapts the SDK when used, marked owned
+ * @internal
+ */
+export function createBigtableSdkLoader(
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): BigtableClientLoader {
   return {
     owned: true,
     load: async (): Promise<IBigtableClient> => {
@@ -141,7 +191,7 @@ export function createLazyBigtableLoader(
           cause: error,
         });
       }
-      return adaptBigtableSdkModule(module, configuration);
+      return adaptBigtableSdk(module, configuration, environment);
     },
   };
 }
@@ -194,20 +244,35 @@ function adaptReadRow(row: BigtableSdkReadRow): BigtableReadRow {
  * @returns The SDK filter
  */
 function adaptFilter(filter: BigtableFilter): unknown {
-  if ('chain' in filter) return filter.chain.map(adaptFilter);
+  if ('chain' in filter) return adaptChain(filter.chain);
   if ('interleave' in filter) {
-    return { interleave: filter.interleave.map((arm) => arm.map(adaptFilter)) };
+    return { interleave: filter.interleave.map(adaptChain) };
   }
   if ('condition' in filter) {
     const { test, pass } = filter.condition;
     return {
       condition:
         pass === undefined
-          ? { test: test.map(adaptFilter) }
-          : { test: test.map(adaptFilter), pass: pass.map(adaptFilter) },
+          ? { test: adaptChain(test) }
+          : { test: adaptChain(test), pass: adaptChain(pass) },
     };
   }
   return filter;
+}
+
+/**
+ * Translates a sequence of filters into ONE flat SDK filter array. The SDK's
+ * `Filter.parse` reads each element's first key, so a nested chain (an array
+ * inside the array) is refused as `Unknown filter: 0.`; a sequential chain
+ * means the same as its elements in order, so it is spliced in.
+ *
+ * @param filters - The facade filters, applied in order
+ * @returns The flat SDK filter array
+ */
+function adaptChain(filters: readonly BigtableFilter[]): unknown[] {
+  return filters.flatMap((filter) =>
+    'chain' in filter ? adaptChain(filter.chain) : [adaptFilter(filter)],
+  );
 }
 
 /**
@@ -261,7 +326,66 @@ export function adaptBigtableSdkModule(
   module: BigtableSdkModule,
   configuration: BigtableClientConfiguration,
 ): IBigtableClient {
-  const client = new module.Bigtable(configuration);
+  return adaptBigtableSdk(module, configuration, {});
+}
+
+/**
+ * The options the native constructor receives.
+ *
+ * `clientOptions` spread first, so the explicit `projectId`/`apiEndpoint`
+ * win. Against an emulator — named by the environment, or an endpoint with
+ * no `sslCreds`, which is plaintext — two SDK defaults that need Google's
+ * production services are turned off unless the caller set them: client-side
+ * metrics export, and the universe-domain lookup that otherwise stalls the
+ * first call while it resolves Google credentials. The universe default also
+ * steps aside whenever a universe is configured, through `clientOptions` or
+ * `GOOGLE_CLOUD_UNIVERSE_DOMAIN`, because the SDK lets an option override
+ * that variable and gax refuses a call whose universe does not match.
+ *
+ * @param configuration - The adapter's client configuration
+ * @param environment - What the plugin read from the runtime environment
+ * @returns The constructor options
+ * @internal
+ */
+function bigtableSdkOptions(
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): BigtableSdkClientOptions {
+  const { clientOptions, ...top } = configuration;
+  const effective = { ...clientOptions, ...top };
+  const endpoint = effective['apiEndpoint'] !== undefined;
+  const emulator = endpoint || environment.emulatorFromEnvironment === true;
+  const plaintextEmulator =
+    environment.emulatorFromEnvironment === true ||
+    (endpoint && clientOptions?.['sslCreds'] === undefined);
+  const universeConfigured =
+    clientOptions?.['universeDomain'] !== undefined ||
+    clientOptions?.['universe_domain'] !== undefined ||
+    environment.universeFromEnvironment === true;
+  return {
+    ...effective,
+    ...(emulator && clientOptions?.['metricsEnabled'] === undefined
+      ? { metricsEnabled: false }
+      : {}),
+    ...(plaintextEmulator && !universeConfigured ? { universeDomain: 'googleapis.com' } : {}),
+  };
+}
+
+/**
+ * Adapts the native SDK with the plugin's environment facts.
+ *
+ * @param module - The native SDK module, or a structural test double
+ * @param configuration - Settings supplied to the native client constructor
+ * @param environment - What the plugin read from the runtime environment
+ * @returns The facade the adapter drives
+ * @internal
+ */
+export function adaptBigtableSdk(
+  module: BigtableSdkModule,
+  configuration: BigtableClientConfiguration,
+  environment: BigtableEnvironmentFacts,
+): IBigtableClient {
+  const client = new module.Bigtable(bigtableSdkOptions(configuration, environment));
   return {
     instance: (id: string): IBigtableInstance => {
       const instance = client.instance(id);
@@ -269,22 +393,39 @@ export function adaptBigtableSdkModule(
         table: (tableId: string): IBigtableTable => {
           const table = instance.table(tableId);
           return {
-            readRows: async (options: BigtableReadOptions): Promise<BigtableReadRow[]> => {
-              const [rows] = await table.getRows(adaptReadOptions(options));
+            readRows: async (
+              options: BigtableReadOptions,
+              callOptions,
+            ): Promise<BigtableReadRow[]> => {
+              const timeout = callOptions?.timeoutMs;
+              const readOptions = {
+                ...adaptReadOptions(options),
+                ...(timeout === undefined ? {} : { gaxOptions: { timeout } }),
+              };
+              const rows =
+                timeout !== undefined && table.createReadStream !== undefined
+                  ? await readStream(table.createReadStream(readOptions), timeout)
+                  : (await table.getRows(readOptions))[0];
               return rows.map(adaptReadRow);
             },
             row: (key: string): IBigtableRow => {
               const row = table.row(key);
               return {
-                conditionalMutate: async (test, branches): Promise<boolean> => {
-                  const sdkBranches: { onMatch?: unknown[]; onNoMatch?: unknown[] } = {};
+                conditionalMutate: async (test, branches, options): Promise<boolean> => {
+                  const sdkBranches: {
+                    onMatch?: unknown[];
+                    onNoMatch?: unknown[];
+                    gaxOptions?: { timeout: number };
+                  } = {};
+                  if (options?.timeoutMs !== undefined)
+                    sdkBranches.gaxOptions = { timeout: options.timeoutMs };
                   if (branches.onMatch !== undefined) {
                     sdkBranches.onMatch = branches.onMatch.map(adaptMutation);
                   }
                   if (branches.onNoMatch !== undefined) {
                     sdkBranches.onNoMatch = branches.onNoMatch.map(adaptMutation);
                   }
-                  const [matched] = await row.filter(test.map(adaptFilter), sdkBranches);
+                  const [matched] = await row.filter(adaptChain(test), sdkBranches);
                   return matched === true;
                 },
               };
@@ -296,5 +437,69 @@ export function adaptBigtableSdkModule(
     close: async (): Promise<void> => {
       await client.close();
     },
+  };
+}
+
+/** Ends a whole streaming call at its deadline, including SDK resumption retries. */
+function readStream(
+  stream: BigtableReadStream,
+  timeout: number,
+): Promise<readonly BigtableSdkReadRow[]> {
+  return new Promise((resolve, reject) => {
+    const signal = AbortSignal.timeout(Math.ceil(timeout));
+    const rows: BigtableSdkReadRow[] = [];
+    let settled = false;
+    const abort = (): void => {
+      if (settled) return;
+      settled = true;
+      reject(
+        Object.assign(new Error('Bigtable ReadRows whole-call deadline exceeded'), {
+          code: 4,
+          cause: signal.reason,
+        }),
+      );
+      stream.end();
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    stream.on('data', (row) => {
+      if (!settled) rows.push(row as BigtableSdkReadRow);
+    });
+    stream.on('error', (error) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      reject(error);
+    });
+    stream.on('end', () => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      resolve(rows);
+    });
+  });
+}
+
+/** Maps facade deadlines to the driver and converts bounded gRPC expiries to 504. @internal */
+export function boundBigtableClient(client: IBigtableClient, timeout: number): IBigtableClient {
+  const callOptions = timeout === 0 ? {} : { timeoutMs: timeout };
+  return {
+    close: () => client.close(),
+    instance: (id) => ({
+      table: (name) => {
+        const table = client.instance(id).table(name);
+        return {
+          readRows: (options) =>
+            requestBound(timeout, () => table.readRows(options, callOptions), true),
+          row: (key) => ({
+            conditionalMutate: (test, branches) =>
+              requestBound(
+                timeout,
+                () => table.row(key).conditionalMutate(test, branches, callOptions),
+                true,
+              ),
+          }),
+        };
+      },
+    }),
   };
 }

@@ -26,6 +26,11 @@ All notable changes to this project are documented here. The format follows
   service binding. The queue arm gains `maxRetries`, `deadLetterQueue` and `retryDelaySeconds`
   (`RetryDelaySeconds` type on `WorkersQueueOptions`, which also gains `deadLetter` and `now`), and
   `cacheApiMiddleware` gains `credentialCookies`.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** `resolveTimeoutMs` (2000 ms, `0` unbounded)
+  and `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and
+  `staleForMs`. Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range
+  `resolveTimeoutMs` (0–2147483647) with `RangeError`.
+
 - **`@setu-ts/worker-pool-plugin` (M143r, #614; V13-131).** `WorkerRunOptions.signal` cancels a call
   with `signal.reason` unchanged: pre-aborted work is not queued, queued work is withdrawn, and a
   running call's worker is terminated and replaced as on timeout. Each cancellation increments
@@ -72,9 +77,29 @@ All notable changes to this project are documented here. The format follows
   beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
   rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
   served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
-  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
-  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
-  the breaker. V13-104.
+  policy check. The SDK client's `circuitBreaker` takes either arm; the resilience plugin also
+  consumes the shared window in the M143c follow-up below. V13-104.
+- **`@setu-ts/resilience-plugin` (M143c, #618).** Count and failure-rate breaker policies run
+  through `createBreakerWindow`; rate policies count successes toward `minimumCalls` and use ten
+  buckets with bucket-granular expiry. Invalid defaults fail at registration and invalid explicit
+  policies fail at `wrap()` through `breakerPolicyRangeError`. V13-104.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** DNS `servers` selects IP-literal name
+  servers through `runtime.createDnsResolver` (Node, Bun, Deno). `resolveTimeoutMs` bounds the whole
+  lookup across all servers with one attempt each; fractional bounds round up for the runtime.
+  Record TTLs are not read; `cacheTtlMs` is the age threshold for starting a background refresh, not
+  a bound on returned data. On Deno SERVFAIL reads as absence and an underlying lookup may end about
+  2 s past the bound. V13-246. Reads and watches share one pending raw DNS lookup per name across
+  caller timeouts. Discovery close invalidates all watches before attempting every stop and
+  surfacing cleanup failures; a watch still in setup is stopped when setup settles, its stop failure
+  rejecting every `watch()` waiting on it; reads still queued at close never call the provider.
+  Nested watch deliveries cannot send an older list after a newer one.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** Unary `Unavailable` with exactly
+  `x-setu-unprocessed: shutdown` is resent once on a new pick within the remaining deadline,
+  regardless of wire status. Streaming calls and unmarked errors are not resent. The reserved header
+  claims no processing; applications setting it on their own `Unavailable` get the same resend. The
+  instance still reports failure; a second marked failure surfaces. Retry setup now races caller
+  abort and the remaining deadline; if stopped before sending, it preserves the original refusal and
+  records no outcome for the unsent attempt. V13-23.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
@@ -108,6 +133,16 @@ All notable changes to this project are documented here. The format follows
   refusals, uploads, downloads, streams, sign-out and testing pages. `docs/ai.md` shows the chat
   stream from a full-stack page, and the full-stack example creates, refuses, exports and signs out
   through pages.
+- **`@setu-ts/database-plugin` (M143q; V13-238, V13-236, V13-241, #617).** The DynamoDB, Cosmos DB
+  and Bigtable arms take `requestTimeoutMs`, a cancelling bound on the whole call, retries included
+  (default 15 000 ms, `0` disables; DynamoDB and Cosmos DB pass an `AbortSignal`, Bigtable a gRPC
+  deadline plus a whole-read deadline); `clientOptions`, spread first into the SDK constructor the
+  lazy arm builds; and (DynamoDB, Bigtable) `readinessEntity`. The three adapters gain a readiness
+  probe, so `/ready` reports a stopped store: Cosmos DB reads its database, DynamoDB and Bigtable
+  read an absent key of the `readinessEntity`'s table (default the first mapped entity). A unit of
+  work on the three stores can carry `updateWhere` / `deleteWhere` (and so `updateVersioned`): the
+  predicate is checked at the call and carried to the commit, and a commit that loses it throws
+  `SerializationConflictError` (409) and applies nothing.
 
 - **`@setu-ts/queue-plugin` (M143p, #616).** `SnsPublisher.publishJob(name, data, options?)`
   publishes the job envelope `SqsQueue` reads, and `SqsQueue` reads it through a raw or a wrapped
@@ -173,6 +208,109 @@ All notable changes to this project are documented here. The format follows
   called; use `0` to disable. A negative value used to turn the option off; a `NaN`, infinite or
   over-range `heartbeatMs` started a timer of about 1 ms, and a `NaN` or infinite `idleTimeoutMs`
   left the idle sweep off.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
+  version with `isWireError`. A status Connect itself cannot decode fails the instance; valid status
+  13 remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
+  remaining deadline after discovery picks and sends nothing or reports nothing if it is spent.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids escape `%` and `@` within
+  serviceName/address as `%25` and `%40`, then join as `<serviceName>@<address>:<port>`; explicit
+  ids still win. DNS aggregate failure codes take precedence over absent members, and watches keep
+  at most one raw lookup pending even after timeout. Late Kubernetes token reads cannot overwrite
+  newer credentials or send after cancellation. Watch setup respects close; last unsubscribe
+  reapplies the empty-only cap. Async listener rejections are isolated, and delivery skips removed
+  subscribers. Cold failures cannot evict warm reporters; superseded read failures open no outage.
+  Held empty answers preserve served-list age, and change comparison reads all instance fields.
+- **Docs (`@setu-ts/resilience-plugin`, M143c, #618).** Clarify that mid-flight cancellation counts
+  as failure only when the protected function rejects; a resolving function counts as success.
+
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Provider reads now default to a
+  2 s bound; set `resolveTimeoutMs: 0` to restore unbounded reads.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Warm names always answer from
+  cache and refresh in the background. `cacheTtlMs: 0` now refreshes every warm call, coalesced; no
+  setting restores waiting on every warm read. Applications requiring that policy must provide their
+  own `IServiceDiscovery` implementation.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** `cacheTtlMs` outside
+  0–2147483647, or `NaN` or `Infinity`, is now refused with `RangeError` at
+  `ServiceDiscoveryPlugin(...)`. A `NaN` (an unset variable read through `Number()`) used to make
+  every call read the backend; with background refresh it would have kept a warm list forever. Pass
+  a finite value.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Empty answers hold a nonempty
+  list for 30000 ms; set `emptyAnswerGraceMs: 0` to restore immediate replacement. A grace timer
+  re-reads without another backend event and broadcasts replacement to all watchers; read changes
+  also reach watchers once.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** DNS absent-name answers now
+  resolve `[]`; no built-in DNS option restores the old rejection/stale-on-absence behavior. Set
+  `provider: 'custom'` with a `discovery` provider that rejects absent-name lookups if that policy
+  is required.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids default to
+  `<serviceName>@<address>:<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
+  an existing identity; `address` must be the instance's own address, never a shared hostname.
+- **BREAKING — `@setu-ts/grpc-plugin` (M143c, #618).** Instance outcomes now distinguish server
+  answers from transport faults. A server's `Internal`, `Unknown` or `DataLoss` answer counts as
+  success, except an `Internal` for a status Connect itself cannot decode, so a throwing handler
+  does not eject replicas. The same codes without a server answer fail. Take a replica whose
+  handlers fail every call out through readiness (health checks). No answer, a refused stream,
+  `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), and the peer's own `Canceled`
+  still fail. Every other server answer reports success, except an `Internal` for a status Connect
+  itself cannot decode. Caller aborts and pre-send faults (binary serialization, `writeMaxBytes`, a
+  request header Node refuses) report nothing; a header name or value `Headers` rejects now fails
+  the call before any instance is picked. No option restores the old outcome mapping;
+  `ejection: false` on discovery disables automatic ejection if the changed classifications are
+  unsuitable, without restoring old reports. A response-stream cancel now aborts the handler's
+  signal before awaiting cleanup without a bound.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** `GrpcHeaderListTooLargeError`: a client call whose
+  header list is over the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` (RFC 7541 §4.1
+  sizes) is stopped before the peer processes it. Only a list also over 8 KiB (8192 octets) is the
+  caller's fault, with this error as the call error's `cause`: no report or resend. At or under 8
+  KiB, exceeding the advertised limit counts as `failure` against the instance; unary calls are
+  resent once to another pick within the remaining deadline, like a refused stream: the peer
+  advertised less than any gRPC default. Calls started before peer SETTINGS skip that
+  advertised-limit check. When no header-list limit was known when the call started, a
+  `REFUSED_STREAM` on a sent list over 65536 octets instead fails with this same error: `size` is
+  the RFC list size, `limit` is the client's 65536 threshold, no outcome is reported, and no resend
+  occurs. Smaller or equal lists retain refused stream handling; an accepted larger list is
+  unaffected. On Node that refusal comes from the client's own HTTP/2 library, which refuses to send
+  a list over 64 KiB. A refusal from a peer shutting down (its session closed or destroyed) stays a
+  refused stream and is resent.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** `GrpcExcessiveLoadError`: a call whose stream is reset
+  with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's
+  own HTTP/2 session when it is over its memory cap) is never counted against the instance and is
+  not resent (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says for more
+  than 128 header fields). It fails as `ResourceExhausted` with this error as its `cause`. Before,
+  12 calls with 130 small headers ejected a healthy replica. On the default `connect` protocol a
+  non-gRPC well-formed `application/json` error object on a non-200 is read as a server answer, and
+  so is not ejected unless its code maps to `Unavailable`, `Unimplemented`, `DeadlineExceeded` or
+  `Canceled` (README).
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** At most 256 unwatched names that have only
+  ever answered empty (absent DNS names, services not yet registered) stay cached; the oldest is
+  evicted, and a watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above).
+  The resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a
+  budget of 20 `warn` lines a minute; past it they log at `debug`, with one notice per minute
+  window.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** Health reflects DNS's last lookup outcome,
+  preserves it on watch unsubscribe, and sets `data.degraded` for warm failed reads or held empty
+  answers while the status stays `up` (visible with `HealthPlugin({ details: true })`). Cold
+  failures leave no cached failure state. A name keeps its reporter while its failure run is open
+  (repeats at debug, recovery at info), bounded at 256 concurrently failing cold names; warm
+  reporters are protected. Watch listener errors are isolated and warn once per failing run. A read
+  that started before a newer watch delivery neither replaces the delivered list nor marks the name
+  failed or starts retry spacing; a superseded failure opens no outage or recovery log. Kubernetes
+  probe timeouts name the API and bound.
+- **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`; M143c, #618).** Clarify
+  per-pod discovery for connection balancing, the marked drain-503 unary resend rule, grace-expiry
+  watch delivery, the shared 5 s provider-health cache and instance-address requirements for
+  registration.
+- **BREAKING — `@setu-ts/resilience-plugin` (M143c, #618; V13-104).** Every breaker policy now goes
+  through `breakerPolicyRangeError`: an invalid `defaultCircuitBreaker` throws a `RangeError` at
+  `ResiliencePlugin()` registration and an invalid explicit policy at `wrap()`. 0.13.0 checked only
+  that `threshold` was present, so it accepted, and now refuses: `NaN`, a numeric string (formerly
+  coerced) or a missing value for `threshold`, `timeout` or `resetTimeout`; a `threshold` of 0, a
+  non-integer or one above `Number.MAX_SAFE_INTEGER`; a `timeout` of 0 or less, `Infinity` or above
+  2147483647; a negative, infinite or over-range `resetTimeout`; a count policy that also sets
+  `minimumCalls` or `failureRateThreshold` (formerly ignored). Use a positive safe integer
+  `threshold`, a finite `timeout` greater than 0 (at least 10 on the rate arm) and at most
+  2147483647, a finite `resetTimeout` from 0 to 2147483647, and one arm.
+
 - **BREAKING — provider arms (M143r, #614; `@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`,
   `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`; V13-232,
   V13-233, V13-234, V13-235, V13-217, V13-245, V13-248, V13-4, V13-193, V13-257).** LaunchDarkly
@@ -353,6 +491,62 @@ All notable changes to this project are documented here. The format follows
   placeholder sign-in. The CLI rewrites `test/support/pages.ts` and `session.ts` only while they
   carry its `Regenerated by setu` first line, and refuses to overwrite a project's own file there.
   Existing modules are untouched.
+- **BREAKING — `@setu-ts/database-plugin` (M143q, #617).** What an existing application meets, each
+  with its way out (`docs/upgrading.md` has the detail). DynamoDB, Cosmos DB and Bigtable calls end
+  at 15 s with 504 (`DatabaseTimeoutError`) where they waited, even where the SDK itself waits
+  without observing cancellation (a Cosmos throttle retry-after under sustained 429s): raise
+  `requestTimeoutMs`, or set `0`. Bigtable client-side metrics are off whenever an endpoint is set
+  (`apiEndpoint`, a private one included, or `BIGTABLE_EMULATOR_HOST`):
+  `clientOptions: { metricsEnabled: true }` keeps them. A NoSQL unit of work whose commit loses a
+  precondition, or a buffered plain update of a row deleted meanwhile, or a DynamoDB commit
+  cancelled with `TransactionConflict`, answers 409 (`SerializationConflictError`) where it was a
+  masked 500, so a retry loop keyed on 409 now retries it. A conditional write to a row a NoSQL unit
+  of work already wrote, or any write after one, is refused by name: write the row once per unit of
+  work. `/ready` can report the three stores down: set `readinessEntity` to a table the
+  application's role can read; with no entity mapped the adapter logs one `warn` and has no probe.
+  Each uncached health check adds one read billed by the provider (the probe is cached 5 s). An
+  injected `IBigtableClient` must accept the new `{ column: { cellLimit } }` filter variant and the
+  optional `{ timeoutMs }` argument; every data-source read asks for the latest cell only (the
+  commit-time precondition read is a filtered check). Prisma conditional and versioned writes on a
+  connector other than PostgreSQL run `updateMany` and a `findUnique` read-back, or `deleteMany`
+  decided by its count, in a short transaction holding a pool connection (`maxWait` 2 s, so pool
+  exhaustion answers 503, `P2028`: size the pool for it); a lost race on MySQL answers 409/404
+  instead of success; a `keyColumns` that matches several rows throws (the root client's short
+  transaction rolls back; a unit of work rolls back when the throw reaches it); a Prisma entity
+  naming `compositeKeyName` without `keyColumns`, or setting an empty `keyColumns`, stops the
+  application at boot (`UnsupportedQueryFeatureError`) until `keyColumns` is set: before, it could
+  look as if it worked while its conditional deletes hit another tenant's row sharing the `id`; a
+  client extension or middleware for `update`/`delete` no longer sees them: hook
+  `updateMany`/`deleteMany` too. Drizzle with MySQL writes through the repository (it was a masked
+  500); its `contains` escapes with `!`; on mysql-proxy a write's read-back runs outside a
+  transaction, with one `warn`. A Prisma `P2010` carrying a duplicate key or a write conflict
+  through `query()` answers 409 where it was 500; mysql2 `ER_LOCK_DEADLOCK` answers 409; a closed
+  mysql2 connection answers 503. Drizzle on mysql2 refuses a session whose `sql_mode` includes
+  `NO_BACKSLASH_ESCAPES`: `connect()` throws `UnsupportedSqlModeError` (new), and so does every
+  later call once a connection the pool opened later reports it; such a connection has the flag
+  stripped from its session `sql_mode` first. `connect()` now reads the session mode (primary and
+  every `withReplicas()` replica), so start fails when MySQL is unreachable or stalls past 2 s,
+  where it used to come up. Turn the mode off for the application's sessions (global `sql_mode`,
+  `init_connect`, the application's own `SET SESSION`).
+- **BREAKING — `@setu-ts/database-plugin` (M143q, #617).** Prisma `updateWhere`, `deleteWhere`,
+  `updateVersioned` and `deleteVersioned` on a connector other than PostgreSQL throw
+  `UnsupportedRelationModeError` (new, no HTTP hint, so a masked 500) at the call when the client's
+  schema sets `relationMode = "prisma"`. Prisma's relation emulation drops the predicate there:
+  `updateMany` selects the matching ids and then updates them by id alone, and the emulated cascade
+  of `deleteMany` deletes children before the parent's predicate is checked, so a lost race read as
+  success (on MySQL 8.4, both of two concurrent conditional updates reported a win in 100 of 100
+  trials). The mode is read at `connect()` from the datasource block of the generated client; when
+  it cannot be read, `connect()` logs one `warn` and the same four writes are refused too, unless
+  the adapter options (or `createPrismaDataSource`'s new last argument) assert
+  `relationMode: 'foreignKeys'` (new option): add it once you have confirmed the schema uses that
+  mode. A schema read as `"prisma"` stays refused with it. Way out: set
+  `relationMode = "foreignKeys"` (the default), or wait for prisma/orm#30758 (fix
+  prisma-engines#5868) and a Setu release that accepts it. PostgreSQL is not refused: Prisma keeps
+  the predicate there, though an emulated `onUpdate: Cascade` can still have run for a write that
+  loses its race. On a MongoDB connector, where Prisma allows only `"prisma"`, the four writes are
+  always refused (no assertion lifts it); the way out is Setu's native MongoDB backend,
+  `DatabasePlugin({ type: 'mongodb', … })`. No application meets this today: Prisma 7 has no MongoDB
+  adapter.
 
 ### Fixed
 
@@ -404,6 +598,24 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/static-plugin` (M143o).** A static asset served with CORS keeps `Vary: Origin`: the
   handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no longer
   replays one origin's `Access-Control-Allow-Origin` to another.
+- **`@setu-ts/database-plugin` (M143q; V13-230, V13-242, V13-243, V13-244, V13-251, V13-231,
+  V13-239, V13-240, V13-249, #617).** On Prisma with MySQL a conditional or versioned write that
+  lost its race reports the miss (409 or 404) instead of returning the stale row: connectors other
+  than PostgreSQL decide from `updateMany`/`deleteMany`'s affected-row count (V13-230). Drizzle on
+  MySQL writes through the repository by the affected-row count and a read-back, its `contains`
+  matches a value holding `!`, `%`, `_` or a backslash literally under the default `sql_mode`
+  (Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES` for bound values), and an `offset` with
+  no `limit` pages to the end (V13-243, V13-242). A MySQL deadlock or duplicate key through
+  `query()` answers 409 on both MySQL cells, and a closed mysql2 connection 503 (V13-244, V13-251).
+  A Bigtable project runs on a host without Google credentials (client-side metrics off on an
+  emulator, V13-231), its reads stay flat as a row is updated (latest cell only, V13-239), and its
+  first call on an emulator skips the SDK's credentials lookup (`universeDomain` defaulted when none
+  is configured, V13-240). The agent-run store's `verify()` on DynamoDB or Bigtable carries a cause
+  naming why it refuses and which backends serve it (V13-249).
+- **`@setu-ts/database-plugin` (M143q, #617).** `DatabasePlugin` passes the Drizzle arm's `dialect`
+  option to the adapter. Since 0.2.0 the plugin dropped it, so the dialect was always detected from
+  the Drizzle instance: an explicit `dialect` never overrode detection, and a nested-path filter on
+  an instance whose dialect could not be detected was refused.
 - **Provider arms (#614).** Storage writes answered 502 now reject with `BackendOutcomeUnknownError`
   (504); reads remain 503. S3 `get`/`getStream` `NoSuchBucket`, Azure `ContainerNotFound` and a GCS
   `ENOENT` (a local file error) reject instead of signalling an absent object. Azure rejects
@@ -493,6 +705,18 @@ All notable changes to this project are documented here. The format follows
   sets `PUBSUB_EMULATOR_HOST`, `setu add` names it as the emulator's address, and the generated
   `test` scripts load the dotenv the way `start` does. A new npm or Bun workspace's root `test`
   passes while it has no members, through a generated `scripts/test.mjs`.
+
+### Security
+
+- **`@setu-ts/database-plugin` (M143q, #617).** V13-272: Drizzle on mysql2 under
+  `NO_BACKSLASH_ESCAPES` was open to SQL injection through any bound string: mysql2 3.24 writes
+  bound values into the query text, escaping `'` as `\'`, and under that mode the quote ends the
+  literal, so a value such as `' OR 1=1 -- ` matched every row. The adapter now refuses the mode
+  with `UnsupportedSqlModeError` at `connect()`. On a pool, each connection opened later reads its
+  mode and has the flag removed before its first caller statement, and once one reported it every
+  later adapter call refuses. A session the application switches itself with `SET SESSION` after the
+  check, connections the pool opened before `connect()`, and mysql-proxy (no connection held) are
+  not covered. mysql2 fixes the escaping in sidorares/node-mysql2#4684, not yet in a stable release.
 
 ## [0.13.0] — 2026-11-17
 

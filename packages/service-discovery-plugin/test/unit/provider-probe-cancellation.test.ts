@@ -53,7 +53,7 @@ describe.each(['consul', 'kubernetes'] as const)('%s probe cancellation', (kind)
       settled = true;
       return value;
     });
-    await Promise.resolve();
+    for (let n = 0; n < 10; n++) await Promise.resolve();
     expect(signal).toBeInstanceOf(AbortSignal);
     expect(signal?.aborted).toBe(false);
     expect(runtime.timeouts).toHaveLength(1);

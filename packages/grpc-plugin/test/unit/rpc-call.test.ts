@@ -1,3 +1,5 @@
+import { checkResponseCancel } from '../fixtures/response-cancel.ts';
+import { iterableStream as cancelStream } from '../../src/transports/rpc-call.ts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -101,4 +103,8 @@ describe('rpc-call conversions', () => {
     expect(response.headers.get('content-type')).toBe('text/plain;charset=UTF-8');
     expect(await response.text()).toBe('Service Unavailable');
   });
+});
+
+it('aborts a canceled reply before returning the blocked iterator, with no cleanup bound', async () => {
+  await checkResponseCancel(cancelStream);
 });

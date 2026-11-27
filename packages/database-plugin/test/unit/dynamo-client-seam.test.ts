@@ -27,6 +27,7 @@ import type {
   DynamoUpdateItemCommandOutput,
   IDynamoClient,
 } from '../../src/adapters/dynamo/dynamo-client-types.ts';
+import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 
 class RecordingDynamoClient implements IDynamoClient {
   readonly calls: string[] = [];
@@ -332,5 +333,166 @@ describe('createLazyDynamoLoader — the guarded import (M113d §3.1)', () => {
     } finally {
       vi.doUnmock('@aws-sdk/client-dynamodb');
     }
+  });
+});
+
+/** What a recording SDK module saw: each constructor configuration and each `send` options bag. */
+interface DynamoSdkRecord {
+  readonly configurations: Record<string, unknown>[];
+  readonly sendOptions: (Record<string, unknown> | undefined)[];
+}
+
+function recordingDynamoSdk(record: DynamoSdkRecord): DynamoSdkModule {
+  return {
+    DynamoDBClient: class {
+      constructor(configuration: unknown) {
+        record.configurations.push(configuration as Record<string, unknown>);
+      }
+      send<TOutput>(_command: unknown, options?: Record<string, unknown>): Promise<TOutput> {
+        record.sendOptions.push(options);
+        return Promise.resolve({} as TOutput);
+      }
+      destroy(): void {}
+    },
+    QueryCommand: FakeQueryCommand,
+    ScanCommand: FakeScanCommand,
+    GetItemCommand: FakeGetItemCommand,
+    PutItemCommand: FakePutItemCommand,
+    UpdateItemCommand: FakeUpdateItemCommand,
+    DeleteItemCommand: FakeDeleteItemCommand,
+    TransactWriteItemsCommand: FakeTransactWriteItemsCommand,
+  };
+}
+
+/** Runs `body` with the lazy arm's `@aws-sdk/client-dynamodb` import served by a recording module. */
+async function withRecordingDynamoSdk(
+  body: (record: DynamoSdkRecord) => Promise<void>,
+): Promise<void> {
+  const record: DynamoSdkRecord = { configurations: [], sendOptions: [] };
+  vi.doMock('@aws-sdk/client-dynamodb', () => recordingDynamoSdk(record));
+  try {
+    await body(record);
+  } finally {
+    vi.doUnmock('@aws-sdk/client-dynamodb');
+  }
+}
+
+describe('DynamoDB clientOptions on the lazy arm', () => {
+  it('spreads every clientOptions key into the SDK constructor, top-level keys winning', () => {
+    const record: DynamoSdkRecord = { configurations: [], sendOptions: [] };
+    const requestHandler = { handle: (): void => {} };
+    adaptDynamoSdkModule(recordingDynamoSdk(record), {
+      region: 'us-east-1',
+      endpoint: 'http://127.0.0.1:8000',
+      credentials: { accessKeyId: 'top', secretAccessKey: 'top' },
+      clientOptions: {
+        region: 'eu-west-1',
+        endpoint: 'http://127.0.0.1:9999',
+        credentials: { accessKeyId: 'inner', secretAccessKey: 'inner' },
+        maxAttempts: 2,
+        requestHandler,
+      },
+    });
+    expect(record.configurations).toEqual([
+      {
+        region: 'us-east-1',
+        endpoint: 'http://127.0.0.1:8000',
+        credentials: { accessKeyId: 'top', secretAccessKey: 'top' },
+        maxAttempts: 2,
+        requestHandler,
+      },
+    ]);
+  });
+
+  it('keeps a clientOptions key the adapter does not set, and writes no undefined key', async () => {
+    await withRecordingDynamoSdk(async (record) => {
+      const adapter = new DynamoAdapter({
+        region: 'us-east-1',
+        clientOptions: { endpoint: 'http://127.0.0.1:8000', maxAttempts: 1 },
+        entities: { Row: { partitionKey: 'id' } },
+      });
+      await adapter.connect();
+      await adapter.disconnect();
+      expect(record.configurations).toHaveLength(1);
+      const configuration = record.configurations[0]!;
+      expect(configuration).toEqual({
+        region: 'us-east-1',
+        endpoint: 'http://127.0.0.1:8000',
+        maxAttempts: 1,
+      });
+      // `toEqual` treats an undefined-valued key as absent, so the keys are listed.
+      expect(Object.keys(configuration).sort()).toEqual(['endpoint', 'maxAttempts', 'region']);
+      expect(Object.values(configuration)).not.toContain(undefined);
+    });
+  });
+
+  it('refuses a remote plaintext endpoint that arrives through clientOptions', () => {
+    expect(() =>
+      createLazyDynamoLoader({
+        region: 'us-east-1',
+        clientOptions: { endpoint: 'http://dynamo.example.com:8000' },
+      }),
+    ).toThrow(/plaintext HTTP endpoint on remote host 'dynamo.example.com'/);
+  });
+
+  it('passes an abort signal to send on every call, and none when the bound is 0', async () => {
+    await withRecordingDynamoSdk(async (record) => {
+      const bounded = new DynamoAdapter({
+        region: 'us-east-1',
+        entities: { Row: { partitionKey: 'id' } },
+      });
+      await bounded.connect();
+      await bounded.createDataSource('Row').findById('a');
+      await bounded.disconnect();
+      expect(record.sendOptions.length).toBeGreaterThan(0);
+      for (const options of record.sendOptions) {
+        expect(options?.['abortSignal']).toBeInstanceOf(AbortSignal);
+      }
+
+      record.sendOptions.length = 0;
+      const unbounded = new DynamoAdapter({
+        region: 'us-east-1',
+        requestTimeoutMs: 0,
+        entities: { Row: { partitionKey: 'id' } },
+      });
+      await unbounded.connect();
+      await unbounded.createDataSource('Row').findById('a');
+      await unbounded.disconnect();
+      expect(record.sendOptions.length).toBeGreaterThan(0);
+      for (const options of record.sendOptions) {
+        expect(options?.['abortSignal']).toBeUndefined();
+      }
+    });
+  });
+
+  it('leaves clientOptions unread when a client is injected', async () => {
+    await withRecordingDynamoSdk(async (record) => {
+      const touched: string[] = [];
+      const clientOptions = new Proxy<Record<string, unknown>>(
+        { region: 'eu-west-1' },
+        {
+          get: (target, property) => {
+            touched.push(`get:${String(property)}`);
+            return Reflect.get(target, property);
+          },
+          ownKeys: (target) => {
+            touched.push('ownKeys');
+            return Reflect.ownKeys(target);
+          },
+        },
+      );
+      const injected = new RecordingDynamoClient();
+      const adapter = new DynamoAdapter({
+        client: injected,
+        clientOptions,
+        entities: { Row: { partitionKey: 'id' } },
+      });
+      await adapter.connect();
+      await adapter.createDataSource('Row').findById('a');
+      await adapter.disconnect();
+      expect(injected.calls).toContain('get:Row');
+      expect(record.configurations).toEqual([]);
+      expect(touched).toEqual([]);
+    });
   });
 });

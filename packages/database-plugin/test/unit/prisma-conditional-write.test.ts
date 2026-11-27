@@ -8,8 +8,156 @@ import {
   InvalidFieldValueError,
   UnknownPayloadFieldError,
 } from '@setu-ts/common';
+import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
 describe('Prisma conditional translation', () => {
+  for (const provider of [
+    'postgresql',
+    'postgres',
+    'mysql',
+    'sqlserver',
+    'cockroachdb',
+    'sqlite',
+    'unknown',
+  ] as const) {
+    it(`selects the conditional strategy once for ${provider}`, async () => {
+      const client = createFakePrismaClient({ activeProvider: provider });
+      const adapter = new PrismaAdapter({ prismaClient: client, transactionTimeout: 4567 });
+      await adapter.connect();
+      const source = adapter.createDataSource('User');
+      await source.create({ id: 'a', name: 'old' });
+      client._activeProvider = 'changed-after-connect';
+      expect(await source.updateWhere!('a', { name: 'old' }, { name: 'new' })).toEqual({
+        id: 'a',
+        name: 'new',
+      });
+      expect(await source.updateWhere!('a', { name: 'old' }, { name: 'bad' })).toBeNull();
+      expect(await source.deleteWhere!('missing', { name: 'new' })).toBe(false);
+      expect(await source.deleteWhere!('a', { name: 'new' })).toBe(true);
+      const single = provider === 'postgresql' || provider === 'postgres';
+      expect(client.recordedCalls.some((call) => call.action === 'updateMany')).toBe(!single);
+      if (!single) expect(client.transactionOptions).toEqual({ maxWait: 2000, timeout: 4567 });
+      await adapter.disconnect();
+    });
+  }
+  it('uses the transaction delegate for read-back, without opening a nested transaction', async () => {
+    const root = createFakePrismaClient({ activeProvider: 'mysql' });
+    const tx = createFakePrismaClient({ activeProvider: 'mysql' });
+    const run = root.$transaction;
+    let transactions = 0;
+    root.$transaction = async (callback, options) => {
+      transactions += 1;
+      return await run(() => callback(tx), options);
+    };
+    const adapter = new PrismaAdapter({ prismaClient: root });
+    await adapter.connect();
+    await tx.user.create({ data: { id: 'a', name: 'old' } });
+    expect(
+      await adapter.createDataSource('User').updateWhere!('a', { name: 'old' }, { name: 'new' }),
+    ).toEqual({ id: 'a', name: 'new' });
+    expect(root.recordedCalls).toEqual([]);
+    const handle = await adapter.beginTransaction();
+    expect(await handle.createDataSource('User').deleteWhere!('a', { name: 'new' })).toBe(true);
+    await handle.commit();
+    expect(transactions).toBe(2);
+    await adapter.disconnect();
+  });
+  it('reads back the row the write matched, even if the caller changes its key object meanwhile', async () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const source = adapter.createDataSource('User');
+    await source.create({ id: 'a', name: 'old' });
+    await source.create({ id: 'b', name: 'other' });
+    const key: Record<string, string> = { id: 'a' };
+    const updateMany = client.user.updateMany;
+    client.user.updateMany = async (args) => {
+      const result = await updateMany(args);
+      key['id'] = 'b';
+      return result;
+    };
+    expect(await source.updateWhere!(key, { name: 'old' }, { name: 'new' })).toEqual({
+      id: 'a',
+      name: 'new',
+    });
+    await adapter.disconnect();
+  });
+  it('refuses an empty keyColumns at construction, with or without compositeKeyName', () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const make = (): PrismaAdapter =>
+      new PrismaAdapter({ prismaClient: client, entities: { User: { keyColumns: [] } } });
+    expect(make).toThrow(UnsupportedQueryFeatureError);
+    expect(make).toThrow(/'User'.*entities\.User\.keyColumns/);
+  });
+  it('refuses compositeKeyName without keyColumns at construction, naming the fix', () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    for (const keyColumns of [undefined, []]) {
+      const make = (): PrismaAdapter =>
+        new PrismaAdapter({
+          prismaClient: client,
+          entities: {
+            Compound: {
+              compositeKeyName: 'tenantId_id',
+              ...(keyColumns === undefined ? {} : { keyColumns }),
+            },
+          },
+        });
+      expect(make).toThrow(UnsupportedQueryFeatureError);
+      expect(make).toThrow(/'Compound'.*entities\.Compound\.keyColumns/);
+    }
+    expect(
+      () =>
+        new PrismaAdapter({
+          prismaClient: client,
+          entities: {
+            Compound: { compositeKeyName: 'tenantId_id', keyColumns: ['tenantId', 'id'] },
+          },
+        }),
+    ).not.toThrow();
+  });
+  it('reads the key once, so a getter cannot steer the read-back to another row', async () => {
+    const client = createFakePrismaClient({ activeProvider: 'mysql' });
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const source = adapter.createDataSource('User');
+    await source.create({ id: 'a', name: 'old' });
+    await source.create({ id: 'b', name: 'other' });
+    let reads = 0;
+    const key = {
+      get id(): string {
+        reads += 1;
+        return reads === 1 ? 'a' : 'b';
+      },
+    };
+    expect(await source.updateWhere!(key, { name: 'old' }, { name: 'new' })).toEqual({
+      id: 'a',
+      name: 'new',
+    });
+    await adapter.disconnect();
+  });
+  for (const operation of ['updateWhere', 'deleteWhere'] as const) {
+    it(`rolls back ${operation} if configured key columns match multiple rows`, async () => {
+      const client = createFakePrismaClient({ activeProvider: 'mysql' });
+      const adapter = new PrismaAdapter({
+        prismaClient: client,
+        entities: { User: { keyColumns: ['role'] } },
+      });
+      await adapter.connect();
+      const source = adapter.createDataSource('User');
+      await source.create({ id: 'a', role: 'owner', name: 'old' });
+      await source.create({ id: 'b', role: 'owner', name: 'old' });
+      const result =
+        operation === 'updateWhere'
+          ? source.updateWhere!('owner', { name: 'old' }, { name: 'bad' })
+          : source.deleteWhere!('owner', { name: 'old' });
+      await expect(result).rejects.toThrow(/matched 2 rows.*keyColumns/);
+      expect([...client.stores.user!.records.values()].map((row) => row.name)).toEqual([
+        'old',
+        'old',
+      ]);
+      await adapter.disconnect();
+    });
+  }
   for (const unknownField of [false, true]) {
     it(`maps conditional ${unknownField ? 'unknown fields' : 'invalid values'} to 400 through the service`, async () => {
       const client = createFakePrismaClient();
@@ -25,6 +173,8 @@ describe('Prisma conditional translation', () => {
       );
       client.user.update = () => Promise.reject(error);
       client.user.delete = () => Promise.reject(error);
+      client.user.updateMany = () => Promise.reject(error);
+      client.user.deleteMany = () => Promise.reject(error);
       const adapter = new PrismaAdapter({ prismaClient: client });
       await adapter.connect();
       try {
@@ -124,6 +274,8 @@ describe('Prisma conditional translation', () => {
     const error = new Error('driver fault');
     client.user.update = () => Promise.reject(error);
     client.user.delete = () => Promise.reject(error);
+    client.user.updateMany = () => Promise.reject(error);
+    client.user.deleteMany = () => Promise.reject(error);
     const source = createPrismaDataSource(client, 'User');
     await expect(source.updateWhere!('a', { name: 'old' }, { name: 'new' })).rejects.toBe(error);
     await expect(source.deleteWhere!('a', { name: 'old' })).rejects.toBe(error);

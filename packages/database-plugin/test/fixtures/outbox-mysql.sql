@@ -1,0 +1,20 @@
+CREATE TABLE `setu_outbox` (
+  `id` VARCHAR(191) PRIMARY KEY,
+  `kind` VARCHAR(191) NOT NULL,
+  `topic` VARCHAR(191) NOT NULL,
+  `envelope` LONGTEXT NOT NULL,
+  `options` LONGTEXT NOT NULL,
+  `ordering_key` VARCHAR(191),
+  `tenant_id` VARCHAR(191),
+  `traceparent` VARCHAR(191),
+  `position` VARCHAR(191) NOT NULL,
+  `created_at` BIGINT NOT NULL,
+  `status` VARCHAR(191) NOT NULL,
+  `attempts` INT NOT NULL,
+  `available_at` BIGINT NOT NULL,
+  `claim_version` BIGINT NOT NULL,
+  `lease_until` BIGINT NOT NULL,
+  `last_error` LONGTEXT,
+  `settled_at` BIGINT,
+  `sent_by` VARCHAR(191)
+);

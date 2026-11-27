@@ -1,0 +1,25 @@
+// The MySQL fixture's `rows` model under Prisma's relation emulation. The
+// adapter refuses conditional writes on this client (its updateMany drops the
+// predicate); the generated client in `../prisma-client-generated-mysql-relation-prisma`
+// is git-ignored, like the other generated fixtures.
+generator client {
+  provider = "prisma-client"
+  output = "../prisma-client-generated-mysql-relation-prisma"
+  runtime = "nodejs"
+  moduleFormat = "esm"
+  generatedFileExtension = "ts"
+}
+datasource db {
+  provider = "mysql"
+  relationMode = "prisma"
+}
+
+model Row {
+  id String @id @db.VarChar(191)
+  name String? @db.VarChar(191)
+  tenant_id String? @db.VarChar(191)
+  version Int
+  balance Int
+  profile Json?
+  @@map("rows")
+}

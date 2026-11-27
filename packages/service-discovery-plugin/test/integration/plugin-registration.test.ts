@@ -118,7 +118,7 @@ describe('ServiceDiscoveryPlugin — registration', () => {
       for (let attempt = 0; attempt < 2; attempt++) {
         await expect(discovery.resolve('billing')).rejects.toThrow(/token.*apiServer/);
       }
-      expect(warnings).toHaveLength(1);
+      expect(warnings).toHaveLength(2);
       expect(warnings.join()).not.toContain('API_SERVER_CANARY');
     } finally {
       await app.stop();
@@ -219,6 +219,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
       watchedServices: 0,
       ejectedInstances: 0,
       degraded: false,
+      staleForMs: 0,
       reachable: true,
       everResolved: true,
     });
@@ -244,6 +245,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
 
     provider.failWith(new Error('backend down'));
     await discovery.resolve('billing');
+    for (let n = 0; n < 30; n++) await Promise.resolve();
 
     const result = await health.check('service-discovery');
     expect(result.status).toBe('up');

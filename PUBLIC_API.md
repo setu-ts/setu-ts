@@ -1934,14 +1934,20 @@ requested isolation level is refused by name, so pass `provider` explicitly. Dri
 `options.drizzleInstance` and `options.drizzleTables`. The instance is a opaque `DrizzleDatabase<T>`
 configuration created by `createDrizzleDatabase(database, transactionBridge)`; the registry's tables
 must carry an `id` column and the adapter translates every repository field to a real Drizzle
-column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
-results are actual driver rows; an unsupported dialect throws a descriptive error. Promise-aware
-SQLite Proxy and libsql-shaped Drizzle instances without `execute()` are accepted for repository,
-transaction, and typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects
-with guidance to use Drizzle's typed query builder. That refusal is permanent rather than pending:
-those drivers do expose `all()`, but on a raw statement the proxy protocol answers with
-**positional** rows, because Drizzle has no field map for a statement it did not build — and
-`query<T>()` promises row objects.
+column. Drizzle `create`, `update`, and `delete` return actual driver rows: through `RETURNING`
+where the builder offers it, and on MySQL (since 0.14.0) a `create` or `update` by the write's
+affected-row count followed by a read-back by key, both in one Drizzle `transaction()` (unwrapped,
+with one `warn`, on mysql-proxy), while a MySQL `delete` decides from its count alone, outside a
+transaction and with no read-back. A `create` whose key the database fills is served through
+`$returningId()` only for one column-level primary key that auto-increments or has a `$defaultFn`,
+and is otherwise refused before sending with `UnsupportedQueryFeatureError('create')`; a result
+carrying no readable `affectedRows` is refused with `UnsupportedQueryFeatureError('write')`. Both
+are configuration refusals (masked `500`). Promise-aware SQLite Proxy and libsql-shaped Drizzle
+instances without `execute()` are accepted for repository, transaction, and typed-builder use.
+Calling `IDatabaseService.query()` on such an instance rejects with guidance to use Drizzle's typed
+query builder. That refusal is permanent rather than pending: those drivers do expose `all()`, but
+on a raw statement the proxy protocol answers with **positional** rows, because Drizzle has no field
+map for a statement it did not build — and `query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -2213,12 +2219,15 @@ probe that exists and did not answer inside the 2-second bound reports `'unknown
 indicator used to read the lifecycle `isReady()`, which reports that `connect()` once succeeded and
 says nothing about the backend now). An adapter that ships NO probe reports `up` with `reachable`
 OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe that was never written is
-evidence of nothing, and mapping a missing probe to `degraded` would fail `/ready` for every healthy
-Cosmos, Bigtable and DynamoDB application on upgrade (`degraded` already answers 503). Shipped
-probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe
-for instances without `execute()`), memory (its own connection state — the process is the backend).
-Cosmos, Bigtable and DynamoDB omit the probe pending one optional member on their own client
-facades; their payload is unchanged. The concrete `DatabaseService` exposes the seam the indicator
+evidence of nothing about the backend, so a missing probe is not mapped to `degraded` (which answers
+503). Shipped probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle
+omits the probe for instances without `execute()`), memory (its own connection state — the process
+is the backend), and since 0.14.0 Cosmos DB (`database.read()`), DynamoDB and Bigtable (a point read
+of the absent key `'__setu_readiness__'` on the table of `readinessEntity`, default the first mapped
+entity; with none the adapter has no probe and logs one `warn` at `connect()`). Each is bounded by
+2000 ms, or by `requestTimeoutMs` when that is non-zero and smaller (`0` does not lift the probe's
+bound), and rejects on expiry (`'unknown'`, `degraded`); a refusal (missing table, denied access,
+unreachable service) is `false`. The concrete `DatabaseService` exposes the seam the indicator
 reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
 (`Promise<boolean | undefined>` — the bounded probe, `undefined` when no answer was produced), the
 database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
@@ -2394,7 +2403,9 @@ A data source owns query evaluation end to end — it applies `where`, `orderBy`
 require every predicate field to equal its value at the write. `updateWhere` returns the updated row
 or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a predicate miss have
 the same outcome and write nothing. The key and predicate remain separate conjunctions even when the
-predicate names a key field.
+predicate names a key field. The outcome is decided from the write's own result — the rows it
+returned, or its affected-row count where the connector has no `RETURNING` — never from a read taken
+before it (since 0.14.0; on Prisma with MySQL a lost race used to report success).
 
 <!-- version:history -->
 
@@ -2436,7 +2447,7 @@ and that read is reported as not found. Both refuse before any I/O with
 non-negative safe integer or a `data` that sets the version field (an empty `field` option is a
 configuration fault: a `TypeError`, served as a masked `500`), and with `'conditional-write'`
 (`501`) when the repository has no conditional member — which is also what a buffered transaction
-source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle, Prisma and MongoDB
+source answers (memory overlay and D1; Drizzle, Prisma, MongoDB, DynamoDB, Cosmos and Bigtable
 transactions apply it).
 
 | Symbol                                                                                                                                                             | Shape                                                                                                                                                                                                              |
@@ -2466,23 +2477,67 @@ the tenant path.
 | Data source                  | Write mechanism                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------- |
 | Memory, outside transactions | Synchronous key lookup, predicate check and mutation                                              |
-| Prisma                       | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
-| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`                                      |
+| Prisma on PostgreSQL         | Native `update`/`delete`, key conjoined with `AND: [where]`; `P2025` means no match               |
+| Prisma, any other connector  | `updateMany`/`deleteMany` on key AND predicate, `count: 0` means no match, `findUnique` read-back |
+| Drizzle                      | Key and predicate joined with `and(...)`, native `RETURNING`; on MySQL `affectedRows`, read-back  |
 | MongoDB                      | `$and: [idFilter, whereFilter]`, `findOneAndUpdate` / `deleteOne`                                 |
 | D1                           | Bound `UPDATE` / `DELETE`, `WHERE key AND predicate`, `RETURNING`                                 |
 | DynamoDB                     | Native `ConditionExpression`, key existence AND aliased equality fields                           |
 | Cosmos DB                    | Read and check, then `_etag` IfMatch guarded `replace` / `delete`; retry 412 at most three rounds |
 | Bigtable                     | CheckAndMutateRow with nested per-field conditions, newest cell capped before value comparison    |
 
-Deferred transaction sources (memory overlay, D1 batch, DynamoDB buffer, Cosmos batch and Bigtable)
-omit both members: the result is unknown until commit, so the repository refuses
-`'conditional-write'`. Prisma, Drizzle and MongoDB transaction sources carry them. The tenant and
-inbox bridges use the conditional path when offered and fall back only on absence or that named
-refusal. The outbox requires native conditional writes and refuses unsupported sources at startup.
-Other errors propagate. On that fallback the tenant bridge reads ownership and then writes by key,
-so a delete-and-recreate under a reused caller-supplied key in between can move the write onto
-another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back separately;
-the tenant bridge checks the returned tenant on both paths before returning it.
+The Prisma path is chosen once at `connect()` from the resolved connector: `postgresql` and
+`postgres` keep the single statement; every other connector, and an undetermined one, takes the
+count path. On the root client the count path runs in
+`$transaction(fn, { maxWait: 2000, timeout: transactionTimeout })`; on a unit of work's client it
+runs directly. A `count` above 1 throws an `Error` naming the entity and `keyColumns`, which rolls
+the write back.
+
+Since 0.14.0 the count path refuses a client whose schema sets `relationMode = "prisma"`:
+`updateWhere` and `deleteWhere` (so `updateVersioned` and `deleteVersioned`), on the root client, in
+a unit of work and through `createPrismaDataSource`, throw `UnsupportedRelationModeError` (`name`
+`'UnsupportedRelationModeError'`, `relationMode` `'prisma'` (also on MongoDB, which allows only
+that), or `undefined` for an unread mode, no HTTP hint, so a masked `500`) before any I/O. Prisma's
+emulation drops the predicate there (prisma/orm#30758, fix prisma-engines#5868): `updateMany`
+selects the ids, then updates by id alone, and the emulated cascade of `deleteMany` runs before the
+parent's predicate is checked, so a lost race would read as success. The mode is read at `connect()`
+from the datasource block of the client's `_engineConfig.inlineSchema` (the root, transaction and
+`$extends` clients share it); a block without the setting is Prisma's default, `foreignKeys`. When
+the field is absent or unreadable, `connect()` logs one `warn` and the four writes are refused the
+same way, with or without a `warn` sink, unless `PrismaAdapterOptions.relationMode` is
+`'foreignKeys'` (since 0.14.0; `createPrismaDataSource` takes it as an optional sixth argument,
+`{ relationMode: 'foreignKeys' }`, and `DatabasePlugin` carries it). The assertion lifts only the
+unread refusal: a schema read as `"prisma"` stays refused. On a `mongodb` connector the writes are
+always refused, and the message names Setu's native MongoDB backend
+(`DatabasePlugin({ type: 'mongodb', … })`) as the way out. The message names the mode, the hazard
+and the ways out: `relationMode = "foreignKeys"`, or wait for the upstream fix and a Setu release
+that accepts it; for an unread mode it says to add `relationMode: 'foreignKeys'` once the schema is
+confirmed to use that mode, or to use a `relationMode = "foreignKeys"` schema the adapter can read.
+`postgresql` / `postgres` are not refused: Prisma keeps the predicate there (it reads, runs the
+emulated `onUpdate` actions, then updates with the predicate), but a conditional write that changes
+a field another model references with `onUpdate: Cascade` and loses a race can still have updated
+the child rows. `PrismaAdapter`, `DrizzleAdapter`, `DynamoAdapter` and `BigtableAdapter` take an
+optional `warn` callback as their last constructor parameter; the plugin passes its logger, and an
+adapter built directly without one logs nothing.
+
+The memory overlay and D1 batch transaction sources omit both members: the result is unknown until
+commit, so the repository refuses `'conditional-write'`. Prisma, Drizzle and MongoDB transaction
+sources carry them, and since 0.14.0 so do the DynamoDB, Cosmos DB and Bigtable buffers: the
+predicate is evaluated against the committed row at the call (a miss returns `null` / `false` and
+buffers nothing), and a match buffers the write with its precondition — a `ConditionExpression`, an
+`ifMatch` on the row's `_etag` (the facade's batch operations gain an optional `ifMatch`), or the
+CheckAndMutateRow test. A precondition that fails at commit applies nothing and throws
+`SerializationConflictError` (`409`) with the driver failure as `cause`. A conditional write to a
+row the unit of work has already written, and any write to a row after a conditional write to it, is
+refused before it is buffered, and before any read when the calls run one after another
+(`CosmosTransactionScopeError`, `BigtableTransactionScopeError`, DynamoDB's one-write-per-key
+`UnsupportedQueryFeatureError`); a Bigtable conditional write must be its unit of work's only write.
+The tenant and inbox bridges use the conditional path when offered and fall back only on absence or
+that named refusal. The outbox requires native conditional writes and refuses unsupported sources at
+startup. Other errors propagate. On that fallback the tenant bridge reads ownership and then writes
+by key, so a delete-and-recreate under a reused caller-supplied key in between can move the write
+onto another tenant's row; generated keys avoid the reuse. Bigtable reads an updated row back
+separately; the tenant bridge checks the returned tenant on both paths before returning it.
 
 <!-- version:history -->
 
@@ -2684,10 +2739,34 @@ column.
 
 **Prisma requires `provider`** and **Drizzle may require `dialect`** for a path filter, because the
 syntax differs per connector and neither library publishes a discriminant the adapter can read
-reliably. Drizzle detects its dialect from the instance and needs the option only when detection
-fails; either way, an adapter that cannot determine the syntax **refuses by name** rather than
-emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about, where a
-refusal names the option that fixes it.
+reliably. Since 0.14.0 Drizzle's `dialect: 'mysql'` also selects MySQL's `contains` form
+(`LIKE … ESCAPE '!'`, the value escaped by `!`) and, for an `offset` with no `limit`,
+`LIMIT 18446744073709551615`. Drizzle on mysql2 does not support `NO_BACKSLASH_ESCAPES`: mysql2
+escapes `'` in a bound string as `\'`, which that mode does not honour, so a bound value could end
+its literal. Since 0.14.0 it is refused: `connect()` throws `UnsupportedSqlModeError` (`name`
+`'UnsupportedSqlModeError'`, `mode` `'NO_BACKSLASH_ESCAPES'`, no HTTP hint, so a masked `500`) when
+`@@SESSION.sql_mode` includes it on the primary or on any `withReplicas()` replica, or when a read
+fails or gets no answer within a fixed 2000 ms (the readiness probe's default bound;
+`requestTimeoutMs` does not change it; the driver error or the expiry is the `cause`), so
+`connect()` now fails when MySQL is unreachable or stalls. Every unread case carries `unreadReason`
+(a string naming why; absent when a session reported the mode). A failed or expired read is
+transient, and its message asks to start once MySQL answers or to retry `connect()`; a result with
+no `sql_mode`, or a `withReplicas()` wrapper whose members cannot all be read, is a configuration
+fault with no `cause`, and its message says a retry does not help. A `withReplicas()` wrapper is
+recognised by its `$primary`/`$replicas` shape, nested wrappers are walked, and every mysql2 member
+is checked, even behind a primary on another driver. On each mysql2 pool (primary and replicas) the
+adapter strips `NO_BACKSLASH_ESCAPES` from the session mode of each connection the pool opens later,
+then refuses. Each new connection reads its mode, then sets its session `sql_mode` without the flag.
+The strip runs on the server before the statement mysql2 has already formatted for the pool's
+caller, which closing the connection after the read could not stop. After a new connection reported
+the flag, every adapter call throws the same error and one `warn` is logged. Three cases are not
+covered: a session the application switches itself with `SET SESSION` after the check (mysql2
+reports the flag on no `SELECT` result), connections the pool opened before `connect()` beyond the
+one it reads, and mysql-proxy (its callback owns how statements reach the server; the adapter holds
+no connection). Drizzle detects its dialect from the instance and needs the option only when
+detection fails; either way, an adapter that cannot determine the syntax **refuses by name** rather
+than emitting a guess — a guessed syntax returns wrong rows on the engine it guessed wrong about,
+where a refusal names the option that fixes it.
 
 ```typescript
 DatabasePlugin({
@@ -3047,15 +3126,16 @@ neither a client nor a project encodes it. `BigtableAdapterOptionsBase` is the h
 `rowKey` is a `BigtableRowKeyMapping` and whose `valueEncoding` is a `BigtableValueEncoding`; an
 unmapped entity uses its own name as the table, `['id']` as the row-key fields, `'cf'` as the column
 family and tagged values. `BigtableAdapter`'s constructor also takes an optional second parameter, a
-`BigtableClientLoader`, which overrides the inject-or-lazy choice and whose `owned` flag decides
-whether `disconnect()` closes the client it produced.
+`BigtableClientLoader` (and a third, the optional `warn` callback), which overrides the
+inject-or-lazy choice and whose `owned` flag decides whether `disconnect()` closes the client it
+produced.
 
-**The adapter provisions nothing and `connect()` issues no RPC.** Column families,
+**The adapter provisions nothing and `connect()` makes no admin call.** Column families,
 garbage-collection policies and split points belong to the application's provisioning, and a missing
 table or instance is already reported by the service as `5 NOT_FOUND` quoting the full resource path
 — while `instance.getTables()` is a table-ADMIN call a data-plane service account commonly cannot
-make, so probing at connect time would refuse a working configuration. Configuration mistakes are
-refused at construction instead, by name.
+make, so probing at connect time would refuse a working configuration. `connect()` sends no request.
+Configuration mistakes are refused at construction instead, by name.
 
 **The row key is composed from logical fields.** `BigtableRowKeyMapping` is
 `{ fields, separator?, prefix? }`, defaulting to `{ fields: ['id'], separator: '#' }`. A
@@ -3138,6 +3218,33 @@ injection seam, so an application implementing its own facade can name every sig
 `createInjectedBigtableLoader` and `createLazyBigtableLoader` build the two loader arms;
 `BigtableClientConfiguration` is what the lazy one takes.
 
+### NoSQL call bound, readiness and client options (since 0.14.0)
+
+`DynamoAdapterOptionsBase`, `CosmosAdapterOptionsBase` and `BigtableAdapterOptionsBase` gain:
+
+| Member             | Arms                       | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requestTimeoutMs` | DynamoDB, Cosmos, Bigtable | Whole-call bound, retries included; default `15000`, `0` disables it on calls (the readiness probe keeps its 2000 ms bound). DynamoDB: `abortSignal` on every `send`; Cosmos: `abortSignal` in the `CosmosRequestOptions` of every call; Bigtable: `gaxOptions.timeout` on every read and conditional write plus a whole-read deadline. The call also rejects at the deadline when the SDK ignores the signal. Expiry is `DatabaseTimeoutError` (`504`); its `cause` is the driver's error when the driver answers the abort, else the signal's `TimeoutError`. Refused at construction by `deadlineRangeError` (non-finite, negative, above 2147483647); a fraction is accepted. |
+| `clientOptions`    | DynamoDB, Cosmos, Bigtable | Spread first into the SDK constructor the lazy arm builds; the arm's own `region`/`endpoint`/`credentials`, `endpoint`/`key`, or `projectId`/`apiEndpoint` win when set. Unread with an injected `client`. On Bigtable, with an endpoint set (`apiEndpoint`, `clientOptions.apiEndpoint`, or `BIGTABLE_EMULATOR_HOST` read by the plugin through `ctx.runtime.env`), `metricsEnabled: false` is passed unless `clientOptions` sets it; and with `BIGTABLE_EMULATOR_HOST` set, or an endpoint and no `clientOptions.sslCreds`, `universeDomain: 'googleapis.com'` is passed unless `clientOptions.universeDomain` / `universe_domain` or `GOOGLE_CLOUD_UNIVERSE_DOMAIN` names one. |
+| `readinessEntity`  | DynamoDB, Bigtable         | The entity whose table the readiness probe reads (default: the first entry of `entities` / `tables`); with none, no probe and one `warn` at `connect()`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+Each adapter assigns `isHealthy` (see Health status above). The injection facades widen to carry the
+bound:
+
+- `IDynamoClient`: every method takes an optional second argument `{ abortSignal?: AbortSignal }`,
+  which the adapter passes on every call while `requestTimeoutMs` is above `0` (at `0` it passes
+  none); an injected facade that ignores it is still rejected at the deadline, though its own work
+  runs on.
+- `ICosmosClient` family: `CosmosRequestOptions` gains an optional `abortSignal`, every member that
+  does I/O takes an optional `CosmosRequestOptions` (the query iterator through its `query` call),
+  and the four batch operation shapes gain an optional `ifMatch`.
+- **BREAKING for an injected `IBigtableClient`:** `BigtableFilter` gains the variant
+  `{ column: { cellLimit: number } }` (told apart from `{ column: string[] }` by `Array.isArray`),
+  which every data read now sends first in its filter chain, so a facade that switches exhaustively
+  over the union must handle it; `IBigtableTable.readRows` and `IBigtableRow.conditionalMutate` take
+  an optional `{ timeoutMs?: number }` call-options argument, which a facade may ignore: the call is
+  still rejected at `requestTimeoutMs` (504), though the facade's own work runs on.
+
 ### Exports
 
 | Export                                                                                                                                                                                                                                                                                                                  | Kind                                 |
@@ -3147,7 +3254,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
-| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                              |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`, `UnsupportedSqlModeError`, `UnsupportedRelationModeError`                                                                                                  | classes                              |
 | `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |
@@ -3242,9 +3349,11 @@ log, and `errorHandler` reads the hint. It is not `DatabaseUnavailableError`: th
 says the operation did not happen, and a timed-out statement may have run, so a write's outcome is
 unknown and a retry of a write must be idempotent. The bound is the driver's own — node-postgres's
 `query_timeout` and `connectionTimeoutMillis` on the `Pool` the application hands Drizzle; the
-plugin adds no call deadline of its own, for the reasons the README's `Bounding a call` section
-gives. The behaviour of a timed-out statement inside a transaction is measured in this milestone and
-documented there. Ships in 0.10.0.
+plugin adds no JavaScript race to a call (only the bounded `sql_mode` read at `connect()` on Drizzle
+over mysql2), for the reasons the README's `Bounding a call` section gives. The DynamoDB, Cosmos DB
+and Bigtable arms set their driver's own cancelling deadline, `requestTimeoutMs` (since 0.14.0). The
+behaviour of a timed-out statement inside a transaction is measured in this milestone and documented
+there. Ships in 0.10.0.
 
 **A duplicate key answers `409 Conflict`.** A write that would duplicate a primary key or a unique
 index is thrown as `DuplicateKeyError` (exported from `@setu-ts/common`, so a package that may not
@@ -3258,8 +3367,10 @@ conflicting write was rejected, never that it is safe to retry. The class carrie
 `entity` when the failing repository call names one. At `commit()` a duplicate is the one class
 mapped, because the backends that detect it there (D1's atomic batch, a Cosmos transactional batch,
 a DynamoDB `TransactWriteItems` whose cancellation reason sits on a create's `Put`, a buffered
-memory or Bigtable create) apply nothing when they refuse; any other commit rejection is still
-rethrown unchanged.
+memory or Bigtable create) apply nothing when they refuse. Since 0.14.0 a DynamoDB, Cosmos DB or
+Bigtable commit whose precondition failed (a conditional write, or a buffered plain update of a row
+deleted meanwhile), or a `TransactWriteItems` cancelled with a `TransactionConflict` reason, is
+`SerializationConflictError` (`409`). Any other commit rejection is still rethrown unchanged.
 
 <!-- version:history -->
 
@@ -3280,17 +3391,20 @@ class, status and public detail are the same.
 | node-postgres | `Connection terminated unexpectedly`                                                                                                                                                                 | `504`    |
 | Prisma        | `P1001` (server unreachable), `P2028` (transaction could not start in time)                                                                                                                          | `503`    |
 | Prisma        | `P2039` / `P2010` — the driver code under `meta.driverAdapterError.cause.originalCode` is classified (adapter-pg `57P01` → `503`; adapter-mariadb `45028`, `45013`, `1053` → `503`, `45009` → `504`) | per code |
-| mysql2        | `ER_SERVER_SHUTDOWN` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                                                                                     | as shown |
+| mysql2        | `ER_SERVER_SHUTDOWN` and `Can't add new command when connection is in closed state` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                      | as shown |
 | libsql        | `SQLITE_BUSY`                                                                                                                                                                                        | `503`    |
 | MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107` `NotWritablePrimary` (read only under the `mongodb` adapter)                                                                     | `503`    |
 
 The pg message anchors are read only on a cause chain carrying no string code. The mariadb codes are
-read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. MySQL,
-mariadb and libsql rows were measured by probe (CI runs none of them); the PostgreSQL and MongoDB
-rows are pinned by guarded live suites. **Known limitation:** the older connection-fault arms
-(`ECONNRESET`, `EPIPE`, `MongoNetworkError`) still answer `503` even when the connection dropped
-under a write in flight, which the `503` detail's "not applied" does not strictly cover; re-mapping
-them is a separate decision.
+read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. Since
+0.14.0 the driver-adapter cause's `kind` is read on every connector: `UniqueConstraintViolation` is
+`DuplicateKeyError` and `TransactionWriteConflict` is `SerializationConflictError` (both `409`), so
+a MySQL duplicate key or deadlock through `query()` (`P2010`) answers as on PostgreSQL; mysql2's
+`ER_LOCK_DEADLOCK` is `SerializationConflictError` too. MySQL, mariadb and libsql rows were measured
+by probe (CI runs none of them); the PostgreSQL and MongoDB rows are pinned by guarded live suites.
+**Known limitation:** the older connection-fault arms (`ECONNRESET`, `EPIPE`, `MongoNetworkError`)
+still answer `503` even when the connection dropped under a write in flight, which the `503`
+detail's "not applied" does not strictly cover; re-mapping them is a separate decision.
 
 `IDatabaseService.transaction()` no longer classifies an error its `work` throws. Repository calls
 inside the work are classified by the repository wrapper as before, so a database fault there still
@@ -9487,9 +9601,12 @@ asymmetry: a fixed window genuinely knows when it resets.
 - **`WrapOptions`** — Pattern-selection options for `wrap` (re-exported)
 - **`CircuitBreakerPolicy`** — the count arm `{ threshold, timeout, resetTimeout }` (`threshold`
   failures within the rolling `timeout` window, ms) or the rate arm
-  `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (re-exported). This version of the
-  plugin supports the count arm only: a rate policy is refused with a `RangeError` when `wrap()`
-  builds the breaker, not at `ResiliencePlugin()`.
+  `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` (re-exported). Both arms use
+  `createBreakerWindow`; successes never clear failures. The rate arm counts successes and failures
+  toward `minimumCalls`, then trips on a failure at or above the percentage. Its ten buckets of
+  `timeout / 10` ms expire at bucket granularity. Invalid policies throw the shared
+  `breakerPolicyRangeError` refusal during plugin registration for `defaultCircuitBreaker` and at
+  `wrap()` for the selected explicit or default policy; fields of both arms are refused.
 - **`RetryPolicy`** — `limit`, `delay`, `backoff` (re-exported). `limit` is a safe integer at least
   1 (total attempts); `delay` is finite and non-negative in milliseconds. `ResiliencePlugin`
   registration throws `RangeError` for an invalid `defaultRetry`. `IResilienceService.wrap` throws
@@ -9589,11 +9706,18 @@ const pending = guarded(controller.signal);
 controller.abort(); // pending rejects with the caller's reason
 ```
 
-Cancellation is **cooperative**: a call that ignores the signal still runs to completion, and only
-the caller's `await` rejects. Passing a zero-argument `() => Promise<T>` remains valid — it simply
-cannot be cancelled.
+Cancellation is **cooperative**: a function ignoring its signal can still run to completion. The
+timeout layer rejects the caller's wait if its deadline elapses first; without that layer, ignoring
+an abort does not itself reject the call. Passing a zero-argument `() => Promise<T>` remains valid —
+it simply cannot be cancelled.
 
 Breaker/bulkhead state is per-process and per-`wrap`; there is no shared state across instances.
+
+Breaker accounting skips already-aborted calls and records the result of the inner retry/timeout
+layers: rejection is failure, resolution is success. It sees the final result after retries, so a
+timed-out attempt followed by a successful retry records success. A timeout that no retry recovers
+is failure even if the function ignores its signal and later resolves; without a timeout, that
+resolution records success.
 
 ---
 
@@ -13717,8 +13841,8 @@ app.router.post('/users', {
 ## Service Discovery (`@setu-ts/service-discovery-plugin`)
 
 Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
-and Consul providers therefore report reachable and allow `/ready` to return 200. Stale-cache
-`degraded` semantics remain unchanged.
+and Consul providers therefore report reachable and allow `/ready` to return 200. Warm lists are
+served from cache and refreshed in the background.
 
 The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
 at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an
@@ -13818,29 +13942,32 @@ token from.
 
 ### Options
 
-| Option             | Arms               | Default                      | Behavior                                                             |
-| ------------------ | ------------------ | ---------------------------- | -------------------------------------------------------------------- |
-| `provider`         | all                | —                            | Discriminant; always explicit                                        |
-| `cacheTtlMs`       | all                | `30_000`                     | `0` disables caching so every `resolve` hits the backend             |
-| `strategy`         | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`             |
-| `ejection`         | all                | see below                    | `false` disables outlier ejection entirely                           |
-| `selfRegistration` | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms         |
-| `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread          |
-| `services`         | static             | —                            | Unknown name resolves to `[]`, never a throw                         |
-| `address`          | consul             | —                            | Agent base URL                                                       |
-| `token`            | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset  |
-| `datacenter`       | consul             | —                            | Sent as `?dc=`                                                       |
-| `waitSeconds`      | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600 |
-| `namespace`        | kubernetes         | —                            | Required                                                             |
-| `apiServer`        | kubernetes         | in-cluster env               | Absent both, `register()` throws                                     |
-| `token`            | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo      |
-| `portName`         | kubernetes         | —                            | Unset with one port uses it; unset with several throws               |
-| `mode`             | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records |
-| `domainTemplate`   | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                   |
-| `port`             | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port             |
-| `secure`           | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme      |
-| `http`             | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                             |
-| `discovery`        | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied          |
+| Option               | Arms               | Default                      | Behavior                                                                                                                            |
+| -------------------- | ------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`           | all                | —                            | Discriminant; always explicit                                                                                                       |
+| `cacheTtlMs`         | all                | `30_000`                     | Age that starts background refresh; `0` refreshes every warm call; outside 0–2147483647 or `NaN` refused                            |
+| `resolveTimeoutMs`   | all                | `2000`                       | Read bound (DNS watch too); `0` unbounded; finite 0–2147483647                                                                      |
+| `emptyAnswerGraceMs` | all                | `30_000`                     | Hold nonempty lists on empty answers; `0` immediate; finite 0–2147483647                                                            |
+| `strategy`           | all                | `'round-robin'`              | Overridable per `pick()` call via `PickOptions.strategy`                                                                            |
+| `ejection`           | all                | see below                    | `false` disables outlier ejection entirely                                                                                          |
+| `selfRegistration`   | consul, custom     | —                            | Throws `SelfRegistrationNotSupportedError` on the other arms                                                                        |
+| `watchIntervalMs`    | static, dns        | `30_000`                     | Absent from the push-based arms rather than silently unread                                                                         |
+| `services`           | static             | —                            | Unknown name resolves to `[]`, never a throw                                                                                        |
+| `address`            | consul             | —                            | Agent base URL                                                                                                                      |
+| `token`              | consul             | —                            | Sent as `X-Consul-Token`; the header is omitted entirely when unset                                                                 |
+| `datacenter`         | consul             | —                            | Sent as `?dc=`                                                                                                                      |
+| `waitSeconds`        | consul             | `30`                         | Blocking-query `wait`, clamped to Consul's documented maximum of 600                                                                |
+| `namespace`          | kubernetes         | —                            | Required                                                                                                                            |
+| `apiServer`          | kubernetes         | in-cluster env               | Absent both, `register()` throws                                                                                                    |
+| `token`              | kubernetes         | projected token file         | Used verbatim; otherwise the file is re-read behind a 60 s memo                                                                     |
+| `portName`           | kubernetes         | —                            | Unset with one port uses it; unset with several throws                                                                              |
+| `mode`               | dns                | —                            | `'srv'` honours RFC 2782 priority tiers; `'a'` reads address records                                                                |
+| `domainTemplate`     | dns                | `'{service}.service.consul'` | `{service}` is substituted with the requested name                                                                                  |
+| `port`               | dns (`'a'` only)   | —                            | Mandatory on that arm: DNS address records carry no port                                                                            |
+| `servers`            | dns                | host resolver                | Nonempty IP literals with optional ports, IPv6 ports bracketed; requires `runtime.createDnsResolver` (Node, Bun, Deno; not Workers) |
+| `secure`             | consul, k8s, dns   | `false`                      | Sets `ServiceInstance.secure`, which decides the `https` scheme                                                                     |
+| `http`               | consul, kubernetes | `fetch`                      | Overrides `createDefaultDiscoveryHttp()`                                                                                            |
+| `discovery`          | custom             | —                            | The application's own `DiscoveryProvider`, used as supplied                                                                         |
 
 ### Outlier ejection
 
@@ -13871,45 +13998,103 @@ before the socket binds, so the instance is advertised a moment before it can se
 harmless only because Consul marks a newly registered service critical until its first check passes
 and every read here sends `passing=true`.
 
+The Consul default id is `<serviceName>@<address>:<port>`, stable across restarts. An explicit `id`
+wins. Within the service name and address, `%` becomes `%25` and `@` becomes `%40`; other characters
+(including IPv6 colons) remain readable. Deregistration encodes the whole id in the URL path.
+
 ### Exports
 
-| Export                              | Kind      | Purpose                                                                  |
-| ----------------------------------- | --------- | ------------------------------------------------------------------------ |
-| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                       |
-| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                           |
-| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                       |
-| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                       |
-| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                                   |
-| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`)       |
-| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                       |
-| `StaticServiceDefinition`           | interface | One entry of a static service list                                       |
-| `EjectionOptions`                   | interface | Ejection tuning                                                          |
-| `SelfRegistration`                  | interface | What this instance advertises                                            |
-| `SelfRegistrationCheck`             | interface | The mandatory health check                                               |
-| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                                |
-| `StaticProvider`                    | class     | The `'static'` provider                                                  |
-| `ConsulProvider`                    | class     | The `'consul'` provider                                                  |
-| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                              |
-| `DnsProvider`                       | class     | The `'dns'` provider                                                     |
-| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                          |
-| `DiscoveryHttpResponse`             | interface | Buffered response shape                                                  |
-| `DiscoveryHttpStream`               | interface | Streaming response shape                                                 |
-| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                            |
-| `DiscoveryUnavailableError`         | class     | Cold backend failure (branded 503), missing DNS resolver, k8s multi-port |
-| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                        |
+| Export                              | Kind      | Purpose                                                                                                  |
+| ----------------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                                                       |
+| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                                                           |
+| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                                                       |
+| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                                                       |
+| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                                                                   |
+| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`)                                       |
+| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                                                       |
+| `StaticServiceDefinition`           | interface | One entry of a static service list                                                                       |
+| `EjectionOptions`                   | interface | Ejection tuning                                                                                          |
+| `SelfRegistration`                  | interface | What this instance advertises                                                                            |
+| `SelfRegistrationCheck`             | interface | The mandatory health check                                                                               |
+| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                                                                |
+| `StaticProvider`                    | class     | The `'static'` provider                                                                                  |
+| `ConsulProvider`                    | class     | The `'consul'` provider                                                                                  |
+| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                                                              |
+| `DnsProvider`                       | class     | The `'dns'` provider; constructor throws `RangeError` for `resolveTimeoutMs` outside finite 0–2147483647 |
+| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                                                          |
+| `DiscoveryHttpResponse`             | interface | Buffered response shape                                                                                  |
+| `DiscoveryHttpStream`               | interface | Streaming response shape                                                                                 |
+| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                                                            |
+| `DiscoveryUnavailableError`         | class     | Cold backend failure (branded 503), missing DNS resolver, k8s multi-port                                 |
+| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                                                        |
 
 ### Notes
 
-- Registers a `service-discovery` health indicator reporting `provider`, `cachedServices`,
-  `watchedServices`, `ejectedInstances`, and `degraded`. It reads the cache's own observed state and
-  never issues a backend call, so a health scrape does not become load against Consul. `'degraded'`
-  means a refresh failed and a stale snapshot is being served; `'down'` is unreachable by
-  construction, because with nothing cached the caller already received a
-  `DiscoveryUnavailableError`.
-- `onClose` unsubscribes every active watch and clears ejection state.
-- The cache is read-through on the **monotonic** clock, with per-service in-flight coalescing (a
-  burst of concurrent `pick()`s for one cold service issues one backend read) and stale-on-failure.
-  A watch event invalidates that name's entry immediately.
+- Registers a `service-discovery` indicator: `provider`, `cachedServices`, `watchedServices`,
+  `ejectedInstances`, `degraded`, `reachable`, `everResolved`, `staleForMs`. Consul and Kubernetes
+  issue reachability probes cached 5 s and bounded at 2 s. DNS uses its last lookup outcome,
+  including a bounded-out lookup; before a lookup or after an absent-name answer it is reachable.
+  `down` means never resolved and unreachable; otherwise `up`, so a warm cache at any age stays
+  ready.
+- `data.degraded` is true if a warm name's last read failed or an empty answer is held during its
+  grace; the status stays `up`. Visible with `HealthPlugin({ details: true })`. `staleForMs` is the
+  age of the oldest list whose last refresh failed, zero when none is failing. Empty grace does not
+  raise the age. Both read and watch paths hold nonempty lists for `emptyAnswerGraceMs`; the watch
+  listener receives the held list. A per-name timer starts a coalesced, retry-spaced background read
+  at the grace deadline. If still empty, replacement reaches every watcher without another backend
+  event. Changes from reads also notify watchers once; unchanged watch deliveries still notify. A
+  nested delivery stops the older broadcast, so remaining subscribers never receive it after the new
+  list. Nonempty answers, replacement and close clear the timer. A cold empty answer (a name with no
+  list yet, such as an absent DNS name) is cached like any other, but at most 256 unwatched names
+  that have only ever answered empty stay cached; past that, the oldest is evicted (a failing one
+  last), and watched names are never evicted. The cap covers only empty-only names. Nonempty cached
+  names remain until `close()`: a provider answering arbitrary request-supplied names can grow the
+  cache without bound. A read of a watched name still starts a background refresh once its list is
+  `cacheTtlMs` old. Subscribers to one name share one provider watch; a later subscriber receives
+  the cached list at once. A listener may receive the current list on subscription and the same list
+  more than once. The provider watch stops when the last subscriber unsubscribes. Each listener
+  failure is isolated from discovery and other subscribers; it is logged at `warn` as
+  `service-discovery-plugin: watch listener for '<name>' failed` with the masked error and no
+  instance data, once per name until every failing listener has succeeded, unsubscribed, or its
+  watch stopped. A read that started before a newer watch delivery neither replaces the delivered
+  list nor marks the name failed or starts retry spacing; a superseded failure opens no outage or
+  recovery log.
+- Warm names are served from cache, refreshed in the background on the monotonic clock; cold reads
+  await one bounded, coalesced read. Failed background refreshes retry per name after 1, 2, 4, 8,
+  16, then 30 s; success resets spacing. Cold failures are not spaced and leave no cached failure
+  state. A name keeps its reporter while its failure run is open and drops it at recovery; at most
+  256 cold names keep one at once; a 257th cold failure evicts the least recently failing cold name.
+  Warm names with nonempty lists retain their reporter until recovery. Resolve warnings of names
+  with no non-empty list (never resolved, or only ever empty) share a budget of 20 `warn` lines a
+  minute (past it `debug`, with one notice per minute window); a name with a non-empty list always
+  warns. Per-name reporters warn on first/changed error, debug on identical repeats, info on
+  recovery, with URL userinfo masked. DNS can also log its probe failure.
+- DNS absent-name codes `ENOTFOUND`, `ENODATA` and Deno `NotFound` through bounded causes and
+  aggregates resolve `[]` only when every member says absent; other failures reject and affect
+  health. Use a trusted resolver. On Deno SERVFAIL also reads as absence after the grace rule.
+- DNS `servers` accepts `127.0.0.1`, `127.0.0.1:7853`, `::1`, `[::1]:53`; ports are decimal 1–65535,
+  default 53. Host names, empty lists/entries, malformed addresses and IPv6 zones are refused at
+  construction with `RangeError` naming the entry (an empty list:
+  `servers must be a non-empty array`). Bare `::1:5353` is an IPv6 address on port 53; a port suffix
+  needs brackets. The option requires `runtime.createDnsResolver` (Node, Bun, Deno; not Workers);
+  otherwise startup refuses naming `servers`. Without it, `runtime.dns` is used. `resolveTimeoutMs`
+  bounds the whole lookup across all servers, one attempt each; fractional values round up for the
+  runtime's integer bound. On Deno the underlying lookup may end about 2 s past the bound. Record
+  TTLs are not read: `cacheTtlMs` is the age threshold for starting a background refresh, not a
+  bound on returned data.
+- `DiscoveryProvider.resolve(serviceName, signal?)` receives the read bound's signal. Consul and
+  Kubernetes forward it; DNS races its resolver and ignores late outcomes. DNS watch ticks are
+  bounded and arm the interval before the first lookup. Reads and watches share at most one raw
+  lookup per name until it settles, including across aborted or timed-out cold reads. Each watch
+  skips ticks while that lookup remains pending, even after the caller-facing bound. An abandoned
+  lookup may keep running in the resolver until its own timeout: the resolver takes no signal.
+  Stopping a watch preserves the prior lookup outcome.
+- `onClose` invalidates every watch and clears cache, in-flight, retry, reporter and ejection state
+  before attempting every provider stop; cleanup failures surface together after all stops. A watch
+  whose provider setup is still pending at close is stopped when that setup settles, and a failure
+  of that stop rejects every `watch()` waiting on that setup. Late refreshes do not write state, and
+  reads still queued when close runs never call the provider.
 - `pick` and `resolveUrl` funnel through one implementation, so both honour the same configured
   strategy and the same ejection filter.
 - Ejection state is **per-process**. A cluster-wide view is a distributed-consensus problem and is
@@ -13918,26 +14103,39 @@ and every read here sends `passing=true`.
   `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`; no code change fixes the cluster CA from
   inside the process. The `http` option is the escape hatch for a caller-supplied TLS-configured
   client.
+- Async watch listener rejections follow the same isolated warning path as synchronous throws. A
+  fulfilled listener promise clears its failure without blocking other subscribers. Only the latest
+  call to each listener can settle its failure state; older settlements are ignored. Unsubscribing
+  or closing during a delivery skips removed listeners in the snapshot. Stopping the last watch
+  reapplies the empty-only cap and releases watch sequencing once no older read can settle.
+  `staleForMs` measures time since the last successful refresh that was not a held empty answer; an
+  identical successful list resets that age too. Abandoned or older Kubernetes token reads cannot
+  overwrite newer cached credentials or send after cancellation.
 
 ---
 
 ### Health status
 
 Since M70c the indicator composes three facts. `everResolved` is `false` until the first successful
-provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix). `degraded`
-means a stale cache is being served. `isHealthy()` is the cached reachability probe (Consul
-`/v1/status/leader`, Kubernetes a `limit=1` EndpointSlice LIST).
+provider read, so a backend that was never reached is `down`, not `up` (the X10-3 fix).
+`data.degraded` is true when a warm name's last read failed or an empty answer is held during its
+grace; the status stays `up`. Visible with `HealthPlugin({ details: true })`. `isHealthy()` is
+Consul's `/v1/status/leader` probe, Kubernetes' `limit=1` EndpointSlice LIST, or DNS's last lookup
+outcome. Every provider's `isHealthy()` is read through the same 5 s cache.
 
 Since 0.13.0 a failing probe logs its reason through the application logger: one `warn` naming the
 cause when the failure starts (a Deno `UnknownIssuer` TLS rejection, an HTTP status), `debug` for
 identical repeats, and one `info` on recovery, under the source `service-discovery-plugin: <kind>`.
 `DiscoveryProvider.isHealthy?()` may reject with that reason instead of resolving `false`; the
-service counts a rejection as unreachable, and the Kubernetes provider rejects this way. A
-cold-resolve `DiscoveryUnavailableError` message now ends with the cause; its public `503` detail is
-unchanged. A Kubernetes service-account token or Consul ACL token holding anything but visible ASCII
-is refused with a fixed `DiscoveryUnavailableError` that never contains the token, before any
-request is built; as a configuration fault it passes through unbranded, so a cold resolve that needs
-it answers `500`.
+service counts a rejection as unreachable. The Kubernetes provider (since 0.13.0) and the DNS
+provider (since 0.14.0) reject this way. A cold backend failure is wrapped in a branded
+`DiscoveryUnavailableError` whose message ends with the cause; its public `503` detail is unchanged.
+This includes a Kubernetes API token rejection (`401`/`403`). Every provider-thrown
+`DiscoveryUnavailableError` passes through unbranded, so a cold resolve answers `500`. The built-in
+providers throw it for a multi-port Kubernetes service with no `portName`, a missing projected token
+file or no runtime `fs` when no explicit token was supplied, or a Kubernetes service-account /
+Consul ACL token holding anything but visible ASCII. The token fault has a fixed message that never
+contains the token and is raised before any request is built.
 
 | Status | Meaning                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -13945,7 +14143,7 @@ it answers `500`.
 | `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
-`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+`{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved, staleForMs }`.
 
 Since M113o, serving a stale cache or losing backend reachability after resolution keeps `up`.
 `data.degraded` and `data.reachable` preserve visibility without draining serving replicas.
@@ -14419,7 +14617,7 @@ reaches `redactors[<string>]`):
 | `createCachedProbe(options)`                           | function  | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `withDeadline(run, options)`                           | function  | **Since M101a.** Runs one backend call under a bound whose expiry is a recorded failure: `run` receives an `AbortSignal` to forward; the call is raced against the deadline (an injected seam may ignore the signal), and on expiry the signal is aborted and the promise REJECTS with `options.onTimeout()`. The call's own rejection is never swallowed. `timeoutMs: 0` arms no timer. The request-path counterpart of `createCachedProbe`, which never rejects. Prefer a client's native per-command timeout where one exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `deadlineRangeError(name, timeoutMs)`                  | function  | **Since M101a.** Returns the `RangeError` naming `name` for a deadline outside `0`–`2147483647` (including `NaN`), or `null` when valid — so an option holder can refuse a bad value at construction with the same message `withDeadline` uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `createBreakerWindow(policy, now)`                     | function  | **Since 0.14.0.** The circuit-breaker trip rule, written once; the SDK client's breaker runs on it, the resilience plugin keeps its own count-arm window in this release (also served alone at `@setu-ts/common/breaker-window`, which imports nothing at run time). Returns an `IBreakerWindow` (`recordSuccess()`, `recordFailure(): boolean` — `true` when the failure trips the policy —, `reset()`, `failures`). Count arm: exact timestamps, trips at `threshold` failures less than `timeout` old, keeps at most `threshold`. Rate arm: ten buckets of `timeout / 10` ms aligned on the clock (a call counts for between `0.9 · timeout` and `timeout`), trips when the window holds at least `minimumCalls` calls and `failures * 100 / calls >= failureRateThreshold`; a success never trips. A success never clears failures. `now` is a monotonic millisecond clock; the policy is checked with `breakerPolicyRangeError` (thrown) and copied                                                                                                                                                                                                                                                                                                                     |
+| `createBreakerWindow(policy, now)`                     | function  | **Since 0.14.0.** The circuit-breaker trip rule, written once; the SDK client's breaker and the resilience plugin both run on it (also served alone at `@setu-ts/common/breaker-window`, which imports nothing at run time). Returns an `IBreakerWindow` (`recordSuccess()`, `recordFailure(): boolean` — `true` when the failure trips the policy —, `reset()`, `failures`). Count arm: exact timestamps, trips at `threshold` failures less than `timeout` old, keeps at most `threshold`. Rate arm: ten buckets of `timeout / 10` ms aligned on the clock (a call counts for between `0.9 · timeout` and `timeout`), trips when the window holds at least `minimumCalls` calls and `failures * 100 / calls >= failureRateThreshold`; a success never trips. A success never clears failures. `now` is a monotonic millisecond clock; the policy is checked with `breakerPolicyRangeError` (thrown) and copied                                                                                                                                                                                                                                                                                                                                                             |
 | `breakerPolicyRangeError(policy)`                      | function  | **Since 0.14.0.** Returns the `RangeError` for an invalid `CircuitBreakerPolicy`, or `null`: fields of both arms or neither are refused; `threshold` and `minimumCalls` are positive safe integers; `failureRateThreshold` is 1–100; `timeout` is above 0 (count) or at least 10 (rate) and at most `2147483647`; `resetTimeout` is `0`–`2147483647`. Messages read `circuitBreaker.<field> must be <rule>; received <value>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `IBreakerWindow`                                       | type      | **Since 0.14.0.** The window `createBreakerWindow` returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `DeadlineOptions`                                      | type      | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -16896,28 +17094,100 @@ grpc.addService(AnotherDefinition, anotherImpl);
 | `serve`         | `boolean`                                | `true`  | `false` registers the capability for calling only: no request is claimed and no procedure, health or reflection service is served; `services` must then be empty. Not a boolean → `TypeError` at `GrpcPlugin()`. Since `0.13.0`.                                             |
 | `clients`       | `Record<string, GrpcClientOptions>`      | `{}`    | Per-target client defaults, keyed by the `target` passed to `grpcClient()`. Each entry is validated at `GrpcPlugin()`. Since `0.13.0`.                                                                                                                                       |
 
-> Native gRPC-binary requests (`application/grpc`, `+proto`, `+json`) are refused with a
-> Trailers-Only `UNIMPLEMENTED` (`grpc-status: 12`). No runtime the plugin loads on exposes the
-> HTTP/2 trailers the native protocol requires. Connect and gRPC-Web are fully supported.
+> Native gRPC-binary (`application/grpc`, `+proto`, `+json`) is served on Node and Bun with
+> `RuntimePlugin({ http2 })`; elsewhere it is refused with a Trailers-Only `UNIMPLEMENTED`
+> (`grpc-status: 12`). Connect and gRPC-Web are fully supported.
 
 ### Exports
 
-| Export                 | Kind     | Purpose                                                                                       |
-| ---------------------- | -------- | --------------------------------------------------------------------------------------------- |
-| `GrpcPlugin`           | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                           |
-| `grpcClient`           | function | `grpcClient(services, definition, target, options?)`: a typed Connect `Client` (`0.13.0`)     |
-| `grpcClientProvider`   | function | The same client as an `@Module` provider entry under a token (`0.13.0`)                       |
-| `GrpcService`          | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing       |
-| `adaptConnectModule`   | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port |
-| `GrpcUnavailableError` | class    | **Deprecated** — nothing throws it since M70a; `handleRequest` needs no adapter capability    |
-| `GrpcRuntimeLoadError` | class    | A Connect/Protobuf-ES specifier, or connect-node on a client's first call, cannot be imported |
-| `GrpcDescriptorError`  | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service        |
-| `GrpcPluginOptions`    | type     | The factory parameter shape; `readMaxBytes`, `serve`, `clients` are `@since 0.13.0`           |
-| `GrpcClientOptions`    | type     | Re-exported from `@setu-ts/common`: `basePath`, `protocol`, `httpVersion`, `timeoutMs`        |
-| `ConnectModuleLike`    | type     | The four-module bundle `adaptConnectModule` accepts                                           |
+| Export                        | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GrpcPlugin`                  | function | Plugin factory — registers `IGrpcService` under `CAPABILITIES.GRPC`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `grpcClient`                  | function | `grpcClient(services, definition, target, options?)`: a typed Connect `Client` (`0.13.0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `grpcClientProvider`          | function | The same client as an `@Module` provider entry under a token (`0.13.0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `GrpcService`                 | class    | The `IGrpcService` implementation; exported so tests can compose it without subclassing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `adaptConnectModule`          | function | Structural adaptation of raw Connect/Protobuf modules into the internal `ConnectRuntime` port                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GrpcUnavailableError`        | class    | **Deprecated** — nothing throws it since M70a; `handleRequest` needs no adapter capability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `GrpcRuntimeLoadError`        | class    | A Connect/Protobuf-ES specifier, or connect-node on a client's first call, cannot be imported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GrpcDescriptorError`         | class    | Thrown when an embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `GrpcExcessiveLoadError`      | class    | `@since 0.14.0`. The `cause` of a `ResourceExhausted` client call whose stream was reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers, by the server or by this client's own session over its memory cap (this client's behaviour looked excessive); never reported against the instance and not resent                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `GrpcHeaderListTooLargeError` | class    | `@since 0.14.0`. The `cause` of a call over both the peer's advertised HTTP/2 header-list limit and 8 KiB, or over 65536 octets when no header-list limit was known when the call started and its stream is refused on an open session (on Node, the client's HTTP/2 library refused to send it). `size` is the sent list's RFC 7541 §4.1 size; `limit` is the advertised limit or the client's 65536-octet threshold. Constructor: `(size, limit, reason?: 'unadvertised-refusal')`; the optional reason selects the message for the latter case. Never reported or resent. At or under 8 KiB, exceeding an advertised limit instead counts against the instance and is resent once. Calls started before peer SETTINGS skip the advertised-limit check |
+| `GrpcPluginOptions`           | type     | The factory parameter shape; `readMaxBytes`, `serve`, `clients` are `@since 0.13.0`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `GrpcClientOptions`           | type     | Re-exported from `@setu-ts/common`: `basePath`, `protocol`, `httpVersion`, `timeoutMs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ConnectModuleLike`           | type     | The four-module bundle `adaptConnectModule` accepts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 > `ConnectRuntime` and the structural Connect facades are **not** exported. They are an internal
 > port; publishing them would commit the package to a shape that tracks Connect's own API.
+
+### Client outcomes and cancellation
+
+An instance fails when it did not answer, refused the stream, returned `Unavailable`,
+`Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
+server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`,
+except an `Internal` for a status Connect itself cannot decode. The same codes without a server
+answer fail. A request that makes a healthy handler throw must not eject replicas. A replica whose
+handlers fail every call with `Internal` (a broken dependency, say) is not ejected by call outcomes.
+Take it out through readiness (health checks) instead. On the default `connect` protocol a
+well-formed JSON error object (`application/json`) on any non-200 unary answer is read as a server
+answer, its code taken from the body's `code` field or else from the HTTP status (404
+`Unimplemented`; 429, 502, 503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their auth codes; any
+other status `Unknown`); it fails only when that code is `Unavailable`, `Unimplemented`,
+`DeadlineExceeded` or `Canceled`, so a wrong service or proxy answering a JSON 400, 401, 403 or 500
+is not ejected either; an HTML error page is no answer and fails. A stream reset with HTTP/2
+`ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's own HTTP/2
+session when it is over its memory cap) (RFC 9113 §7: this client's behaviour looked excessive, as
+Node's server says for more than 128 header fields) is never counted against the instance and is not
+resent, whatever the call sent: it fails as `ResourceExhausted` (grpc-go's mapping) with
+`GrpcExcessiveLoadError` as its `cause`. Caller abort reports nothing. A few client-side faults
+raised before the request leaves (serialization, `writeMaxBytes`, a request header Node refuses)
+report nothing. The serialization and write-size exclusions apply only with no response metadata:
+Connect's binary serialization failure (`serialize binary: …`, `Internal`) and its exact
+`writeMaxBytes` refusal (`ResourceExhausted`). A refused-header code
+(`ERR_HTTP2_INVALID_CONNECTION_HEADERS`, `ERR_INVALID_CHAR`) within five cause-chain objects is
+excluded whatever the metadata: a connection-specific header on HTTP/2 (`connection`, `keep-alive`,
+`proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`, `te` other than `trailers`) or
+a control character in a header value on HTTP/1.1. A header name or value the WHATWG `Headers`
+rejects fails the call before any instance is picked, so it is never reported. A list over the
+peer's advertised `SETTINGS_MAX_HEADER_LIST_SIZE` is stopped immediately once SETTINGS are known. If
+it is also over 8 KiB (8192 octets), it is the caller's fault: `GrpcHeaderListTooLargeError`, no
+report and no resend. At or under 8 KiB it counts as `failure` against the instance; unary calls are
+resent once to another pick within the remaining deadline, like a refused stream: that peer
+advertised less than any gRPC default. If the resend meets the same fault, the caller gets
+`Unavailable` with a message naming the header size and advertised limit. When no header-list limit
+was known when the call started, only a `REFUSED_STREAM` on a sent list over 65536 octets becomes
+`GrpcHeaderListTooLargeError` (on Node the client's HTTP/2 library refused to send it; another peer
+may refuse it itself), with `size` equal to that RFC 7541 §4.1 list size and `limit` equal to the
+client's 65536-octet threshold. At or under 65536, a refusal still reports failure and is resent; an
+accepted larger list passes through. A refusal from a peer shutting down (its session closed or
+destroyed) stays a refused stream and is resent. Any other error follows the outcome rule above; a
+marked drain `Unavailable` reports failure too, whether or not it is resent. Streaming reports
+success at headers; later iteration errors report nothing. Aborting thousands of in-flight calls at
+once can trip a Node peer's stream-reset limit (GOAWAY `INTERNAL_ERROR`), which fails the session's
+calls and reports the instance failed, with the same ejection bounds. Tight caller deadlines can
+eject healthy instances under discovery's ejection limits. Unary refused streams and `Unavailable`
+errors whose metadata carries exactly `x-setu-unprocessed: shutdown` are resent once on a new pick
+within the remaining deadline, regardless of wire status. The kernel's pre-pipeline drain answer
+carries this marker even with a custom error responder; over HTTP/2 a draining Setu server on Node
+refuses the new stream instead, so the marked 503 reaches a client over HTTP/1.1 or through a proxy.
+Streaming calls, unmarked errors, other marker values and other codes are not resent; the second
+refusal surfaces. Caller abort prevents resend. The instance still reports failure. The header is
+reserved: an application setting it on its own `Unavailable` claims no processing and gets one
+resend of that unary call; the kernel does not strip it. The plugin's own post-close 503 is
+unmarked. Discover per-pod addresses (headless DNS mode `'a'` or Kubernetes) to balance calls: one
+Service address pins the session to one pod.
+
+Cancelling a response stream aborts the handler's combined `ctx.signal` before awaiting iterator
+cleanup with no bound. A handler ignoring the signal holds the stream until it yields. Unary signals
+are unchanged.
+
+A wire `Internal` for a status Connect itself cannot decode is a protocol failure when the server
+sent it as its own status; a peer relaying a downstream's invalid-status message under a valid
+status stays an answer. Status details (`grpc-status-details-bin`) take precedence over the header.
+A valid `grpc-status: 13` remains an application answer. The resend's remaining deadline is checked
+after discovery picks again; an exhausted budget sends nothing and records no outcome for that
+attempt. Header-list size uses Node's Latin-1 encoding, one octet per UTF-16 code unit in names and
+values, plus 32 per field. Bun sends UTF-8, so values above U+007F are undercounted there; gRPC
+metadata values are ASCII by spec.
 
 ### Notes
 
@@ -16946,8 +17216,9 @@ grpc.addService(AnotherDefinition, anotherImpl);
 - The request handed to `handleRequest` is **reconstructed** from the mapped `IRequest` (method,
   URL, headers, buffered body), because the framework mapping has already consumed the original
   body. Cloning every request before mapping would tax the whole application to serve the gRPC
-  minority. Trailers do not survive the round trip — M49 already records that native gRPC-binary
-  trailers work on no runtime this plugin runs on, so no working path regresses.
+  minority. Trailers do not survive the round trip — M49 recorded that native gRPC-binary trailers
+  then worked on no runtime this plugin ran on, so no working path regressed (native gRPC over
+  HTTP/2 arrived in 0.13.0).
 - **`inject()` CAN exercise RPC.** Since M70a the kernel dispatches gRPC from its terminal handler,
   and `inject()` attaches the undisturbed web `Request` as `IRequest.raw` before running the
   pipeline, so an injected request reaches RPC dispatch exactly as a socket request does — the
@@ -16982,33 +17253,39 @@ grpc.addService(AnotherDefinition, anotherImpl);
   `grpcClient(services, definition, target, options?)` resolves `IGrpcService` and calls the
   optional `IGrpcService.client?(definition, target, options?): unknown`, returning Connect's typed
   `Client`. A `target` that is a service name resolves through `CAPABILITIES.SERVICE_DISCOVERY` on
-  every call, and the client reports each outcome (`failure` for `Unavailable`, `success` otherwise)
-  so a refusing instance is ejected; an absolute `http(s)://` URL is used as is. A name with no
-  discovery registered throws `TypeError` at `grpcClient()`, as does a target carrying credentials
-  (`user:password@`, with or without a scheme) a URL target with a query or fragment, a URL that
-  does not parse, or a name outside the service-name grammar (letters, digits, `.`, `_`, `-`),
-  without repeating it. Each reply message is bounded by `GrpcPluginOptions.readMaxBytes` (default 4
-  MiB). Each client HTTP/2 session may buffer 64 MB (`maxSessionMemory`; Node's 10 MB default reset
-  streams with several 1 MB replies in flight). Calls share one HTTP/2 session per instance (64
-  origins at most; the least recently used is forgotten, never closed by the client, and closed by
-  connect-node after 60 s with no stream; the application's stop closes the rest), have a 5 s
-  deadline, carry the active span as `traceparent` when telemetry is registered, and reject with
-  `ConnectError(Unavailable)` when no instance is known, when the discovery backend fails
-  (`could not resolve "<target>"`, cause kept), or after the application stops. Each definition
-  caches at most 256 clients (least recently used evicted). A stream the server refused
-  (`REFUSED_STREAM`, never processed — a server shutting down) is reported as the instance's failure
-  and rejects as `Unavailable`; a unary call is first sent once more on a fresh pick, within what is
-  left of its deadline (its own or the configured one). Only the refusal itself is resent, never an
-  error a server sent whose message names the code. `GrpcClientOptions` (`common`): `basePath`
-  (`''`), `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default `'connect'`), `httpVersion`
-  (`'2'` | `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs` (1–2147483647, default
-  `5000`); per-call options override `GrpcPluginOptions.clients[target]`, which overrides the
-  defaults. The transport is `@connectrpc/connect-node`, an optional peer loaded on the first call.
-  On Cloudflare Workers the client refuses with a `TypeError` at `grpcClient()`/`client()`
-  (`workerd` has no `node:http2` client; HTTP/1.1 calls hang). On Deno it is not safe yet: Deno's
-  Node-style HTTP clients can crash the process natively when their peer goes away (a Deno defect,
-  reproduced without Setu). `grpcClientProvider(provide, definition, target, options?)` returns the
-  same client as a `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
+  every call, and reports outcomes by the instance-reporting rule above: no answer, a refused
+  stream, `Unavailable`, `Unimplemented`, `DeadlineExceeded` or peer `Canceled` reports failure;
+  other server answers succeed, except a status Connect itself cannot decode. Caller cancellation
+  and the client-fault exclusions above report nothing. A refusing instance can be ejected; an
+  absolute `http(s)://` URL is used as is. A name with no discovery registered throws `TypeError` at
+  `grpcClient()`, as does a target carrying credentials (`user:password@`, with or without a scheme)
+  a URL target with a query or fragment, a URL that does not parse, or a name outside the
+  service-name grammar (letters, digits, `.`, `_`, `-`), without repeating it. Each reply message is
+  bounded by `GrpcPluginOptions.readMaxBytes` (default 4 MiB). Each client HTTP/2 session may buffer
+  64 MB (`maxSessionMemory`; Node's 10 MB default reset streams with several 1 MB replies in
+  flight). Calls share one HTTP/2 session per instance (64 origins at most; the least recently used
+  is forgotten, never closed by the client, and closed by connect-node after 60 s with no stream;
+  the application's stop closes the rest), have a 5 s deadline, carry the active span as
+  `traceparent` when telemetry is registered, and reject with `ConnectError(Unavailable)` when no
+  instance is known, when the discovery backend fails (`could not resolve "<target>"`, cause kept),
+  or after the application stops. Each definition caches at most 256 clients (least recently used
+  evicted). A stream the server refused (`REFUSED_STREAM`, never processed — a server shutting down)
+  is reported as the instance's failure and rejects as `Unavailable`; a unary call is first sent
+  once more on a fresh pick, within what is left of its deadline (its own or the configured one).
+  The retry setup wait races caller abort and the remaining deadline; if stopped before sending, the
+  original refusal remains the answer and that unsent attempt records no outcome. A unary
+  `Unavailable` whose metadata carries exactly `x-setu-unprocessed: shutdown` (a server draining
+  before its pipeline ran) is resent once in the same way. Only these two are resent, never an error
+  a server sent whose message names the code. `GrpcClientOptions` (`common`): `basePath` (`''`),
+  `protocol` (`'connect'` | `'grpc'` | `'grpc-web'`, default `'connect'`), `httpVersion` (`'2'` |
+  `'1.1'`, default `'2'`; `'grpc'` needs `'2'`), `timeoutMs` (1–2147483647, default `5000`);
+  per-call options override `GrpcPluginOptions.clients[target]`, which overrides the defaults. The
+  transport is `@connectrpc/connect-node`, an optional peer loaded on the first call. On Cloudflare
+  Workers the client refuses with a `TypeError` at `grpcClient()`/`client()` (`workerd` has no
+  `node:http2` client; HTTP/1.1 calls hang). On Deno it is not safe yet: Deno's Node-style HTTP
+  clients can crash the process natively when their peer goes away (a Deno defect, reproduced
+  without Setu). `grpcClientProvider(provide, definition, target, options?)` returns the same client
+  as a `ModuleFactoryProvider` (`inject: [CAPABILITIES.GRPC]`, `scope: 'singleton'`) for
   `@Module({ providers })`, so a decorated class takes it with `@Inject(provide)`; its options and
   target are checked when it is called, and the container's client is the one `grpcClient` returns
   for the same arguments.
@@ -17038,7 +17315,7 @@ grpc.addService(AnotherDefinition, anotherImpl);
 - **Descriptors are addressed by their suffixed proto path.** Reflection clients ask for
   `example/echo.proto`; Protobuf-ES's `DescFile.name` drops the `.proto` suffix while `proto.name`
   retains it, and the registry keys on the latter.
-- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.1.2`,
+- **Lazy loading.** The four npm specifiers (`@connectrpc/connect@^2.2.0`,
   `@bufbuild/protobuf@^2.7.0`, `@bufbuild/protobuf@^2.7.0/wkt`) are loaded on first `register()`.
   Absence throws `GrpcRuntimeLoadError` with the install command.
 - **No adapter seam.** Since M70a the kernel dispatches gRPC from its terminal handler after the

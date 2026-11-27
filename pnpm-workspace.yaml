@@ -65,8 +65,11 @@ ignoreWorkspaceCycles: true
 # @azure/identity still requests msal-node 6; 7.1 fixes GHSA-xcx6-jx8p-x3h5.
 # @qdrant/js-client-rest 1.20.0 pins undici 7.29.1; 7.30.1 fixes GHSA-2m5v-pch6-74hx,
 # GHSA-4w7w-5xrc-9h26, GHSA-xjj6-f33q-929c and GHSA-qrxm-fqhp-jwvm (M135 audit F4).
+# @prisma/config 7.10.1 (under the prisma CLI database-plugin generates its MySQL test client
+# with) pins effect 3.20.0; 3.22.1 fixes GHSA-7589-6fvf-x4pw.
 overrides:
   '@azure/msal-node': ^7.1.0
+  '@prisma/config>effect': ^3.22.1
   '@qdrant/js-client-rest>undici': 7.30.1
 
 # Google SDK install scripts are denied: both are transitive deps of
@@ -77,6 +80,10 @@ allowBuilds:
   '@scarf/scarf': false
   protobufjs: false
   sse4_crc32: false
+  # The Prisma CLI only generates the MySQL test client. Denying its scripts moves the
+  # schema-engine download from install to the first `prisma generate`, which fetches it.
+  '@prisma/engines': false
+  prisma: false
   # The TC39 decorator transformer requires its native build.
   esbuild: true
   # cloudflare-plugin's workerd e2e runs wrangler dev, whose runtime installs its binary.

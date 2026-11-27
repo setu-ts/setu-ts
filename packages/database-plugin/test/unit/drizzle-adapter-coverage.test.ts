@@ -73,7 +73,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         ops,
       );
       await expect(unsupported.create({ id: 'no-returning' })).rejects.toThrow(
-        'requires a driver that supports RETURNING',
+        'no affected-row count',
       );
     });
 

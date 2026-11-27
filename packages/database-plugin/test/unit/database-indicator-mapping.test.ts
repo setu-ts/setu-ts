@@ -21,6 +21,13 @@ import {
   DATABASE_QUERY_PROGRESS,
 } from '../../src/health/database-capacity.ts';
 import type { DatabasePoolCapacity } from '../../src/interfaces/index.ts';
+import { BigtableAdapter, CosmosAdapter, DynamoAdapter } from '../../src/index.ts';
+import type { IDynamoClient } from '../../src/adapters/dynamo/dynamo-client-types.ts';
+import type { IBigtableClient } from '../../src/adapters/bigtable/bigtable-client-types.ts';
+import type { ICosmosClient } from '../../src/adapters/cosmos/cosmos-client-types.ts';
+import { dynamoFixture } from '../fixtures/conditional-dynamo.ts';
+import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
+import { createFakeCosmosClient, FakeCosmosError } from '../fixtures/fake-cosmos-client.ts';
 
 const SATURATED: DatabasePoolCapacity = { total: 4, idle: 0, waiting: 3 };
 const IDLE: DatabasePoolCapacity = { total: 4, idle: 2, waiting: 0 };
@@ -158,6 +165,10 @@ function adapterFor(row: Row): IDatabaseAdapter {
 }
 
 async function indicatorFor(row: Row) {
+  return await indicatorForAdapter(adapterFor(row));
+}
+
+async function indicatorForAdapter(adapter: IDatabaseAdapter) {
   let indicator: (() => Promise<{ status: string; data?: Record<string, unknown> }>) | undefined;
   let clock = 0;
   const ctx = {
@@ -175,7 +186,7 @@ async function indicatorFor(row: Row) {
       clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     },
   } as unknown as IPluginContext;
-  await DatabasePlugin({ type: 'custom', adapter: adapterFor(row) }).register(ctx);
+  await DatabasePlugin({ type: 'custom', adapter }).register(ctx);
   return indicator!;
 }
 
@@ -187,5 +198,113 @@ describe('database indicator mapping (M101a)', () => {
       expect(health.status).toBe(row.status);
       expect(health.data?.['reachable']).toBe(row.reachable);
     });
+  }
+});
+
+/** How the store answers the readiness probe once the adapter is connected. */
+type ProbeAnswer = 'answered' | 'refused' | 'unknown';
+
+/** A NoSQL adapter whose probe answer is switched after connect (the connect read stays healthy). */
+interface NoSqlBackend {
+  readonly name: string;
+  readonly make: (answer: () => ProbeAnswer) => IDatabaseAdapter;
+}
+
+const NOSQL_BACKENDS: ReadonlyArray<NoSqlBackend> = [
+  {
+    name: 'dynamodb',
+    make: (answer) => {
+      const inner = dynamoFixture().client;
+      const client: IDynamoClient = {
+        ...inner,
+        getItem: (input, options) => {
+          const now = answer();
+          if (now === 'refused') {
+            return Promise.reject(
+              Object.assign(new Error('no table'), { name: 'ResourceNotFoundException' }),
+            );
+          }
+          if (now === 'unknown') {
+            return Promise.reject(Object.assign(new Error('odd'), { name: 'InternalOddity' }));
+          }
+          return inner.getItem(input, options);
+        },
+      };
+      return new DynamoAdapter({ client, entities: { Row: { partitionKey: 'id' } } });
+    },
+  },
+  {
+    name: 'cosmos',
+    make: (answer) => {
+      const inner = createFakeCosmosClient({ containers: {} }).client;
+      const client: ICosmosClient = {
+        database: (id) => {
+          const database = inner.database(id);
+          return {
+            container: (name) => database.container(name),
+            read: (options) => {
+              const now = answer();
+              if (now === 'refused') return Promise.reject(new FakeCosmosError(403, 'forbidden'));
+              if (now === 'unknown') return Promise.reject(new FakeCosmosError(400, 'odd'));
+              return database.read(options);
+            },
+          };
+        },
+      };
+      return new CosmosAdapter({ client, database: 'app' });
+    },
+  },
+  {
+    name: 'bigtable',
+    make: (answer) => {
+      const inner = createFakeBigtableClient(new FakeBigtableStore());
+      const client: IBigtableClient = {
+        instance: (id) => ({
+          table: (table) => {
+            const handle = inner.instance(id).table(table);
+            return {
+              row: (key) => handle.row(key),
+              readRows: (options, callOptions) => {
+                const now = answer();
+                if (now === 'refused') {
+                  return Promise.reject(Object.assign(new Error('not found'), { code: 5 }));
+                }
+                if (now === 'unknown') {
+                  return Promise.reject(Object.assign(new Error('odd'), { code: 3 }));
+                }
+                return handle.readRows(options, callOptions);
+              },
+            };
+          },
+        }),
+        close: () => inner.close(),
+      };
+      return new BigtableAdapter({ client, instance: 'app', tables: { Row: {} } });
+    },
+  },
+];
+
+const NOSQL_ROWS: ReadonlyArray<{
+  readonly answer: ProbeAnswer;
+  readonly status: 'up' | 'degraded' | 'down';
+  readonly reachable: true | false | 'unknown';
+}> = [
+  { answer: 'answered', status: 'up', reachable: true },
+  { answer: 'refused', status: 'down', reachable: false },
+  { answer: 'unknown', status: 'degraded', reachable: 'unknown' },
+];
+
+describe('database indicator mapping: the NoSQL adapters report reachable', () => {
+  for (const backend of NOSQL_BACKENDS) {
+    for (const row of NOSQL_ROWS) {
+      it(`${backend.name}: a probe that is ${row.answer} → ${row.status}`, async () => {
+        let current: ProbeAnswer = 'answered';
+        const indicator = await indicatorForAdapter(backend.make(() => current));
+        current = row.answer;
+        const health = await indicator();
+        expect(health.status).toBe(row.status);
+        expect(health.data?.['reachable']).toBe(row.reachable);
+      });
+    }
   }
 });

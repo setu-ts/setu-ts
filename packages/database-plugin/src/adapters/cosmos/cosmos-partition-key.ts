@@ -15,6 +15,7 @@
  *
  * @module
  */
+import { isDatabaseTimeout } from '../request-bound.ts';
 import { serializeError } from '@setu-ts/common';
 import type { ICosmosDatabase } from './cosmos-client-types.ts';
 import type { CosmosTarget } from './cosmos-mapping.ts';
@@ -126,6 +127,8 @@ export class PartitionKeyResolver {
     try {
       definition = await container.read();
     } catch (error) {
+      // A bounded read that expired stays a 504: its outcome, not the container, is unknown.
+      if (isDatabaseTimeout(error)) throw error;
       throw new Error(
         `CosmosAdapter could not read container '${target.container}': ${
           serializeError(error).message

@@ -681,6 +681,22 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
     }
   });
 
+  it("skips a generated Prisma client, whose imports are not the member's", async () => {
+    const root = await workspace();
+    try {
+      const generated = `${root}/packages/a/test/fixtures/prisma-client-generated-mysql`;
+      await mkdir(generated, { recursive: true });
+      // An undeclared import that would otherwise be refused or recorded.
+      await writeFile(`${generated}/client.ts`, "import x from 'left-pad';");
+      expect(await runNodeManifests(['--write'], root)).toBe(0);
+      expect(await runNodeManifests(['--check'], root)).toBe(0);
+      const deno = JSON.parse(await readFile(`${root}/packages/a/deno.json`, 'utf8'));
+      expect(Object.keys(deno.imports)).not.toContain('left-pad');
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
   it('refuses a workspace entry without its member manifest', async () => {
     const root = await workspace();
     try {

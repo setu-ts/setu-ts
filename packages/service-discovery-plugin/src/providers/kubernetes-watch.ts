@@ -36,8 +36,8 @@ export interface KubernetesWatchDeps {
   readonly runtime: IRuntimeServices;
   /** Builds the list/watch URL, with extra query parameters. */
   readonly listUrl: (extra?: Readonly<Record<string, string>>) => string;
-  /** Resolves the `Authorization` header value. */
-  readonly authHeader: () => Promise<string>;
+  /** Resolves the `Authorization` header value under the watch's cancellation signal. */
+  readonly authHeader: (signal: AbortSignal) => Promise<string>;
   /** Maps a parsed list response onto instances. */
   readonly map: (body: unknown) => readonly ServiceInstance[];
   /** Reads `metadata.resourceVersion` from a parsed list response. */
@@ -74,8 +74,10 @@ export function watchKubernetesService(deps: KubernetesWatchDeps): Promise<Unsub
 
   /** LISTs, fires the listener, and returns the version to watch from. */
   const listAndFire = async (): Promise<string | null> => {
+    const authorization = await deps.authHeader(controller.signal);
+    controller.signal.throwIfAborted();
     const response = await deps.http.request(deps.listUrl(), {
-      headers: { Authorization: await deps.authHeader() },
+      headers: { Authorization: authorization },
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -93,6 +95,8 @@ export function watchKubernetesService(deps: KubernetesWatchDeps): Promise<Unsub
         backoffMs = INITIAL_BACKOFF_MS;
 
         while (!stopped) {
+          const authorization = await deps.authHeader(controller.signal);
+          controller.signal.throwIfAborted();
           const stream = await deps.http.stream(
             deps.listUrl({
               watch: 'true',
@@ -100,7 +104,7 @@ export function watchKubernetesService(deps: KubernetesWatchDeps): Promise<Unsub
               allowWatchBookmarks: 'true',
             }),
             {
-              headers: { Authorization: await deps.authHeader() },
+              headers: { Authorization: authorization },
               signal: controller.signal,
             },
           );

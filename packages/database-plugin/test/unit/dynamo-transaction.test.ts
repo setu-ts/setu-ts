@@ -16,6 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { DynamoAdapter, failedCreateGuard } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
+import { SerializationConflictError } from '../../src/errors.ts';
 import type {
   DynamoTransactWriteItemsCommandInput,
   IDynamoClient,
@@ -166,7 +167,10 @@ describe('DynamoDB adapter — deferred TransactWriteItems transactions', () => 
     await tx.createDataSource('Shipment').update('k', { status: 'shipped' });
     await tx.createDataSource('Order').create({ pk: 'fresh' });
 
-    await expect(tx.commit()).rejects.toBe(failure);
+    // An Update guard that failed at commit lost a precondition: 409, cause kept.
+    const error: unknown = await tx.commit().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SerializationConflictError);
+    expect((error as Error).cause).toBe(failure);
   });
 
   it('failedCreateGuard reads only a cancellation with index-aligned reasons', () => {

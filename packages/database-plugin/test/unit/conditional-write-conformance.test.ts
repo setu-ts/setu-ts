@@ -2,6 +2,7 @@ import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import type { WritePrecondition } from '@setu-ts/common';
 import { sources } from '../fixtures/conditional-sources.ts';
+import { mysqlDrizzle } from '../fixtures/mysql-drizzle.ts';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
@@ -11,6 +12,8 @@ import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bi
 import { dynamoFixture } from '../fixtures/conditional-dynamo.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
 import {
+  BigtableTransactionScopeError,
+  CosmosTransactionScopeError,
   EntityNotFoundError,
   UnsupportedQueryFeatureError,
   VersionConflictError,
@@ -79,35 +82,9 @@ describe('conditional adapter native error paths', () => {
     expect(await source.findById('b')).toBeNull();
   });
 });
+// DynamoDB, Cosmos and Bigtable accept them: nosql-transactional-conditional.test.ts.
 describe('deferred transaction refuses conditional writes', () => {
-  const adapters = [
-    { name: 'memory', make: () => new MemoryAdapter() },
-    {
-      name: 'dynamodb',
-      make: () =>
-        new DynamoAdapter({
-          client: dynamoFixture().client,
-          entities: { User: { partitionKey: 'id' } },
-        }),
-    },
-    {
-      name: 'cosmos',
-      make: () =>
-        new CosmosAdapter({
-          database: 'db',
-          client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
-            .client,
-        }),
-    },
-    {
-      name: 'bigtable',
-      make: () =>
-        new BigtableAdapter({
-          client: createFakeBigtableClient(new FakeBigtableStore()),
-          instance: 'i',
-        }),
-    },
-  ];
+  const adapters = [{ name: 'memory', make: () => new MemoryAdapter() }];
   for (const { name, make } of adapters) {
     it(name, async () => {
       const adapter = make();
@@ -231,7 +208,7 @@ describe('conditional writes conjoin key and predicate at every public data sour
             expect(message).not.toContain('canary-payload');
             // D1's unknown-column refusal is SQLite's own driver diagnostic,
             // which names the column (as for every D1 statement).
-            if (name !== 'd1' && name !== 'prisma') expect(message).not.toContain(field);
+            if (name !== 'd1' && !name.startsWith('prisma')) expect(message).not.toContain(field);
           }
         } else {
           expect(await ds.updateWhere!('a', where, { name: 'bad' })).toBeNull();
@@ -286,18 +263,53 @@ describe('updateVersioned / deleteVersioned at every public data source (M128)',
 
 /**
  * Inside a transaction, the versioned write applies exactly where the
- * transaction-scoped source has conditional writes. The two sets are data:
- * a source moving between them fails here, not in prose.
+ * transaction-scoped source has conditional writes. The two sets are written
+ * out, not derived from `sources`: a source moving between them, or a source
+ * added to `sources` and to neither set, fails here, not in prose.
  */
 const TRANSACTION_OUTCOMES: Readonly<Record<'applies' | 'refuses', readonly string[]>> = {
-  applies: ['drizzle', 'prisma', 'mongodb'],
-  refuses: ['memory', 'd1', 'dynamodb', 'cosmos', 'bigtable'],
+  applies: [
+    'drizzle',
+    'drizzle-mysql',
+    'prisma',
+    'prisma-mysql',
+    'prisma-undetermined',
+    'mongodb',
+    'dynamodb',
+    'cosmos',
+    'bigtable',
+  ],
+  refuses: ['memory', 'd1'],
+};
+
+/**
+ * What a second stale-version write to the same row in the same transaction gives. The SQL and
+ * MongoDB sources read their own write and report the stale version; DynamoDB, Cosmos and
+ * Bigtable refuse a second conditional write to a row they already write in the unit of work.
+ */
+const STALE_IN_TRANSACTION: Readonly<Record<string, abstract new (...args: never[]) => Error>> = {
+  drizzle: VersionConflictError,
+  'drizzle-mysql': VersionConflictError,
+  prisma: VersionConflictError,
+  'prisma-mysql': VersionConflictError,
+  'prisma-undetermined': VersionConflictError,
+  mongodb: VersionConflictError,
+  dynamodb: UnsupportedQueryFeatureError,
+  cosmos: CosmosTransactionScopeError,
+  bigtable: BigtableTransactionScopeError,
 };
 
 describe('updateVersioned inside a transaction (M128)', () => {
   it('the two sets cover every adapter exactly once', () => {
-    expect([...TRANSACTION_OUTCOMES.applies, ...TRANSACTION_OUTCOMES.refuses].sort()).toEqual(
-      sources.map((source) => source.name).sort(),
+    const listed = [...TRANSACTION_OUTCOMES.applies, ...TRANSACTION_OUTCOMES.refuses];
+    expect(new Set(listed).size).toBe(listed.length);
+    expect([...listed].sort()).toEqual(sources.map((source) => source.name).sort());
+    for (const source of sources)
+      expect(source.transactionalConditional, source.name).toBe(
+        TRANSACTION_OUTCOMES.applies.includes(source.name) ? true : 'refused',
+      );
+    expect(Object.keys(STALE_IN_TRANSACTION).sort()).toEqual(
+      [...TRANSACTION_OUTCOMES.applies].sort(),
     );
   });
 
@@ -309,13 +321,16 @@ describe('updateVersioned inside a transaction (M128)', () => {
     for (const [name, { source, done }] of Object.entries(transactionSources)) {
       try {
         const repo = new Repo(source);
-        await repo.create({ id: 'a', name: 'old', version: 1 });
         await expect(updateVersioned(repo, 'a', 1, { name: 'new' }), name).resolves.toMatchObject({
           version: 2,
         });
         await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toBeInstanceOf(
-          VersionConflictError,
+          STALE_IN_TRANSACTION[name]!,
         );
+        if (name === 'dynamodb')
+          await expect(updateVersioned(repo, 'a', 1, { name: 'x' }), name).rejects.toMatchObject({
+            feature: 'transaction',
+          });
       } finally {
         await done();
       }
@@ -348,7 +363,31 @@ async function applyingTransactionSources(): Promise<
   Record<string, { source: import('@setu-ts/common').IDataSource; done: () => Promise<void> }>
 > {
   const prismaClient = createFakePrismaClient();
+  const mysql = mysqlDrizzle();
   const adapters = {
+    'drizzle-mysql': new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(mysql.db, (db, work) => db.transaction(work)),
+      drizzleTables: { User: mysql.table },
+    }),
+    'prisma-mysql': new PrismaAdapter({
+      prismaClient: createFakePrismaClient({ activeProvider: 'mysql' }),
+    }),
+    'prisma-undetermined': new PrismaAdapter({
+      prismaClient: createFakePrismaClient({ activeProvider: 'unknown' }),
+    }),
+    dynamodb: new DynamoAdapter({
+      client: dynamoFixture().client,
+      entities: { User: { partitionKey: 'id' } },
+    }),
+    cosmos: new CosmosAdapter({
+      database: 'db',
+      client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
+        .client,
+    }),
+    bigtable: new BigtableAdapter({
+      client: createFakeBigtableClient(new FakeBigtableStore()),
+      instance: 'i',
+    }),
     drizzle: new DrizzleAdapter({
       drizzleInstance: createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
         database.transaction(work),
@@ -367,6 +406,7 @@ async function applyingTransactionSources(): Promise<
   > = {};
   for (const [name, adapter] of Object.entries(adapters)) {
     await adapter.connect();
+    await adapter.createDataSource('User').create({ id: 'a', name: 'old', version: 1 });
     const tx = await adapter.beginTransaction();
     result[name] = {
       source: tx.createDataSource('User'),
@@ -389,19 +429,6 @@ async function refusingTransactionSources(): Promise<
   > = {};
   const adapters = {
     memory: new MemoryAdapter(),
-    dynamodb: new DynamoAdapter({
-      client: dynamoFixture().client,
-      entities: { User: { partitionKey: 'id' } },
-    }),
-    cosmos: new CosmosAdapter({
-      database: 'db',
-      client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
-        .client,
-    }),
-    bigtable: new BigtableAdapter({
-      client: createFakeBigtableClient(new FakeBigtableStore()),
-      instance: 'i',
-    }),
   };
   for (const [name, adapter] of Object.entries(adapters)) {
     await adapter.connect();

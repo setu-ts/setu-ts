@@ -390,6 +390,17 @@ export function backendSpecs(shard: Shard): IBackend[] {
       ['server', '/data'],
       { MINIO_ROOT_USER: 'minioadmin', MINIO_ROOT_PASSWORD: 'minioadmin' },
     ),
+    // CI maps host port 3307 to the service's 3306; here the server listens on 3307 itself,
+    // so MYSQL_URL reaches it unchanged.
+    spec(
+      'mysql',
+      'mysql:8.4',
+      [3307],
+      ['mysqladmin', 'ping', '-h', '127.0.0.1', '-P', '3307', '-psetu'],
+      ['--port=3307'],
+      { MYSQL_ROOT_PASSWORD: 'setu', MYSQL_DATABASE: 'setu_test' },
+      '1g',
+    ),
   ];
 }
 
