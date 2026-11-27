@@ -14,6 +14,7 @@ import type { AgentRunDefinition } from '../definitions/define-agent-run.ts';
 import { loadAi } from '../runtime/ai-runtime.ts';
 import { AgentRunService } from '../service/agent-run-service.ts';
 import { VERSION } from '../version.ts';
+import { errorLabel } from '../log/error-label.ts';
 
 /** Durable run storage, definitions and bounded execution settings. @since 0.12.0 */
 export interface AgentRunsPluginOptions {
@@ -141,7 +142,7 @@ export function AgentRunsPlugin(options: AgentRunsPluginOptions): IPlugin {
         timer = ctx.runtime.setInterval(() => {
           void registered.sweep().catch((error: unknown) => {
             logger?.warn('Agent run sweep failed.', {
-              error: error instanceof Error ? error.name : typeof error,
+              error: errorLabel(error),
             });
           });
         }, bounds.sweepIntervalMs);

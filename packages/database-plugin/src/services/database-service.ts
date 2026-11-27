@@ -89,6 +89,18 @@ function hasAccessPathReporter(dataSource: DataSource): boolean {
   return typeof reporter.getLastAccessPath === 'function';
 }
 
+/** Scrubs a rejection, keeping the status hint on a scrubbed copy. */
+function scrubKeepingHint(error: unknown): unknown {
+  // A tagged driver error (a `Failed query:` wrapper, a pg 22xxx, a frozen
+  // wrapper whose cause is relinked) is replaced by a scrubbed copy; the copy
+  // carries the tag, so its status survives.
+  const hint = httpStatusHintOf(error);
+  const scrubbed = scrubDriverError(error);
+  return hint !== undefined && scrubbed !== error && scrubbed instanceof Error
+    ? withHttpStatusHint(scrubbed, hint)
+    : scrubbed;
+}
+
 /**
  * Maps a driver rejection onto the package-owned classified error
  * (X38-1/X35-2, M90f), or returns the scrubbed diagnostic when no signal matches.
@@ -104,15 +116,7 @@ function classifiedOrOriginal(
   entity?: string,
   site?: 'transaction-work',
 ): unknown {
-  const hint = httpStatusHintOf(error);
-  if (hint !== undefined) {
-    // A tagged driver error (a `Failed query:` wrapper, a pg 22xxx) is replaced
-    // by a scrubbed copy; the copy carries the tag, so its status survives.
-    const scrubbed = scrubDriverError(error);
-    return scrubbed !== error && scrubbed instanceof Error
-      ? withHttpStatusHint(scrubbed, hint)
-      : scrubbed;
-  }
+  if (httpStatusHintOf(error) !== undefined) return scrubKeepingHint(error);
   const kind = classifyDriverError(error, adapterType, site);
   const refused = entity === undefined ? undefined : refusalErrorOf(error, entity);
   const lost = kind === 'timeout' && isConnectionLostMidCall(error, adapterType, site);
@@ -219,7 +223,7 @@ function verdictAtCommitOrOriginal(error: unknown, adapterType: DatabaseAdapterT
   ) {
     return classifiedOrOriginal(error, adapterType);
   }
-  return scrubDriverError(error);
+  return scrubKeepingHint(error);
 }
 
 // ---------------------------------------------------------------------------

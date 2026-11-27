@@ -13,6 +13,7 @@ import type { ChunkLog } from '../log/chunk-log.ts';
 import { prepareApprovals } from '../approvals/approvals.ts';
 import { calls, childId, json, messages, schemaOnly } from './messages.ts';
 import { runTool, toolKey, ToolConflict } from './tool-runner.ts';
+import { errorLabel } from '../log/error-label.ts';
 
 /** Private deadline marker; model timeouts still follow the ordinary failure path. */
 class CallTimeout extends Error {}
@@ -330,9 +331,7 @@ export async function stepLoop(
       const status = httpStatusHintOf(error)?.status;
       deps.logger?.warn('Agent run failed.', {
         definition: definition?.name ?? '',
-        // The captured error is application-model code's own value: a
-        // non-string `name` is not logged.
-        error: error instanceof Error && typeof error.name === 'string' ? error.name : typeof error,
+        error: errorLabel(error),
         ...(status === undefined ? {} : { status }),
       });
     }

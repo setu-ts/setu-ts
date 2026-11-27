@@ -187,8 +187,8 @@ All notable changes to this project are documented here. The format follows
   never unknown commit results, unavailable or timeout. Hinted application errors keep their
   identity while Drizzle cause values are scrubbed; a hinted error that is itself a Drizzle query
   wrapper or SQLSTATE 22 error, or a frozen one whose cause must be relinked, becomes a scrubbed
-  copy that keeps its name, message and status. Exceptions still re-exports ERROR_TYPE_BASE with the
-  same value from common.
+  copy that keeps its status, at every interception site including commit. Exceptions still
+  re-exports ERROR_TYPE_BASE with the same value from common.
 - **BREAKING — `@setu-ts/database-plugin` (M143h; V13-133, V13-50, V13-40, V13-250).** MongoDB
   pool-cleared subclasses map to 503; network/operation timeout classes to 504. Prisma P2037,
   SQLSTATE 53300, mysql2 connection-limit codes and portable adapter kinds are recognised. pg-pool

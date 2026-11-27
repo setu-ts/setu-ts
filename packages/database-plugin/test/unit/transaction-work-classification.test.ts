@@ -380,6 +380,12 @@ describe('a tagged driver error that the scrub replaces keeps its status', () =>
       .catch((error: unknown) => error);
     check(thrown);
   });
+  it('from commit', async () => {
+    const thrown = await service(tagged())
+      .transaction(() => Promise.resolve())
+      .catch((error: unknown) => error);
+    check(thrown);
+  });
   it('from a repository call', async () => {
     const failing: IDataSource = { ...source, findAll: () => Promise.reject(tagged()) };
     const adapter: IDatabaseAdapter = {
