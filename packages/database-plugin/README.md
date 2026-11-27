@@ -1656,11 +1656,13 @@ Numeric driver codes are read only in their backend's namespace. Prisma adapter 
 from that adapter cause with `kind: 'mysql'`; `45028` is an unavailable pool timeout, not pg-pool
 saturation.
 
-Structured signals are checked before generic names. A bare `TimeoutError` maps to 504; on a member
-with a connection errno it still maps to 504, including `ETIMEDOUT`. An outer bare `TimeoutError`
-over a `40001` cause remains a write conflict. Name matching walks guarded, bounded prototype
-chains, so `PoolClearedOnNetworkError` inherits the MongoDB pool-cleared classification.
-Unrecognised conditions keep their original error path.
+Structured signals are checked before generic names. A bare `TimeoutError` maps to 504, and so does
+a `TimeoutError` whose own `code` is a connection errno such as `ETIMEDOUT`. The rule reads each
+member of the cause chain on its own: a `TimeoutError` wrapping a separate cause with a connection
+errno is read from that cause, so a bare `ETIMEDOUT` or `ECONNREFUSED` cause still answers 503. An
+outer bare `TimeoutError` over a `40001` cause remains a write conflict. Name matching walks
+guarded, bounded prototype chains, so `PoolClearedOnNetworkError` inherits the MongoDB pool-cleared
+classification. Unrecognised conditions keep their original error path.
 
 Under `rfc9457`, classified errors carry a problem `type` from `DATABASE_PROBLEM_TYPES` in
 `@setu-ts/common`; the `default` response format is unchanged. `SerializationConflictError.reason`

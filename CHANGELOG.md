@@ -177,15 +177,17 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/exceptions` (M143h; V13-139,
   V13-132, V13-237, V13-252, V13-218, V13-115).** Problem Details database responses replace
   about:blank/status titles with condition-specific type URIs and titles; default-format bodies stay
-  unchanged. TimeoutError now answers 504 instead of 503, including with ETIMEDOUT; Bigtable
-  deadlines and Cosmos SDK timeouts follow that rule. Prisma P1017 and ConnectionClosed are
-  connection-lost (504), P1008/SocketTimeout bound (504). A write outcome is unknown: retry only
-  idempotently. FK, NOT NULL, repository length/range and lock wait refusals now answer 409/400
-  rather than masked 500s. Database-specific native errors thrown inside transaction work are
-  classified; application-wrapped causes and generic foreign network errors are not. Commit maps
-  only duplicate/conflict/FK/NOT NULL verdicts, never unknown commit results, unavailable or
-  timeout. Hinted application errors keep their identity while Drizzle cause values are scrubbed.
-  Exceptions still re-exports ERROR_TYPE_BASE with the same value from common.
+  unchanged. TimeoutError now answers 504 instead of 503, including one whose own code is ETIMEDOUT
+  (a separate connection-errno cause still answers 503); Bigtable deadlines and Cosmos SDK timeouts
+  follow that rule. Prisma P1017 and ConnectionClosed are connection-lost (504), P1008/SocketTimeout
+  bound (504). A write outcome is unknown: retry only idempotently. FK, NOT NULL, repository
+  length/range and lock wait refusals now answer 409/400 rather than masked 500s. Database-specific
+  native errors thrown inside transaction work are classified; application-wrapped causes and
+  generic foreign network errors are not. Commit maps only duplicate/conflict/FK/NOT NULL verdicts,
+  never unknown commit results, unavailable or timeout. Hinted application errors keep their
+  identity while Drizzle cause values are scrubbed; a hinted error that is itself a Drizzle query
+  wrapper or SQLSTATE 22 error becomes a scrubbed copy that keeps its status. Exceptions still
+  re-exports ERROR_TYPE_BASE with the same value from common.
 - **BREAKING — `@setu-ts/database-plugin` (M143h; V13-133, V13-50, V13-40, V13-250).** MongoDB
   pool-cleared subclasses map to 503; network/operation timeout classes to 504. Prisma P2037,
   SQLSTATE 53300, mysql2 connection-limit codes and portable adapter kinds are recognised. pg-pool

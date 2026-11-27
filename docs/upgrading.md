@@ -21,13 +21,13 @@ Problem Details database responses now use eleven condition-specific type URIs a
 is unchanged and still has no type. `ERROR_TYPE_BASE` keeps its value and exceptions re-exports it
 from common; existing imports still work. Do not mutate DATABASE_PROBLEM_TYPES or its entries.
 
-TimeoutError, including a member with ETIMEDOUT, now answers 504 rather than 503. Bigtable's gRPC
-deadline, Cosmos's SDK timeout and Prisma P1008/SocketTimeout also answer 504;
-P1017/ConnectionClosed is connection-lost, also 504. A timed-out write may have run: use an
-idempotency key or reconcile the stored result before retrying. Bare ECONNRESET/EPIPE and
-MongoNetworkError still answer 503, including bare Cosmos socket errors; do not infer a known write
-outcome from them. DynamoDB SDK TimeoutError now follows the unknown-outcome rule. MongoDB
-pool-cleared subclasses remain 503.
+A TimeoutError now answers 504 rather than 503, including one whose own code is ETIMEDOUT; a
+TimeoutError wrapping a separate connection-errno cause still answers 503. Bigtable's gRPC deadline,
+Cosmos's SDK timeout and Prisma P1008/SocketTimeout also answer 504; P1017/ConnectionClosed is
+connection-lost, also 504. A timed-out write may have run: use an idempotency key or reconcile the
+stored result before retrying. Bare ECONNRESET/EPIPE and MongoNetworkError still answer 503,
+including bare Cosmos socket errors; do not infer a known write outcome from them. DynamoDB SDK
+TimeoutError now follows the unknown-outcome rule. MongoDB pool-cleared subclasses remain 503.
 
 Foreign-key violations now answer 409, NOT NULL and repository length/range refusals 400, and lock
 wait timeouts 409. Catch the named errors or inspect problem.type instead of treating every 409 as
