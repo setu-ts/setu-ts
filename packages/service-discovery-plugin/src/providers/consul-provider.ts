@@ -4,6 +4,7 @@
  *
  * @module
  */
+import { withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp, SelfRegistration } from '../interfaces/index.ts';
 import { watchConsulService } from './consul-watch.ts';
@@ -55,7 +56,7 @@ export class ConsulProvider implements DiscoveryProvider {
   /**
    * @param options - Agent address, ACL token, datacenter, and wait
    * @param http - The HTTP seam
-   * @param runtime - Supplies timers and `uuid()` for the default instance id
+   * @param runtime - Supplies timers
    */
   constructor(options: ConsulProviderOptions, http: IDiscoveryHttp, runtime: IRuntimeServices) {
     this.#options = options;
@@ -147,9 +148,10 @@ export class ConsulProvider implements DiscoveryProvider {
     return instances;
   }
 
-  async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
     const response = await this.#http.request(this.healthUrl(serviceName), {
       headers: this.headers(),
+      ...(signal !== undefined ? { signal } : {}),
     });
     if (!response.ok) {
       throw new Error(
@@ -166,17 +168,19 @@ export class ConsulProvider implements DiscoveryProvider {
    * the request after 2 s so a hung agent cannot hold the connection open.
    */
   async isHealthy(): Promise<boolean> {
-    const controller = new AbortController();
-    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
     try {
-      const response = await this.#http.request(`${this.#base}/v1/status/leader`, {
-        signal: controller.signal,
-      });
+      const response = await withDeadline(
+        (signal) => this.#http.request(`${this.#base}/v1/status/leader`, { signal }),
+        {
+          timeoutMs: 2000,
+          timing: resolveProbeTiming(this.#runtime),
+          onTimeout: () =>
+            new Error('The Consul agent did not answer the reachability probe within 2000 ms'),
+        },
+      );
       return response.ok;
     } catch {
       return false;
-    } finally {
-      this.#runtime.clearTimeout(timer);
     }
   }
 
@@ -262,8 +266,8 @@ export class ConsulProvider implements DiscoveryProvider {
   /**
    * The instance id used for both register and deregister.
    *
-   * Generated once per registration object rather than per call, because a
-   * fresh uuid on deregistration would target an id that was never registered.
+   * Stable across process restarts on the same address and port, so a restart
+   * replaces its orphan registration. Memoised per registration object.
    *
    * @param registration - The registration
    * @returns Its stable instance id
@@ -273,7 +277,9 @@ export class ConsulProvider implements DiscoveryProvider {
     if (existing !== undefined) {
       return existing;
     }
-    const id = registration.id ?? `${registration.serviceName}-${this.#runtime.uuid()}`;
+    const id =
+      registration.id ??
+      `${registration.serviceName.replaceAll('%', '%25').replaceAll('@', '%40')}@${registration.address.replaceAll('%', '%25').replaceAll('@', '%40')}:${registration.port}`;
     this.#selfIds.set(registration, id);
     return id;
   }

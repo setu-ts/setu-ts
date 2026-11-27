@@ -2,7 +2,7 @@
  * Test fixture: a fake {@linkcode ConnectRuntime} plus descriptor builders.
  *
  * The fake honors the REAL runtime's contract, verified against
- * `@connectrpc/connect@2.1.2` / `@bufbuild/protobuf@2.13.0`:
+ * `@connectrpc/connect@2.3.0` / `@bufbuild/protobuf@2.17.0`:
  *
  * - `DescFile.name` has NO `.proto` suffix while `proto.name` retains it, so a
  *   fixture that used one name for both would hide the filename-keying bug.
@@ -244,8 +244,20 @@ export function createFakeConnectRuntime(
       return new FakeUnavailableError(message);
     },
 
+    resourceExhausted(message: string, cause?: unknown): Error {
+      return new FakeResourceExhaustedError(message, { cause });
+    },
+
+    isWireError(error: unknown): boolean {
+      return error instanceof Error && 'isWireError' in error && error.isWireError === true;
+    },
     isUnavailable(error: unknown): boolean {
       return error instanceof FakeUnavailableError;
+    },
+    errorMetadata(error: unknown): Headers | undefined {
+      return error instanceof FakeUnavailableError || error instanceof FakeResourceExhaustedError
+        ? error.metadata
+        : undefined;
     },
   };
 }
@@ -253,4 +265,11 @@ export function createFakeConnectRuntime(
 /** The fake runtime's `Unavailable` error. */
 export class FakeUnavailableError extends Error {
   readonly code = 14;
+  readonly metadata = new Headers();
+}
+
+/** The fake runtime's `ResourceExhausted` error. */
+export class FakeResourceExhaustedError extends Error {
+  readonly code = 8;
+  readonly metadata = new Headers();
 }

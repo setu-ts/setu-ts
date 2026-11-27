@@ -728,10 +728,10 @@ importers:
         specifier: ^2.7.0
         version: 2.17.0
       '@connectrpc/connect':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)
       '@connectrpc/connect-web':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.17.0))
       '@setu-ts/grpc-plugin':
         specifier: workspace:^
@@ -762,7 +762,7 @@ importers:
         specifier: ^2.7.0
         version: 2.17.0
       '@connectrpc/connect':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)
       '@grpc-workspace/contracts':
         specifier: workspace:*
@@ -868,10 +868,10 @@ importers:
         specifier: ^2.7.0
         version: 2.17.0
       '@connectrpc/connect':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)
       '@connectrpc/connect-node':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.17.0))
       '@grpc-workspace/contracts':
         specifier: workspace:*
@@ -2136,10 +2136,10 @@ importers:
         specifier: ^2.7.0
         version: 2.17.0
       '@connectrpc/connect':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)
       '@connectrpc/connect-node':
-        specifier: ^2.1.2
+        specifier: ^2.2.0
         version: 2.3.0(@bufbuild/protobuf@2.17.0)(@connectrpc/connect@2.3.0(@bufbuild/protobuf@2.17.0))
       '@setu-ts/decorator-plugin':
         specifier: workspace:^
@@ -2147,6 +2147,9 @@ importers:
       '@setu-ts/di-plugin':
         specifier: workspace:^
         version: link:../di-plugin
+      '@setu-ts/exceptions':
+        specifier: workspace:^
+        version: link:../exceptions
       '@setu-ts/health-plugin':
         specifier: workspace:^
         version: link:../health-plugin

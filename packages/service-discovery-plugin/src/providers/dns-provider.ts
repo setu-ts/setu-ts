@@ -7,15 +7,18 @@
  *
  * @module
  */
+import { withDeadline, resolveProbeTiming, deadlineRangeError } from '@setu-ts/common';
 import type {
   IDnsResolver,
   IRuntimeServices,
   ServiceInstance,
   SrvRecord,
-  TimerHandle,
   Unsubscribe,
 } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
+
+/** Watch teardown is cancellation by the owner, not a DNS lookup failure. */
+const WATCH_STOPPED = Object.freeze({});
 
 /** Options shared by both DNS modes. */
 interface DnsProviderCommon {
@@ -25,6 +28,8 @@ interface DnsProviderCommon {
   readonly secure?: boolean;
   /** Milliseconds between watch polls. */
   readonly watchIntervalMs: number;
+  /** Bound for a watch tick; default 2000, zero unbounded. */
+  readonly resolveTimeoutMs?: number;
 }
 
 /**
@@ -87,8 +92,11 @@ export class DnsProvider implements DiscoveryProvider {
    * @param resolver - The DNS resolver from `IRuntimeServices.dns`
    * @param runtime - Supplies timers for the poll
    * @param options - Mode, template, port, and poll interval
+   * @throws {RangeError} When resolveTimeoutMs is outside the runtime timer range
    */
   constructor(resolver: IDnsResolver, runtime: IRuntimeServices, options: DnsProviderOptions) {
+    const refusal = deadlineRangeError('resolveTimeoutMs', options.resolveTimeoutMs ?? 2000);
+    if (refusal !== null) throw refusal;
     this.#resolver = resolver;
     this.#runtime = runtime;
     this.#options = options;
@@ -104,7 +112,70 @@ export class DnsProvider implements DiscoveryProvider {
     return this.#options.domainTemplate.replaceAll('{service}', serviceName);
   }
 
-  async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  #lastFailure: { error: unknown } | undefined;
+  /** Raw resolver work survives caller cancellation; only one per name is pending. */
+  readonly #pending = new Map<string, Promise<readonly ServiceInstance[]>>();
+
+  /** Reachability from the last lookup; absent names are successful answers. */
+  isHealthy(): Promise<boolean> {
+    return this.#lastFailure === undefined
+      ? Promise.resolve(true)
+      : Promise.reject(this.#lastFailure.error);
+  }
+
+  async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    return await this.#resolveLookup(
+      signal?.aborted ? Promise.resolve([]) : this.#pendingLookup(serviceName),
+      signal,
+    );
+  }
+
+  #pendingLookup(serviceName: string): Promise<readonly ServiceInstance[]> {
+    const existing = this.#pending.get(serviceName);
+    if (existing !== undefined) return existing;
+    const lookup = this.#lookup(serviceName);
+    this.#pending.set(serviceName, lookup);
+    const settled = (): void => {
+      this.#pending.delete(serviceName);
+    };
+    void lookup.then(settled, settled);
+    return lookup;
+  }
+
+  async #resolveLookup(
+    lookup: Promise<readonly ServiceInstance[]>,
+    signal?: AbortSignal,
+  ): Promise<readonly ServiceInstance[]> {
+    let onAbort: (() => void) | undefined;
+    try {
+      signal?.throwIfAborted();
+      const instances =
+        signal === undefined
+          ? await lookup
+          : await Promise.race([
+              lookup,
+              new Promise<never>((_, reject) => {
+                onAbort = () => reject(signal.reason);
+                signal.addEventListener('abort', onAbort, { once: true });
+                if (signal.aborted) onAbort();
+              }),
+            ]);
+      this.#lastFailure = undefined;
+      return instances;
+    } catch (error) {
+      if (signal?.aborted && signal.reason === WATCH_STOPPED) throw error;
+      if (!signal?.aborted && isNameAbsent(error)) {
+        this.#lastFailure = undefined;
+        return [];
+      }
+      this.#lastFailure = { error };
+      throw error;
+    } finally {
+      if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
+    }
+  }
+
+  async #lookup(serviceName: string): Promise<readonly ServiceInstance[]> {
     const domain = this.domainFor(serviceName);
     const secure = this.#options.secure ?? false;
 
@@ -140,7 +211,8 @@ export class DnsProvider implements DiscoveryProvider {
    * Polls at `watchIntervalMs`, firing only when the instance list changed.
    *
    * DNS has no push channel. Polling is the honest implementation: a `watch()`
-   * that never fires would be worse than a documented interval.
+   * that never fires would be worse than a documented interval. After a deadline,
+   * ticks still wait for the one raw resolver lookup to settle before starting another.
    */
   watch(
     serviceName: string,
@@ -148,41 +220,84 @@ export class DnsProvider implements DiscoveryProvider {
   ): Promise<Unsubscribe> {
     let last = '';
     let stopped = false;
-    let handle: TimerHandle | null = null;
-
+    let inFlight = false;
+    let active: AbortController | undefined;
+    let raw: Promise<readonly ServiceInstance[]> | undefined;
     const tick = async (): Promise<void> => {
+      if (stopped || inFlight || raw !== undefined) return;
+      inFlight = true;
+      const local = new AbortController();
+      active = local;
+      const ms = this.#options.resolveTimeoutMs ?? 2000;
+      const lookup = this.#pendingLookup(serviceName);
+      raw = lookup;
+      const settled = (): void => {
+        if (raw === lookup) raw = undefined;
+      };
+      void lookup.then(settled, settled);
       try {
-        const instances = await this.resolve(serviceName);
+        const instances = await withDeadline(
+          (signal) => this.#resolveLookup(lookup, AbortSignal.any([signal, local.signal])),
+          {
+            timeoutMs: ms,
+            timing: resolveProbeTiming(this.#runtime),
+            onTimeout: () =>
+              new Error(
+                `dns discovery did not answer the read for '${serviceName}' within ${ms} ms`,
+              ),
+          },
+        );
         const fingerprint = JSON.stringify(instances);
         if (!stopped && fingerprint !== last) {
           last = fingerprint;
           listener(instances);
         }
       } catch {
-        // A failed lookup is a transient DNS condition, not a change: keeping
-        // the last fingerprint means recovery fires the listener again.
+        // The lookup records its outcome for the health indicator; keep the last list.
+      } finally {
+        inFlight = false;
       }
     };
-
-    const schedule = (): void => {
-      // Guarded: unsubscribing before the first lookup resolves would
-      // otherwise arm an interval after the clear, leaking a timer nothing
-      // holds a handle to.
-      if (stopped) {
-        return;
-      }
-      handle = this.#runtime.setInterval(() => {
-        void tick();
-      }, this.#options.watchIntervalMs);
-    };
-
-    void tick().then(schedule);
-
+    const handle = this.#runtime.setInterval(() => {
+      void tick();
+    }, this.#options.watchIntervalMs);
+    void tick();
     return Promise.resolve(() => {
       stopped = true;
-      if (handle !== null) {
-        this.#runtime.clearInterval(handle);
-      }
+      this.#runtime.clearInterval(handle);
+      active?.abort(WATCH_STOPPED);
     });
   }
+}
+
+/**
+ * Whether DNS says the name or record type is absent, through at most five
+ * cause/member edges and 64 nodes. Every aggregate member must say absent;
+ * truncation, an empty aggregate or any other failure is not absence.
+ * @param error - DNS rejection, possibly wrapped by the runtime
+ * @returns Whether the name is absent
+ * @internal
+ */
+export function isNameAbsent(error: unknown): boolean {
+  let remaining = 64;
+  const visit = (current: unknown, depth: number): boolean => {
+    if (depth > 5 || --remaining < 0) return false;
+    if (current === null || typeof current !== 'object') return false;
+    const record = current as { code?: unknown; name?: unknown; cause?: unknown };
+    if (record.code !== undefined && record.code !== 'ENOTFOUND' && record.code !== 'ENODATA')
+      return false;
+    if (current instanceof AggregateError) {
+      const members: unknown[] = current.errors;
+      return (
+        members.length > 0 &&
+        members.length <= remaining &&
+        members.every((member) => visit(member, depth + 1))
+      );
+    }
+    // An explicit failure code must not be hidden by an absent nested cause.
+    if (record.code !== undefined) return record.code === 'ENOTFOUND' || record.code === 'ENODATA';
+    if (record.name === 'NotFound') return true;
+    return visit(record.cause, depth + 1);
+  };
+  return visit(error, 0);
 }

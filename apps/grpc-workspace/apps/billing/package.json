@@ -36,7 +36,7 @@
     "@setu-ts/exceptions": "workspace:^",
     "@grpc-workspace/contracts": "workspace:*",
     "pino": "10.x",
-    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect": "^2.2.0",
     "@bufbuild/protobuf": "^2.7.0",
     "swagger-ui-dist": "5.33.3",
     "zod": "^4.6.6"

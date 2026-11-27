@@ -164,8 +164,8 @@ truncated reports `omittedErrorCount`.
 ## Circuit-breaker window
 
 `createBreakerWindow(policy, now)` is the circuit-breaker trip rule, written once; the SDK client's
-per-origin breaker runs on it. (The resilience plugin still keeps an equivalent count-arm window of
-its own in this release.) `CircuitBreakerPolicy` has two arms:
+per-origin breaker and the resilience plugin's breaker both run on it. `CircuitBreakerPolicy` has
+two arms:
 
 - **count** — `{ threshold, timeout, resetTimeout }`: trips when `threshold` failures are less than
   `timeout` ms old. Failures are timestamped exactly.

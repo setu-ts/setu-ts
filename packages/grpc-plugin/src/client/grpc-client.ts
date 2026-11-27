@@ -9,7 +9,12 @@
  *
  * @module
  */
-import { contextToTraceparent } from '@setu-ts/common';
+import {
+  contextToTraceparent,
+  UNPROCESSED_HEADER,
+  UNPROCESSED_SHUTDOWN,
+  withDeadline,
+} from '@setu-ts/common';
 import type {
   GrpcClientOptions,
   GrpcServiceDefinition,
@@ -22,6 +27,9 @@ import type {
 import { DEFAULT_READ_MAX_BYTES } from '../interfaces/index.ts';
 import type { ClientTransportLike, ConnectRuntime } from '../interfaces/connect-runtime.ts';
 import type { ConnectNodeModuleLike, Http2SessionLike } from './connect-node-loader.ts';
+import { callOutcome, isExcessiveLoadReset, isRefusedStream } from './call-outcome.ts';
+import { GrpcExcessiveLoadError } from '../errors/grpc-errors.ts';
+import { findPeerHeaderListLimitError, guardHeaderList } from './header-list-guard.ts';
 
 /** Every option, resolved. */
 type ResolvedClientOptions = Required<GrpcClientOptions>;
@@ -62,6 +70,8 @@ export const CLIENT_IDLE_TIMEOUT_MS = 60_000;
 /** How many origins keep a transport (and session) before the oldest is forgotten. */
 export const MAX_CLIENT_ORIGINS = 64;
 
+/** Largest delay a runtime timer accepts. */
+const MAX_TIMER_MS = 2_147_483_647;
 const PROTOCOLS: ReadonlySet<string> = new Set(['connect', 'grpc', 'grpc-web']);
 const HTTP_VERSIONS: ReadonlySet<string> = new Set(['2', '1.1']);
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -103,7 +113,7 @@ export function validateClientOptions(options: GrpcClientOptions, where: string)
   }
   if (
     timeoutMs !== undefined &&
-    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647)
+    (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMER_MS)
   ) {
     throw new TypeError(
       `${where}: timeoutMs must be an integer from 1 to 2147483647, received ${String(timeoutMs)}`,
@@ -192,63 +202,7 @@ export function instanceOrigin(instance: ServiceInstance): string {
   return `${scheme}://${host}:${instance.port}`;
 }
 
-/** connect-node's message for a `REFUSED_STREAM` reset code (`connectErrorFromH2ResetCode`). */
-const CONNECT_NODE_REFUSED = 'http/2 stream closed with error code REFUSED_STREAM (0x7)';
-
-/**
- * Whether a call failed because the server refused its HTTP/2 stream
- * (`REFUSED_STREAM`, RFC 9113 §8.7): the server did not process it, which a
- * server that has sent `GOAWAY` while shutting down does to a stream already on
- * the wire. connect-node maps the reset code to `Unavailable` when it reads it,
- * but reports the stream-error event Node raises for the same refusal as
- * `Internal`; the cause chain names it either way. A stream that could not be
- * opened because the session had already received `GOAWAY`
- * (`ERR_HTTP2_GOAWAY_SESSION`) is the same case: the request never left.
- *
- * @param error - The call's error
- * @returns `true` when some error in the cause chain is that refusal
- */
-export function isRefusedStream(error: unknown): boolean {
-  let current: unknown = error;
-  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
-    const { message, code, cause } = current as {
-      message?: unknown;
-      code?: unknown;
-      cause?: unknown;
-    };
-    if (typeof message === 'string') {
-      // Node's stream error for the refusal, and connect-node's reading of the
-      // reset code: exactly these two, so a server's own error message that
-      // happens to name the code is never taken for a refusal and retried.
-      if (code === 'ERR_HTTP2_STREAM_ERROR' && message.includes('NGHTTP2_REFUSED_STREAM')) {
-        return true;
-      }
-      // The stream was never opened: the session had already received GOAWAY
-      // (seen on Bun, whose node:http2 races the session manager's reconnect).
-      if (code === 'ERR_HTTP2_GOAWAY_SESSION') return true;
-      if (isLocalResetRefusal(current)) return true;
-    }
-    current = cause;
-  }
-  return false;
-}
-
-/**
- * connect-node's own reading of a `REFUSED_STREAM` reset code: exactly its
- * message, and no response metadata. A server's error that merely names the
- * code always arrives with the response headers, so it never matches (a server
- * that rethrows a downstream refusal ran its handler, and is not resent).
- */
-function isLocalResetRefusal(error: object): boolean {
-  const { rawMessage, metadata } = error as { rawMessage?: unknown; metadata?: unknown };
-  return (
-    rawMessage === CONNECT_NODE_REFUSED &&
-    metadata instanceof Headers &&
-    metadata.keys().next().done === true
-  );
-}
-
-/** A refused stream, carrying the `Unavailable` error the caller will see. */
+/** An unprocessed call, carrying the `Unavailable` error the caller will see. */
 class RefusedStream {
   // A field, not a parameter property: the sources run through type stripping,
   // which accepts only erasable syntax.
@@ -420,7 +374,14 @@ export class GrpcClients {
       // interceptor: an interceptor is one more async layer on every call, even
       // one with no active span to carry.
       unary: (method, signal, timeoutMs, header, input, contextValues) => {
-        const traced = this.#withTraceparent(header);
+        let traced: HeadersInit | undefined;
+        try {
+          traced = this.#withTraceparent(header);
+        } catch (error) {
+          // An invalid caller header is the caller's fault: refused before
+          // any instance is picked, so it is never reported against one.
+          return Promise.reject(error);
+        }
         return this.#call(
           target,
           base,
@@ -429,10 +390,18 @@ export class GrpcClients {
           (transport, timeout) =>
             transport.unary(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
+          signal,
         );
       },
       stream: (method, signal, timeoutMs, header, input, contextValues) => {
-        const traced = this.#withTraceparent(header);
+        let traced: HeadersInit | undefined;
+        try {
+          traced = this.#withTraceparent(header);
+        } catch (error) {
+          // An invalid caller header is the caller's fault: refused before
+          // any instance is picked, so it is never reported against one.
+          return Promise.reject(error);
+        }
         return this.#call(
           target,
           base,
@@ -441,14 +410,15 @@ export class GrpcClients {
           (transport, timeout) =>
             transport.stream(method, signal, timeout, traced, input, contextValues),
           timeoutMs,
+          signal,
         );
       },
     };
   }
 
   /**
-   * Runs one call, retrying a unary call once when the server refused its
-   * stream (see {@linkcode isRefusedStream}).
+   * Runs one call, resending a unary call once when the peer guarantees it
+   * was not processed (a refused stream or marked shutdown Unavailable).
    */
   async #call(
     target: string,
@@ -457,11 +427,18 @@ export class GrpcClients {
     unary: boolean,
     run: (transport: ClientTransportLike, timeoutMs: number | undefined) => Promise<unknown>,
     timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<unknown> {
     const now = this.#deps.clock ?? (() => performance.now());
     const started = now();
     try {
-      return await this.#attempt(target, base, options, (transport) => run(transport, timeoutMs));
+      return await this.#attempt(
+        target,
+        base,
+        options,
+        (transport) => run(transport, timeoutMs),
+        signal,
+      );
     } catch (error) {
       if (!(error instanceof RefusedStream)) throw error;
       // The retry gets what is left of the call's deadline — the call's own, or
@@ -470,12 +447,63 @@ export class GrpcClients {
       // A call with no deadline is retried with none.
       const deadline = effectiveDeadline(timeoutMs, options.timeoutMs);
       const remaining = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
-      if (!unary || (remaining !== undefined && remaining <= 0)) throw error.error;
-      return this.#attempt(target, base, options, (transport) =>
-        run(transport, remaining ?? timeoutMs),
-      ).catch((again: unknown) => {
-        throw again instanceof RefusedStream ? again.error : again;
-      });
+      if (!unary || signal?.aborted || (remaining !== undefined && remaining <= 0))
+        throw error.error;
+      // Bound each setup wait by the same original budget. The abandoned pick
+      // may settle later, but only the race's result can reach the transport.
+      const setup = <T>(pending: Promise<T>): Promise<T> => {
+        const left = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+        return withDeadline(
+          async (bound) => {
+            const stopped = signal === undefined ? bound : AbortSignal.any([bound, signal]);
+            let onAbort!: () => void;
+            const cancelled = new Promise<never>((_, reject) => {
+              onAbort = () => reject(error);
+              if (stopped.aborted || (left !== undefined && left <= 0)) onAbort();
+              else stopped.addEventListener('abort', onAbort, { once: true });
+            });
+            try {
+              return await Promise.race([cancelled, pending]);
+            } finally {
+              stopped.removeEventListener('abort', onAbort);
+            }
+          },
+          // A per-call timeout Connect passes unchecked (NaN, Infinity, above the timer range)
+          // leaves the setup wait unbounded rather than failing the resend.
+          {
+            timeoutMs:
+              left !== undefined && Number.isFinite(left) && left <= MAX_TIMER_MS
+                ? Math.max(0, left)
+                : 0,
+            onTimeout: () => error.error,
+          },
+        );
+      };
+      let sent = false;
+      return this.#attempt(
+        target,
+        base,
+        options,
+        (transport) => {
+          const left = deadline === undefined ? undefined : deadline - Math.ceil(now() - started);
+          // Return the refusal as an unsent sentinel: #attempt must record no outcome.
+          if (signal?.aborted || (left !== undefined && left <= 0)) return Promise.resolve(error);
+          sent = true;
+          return run(transport, left ?? timeoutMs);
+        },
+        signal,
+        setup,
+      ).then(
+        (result) => {
+          if (result instanceof RefusedStream) throw result.error;
+          return result;
+        },
+        (again: unknown) => {
+          if (!sent && (signal?.aborted || (deadline !== undefined && now() - started >= deadline)))
+            throw error.error;
+          throw again instanceof RefusedStream ? again.error : again;
+        },
+      );
     }
   }
 
@@ -484,6 +512,8 @@ export class GrpcClients {
     base: string | undefined,
     options: ResolvedClientOptions,
     run: (transport: ClientTransportLike) => Promise<unknown>,
+    signal: AbortSignal | undefined,
+    setup?: <T>(pending: Promise<T>) => Promise<T>,
   ): Promise<unknown> {
     const { runtime } = this.#deps;
     if (this.#closed) throw runtime.unavailable('the gRPC client is closed');
@@ -497,37 +527,54 @@ export class GrpcClients {
       }
       // A backend that fails (and has nothing cached) is an unreachable
       // dependency, reported the way every other one is: Unavailable.
-      instance =
-        (await discovery.pick(target).catch((cause: unknown) => {
-          throw runtime.unavailable(`could not resolve "${target}"`, cause);
-        })) ?? undefined;
+      const picked = discovery.pick(target).catch((cause: unknown) => {
+        throw runtime.unavailable(`could not resolve "${target}"`, cause);
+      });
+      instance = (await (setup === undefined ? picked : setup(picked))) ?? undefined;
       if (instance === undefined) {
         throw runtime.unavailable(`no instance of "${target}" is available`);
       }
       origin = instanceOrigin(instance);
     }
     const pending = this.#transport(`${origin}${options.basePath}`, options);
-    const transport = pending instanceof Promise ? await pending : pending;
+    const transport =
+      setup !== undefined
+        ? await setup(Promise.resolve(pending))
+        : pending instanceof Promise
+          ? await pending
+          : pending;
     try {
       const result = await run(transport);
-      this.#report(discovery, instance, 'success');
+      if (!(result instanceof RefusedStream)) this.#report(discovery, instance, 'success');
       return result;
     } catch (error) {
-      if (isRefusedStream(error)) {
+      const outcome = callOutcome(error, signal, runtime.isWireError);
+      if (outcome !== undefined) this.#report(discovery, instance, outcome);
+      if (!signal?.aborted && !runtime.isWireError(error) && isExcessiveLoadReset(error)) {
+        // This client's behaviour looked excessive (to the server, or to its own
+        // session's memory cap): the caller's to change, so neither counted against the instance nor sent again.
+        const calm = new GrpcExcessiveLoadError(error);
+        throw runtime.resourceExhausted(calm.message, calm);
+      }
+      if (
+        !signal?.aborted &&
+        (isRefusedStream(error) ||
+          (runtime.isUnavailable(error) &&
+            runtime.errorMetadata(error)?.get(UNPROCESSED_HEADER) === UNPROCESSED_SHUTDOWN))
+      ) {
         // The server never processed it: the instance's fault, and safe to send again.
-        this.#report(discovery, instance, 'failure');
         throw new RefusedStream(
           runtime.isUnavailable(error)
             ? (error as Error)
             : // A URL target is named by its origin only: its path is the
               // application's, never echoed (a service name is not secret).
               runtime.unavailable(
-                `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
+                findPeerHeaderListLimitError(error)?.message ??
+                  `"${base === undefined ? target : new URL(base).origin}" refused the call before processing it`,
                 error,
               ),
         );
       }
-      this.#report(discovery, instance, runtime.isUnavailable(error) ? 'failure' : 'success');
       throw error;
     }
   }
@@ -581,6 +628,7 @@ export class GrpcClients {
             { maxSessionMemory: CLIENT_MAX_SESSION_MEMORY_MB },
           )
         : undefined;
+    if (session !== undefined) guardHeaderList(session);
     const transportOptions: Record<string, unknown> = {
       baseUrl: url,
       httpVersion: options.httpVersion,
@@ -632,11 +680,19 @@ export class GrpcClients {
 
   /**
    * The call's headers with the active span's `traceparent` added, unless it
-   * already carries one. Unchanged — no copy — when there is no span.
+   * already carries one. Headers given in any form other than a `Headers` instance are
+   * built here, so an invalid name or value throws before the call picks an
+   * instance (Connect would otherwise throw it inside the call, where it would
+   * be reported against the instance). A `Headers` instance with no span to
+   * add is passed through unchanged.
+   *
+   * @throws {TypeError} When a header name or value is invalid
    */
   #withTraceparent(header: HeadersInit | undefined): HeadersInit | undefined {
     const value = this.#traceparent();
-    if (value === null) return header;
+    if (value === null) {
+      return header === undefined || header instanceof Headers ? header : new Headers(header);
+    }
     const headers = new Headers(header);
     if (!headers.has('traceparent')) headers.set('traceparent', value);
     return headers;

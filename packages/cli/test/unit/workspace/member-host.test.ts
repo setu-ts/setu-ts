@@ -221,7 +221,7 @@ describe('withWorkspaceMember — the transport module', () => {
     const grpc = memberOf('microservice', 'redis', 'grpc');
     expect(grpc.module?.contents).toContain("return [GrpcPlugin({ basePath: '/grpc' })];");
     expect(grpc.member.extraFrameworkPackages).toEqual(['grpc-plugin']);
-    expect(grpc.member.extraDependencies).toMatchObject({ '@connectrpc/connect': '^2.1.2' });
+    expect(grpc.member.extraDependencies).toMatchObject({ '@connectrpc/connect': '^2.2.0' });
     expect(grpc.member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(true);
     expect(grpc.member.extraTasks['proto:gen']).toBeDefined();
     // The config does not import the plugin: the module does.
@@ -248,8 +248,8 @@ describe('withWorkspaceMember — the transport module', () => {
     );
     expect(member.extraFrameworkPackages).toEqual(['grpc-plugin']);
     expect(member.extraDependencies).toMatchObject({
-      '@connectrpc/connect': '^2.1.2',
-      '@connectrpc/connect-node': '^2.1.2',
+      '@connectrpc/connect': '^2.2.0',
+      '@connectrpc/connect-node': '^2.2.0',
       '@bufbuild/protobuf': '^2.7.0',
     });
     expect(member.files.some((file) => file.path === 'buf.gen.yaml')).toBe(false);

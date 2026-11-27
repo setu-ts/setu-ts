@@ -1,8 +1,54 @@
 import { describe, expect, it } from 'vitest';
-import type { CircuitBreakerPolicy } from '@setu-ts/common';
+import type { CircuitBreakerPolicy, IResilienceService } from '@setu-ts/common';
 import { ResilienceService } from '../../src/services/resilience-service.ts';
 import { BulkheadFullError, CircuitOpenError, TimeoutError } from '../../src/errors.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
+import { INVALID_BREAKER_POLICIES } from '../fixtures/breaker-policies.ts';
+import { breakerPolicyRangeError } from '@setu-ts/common';
+import { ResiliencePlugin } from '../../src/plugin/resilience-plugin.ts';
+import { createFakeContext } from '../fixtures/fake-context.ts';
+
+it.each(INVALID_BREAKER_POLICIES)(
+  'refuses invalid explicit breaker %s at wrap',
+  (_label, policy) => {
+    const service = new ResilienceService(new FakeRuntime());
+    expect(() => service.wrap(() => Promise.resolve('unused'), { circuitBreaker: policy })).toThrow(
+      breakerPolicyRangeError(policy)!,
+    );
+  },
+);
+
+it('uses the same non-default rate trips through explicit and registered default policies', async () => {
+  const policy = { failureRateThreshold: 75, minimumCalls: 4, timeout: 700, resetTimeout: 123 };
+  const outcomes: string[][] = [];
+  for (const useDefault of [false, true]) {
+    const runtime = new FakeRuntime();
+    const { ctx, registeredServices } = createFakeContext(runtime);
+    ResiliencePlugin({ defaultCircuitBreaker: policy }).register(ctx);
+    const service = useDefault
+      ? (registeredServices.get('resilience') as IResilienceService)
+      : new ResilienceService(runtime);
+    let calls = 0;
+    const guarded = service.wrap(
+      () => (++calls === 1 ? Promise.resolve('ok') : Promise.reject(new Error('boom'))),
+      { circuitBreaker: useDefault ? true : policy },
+    );
+    const seen: string[] = [];
+    for (let n = 0; n < 5; n++) {
+      seen.push(
+        await guarded().catch((error: unknown) =>
+          error instanceof CircuitOpenError ? 'open' : 'boom',
+        ),
+      );
+    }
+    expect(calls).toBe(4);
+    outcomes.push(seen);
+  }
+  expect(outcomes).toEqual([
+    ['ok', 'boom', 'boom', 'boom', 'open'],
+    ['ok', 'boom', 'boom', 'boom', 'open'],
+  ]);
+});
 
 const CB: CircuitBreakerPolicy = { threshold: 3, timeout: 1000, resetTimeout: 5000 };
 const boom = () => Promise.reject(new Error('boom'));
@@ -29,6 +75,38 @@ async function expectReject(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('ResilienceService.wrap', () => {
+  it('records the inner timeout rejection even when the protected function later resolves', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const work = deferred<string>();
+    let calls = 0;
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return work.promise;
+      },
+      { timeout: 5, circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 } },
+    );
+    await expect(guarded()).rejects.toBeInstanceOf(TimeoutError);
+    work.resolve('late success');
+    await work.promise;
+    await expect(guarded()).rejects.toBeInstanceOf(CircuitOpenError);
+    expect(calls).toBe(1);
+  });
+  it('records success when a retry succeeds after an inner timeout', async () => {
+    const service = new ResilienceService(new FakeRuntime());
+    const hung = deferred<string>();
+    let calls = 0;
+    const guarded = service.wrap(() => (++calls === 1 ? hung.promise : Promise.resolve('ok')), {
+      timeout: 5,
+      retry: { limit: 2, delay: 1, backoff: 'fixed' },
+      circuitBreaker: { threshold: 1, timeout: 1000, resetTimeout: 5000 },
+    });
+    expect(await guarded()).toBe('ok');
+    expect(calls).toBe(2);
+    // threshold 1: a recorded failure would open the breaker and refuse this call.
+    expect(await guarded()).toBe('ok');
+    expect(calls).toBe(3);
+  });
   it('returns a callable that passes through when no patterns are selected', async () => {
     const service = new ResilienceService(new FakeRuntime());
     const guarded = service.wrap(() => Promise.resolve('plain'));

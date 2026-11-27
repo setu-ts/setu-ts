@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** `resolveTimeoutMs` (2000 ms, `0` unbounded)
+  and `emptyAnswerGraceMs` (30000 ms, `0` immediate), per-name refresh retry spacing and
+  `staleForMs`. Direct `new DnsProvider(...)` construction refuses non-finite or out-of-range
+  `resolveTimeoutMs` (0–2147483647) with `RangeError`.
+
 - **`@setu-ts/worker-pool-plugin` (M143r, #614; V13-131).** `WorkerRunOptions.signal` cancels a call
   with `signal.reason` unchanged: pre-aborted work is not queued, queued work is withdrawn, and a
   running call's worker is terminated and replaced as on timeout. Each cancellation increments
@@ -54,9 +59,29 @@ All notable changes to this project are documented here. The format follows
   beside the count arm (`CircuitBreakerCountPolicy`). `createBreakerWindow(policy, now)` is the trip
   rule, written once, that the SDK client's breaker runs on (returning an `IBreakerWindow`), also
   served alone as `@setu-ts/common/breaker-window`, and `breakerPolicyRangeError(policy)` is the one
-  policy check. The SDK client's `circuitBreaker` takes either arm; `@setu-ts/resilience-plugin`
-  still takes only the count arm and refuses a rate policy with a `RangeError` when `wrap()` builds
-  the breaker. V13-104.
+  policy check. The SDK client's `circuitBreaker` takes either arm; the resilience plugin also
+  consumes the shared window in the M143c follow-up below. V13-104.
+- **`@setu-ts/resilience-plugin` (M143c, #618).** Count and failure-rate breaker policies run
+  through `createBreakerWindow`; rate policies count successes toward `minimumCalls` and use ten
+  buckets with bucket-granular expiry. Invalid defaults fail at registration and invalid explicit
+  policies fail at `wrap()` through `breakerPolicyRangeError`. V13-104.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** DNS `servers` selects IP-literal name
+  servers through `runtime.createDnsResolver` (Node, Bun, Deno). `resolveTimeoutMs` bounds the whole
+  lookup across all servers with one attempt each; fractional bounds round up for the runtime.
+  Record TTLs are not read; `cacheTtlMs` is the age threshold for starting a background refresh, not
+  a bound on returned data. On Deno SERVFAIL reads as absence and an underlying lookup may end about
+  2 s past the bound. V13-246. Reads and watches share one pending raw DNS lookup per name across
+  caller timeouts. Discovery close invalidates all watches before attempting every stop and
+  surfacing cleanup failures; a watch still in setup is stopped when setup settles, its stop failure
+  rejecting every `watch()` waiting on it; reads still queued at close never call the provider.
+  Nested watch deliveries cannot send an older list after a newer one.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** Unary `Unavailable` with exactly
+  `x-setu-unprocessed: shutdown` is resent once on a new pick within the remaining deadline,
+  regardless of wire status. Streaming calls and unmarked errors are not resent. The reserved header
+  claims no processing; applications setting it on their own `Unavailable` get the same resend. The
+  instance still reports failure; a second marked failure surfaces. Retry setup now races caller
+  abort and the remaining deadline; if stopped before sending, it preserves the original refusal and
+  records no outcome for the unsent attempt. V13-23.
 
 - **`@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime` (M143i, #611).** A process that dies
   from an uncaught exception or an unhandled rejection leaves one `fatal` line, `Process failed`,
@@ -130,6 +155,109 @@ All notable changes to this project are documented here. The format follows
   confirm logs none.
 
 ### Changed
+
+- **`@setu-ts/grpc-plugin` (M143c, #618).** Connect and connect-node now require `^2.2.0`, the first
+  version with `isWireError`. A status Connect itself cannot decode fails the instance; valid status
+  13 remains an application answer. Header limits count Node's Latin-1 octets. A resend checks its
+  remaining deadline after discovery picks and sends nothing or reports nothing if it is spent.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids escape `%` and `@` within
+  serviceName/address as `%25` and `%40`, then join as `<serviceName>@<address>:<port>`; explicit
+  ids still win. DNS aggregate failure codes take precedence over absent members, and watches keep
+  at most one raw lookup pending even after timeout. Late Kubernetes token reads cannot overwrite
+  newer credentials or send after cancellation. Watch setup respects close; last unsubscribe
+  reapplies the empty-only cap. Async listener rejections are isolated, and delivery skips removed
+  subscribers. Cold failures cannot evict warm reporters; superseded read failures open no outage.
+  Held empty answers preserve served-list age, and change comparison reads all instance fields.
+- **Docs (`@setu-ts/resilience-plugin`, M143c, #618).** Clarify that mid-flight cancellation counts
+  as failure only when the protected function rejects; a resolving function counts as success.
+
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Provider reads now default to a
+  2 s bound; set `resolveTimeoutMs: 0` to restore unbounded reads.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Warm names always answer from
+  cache and refresh in the background. `cacheTtlMs: 0` now refreshes every warm call, coalesced; no
+  setting restores waiting on every warm read. Applications requiring that policy must provide their
+  own `IServiceDiscovery` implementation.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** `cacheTtlMs` outside
+  0–2147483647, or `NaN` or `Infinity`, is now refused with `RangeError` at
+  `ServiceDiscoveryPlugin(...)`. A `NaN` (an unset variable read through `Number()`) used to make
+  every call read the backend; with background refresh it would have kept a warm list forever. Pass
+  a finite value.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Empty answers hold a nonempty
+  list for 30000 ms; set `emptyAnswerGraceMs: 0` to restore immediate replacement. A grace timer
+  re-reads without another backend event and broadcasts replacement to all watchers; read changes
+  also reach watchers once.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** DNS absent-name answers now
+  resolve `[]`; no built-in DNS option restores the old rejection/stale-on-absence behavior. Set
+  `provider: 'custom'` with a `discovery` provider that rejects absent-name lookups if that policy
+  is required.
+- **BREAKING — `@setu-ts/service-discovery-plugin` (M143c, #618).** Consul ids default to
+  `<serviceName>@<address>:<port>` across restarts. Set `selfRegistration.id` explicitly to preserve
+  an existing identity; `address` must be the instance's own address, never a shared hostname.
+- **BREAKING — `@setu-ts/grpc-plugin` (M143c, #618).** Instance outcomes now distinguish server
+  answers from transport faults. A server's `Internal`, `Unknown` or `DataLoss` answer counts as
+  success, except an `Internal` for a status Connect itself cannot decode, so a throwing handler
+  does not eject replicas. The same codes without a server answer fail. Take a replica whose
+  handlers fail every call out through readiness (health checks). No answer, a refused stream,
+  `Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), and the peer's own `Canceled`
+  still fail. Every other server answer reports success, except an `Internal` for a status Connect
+  itself cannot decode. Caller aborts and pre-send faults (binary serialization, `writeMaxBytes`, a
+  request header Node refuses) report nothing; a header name or value `Headers` rejects now fails
+  the call before any instance is picked. No option restores the old outcome mapping;
+  `ejection: false` on discovery disables automatic ejection if the changed classifications are
+  unsuitable, without restoring old reports. A response-stream cancel now aborts the handler's
+  signal before awaiting cleanup without a bound.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** `GrpcHeaderListTooLargeError`: a client call whose
+  header list is over the peer's advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE` (RFC 7541 §4.1
+  sizes) is stopped before the peer processes it. Only a list also over 8 KiB (8192 octets) is the
+  caller's fault, with this error as the call error's `cause`: no report or resend. At or under 8
+  KiB, exceeding the advertised limit counts as `failure` against the instance; unary calls are
+  resent once to another pick within the remaining deadline, like a refused stream: the peer
+  advertised less than any gRPC default. Calls started before peer SETTINGS skip that
+  advertised-limit check. When no header-list limit was known when the call started, a
+  `REFUSED_STREAM` on a sent list over 65536 octets instead fails with this same error: `size` is
+  the RFC list size, `limit` is the client's 65536 threshold, no outcome is reported, and no resend
+  occurs. Smaller or equal lists retain refused stream handling; an accepted larger list is
+  unaffected. On Node that refusal comes from the client's own HTTP/2 library, which refuses to send
+  a list over 64 KiB. A refusal from a peer shutting down (its session closed or destroyed) stays a
+  refused stream and is resent.
+- **`@setu-ts/grpc-plugin` (M143c, #618).** `GrpcExcessiveLoadError`: a call whose stream is reset
+  with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by this client's
+  own HTTP/2 session when it is over its memory cap) is never counted against the instance and is
+  not resent (RFC 9113 §7: this client's behaviour looked excessive, as Node's server says for more
+  than 128 header fields). It fails as `ResourceExhausted` with this error as its `cause`. Before,
+  12 calls with 130 small headers ejected a healthy replica. On the default `connect` protocol a
+  non-gRPC well-formed `application/json` error object on a non-200 is read as a server answer, and
+  so is not ejected unless its code maps to `Unavailable`, `Unimplemented`, `DeadlineExceeded` or
+  `Canceled` (README).
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** At most 256 unwatched names that have only
+  ever answered empty (absent DNS names, services not yet registered) stay cached; the oldest is
+  evicted, and a watched name never is. `cacheTtlMs` outside 0–2147483647 is refused (see above).
+  The resolve warnings of names with no non-empty list (never resolved, or only ever empty) share a
+  budget of 20 `warn` lines a minute; past it they log at `debug`, with one notice per minute
+  window.
+- **`@setu-ts/service-discovery-plugin` (M143c, #618).** Health reflects DNS's last lookup outcome,
+  preserves it on watch unsubscribe, and sets `data.degraded` for warm failed reads or held empty
+  answers while the status stays `up` (visible with `HealthPlugin({ details: true })`). Cold
+  failures leave no cached failure state. A name keeps its reporter while its failure run is open
+  (repeats at debug, recovery at info), bounded at 256 concurrently failing cold names; warm
+  reporters are protected. Watch listener errors are isolated and warn once per failing run. A read
+  that started before a newer watch delivery neither replaces the delivered list nor marks the name
+  failed or starts retry spacing; a superseded failure opens no outage or recovery log. Kubernetes
+  probe timeouts name the API and bound.
+- **Docs (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`; M143c, #618).** Clarify
+  per-pod discovery for connection balancing, the marked drain-503 unary resend rule, grace-expiry
+  watch delivery, the shared 5 s provider-health cache and instance-address requirements for
+  registration.
+- **BREAKING — `@setu-ts/resilience-plugin` (M143c, #618; V13-104).** Every breaker policy now goes
+  through `breakerPolicyRangeError`: an invalid `defaultCircuitBreaker` throws a `RangeError` at
+  `ResiliencePlugin()` registration and an invalid explicit policy at `wrap()`. 0.13.0 checked only
+  that `threshold` was present, so it accepted, and now refuses: `NaN`, a numeric string (formerly
+  coerced) or a missing value for `threshold`, `timeout` or `resetTimeout`; a `threshold` of 0, a
+  non-integer or one above `Number.MAX_SAFE_INTEGER`; a `timeout` of 0 or less, `Infinity` or above
+  2147483647; a negative, infinite or over-range `resetTimeout`; a count policy that also sets
+  `minimumCalls` or `failureRateThreshold` (formerly ignored). Use a positive safe integer
+  `threshold`, a finite `timeout` greater than 0 (at least 10 on the rate arm) and at most
+  2147483647, a finite `resetTimeout` from 0 to 2147483647, and one arm.
 
 - **BREAKING — provider arms (M143r, #614; `@setu-ts/storage-plugin`, `@setu-ts/secrets-plugin`,
   `@setu-ts/mail-plugin`, `@setu-ts/feature-flags-plugin`, `@setu-ts/notification-plugin`; V13-232,

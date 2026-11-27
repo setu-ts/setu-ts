@@ -58,3 +58,76 @@ export class GrpcUnavailableError extends Error {
     this.name = 'GrpcUnavailableError';
   }
 }
+
+/**
+ * A client call whose request header list exceeds both the peer's advertised
+ * limit and 8 KiB, or the client's threshold when no header-list limit was known
+ * when the call started and the stream is refused (on Node the client's HTTP/2
+ * library refuses to send a list over 64 KiB, before any frame reaches the peer). At or under 8 KiB, exceeding an
+ * advertised limit instead counts against the instance; unary calls are resent
+ * once within the remaining deadline: that peer advertised less than any gRPC default.
+ * For an advertised HTTP/2 `SETTINGS_MAX_HEADER_LIST_SIZE`, the call is stopped before
+ * the peer processes it (a call started before the session holds the peer's
+ * SETTINGS, such as the first on a new session, is not checked). If no header-list
+ * limit was known when the call started, a list over the client's 64 KiB threshold
+ * becomes this error only when the stream is refused (by the client's HTTP/2 library
+ * on Node, or by a peer); a call that is sent and answered is unaffected.
+ * It is never reported against the instance, and it is not sent
+ * to another one: the headers are the caller's to shrink. It reaches the caller
+ * as the `cause` of the call's `ConnectError`.
+ * A refusal from a peer shutting down (its session closed or destroyed) stays
+ * a refused stream and is resent.
+ *
+ * Sizes follow RFC 7541 §4.1: each field counts its name and value octets plus
+ * 32.
+ * @since 0.14.0
+ */
+export class GrpcHeaderListTooLargeError extends Error {
+  /** The request's header list size, in octets. */
+  readonly size: number;
+  /** The peer's advertised limit, or the client's threshold when no limit was known, in octets. */
+  readonly limit: number;
+
+  /**
+   * @param size - The sent header list's RFC 7541 §4.1 size, in octets
+   * @param limit - The advertised limit, or 65536 for a refusal when no limit was known
+   * @param reason - Selects the client-threshold message when no limit was known when the call started
+   */
+  constructor(size: number, limit: number, reason?: 'unadvertised-refusal') {
+    super(
+      reason === 'unadvertised-refusal'
+        ? `The call's header list is ${size} octets, over the client's ${limit}-octet threshold; ` +
+            "no header-list limit was known when the call started and the stream was refused (on Node, normally by the client's own HTTP/2 library before sending). Send fewer or smaller headers."
+        : `The call's header list is ${size} octets, over the ${limit} the peer accepts ` +
+            '(HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE); send fewer or smaller headers.',
+    );
+    this.name = 'GrpcHeaderListTooLargeError';
+    this.size = size;
+    this.limit = limit;
+  }
+}
+
+/**
+ * A client call whose stream was reset with HTTP/2 `ENHANCE_YOUR_CALM` before the
+ * response headers, by the server or by this client's own HTTP/2 session when it is
+ * over its memory cap (RFC 9113 §7: this client's behaviour looked excessive, as
+ * Node's server says for more than 128 header fields). A reset after the response
+ * headers is not wrapped (a unary call then reports failure). The call is never reported against the instance, whatever
+ * it sent, and is not sent to another one. It reaches the caller as the `cause`
+ * of a `ConnectError` with code `ResourceExhausted` (grpc-go's mapping of the
+ * code); the original stream error is its own `cause`.
+ * @since 0.14.0
+ */
+export class GrpcExcessiveLoadError extends Error {
+  /** @param cause - The stream error the reset produced */
+  constructor(cause?: unknown) {
+    super(
+      "The call's stream was reset with HTTP/2 ENHANCE_YOUR_CALM, by the server or by this " +
+        "client's own HTTP/2 session over its memory cap: this client's behaviour looked excessive " +
+        '(for example too many header fields or too much buffered data). The call was not resent ' +
+        'and is not counted against the instance.',
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'GrpcExcessiveLoadError';
+  }
+}

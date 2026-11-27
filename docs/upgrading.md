@@ -12,6 +12,89 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Discovery and gRPC calls (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`)
+
+Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`
+is the age that starts a refresh; `0` refreshes every warm call, coalesced. Failed refreshes retain
+the last list indefinitely with retries after 1, 2, 4, 8, 16, then 30 s. Alert on `staleForMs` and
+`degraded` (warm read failures or held empty answers); warm lists at any age stay ready. Cold reads
+use `resolveTimeoutMs` (2000 ms default, `0` unbounded). Both new timing options accept finite
+values from 0 to 2147483647.
+
+Empty answers hold warm nonempty lists for `emptyAnswerGraceMs` (30000 ms default); set `0` to
+replace immediately. Reads and watches share this rule. At the grace deadline a per-name timer
+starts a coalesced background read, respecting failure retry spacing. A still-empty answer replaces
+the list and notifies all watchers, even without a repeated backend event. Nonempty answers,
+replacement and close clear the timer. Changes from background reads also reach watchers once.
+Missing DNS names now resolve `[]`, as static unknown names do, rather than causing a cold 503 or
+retaining removed records indefinitely. Use a trusted host resolver. Other DNS errors remain
+failures, reflected in health, including hung lookups. Reads and watches now share one pending raw
+DNS lookup per name across caller aborts and timeouts. Stopping a caller does not cancel the query.
+Discovery close invalidates all watches, attempts every provider stop, then surfaces cleanup errors
+(a watch still in setup is stopped when setup settles, and its stop failure rejects every `watch()`
+waiting on it); a read still queued at close never calls the provider. A nested watch delivery
+supersedes the older broadcast.
+
+No DNS configuration change is required. To select name servers, add the DNS arm's `servers` option
+with IP literals (optional ports; IPv6 ports need brackets). This requires a runtime with
+`createDnsResolver` (Node, Bun or Deno; not Workers). Fractional `resolveTimeoutMs` values round up
+for the runtime's integer whole-lookup bound. On Deno SERVFAIL reads as absence after the grace
+rule, and the underlying lookup may end about 2 s past the bound.
+
+Consul defaults the registration id to `<serviceName>@<address>:<port>` so restarts replace their
+own entry. `%` and `@` inside serviceName/address become `%25` and `%40`; other characters,
+including IPv6 colons, remain readable. Explicit ids still win. Once after upgrading, list
+`/v1/agent/services`, identify old uuid entries left by crashed processes, and deregister each via
+`PUT /v1/agent/service/deregister/<URL-encoded-id>`; the new default cannot remove those old ids.
+
+Connect and connect-node now require `^2.2.0` or newer, which first supplies `isWireError`; update
+older peer installations. A wire `Internal` for a status Connect itself cannot decode now fails;
+valid status 13 remains an application answer.
+
+The gRPC client reports instance failure when it did not answer, refused the stream, returned
+`Unavailable`, `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own.
+Every other server answer reports success, including application codes and `Internal`, `Unknown`,
+`DataLoss`, except an `Internal` for a status Connect itself cannot decode. The same codes without a
+server answer fail. A request that makes a healthy handler throw must not eject replicas. A replica
+whose handlers fail every call with `Internal` (a broken dependency, say) is not ejected by call
+outcomes. Take it out through readiness (health checks) instead; the same holds for a wrong service
+or proxy answering a well-formed JSON error object on a non-200 that does not map to `Unavailable`,
+`Unimplemented`, `DeadlineExceeded` or `Canceled` (a 400, 401, 403 or 500, say) on the default
+`connect` protocol. A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers, by
+the server or by this client's own session over its memory cap, is never counted against the
+instance or resent; the call fails as `ResourceExhausted` with `GrpcExcessiveLoadError` as its
+`cause`; send fewer headers or fewer concurrent streams, or keep fewer large replies in flight on
+one connection. A few client-side faults raised before the request leaves (binary serialization,
+`writeMaxBytes`, a request header Node refuses) report nothing, and a header `Headers` rejects fails
+the call before any instance is picked. Caller abort reports nothing. Tight deadlines can therefore
+eject healthy instances; size deadlines for normal latency. Streaming still reports success at
+response headers only. A unary `Unavailable` carrying exactly `x-setu-unprocessed: shutdown` now
+gets one resend on a new pick within the remaining deadline, regardless of wire status. This covers
+the kernel's pre-pipeline drain 503, including custom error responders, which reaches a client over
+HTTP/1.1 or through a proxy (over HTTP/2 a draining Node server refuses the stream, resent as
+before). The header is reserved: remove it from application errors unless the request was not
+processed and one resend is safe. Setting it on an application's own `Unavailable` makes that claim
+and gets the same resend; the kernel does not strip it. Streaming calls, other codes and unmarked
+errors are not resent. The instance still reports failure, a second marked failure surfaces, and
+retry setup races caller abort and the remaining deadline. If stopped before sending, it returns the
+original refusal and records no unsent outcome; a late pick cannot dispatch it. Discover individual
+pods (headless DNS mode `'a'` or Kubernetes) to spread calls; a single Service address pins a
+connection to one pod. Cancelling a response stream aborts the handler's `ctx.signal` before
+awaiting cleanup without a bound; handlers must observe it to exit promptly.
+
+Oversized headers no longer eject healthy replicas: once peer SETTINGS are known, a list over both
+the advertised limit and 8 KiB (8192 octets) fails with `GrpcHeaderListTooLargeError` in the cause
+chain, with no report or resend. A list at or under 8 KiB that exceeds the advertised limit instead
+counts as `failure` against the instance; unary calls are resent once to another pick within the
+remaining deadline, like a refused stream: that peer advertised less than any gRPC default. If the
+resend meets the same fault, `Unavailable` names the header size and advertised limit. When no
+header-list limit was known when the call started, a sent list over 65536 octets becomes that same
+caller error only on `REFUSED_STREAM` (on Node the client's HTTP/2 library refused to send it);
+`size` is the RFC 7541 §4.1 list size and `limit` is the client's 65536 threshold. Neither case
+reports an outcome or resends. At or under 65536, refused-stream failure and resend remain; an
+accepted larger list is unaffected. Shrink the headers on this error. A refusal from a peer shutting
+down (its session closed or destroyed) stays a refused stream and is resent.
+
 ### Worker call cancellation (`@setu-ts/worker-pool-plugin`)
 
 `WorkerRunOptions.signal` now withdraws queued work or terminates and replaces a running call's
@@ -222,7 +305,7 @@ may send that request again.
   signal fires: add `enable_request_signal` to `compatibility_flags` in `wrangler.toml` while the
   compatibility date is before 2026-11-17.
 
-### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`)
+### Circuit breakers: a rate arm, and the SDK keeps its failures (`@setu-ts/common`, `@setu-ts/sdk`, `@setu-ts/resilience-plugin`)
 
 - **Reading a policy.** `CircuitBreakerPolicy` is now a union of the count arm
   (`{ threshold, timeout, resetTimeout }`) and the rate arm
@@ -244,8 +327,13 @@ may send that request again.
   code coerced strings); a `timeout` of 0 or less, `Infinity` or above 2147483647, or missing; a
   negative, infinite or over-range `resetTimeout`, or a missing one. A `timeout: Infinity` once
   meant "failures in a row": use a finite window, or the rate arm.
-- **The resilience plugin.** `ResiliencePlugin` still takes only the count arm in this release: a
-  rate policy throws a `RangeError` when `wrap()` builds the breaker.
+- **The resilience plugin.** `ResiliencePlugin` now takes both arms through the same shared window.
+  Existing valid count policies keep their behavior. Invalid `defaultCircuitBreaker` now throws
+  `RangeError` at plugin registration, and invalid explicit policies at `wrap()`. Use a positive
+  safe integer `threshold`/`minimumCalls`, finite 1–100 `failureRateThreshold`, finite `timeout`
+  greater than 0 (count) or at least 10 (rate), at most 2147483647, and finite `resetTimeout` from 0
+  to 2147483647. Choose one arm: combining count and rate fields is refused. Rate expiry uses ten
+  buckets; choose `minimumCalls` to avoid tripping on low-volume noise.
 
 ### `--env-file` is now `--dotenv` (`@setu-ts/cli`)
 

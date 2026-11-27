@@ -3,6 +3,31 @@ import type { IPlugin, IResilienceService } from '@setu-ts/common';
 import { ResiliencePlugin } from '../../src/plugin/resilience-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import manifest from '../../deno.json' with { type: 'json' };
+import { INVALID_BREAKER_POLICIES } from '../fixtures/breaker-policies.ts';
+import { breakerPolicyRangeError } from '@setu-ts/common';
+
+it.each(INVALID_BREAKER_POLICIES)(
+  'refuses invalid default breaker %s at registration',
+  (_label, policy) => {
+    const { ctx, registeredServices } = createFakeContext();
+    const plugin = ResiliencePlugin({ defaultCircuitBreaker: policy });
+    expect(() => plugin.register(ctx)).toThrow(breakerPolicyRangeError(policy)!);
+    expect(registeredServices.size).toBe(0);
+  },
+);
+
+it('registers a valid rate default', () => {
+  const { ctx, registeredServices } = createFakeContext();
+  ResiliencePlugin({
+    defaultCircuitBreaker: {
+      failureRateThreshold: 65,
+      minimumCalls: 7,
+      timeout: 1000,
+      resetTimeout: 500,
+    },
+  }).register(ctx);
+  expect(registeredServices.size).toBe(1);
+});
 
 describe('ResiliencePlugin', () => {
   it('returns an IPlugin with the correct shape', () => {

@@ -41,11 +41,11 @@ await callApi();
 
 ## Options
 
-| Option                  | Type                   | Description                                                                                                                                                                                                                            |
-| ----------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `defaultCircuitBreaker` | `CircuitBreakerPolicy` | Consumed when a `wrap` sets `circuitBreaker: true`. Count arm only in this release: a rate policy (`failureRateThreshold`) throws a `RangeError` when `wrap()` builds the breaker, and rate fields set beside `threshold` are ignored. |
-| `defaultRetry`          | `RetryPolicy`          | Consumed when a `wrap` sets `retry: true`.                                                                                                                                                                                             |
-| `defaultBulkhead`       | `BulkheadPolicy`       | Consumed when a `wrap` sets `bulkhead: true`.                                                                                                                                                                                          |
+| Option                  | Type                   | Description                                                                                                                                                                        |
+| ----------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultCircuitBreaker` | `CircuitBreakerPolicy` | Count or rate policy, consumed when a `wrap` sets `circuitBreaker: true`. Invalid defaults throw `RangeError` at plugin registration; invalid explicit policies throw at `wrap()`. |
+| `defaultRetry`          | `RetryPolicy`          | Consumed when a `wrap` sets `retry: true`.                                                                                                                                         |
+| `defaultBulkhead`       | `BulkheadPolicy`       | Consumed when a `wrap` sets `bulkhead: true`.                                                                                                                                      |
 
 Setting a pattern to `true` with **no matching plugin default throws** — an unconfigured policy is a
 mistake, not a silent no-op. A retry `limit` must be a safe integer at least 1 and `delay` must be
@@ -73,6 +73,22 @@ itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the 
 ## Semantics
 
 - The circuit breaker uses a monotonic rolling failure window with an open → half-open cooldown.
+- A count policy `{ threshold, timeout, resetTimeout }` trips at `threshold` failures within
+  `timeout` ms. A rate policy `{ failureRateThreshold, minimumCalls, timeout, resetTimeout }` trips
+  on a failure when at least `minimumCalls` calls are in the window and at least
+  `failureRateThreshold` percent failed. Both successes and failures count toward `minimumCalls`.
+  The rate window uses ten buckets of `timeout / 10` ms: expiry is bucket-granular, so a call counts
+  for between `0.9 * timeout` and `timeout`. Success never clears failures. Only a successful
+  half-open probe resets the window. Already-aborted calls are not recorded. The breaker records the
+  result of its inner layers (retry and timeout): rejection is failure, resolution is success. It
+  sees the final result after retries, not each attempt: a timed-out attempt followed by a
+  successful retry records success. With a timeout and no successful retry, the timeout counts as
+  failure even if the function ignores the signal and later resolves. Without a timeout, a function
+  ignoring a mid-flight abort and resolving records success.
+- Policies use the shared `breakerPolicyRangeError` validation: `threshold` and `minimumCalls` are
+  positive safe integers, `failureRateThreshold` is finite from 1 to 100, `timeout` is finite and
+  greater than 0 (count) or at least 10 (rate), at most 2147483647; `resetTimeout` is finite from 0
+  to 2147483647. Fields of both arms, or neither arm, are refused.
 - **`timeout` cancels the attempt.** The wrapped function receives an `AbortSignal` that the timeout
   aborts when the deadline elapses, with the `TimeoutError` as its `reason`; the timer is cleared in
   a `finally`. Forward the signal to your I/O (`fetch(url, { signal })`) and the call is genuinely

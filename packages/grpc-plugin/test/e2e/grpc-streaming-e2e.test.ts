@@ -94,6 +94,82 @@ function parseConnectMessages(data: Uint8Array): string[] {
 }
 
 describe('gRPC Server Streaming E2E', () => {
+  it('cancels a fetched response stream while its handler awaits the next event', async () => {
+    const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
+    await app.start({ port: 0 });
+    let observedAbort = false;
+    let cleaned = false;
+    let settled = false;
+    let release: (() => void) | undefined;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let cancel: Promise<void> | undefined;
+    try {
+      const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+      grpc.addService(await reviveStreamService(), {
+        serverStream: async function* (_request: unknown, ctx: { signal: AbortSignal }) {
+          let onAbort: (() => void) | undefined;
+          try {
+            yield { message: 'first' };
+            await new Promise<void>((resolve) => {
+              release = resolve;
+              onAbort = () => {
+                observedAbort = true;
+                resolve();
+              };
+              ctx.signal.addEventListener('abort', onAbort, { once: true });
+              entered();
+            });
+          } finally {
+            if (onAbort !== undefined) ctx.signal.removeEventListener('abort', onAbort);
+            cleaned = true;
+          }
+        },
+      });
+      const response = await app.fetch(
+        new Request('http://localhost/example.StreamService/ServerStream', {
+          method: 'POST',
+          headers: { 'content-type': 'application/connect+json' },
+          body: encodeConnectEnvelope('{}') as unknown as BodyInit,
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(response.body).not.toBeNull();
+      const reader = response.body!.getReader();
+      let bytes = new Uint8Array();
+      let messages: string[] = [];
+      try {
+        while (messages.length === 0) {
+          const chunk = await reader.read();
+          expect(chunk.done).toBe(false);
+          const combined = new Uint8Array(bytes.length + chunk.value!.length);
+          combined.set(bytes);
+          combined.set(chunk.value!, bytes.length);
+          bytes = combined;
+          messages = parseConnectMessages(bytes);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      expect(JSON.parse(messages[0]!)).toEqual({ message: 'first' });
+      await waiting;
+      cancel = response.body!.cancel(new Error('client left')).then(() => {
+        settled = true;
+      });
+      await expect
+        .poll(() => ({ observedAbort, cleaned, settled }), { timeout: 1000 })
+        .toEqual({ observedAbort: true, cleaned: true, settled: true });
+      await cancel;
+    } finally {
+      // Release the fixture even on the original implementation, whose cancel hangs.
+      release?.();
+      await cancel;
+      await app.stop();
+    }
+  });
+
   it('serves a real Connect server-streaming RPC with correct decoded content', async () => {
     const app = createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] });
     await app.start({ port: 0 });

@@ -10,20 +10,33 @@
  * @module
  */
 import { connect, createServer } from 'node:net';
+import { createServer as http1Server } from 'node:http';
+import { createServer as http2Server } from 'node:http2';
 import type { Socket } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { create, createFileRegistry, fromBinary } from '@bufbuild/protobuf';
 import type { DescService } from '@bufbuild/protobuf';
 import { FileDescriptorProtoSchema, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { Code, ConnectError } from '@connectrpc/connect';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import type { IPlugin, IServiceDiscovery, ITelemetryService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler } from '@setu-ts/exceptions';
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
+import type { EjectionOptions } from '@setu-ts/service-discovery-plugin';
 
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
+import { callOutcome } from '../../src/client/call-outcome.ts';
+import {
+  headerListSize,
+  UNADVERTISED_HEADER_LIST_LIMIT,
+} from '../../src/client/header-list-guard.ts';
+import {
+  GrpcExcessiveLoadError,
+  GrpcHeaderListTooLargeError,
+} from '../../src/errors/grpc-errors.ts';
 import { GrpcPlugin } from '../../src/plugin/grpc-plugin.ts';
 import type { GrpcPluginOptions } from '../../src/interfaces/index.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
@@ -86,6 +99,185 @@ function services(): {
   };
 }
 const SVC = services();
+
+describeNode.each(['connect', 'grpc', 'grpc-web'] as const)('instance faults on %s', (protocol) => {
+  for (const fault of [
+    'dead-port',
+    'http1',
+    'http2-missing',
+    'accept-close',
+    'no-error-close',
+    'deadline',
+    'json404',
+  ] as const) {
+    it(`ejects ${fault} after one call and the next five succeed`, async () => {
+      const badPort = await unusedPort();
+      if (
+        fault === 'http1' ||
+        fault === 'http2-missing' ||
+        fault === 'accept-close' ||
+        fault === 'no-error-close'
+      ) {
+        const server =
+          fault === 'http1'
+            ? http1Server((_req, res) => {
+                res.writeHead(404);
+                res.end();
+              })
+            : fault === 'http2-missing' || fault === 'no-error-close'
+              ? http2Server()
+              : createServer((socket) => socket.destroy());
+        if (fault === 'http2-missing')
+          (server as ReturnType<typeof http2Server>).on('stream', (stream) => {
+            stream.respond({ ':status': 404 });
+            stream.end();
+          });
+        if (fault === 'no-error-close')
+          (server as ReturnType<typeof http2Server>).on('stream', (stream) => {
+            stream.close(0);
+          });
+        await new Promise<void>((resolve) => server.listen(badPort, '127.0.0.1', resolve));
+        closers.push(
+          () =>
+            new Promise<void>((resolve, reject) =>
+              server.close((error) => (error ? reject(error) : resolve())),
+            ),
+        );
+      } else if (fault !== 'dead-port') {
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin({ http2: true }),
+            ...(fault === 'json404'
+              ? []
+              : [
+                  GrpcPlugin({
+                    basePath: '/grpc',
+                    services: [
+                      {
+                        definition: SVC.echo,
+                        implementation: {
+                          echo: async (_request: unknown, context: { signal: AbortSignal }) => {
+                            await new Promise<void>((resolve) => {
+                              if (context.signal.aborted) resolve();
+                              else
+                                context.signal.addEventListener('abort', () => resolve(), {
+                                  once: true,
+                                });
+                            });
+                            return { response: 'too late' };
+                          },
+                        },
+                      },
+                    ],
+                  }),
+                ]),
+          ],
+        });
+        await app.start({ port: badPort, hostname: '127.0.0.1' });
+        apps.push(app);
+      }
+      const live = await startServer(fresh());
+      const caller = await startCaller(
+        [
+          { id: 'bad', port: badPort },
+          { id: 'live', port: live.port },
+        ],
+        { clients: { billing: { basePath: '/grpc', protocol, timeoutMs: 500 } } },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      const error = await failure(billing.echo({ message: 'first' }));
+      const causes: { code: unknown; name: unknown }[] = [];
+      let current: unknown = error;
+      for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+        const record = current as { code?: unknown; name?: unknown; cause?: unknown };
+        causes.push({ code: record.code, name: record.name });
+        current = record.cause;
+      }
+      expect(
+        callOutcome(
+          error,
+          undefined,
+          (value) => value instanceof ConnectError && value.isWireError,
+        ),
+        JSON.stringify({
+          fault,
+          protocol,
+          code: error.code,
+          wire: error.isWireError,
+          metadata: [...error.metadata],
+          causes,
+        }),
+      ).toBe('failure');
+      const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      expect((await discovery.pick('billing'))?.id).toBe('live');
+      for (let n = 0; n < 5; n++)
+        expect((await billing.echo({ message: 'ok' })).response).toBe('echo: ok');
+    });
+  }
+
+  it('a handler that throws a plain Error reaches the caller as Internal and does not eject the instance', async () => {
+    let thrown = 0;
+    const throwing = createApplication({
+      plugins: [
+        RuntimePlugin({ http2: true }),
+        GrpcPlugin({
+          basePath: '/grpc',
+          services: [
+            {
+              definition: SVC.echo,
+              implementation: {
+                echo: () => {
+                  thrown++;
+                  throw new Error('broken replica');
+                },
+              },
+            },
+          ],
+        }),
+      ],
+    });
+    const throwingPort = await unusedPort();
+    await throwing.start({ port: throwingPort, hostname: '127.0.0.1' });
+    apps.push(throwing);
+    const live = await startServer(fresh());
+    const caller = await startCaller(
+      [
+        { id: 'throwing', port: throwingPort },
+        { id: 'live', port: live.port },
+      ],
+      {
+        clients: { billing: { basePath: '/grpc', protocol } },
+        ejection: {},
+      },
+    );
+    const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+    let internalAnswers = 0;
+    let healthyAnswers = 0;
+    // Six answers per instance exceed discovery's default five-failure window.
+    // Under the old rule the throwing instance is ejected after its fifth answer.
+    for (let n = 0; n < 12; n++) {
+      try {
+        const reply = await billing.echo({ message: 'ok' });
+        expect(reply.response).toBe('echo: ok');
+        healthyAnswers++;
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConnectError);
+        const answer = ConnectError.from(error);
+        expect(answer.code).toBe(Code.Internal);
+        expect(answer.rawMessage).toBe('internal error');
+        expect(answer.isWireError).toBe(true);
+        internalAnswers++;
+      }
+    }
+    expect(thrown).toBe(6);
+    expect(internalAnswers).toBe(6);
+    expect(healthyAnswers).toBe(6);
+    const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+    const picked = new Set<string>();
+    for (let n = 0; n < 4; n++) picked.add((await discovery.pick('billing'))!.id);
+    expect([...picked].sort()).toEqual(['live', 'throwing']);
+  });
+});
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -220,7 +412,11 @@ async function startProxy(
 /** The calling member: no gRPC mount, static discovery for `billing`. */
 async function startCaller(
   instances: { id: string; port: number }[],
-  options: { clients?: GrpcPluginOptions['clients']; extra?: IPlugin[] } = {},
+  options: {
+    clients?: GrpcPluginOptions['clients'];
+    extra?: IPlugin[];
+    ejection?: EjectionOptions;
+  } = {},
 ): Promise<IKernelApplication> {
   const app = createApplication({
     plugins: [
@@ -228,7 +424,7 @@ async function startCaller(
       ServiceDiscoveryPlugin({
         provider: 'static',
         services: { billing: instances.map((i) => ({ ...i, host: '127.0.0.1' })) },
-        ejection: {
+        ejection: options.ejection ?? {
           failureThreshold: 1,
           windowMs: 60_000,
           durationMs: 60_000,
@@ -260,6 +456,7 @@ interface Echo {
     options?: {
       timeoutMs?: number;
       signal?: AbortSignal;
+      headers?: HeadersInit;
       onHeader?: (headers: Headers) => void;
       onTrailer?: (trailers: Headers) => void;
     },
@@ -267,6 +464,164 @@ interface Echo {
 }
 
 const fresh = (): Observed => ({ aborted: [], traceparents: [] });
+
+/**
+ * How a draining Setu server turns a new call away, by wire. Over HTTP/2 on
+ * Node the drain's GOAWAY refuses every new stream (REFUSED_STREAM), so the
+ * marked 503 never reaches the wire; over HTTP/1.1 the request reaches the
+ * kernel, which answers the marked drain 503. `grpc` has no HTTP/1.1 form.
+ */
+const DRAIN_WIRES = [
+  { protocol: 'connect', httpVersion: '1.1', turnedAway: 'marked 503' },
+  { protocol: 'grpc-web', httpVersion: '1.1', turnedAway: 'marked 503' },
+  { protocol: 'connect', httpVersion: '2', turnedAway: 'refused stream' },
+  { protocol: 'grpc', httpVersion: '2', turnedAway: 'refused stream' },
+  { protocol: 'grpc-web', httpVersion: '2', turnedAway: 'refused stream' },
+] as const;
+
+describeNode.each(DRAIN_WIRES)(
+  'kernel drain failover on $protocol over HTTP/$httpVersion',
+  ({ protocol, httpVersion, turnedAway }) => {
+    it.each([false, true])(
+      `resends the ${turnedAway} and every unary call succeeds (problem responder=%s)`,
+      async (problem) => {
+        let release!: () => void;
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => {
+          enter = resolve;
+        });
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let handlerCalls = 0;
+        const draining = createApplication({
+          plugins: [
+            RuntimePlugin({ http2: true }),
+            GrpcPlugin({
+              basePath: '/grpc',
+              services: [
+                {
+                  definition: SVC.echo,
+                  implementation: {
+                    echo: () => {
+                      handlerCalls++;
+                      return { response: 'should not run' };
+                    },
+                  },
+                },
+              ],
+            }),
+          ],
+        });
+        if (problem) draining.middleware.add(errorHandler({ format: 'rfc9457', logErrors: false }));
+        draining.router.get('/hold', async (ctx) => {
+          enter();
+          await held;
+          return ctx.response.text('released');
+        });
+        const port = await unusedPort();
+        await draining.start({ port, hostname: '127.0.0.1', drainTimeoutMs: 10000 });
+        apps.push(draining);
+        // A real admitted HTTP request holds the kernel in drain. No RPC sessions
+        // exist at stop(), so GOAWAY cannot substitute for the marked HTTP answer.
+        const hold = fetch(`http://127.0.0.1:${port}/hold`).then((reply) => reply.text());
+        await entered;
+        const stopping = draining.stop();
+        try {
+          const probe = await draining.inject({ method: 'GET', url: '/hold' });
+          expect(probe.statusCode).toBe(503);
+          expect(probe.headers.get(UNPROCESSED_HEADER)).toBe(UNPROCESSED_SHUTDOWN);
+          if (problem) expect(probe.headers.get('content-type')).toBe('application/problem+json');
+          const observed = fresh();
+          const live = await startServer(observed);
+          const caller = await startCaller(
+            [
+              { id: 'draining', port },
+              { id: 'live', port: live.port },
+            ],
+            {
+              ejection: {}, // retain both for repeated drain answers, below the five-failure trip
+              clients: { billing: { basePath: '/grpc', protocol, httpVersion, timeoutMs: 2000 } },
+            },
+          );
+          const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+          const reports = vi.spyOn(discovery, 'report');
+          const { Http2SessionManager } = await import('@connectrpc/connect-node');
+          const request = Http2SessionManager.prototype.request;
+          const refusals: number[] = [];
+          const requests = vi
+            .spyOn(Http2SessionManager.prototype, 'request')
+            .mockImplementation(async function (
+              this: InstanceType<typeof Http2SessionManager>,
+              ...args
+            ) {
+              const stream = await request.apply(this, args);
+              stream.on('close', () => {
+                if (stream.rstCode === 7) refusals.push(stream.rstCode);
+              });
+              return stream;
+            });
+          try {
+            const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+            for (let n = 0; n < 3; n++)
+              expect((await billing.echo({ message: 'ok' })).response).toBe('echo: ok');
+            expect(handlerCalls).toBe(0);
+            expect(observed.traceparents).toHaveLength(3);
+            // Over HTTP/1.1 no HTTP/2 stream exists, so a resend there can only
+            // come from the marker on the 503 the probe above read.
+            expect(refusals).toHaveLength(turnedAway === 'refused stream' ? 3 : 0);
+            expect(requests).toHaveBeenCalledTimes(httpVersion === '2' ? 6 : 0);
+            expect(reports.mock.calls.map(([peer, outcome]) => [peer.id, outcome])).toEqual(
+              Array.from({ length: 3 }, () => [
+                ['draining', 'failure'],
+                ['live', 'success'],
+              ]).flat(),
+            );
+          } finally {
+            reports.mockRestore();
+            requests.mockRestore();
+          }
+        } finally {
+          release();
+          await hold;
+          await stopping;
+        }
+      },
+    );
+
+    it('does not resend an unmarked 503 from a real Setu instance', async () => {
+      let answered = 0;
+      const control = createApplication({
+        plugins: [RuntimePlugin({ http2: true }), GrpcPlugin({ basePath: '/grpc' })],
+      });
+      control.middleware.add((ctx) => {
+        answered++;
+        return ctx.response
+          .status(503)
+          .json({ code: 'unavailable', message: 'application unavailable' });
+      });
+      const port = await unusedPort();
+      await control.start({ port, hostname: '127.0.0.1' });
+      apps.push(control);
+      const observed = fresh();
+      const live = await startServer(observed);
+      const caller = await startCaller(
+        [
+          { id: 'control', port },
+          { id: 'live', port: live.port },
+        ],
+        { clients: { billing: { basePath: '/grpc', protocol, httpVersion } } },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      const error = await failure(billing.echo({ message: 'first' }));
+      expect(error.code).toBe(Code.Unavailable);
+      expect(error.metadata.has(UNPROCESSED_HEADER)).toBe(false);
+      expect(answered).toBe(1);
+      expect(observed.traceparents).toHaveLength(0);
+      expect((await billing.echo({ message: 'next' })).response).toBe('echo: next');
+    });
+  },
+);
 
 describeNode('grpcClient scenarios', () => {
   it('a per-target deadline ends a slow call as DeadlineExceeded and aborts the handler; a per-call one overrides it', async () => {
@@ -501,3 +856,293 @@ describeNode('grpcClient scenarios', () => {
     expect((await billing.echo({ message: 'small' })).response).toBe('echo: small');
   });
 });
+
+describeNode('grpcClient and a peer header-list limit', () => {
+  it('does not report or resend six 70 KiB header refusals from healthy Setu servers with no advertised limit', async () => {
+    const observed = [fresh(), fresh()];
+    const a = await startServer(observed[0]!);
+    const b = await startServer(observed[1]!);
+    // Each manager binds request when its guard is installed, so observe the
+    // prototype before constructing the caller, including its first sessions.
+    const { Http2SessionManager } = await import('@connectrpc/connect-node');
+    let sentSize = 0;
+    const request = Http2SessionManager.prototype.request;
+    const restore: (() => void)[] = [];
+    const requests = vi
+      .spyOn(Http2SessionManager.prototype, 'request')
+      .mockImplementation(async function (this: InstanceType<typeof Http2SessionManager>, ...args) {
+        const stream = await request.apply(this, args);
+        sentSize = headerListSize(stream.sentHeaders);
+        expect(stream.session!.remoteSettings.maxHeaderListSize).toBe(4294967295);
+        return stream;
+      });
+    restore.push(() => requests.mockRestore());
+    try {
+      const caller = await startCaller(
+        [
+          { id: 'a', port: a.port },
+          { id: 'b', port: b.port },
+        ],
+        { ejection: {} },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      const picks = vi.spyOn(discovery, 'pick');
+      const reports = vi.spyOn(discovery, 'report');
+      restore.push(
+        () => picks.mockRestore(),
+        () => reports.mockRestore(),
+      );
+      // No warm-up: the fallback must also work on a session's first call.
+      const errors: ConnectError[] = [];
+      for (let n = 0; n < 6; n++) {
+        errors.push(
+          await failure(
+            billing.echo({ message: 'big' }, { headers: { 'x-big': 'a'.repeat(70 * 1024) } }),
+          ),
+        );
+      }
+      const picked = new Set<string>();
+      for (let n = 0; n < 4; n++) picked.add((await discovery.pick('billing'))!.id);
+      expect([...picked].sort()).toEqual(['a', 'b']);
+      expect(picks).toHaveBeenCalledTimes(10); // six attempts, four ejection reads
+      expect(reports).not.toHaveBeenCalled();
+      for (const error of errors) {
+        let cause: unknown = error;
+        let headerError: GrpcHeaderListTooLargeError | undefined;
+        for (let depth = 0; depth < 5 && typeof cause === 'object' && cause !== null; depth++) {
+          if (cause instanceof GrpcHeaderListTooLargeError) headerError = cause;
+          cause = (cause as { cause?: unknown }).cause;
+        }
+        expect(headerError, error.message).toBeInstanceOf(GrpcHeaderListTooLargeError);
+        expect(headerError!.size).toBeGreaterThan(UNADVERTISED_HEADER_LIST_LIMIT);
+        expect(headerError!.limit).toBe(UNADVERTISED_HEADER_LIST_LIMIT);
+      }
+      expect(observed.map((o) => o.traceparents.length)).toEqual([0, 0]);
+      for (let n = 0; n < 2; n++) {
+        expect((await billing.echo({ message: 'normal' })).response).toBe('echo: normal');
+      }
+      expect(observed.map((o) => o.traceparents.length)).toEqual([1, 1]);
+
+      // Capture the actual Node sentHeaders to size the complete list, including
+      // pseudo-headers and Connect metadata, exactly one octet below 64 KiB.
+      await billing.echo({ message: 'under' }, { headers: { 'x-boundary': 'a' } });
+      const baseline = sentSize;
+      const value = 'a'.repeat(UNADVERTISED_HEADER_LIST_LIMIT - baseline);
+      expect(
+        (await billing.echo({ message: 'under' }, { headers: { 'x-boundary': value } })).response,
+      ).toBe('echo: under');
+      expect(sentSize).toBe(UNADVERTISED_HEADER_LIST_LIMIT - 1);
+    } finally {
+      for (const undo of restore.reverse()) undo();
+    }
+  });
+
+  it('stops an over-limit call before a peer processes it and never ejects the healthy instances', async () => {
+    const { connectNodeAdapter } = await import('@connectrpc/connect-node');
+    const limit = 4096;
+    const served: Record<string, number> = { a: 0, b: 0 };
+    const instances: { id: string; port: number }[] = [];
+    for (const id of ['a', 'b']) {
+      const port = await unusedPort();
+      const server = http2Server(
+        { settings: { maxHeaderListSize: limit } },
+        connectNodeAdapter({
+          requestPathPrefix: '/grpc',
+          routes: (router) => {
+            router.service(SVC.echo, {
+              echo: (request: { message: string }) => {
+                served[id]! += 1;
+                return { response: `echo: ${request.message}` };
+              },
+            } as never);
+          },
+        }),
+      );
+      await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+      closers.push(
+        () =>
+          new Promise<void>((resolve) => {
+            server.close(() => resolve());
+            server.unref();
+          }),
+      );
+      instances.push({ id, port });
+    }
+    const caller = await startCaller(instances);
+    const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+    // One ordinary call per instance opens its session; a completed call means
+    // the peer's SETTINGS have arrived. The first call on a new session is not
+    // checked (documented), so the guard is exercised from the second on.
+    for (let n = 0; n < 2; n++) await billing.echo({ message: 'warm' });
+    const before = { ...served };
+    // Stay above 8 KiB: a smaller call would now count against the instance.
+    const big = { 'x-big': 'a'.repeat(8193) };
+    for (let n = 0; n < 10; n++) {
+      const error = await failure(billing.echo({ message: 'big' }, { headers: big }));
+      let cause: unknown = error;
+      let named = false;
+      for (let depth = 0; depth < 5 && typeof cause === 'object' && cause !== null; depth++) {
+        if ((cause as { name?: unknown }).name === 'GrpcHeaderListTooLargeError') named = true;
+        cause = (cause as { cause?: unknown }).cause;
+      }
+      expect(named, JSON.stringify({ code: error.code, message: error.rawMessage })).toBe(true);
+    }
+    // No peer processed an over-limit call, and both instances stay in rotation.
+    expect(served).toEqual(before);
+    const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+    const picked = new Set<string>();
+    for (let n = 0; n < 4; n++) picked.add((await discovery.pick('billing'))!.id);
+    expect([...picked].sort()).toEqual(['a', 'b']);
+    // A header list under the limit still goes through: the guard counts what was sent.
+    const underLimit = { 'x-small': 'a'.repeat(limit - 1024) };
+    expect((await billing.echo({ message: 'small' }, { headers: underLimit })).response).toBe(
+      'echo: small',
+    );
+  });
+
+  it('resends normal headers from a small-limit instance and ejects it after five failures', async () => {
+    const { connectNodeAdapter, Http2SessionManager } = await import('@connectrpc/connect-node');
+    const limit = 1024;
+    let smallServed = 0;
+    const smallPort = await unusedPort();
+    const server = http2Server(
+      { settings: { maxHeaderListSize: limit } },
+      connectNodeAdapter({
+        requestPathPrefix: '/grpc',
+        routes: (router) => {
+          router.service(SVC.echo, {
+            echo: (request: { message: string }) => {
+              smallServed++;
+              return { response: `echo: ${request.message}` };
+            },
+          } as never);
+        },
+      }),
+    );
+    await new Promise<void>((resolve) => server.listen(smallPort, '127.0.0.1', resolve));
+    closers.push(
+      () =>
+        new Promise<void>((resolve) => {
+          server.close(() => resolve());
+          server.unref();
+        }),
+    );
+    const observed = fresh();
+    const healthy = await startServer(observed);
+    const request = Http2SessionManager.prototype.request;
+    const sent: { size: number; limit: number | undefined }[] = [];
+    const requests = vi
+      .spyOn(Http2SessionManager.prototype, 'request')
+      .mockImplementation(async function (this: InstanceType<typeof Http2SessionManager>, ...args) {
+        const stream = await request.apply(this, args);
+        sent.push({
+          size: headerListSize(stream.sentHeaders),
+          limit: stream.session!.remoteSettings.maxHeaderListSize,
+        });
+        return stream;
+      });
+    try {
+      const caller = await startCaller(
+        [
+          { id: 'small', port: smallPort },
+          { id: 'healthy', port: healthy.port },
+        ],
+        { ejection: {} },
+      );
+      const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+      // Finish one call per session so SETTINGS are known before testing the guard.
+      for (let n = 0; n < 2; n++) await billing.echo({ message: 'warm' });
+      expect(smallServed).toBe(1);
+      const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      const reports = vi.spyOn(discovery, 'report');
+      try {
+        sent.length = 0;
+        for (let n = 0; n < 5; n++) {
+          expect(
+            (
+              await billing.echo(
+                { message: 'normal' },
+                { headers: { 'x-normal': 'a'.repeat(2048) } },
+              )
+            ).response,
+          ).toBe('echo: normal');
+        }
+        // Each call was stopped locally on small, then succeeded on a fresh healthy pick.
+        expect(sent).toHaveLength(10);
+        for (const entry of sent) {
+          expect(entry.size).toBeGreaterThan(limit);
+          expect(entry.size).toBeLessThanOrEqual(8192);
+        }
+        expect(sent.map((entry) => entry.limit)).toEqual(
+          Array.from({ length: 5 }, () => [limit, 4294967295]).flat(),
+        );
+        expect(reports.mock.calls.map(([instance, outcome]) => [instance.id, outcome])).toEqual(
+          Array.from({ length: 5 }, () => [
+            ['small', 'failure'],
+            ['healthy', 'success'],
+          ]).flat(),
+        );
+        expect(smallServed).toBe(1);
+        expect(observed.traceparents).toHaveLength(6); // warm-up plus all five resends
+        const picked = new Set<string>();
+        for (let n = 0; n < 4; n++) picked.add((await discovery.pick('billing'))!.id);
+        expect([...picked]).toEqual(['healthy']);
+      } finally {
+        reports.mockRestore();
+      }
+    } finally {
+      requests.mockRestore();
+    }
+  });
+});
+
+describeNode.each(['grpc', 'connect'] as const)(
+  'grpcClient and an ENHANCE_YOUR_CALM reset on %s',
+  (protocol) => {
+    it('neither reports nor resends calls with 130 small extra headers, and names the error', async () => {
+      const observed = [fresh(), fresh()];
+      const a = await startServer(observed[0]!);
+      const b = await startServer(observed[1]!);
+      // Each manager binds request when its guard is installed: observe the
+      // prototype before the caller builds its sessions.
+      const { Http2SessionManager } = await import('@connectrpc/connect-node');
+      const requests = vi.spyOn(Http2SessionManager.prototype, 'request');
+      const restore: Array<{ mockRestore(): void }> = [requests];
+      try {
+        const caller = await startCaller(
+          [
+            { id: 'a', port: a.port },
+            { id: 'b', port: b.port },
+          ],
+          { ejection: {}, clients: { billing: { basePath: '/grpc', protocol } } },
+        );
+        const billing = grpcClient(caller.services, SVC.echo, 'billing') as unknown as Echo;
+        const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+        const picks = vi.spyOn(discovery, 'pick');
+        const reports = vi.spyOn(discovery, 'report');
+        restore.push(picks, reports);
+        // Node's server allows 128 header fields (maxHeaderListPairs); about 5 KB in all.
+        const headers = Object.fromEntries(
+          Array.from({ length: 130 }, (_, i) => [`x-h-${i}`, 'v']),
+        );
+        for (let n = 0; n < 12; n++) {
+          const error = await failure(billing.echo({ message: 'many' }, { headers }));
+          expect(Code[error.code]).toBe('ResourceExhausted');
+          expect(error.cause, error.message).toBeInstanceOf(GrpcExcessiveLoadError);
+        }
+        expect(requests).toHaveBeenCalledTimes(12); // one stream per call: nothing resent
+        expect(picks).toHaveBeenCalledTimes(12);
+        expect(reports).not.toHaveBeenCalled();
+        expect((discovery as unknown as { ejectedInstances: number }).ejectedInstances).toBe(0);
+        expect(observed.map((o) => o.traceparents.length)).toEqual([0, 0]);
+        for (let n = 0; n < 2; n++) {
+          expect((await billing.echo({ message: 'normal' })).response).toBe('echo: normal');
+        }
+        expect(observed.map((o) => o.traceparents.length)).toEqual([1, 1]);
+      } finally {
+        for (const spy of restore) spy.mockRestore();
+      }
+    });
+  },
+);

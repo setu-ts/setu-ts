@@ -1,3 +1,4 @@
+import { isNameAbsent } from '../../src/providers/dns-provider.ts';
 /**
  * Unit tests for the DNS provider.
  *
@@ -12,6 +13,62 @@ import { describe, expect, it } from 'vitest';
 import { DnsProvider, lowestPriorityTier } from '../../src/providers/dns-provider.ts';
 import type { IDnsResolver, SrvRecord } from '@setu-ts/common';
 import { createFakeDns, createFakeRuntime, type FakeRuntime } from '../fixtures/fakes.ts';
+
+describe('DNS aggregate absence', () => {
+  const absent = (code: string) => Object.assign(new Error(code), { code });
+  const rows = [
+    ['lone absent', absent('ENOTFOUND'), true],
+    ['wrapped absent', new Error('wrapper', { cause: absent('ENOTFOUND') }), true],
+    ['both absent', new AggregateError([absent('ENOTFOUND'), absent('ENODATA')]), true],
+    ['mixed timeout', new AggregateError([absent('ENOTFOUND'), absent('ETIMEOUT')]), false],
+    ['both timeout', new AggregateError([absent('ETIMEOUT'), absent('ETIMEOUT')]), false],
+    [
+      'timeout code with absent name',
+      Object.assign(new Error(), { code: 'ETIMEOUT', name: 'NotFound' }),
+      false,
+    ],
+    ['empty aggregate', new AggregateError([]), false],
+    ['other code', new AggregateError([absent('ENOTFOUND'), absent('ESERVFAIL')]), false],
+    ['Deno absence', new AggregateError([Object.assign(new Error(), { name: 'NotFound' })]), true],
+    [
+      'failure wrapping absence',
+      Object.assign(new Error('timeout', { cause: absent('ENOTFOUND') }), { code: 'ETIMEOUT' }),
+      false,
+    ],
+    [
+      'member budget',
+      new AggregateError(Array.from({ length: 64 }, () => absent('ENOTFOUND'))),
+      false,
+    ],
+  ] as const;
+  it.each(rows)('%s is absent: %s', async (_label, error, expected) => {
+    expect(isNameAbsent(error)).toBe(expected);
+    const provider = srvProvider(createFakeDns({ srv: new Error('lookup', { cause: error }) }));
+    if (expected) {
+      expect(await provider.resolve('billing')).toEqual([]);
+      expect(await provider.isHealthy()).toBe(true);
+    } else {
+      await expect(provider.resolve('billing')).rejects.toThrow('lookup');
+      await expect(provider.isHealthy()).rejects.toThrow('lookup');
+    }
+  });
+  it('bounds aggregate depth, cycles and nested total member traversal', () => {
+    let error: Error = absent('ENOTFOUND');
+    for (let n = 0; n < 5; n++) error = new AggregateError([error]);
+    expect(isNameAbsent(error)).toBe(true);
+    expect(isNameAbsent(new AggregateError([error]))).toBe(false);
+    const cycle = new Error('cycle');
+    cycle.cause = cycle;
+    expect(isNameAbsent(cycle)).toBe(false);
+    const wide = new AggregateError(
+      Array.from(
+        { length: 8 },
+        () => new AggregateError(Array.from({ length: 8 }, () => absent('ENODATA'))),
+      ),
+    );
+    expect(isNameAbsent(wide)).toBe(false);
+  });
+});
 
 function srv(host: string, port: number, priority: number, weight: number): SrvRecord {
   return { host, port, priority, weight };
@@ -145,7 +202,7 @@ describe('DnsProvider — a mode', () => {
 });
 
 describe('DnsProvider — watch', () => {
-  it('fires on the first lookup, then arms the poll interval', async () => {
+  it('arms the interval before delivering the first lookup', async () => {
     const runtime = createFakeRuntime();
     const resolver = createFakeDns({ srv: [srv('a.internal', 8080, 0, 1)] });
     const provider = srvProvider(resolver, {}, runtime);
@@ -228,7 +285,7 @@ describe('DnsProvider — watch', () => {
     expect(runtime.intervals[0].cleared).toBe(true);
   });
 
-  it('unsubscribing before the first lookup resolves never arms an interval', async () => {
+  it('unsubscribing before the first lookup resolves clears the armed interval', async () => {
     const runtime = createFakeRuntime();
     const resolver = createFakeDns({ srv: [srv('a.internal', 8080, 0, 1)] });
     const provider = srvProvider(resolver, {}, runtime);
@@ -239,16 +296,315 @@ describe('DnsProvider — watch', () => {
     await flush();
 
     // An interval armed after the clear would leak a timer nothing can stop.
-    expect(runtime.intervals).toHaveLength(0);
+    expect(runtime.intervals).toHaveLength(1);
+    expect(runtime.intervals[0].cleared).toBe(true);
     expect(seen).toEqual([]);
   });
 });
 
 /** Yields to the event loop so the detached first lookup can settle. */
-function flush(times = 6): Promise<void> {
+function flush(times = 30): Promise<void> {
   let chain = Promise.resolve();
   for (let i = 0; i < times; i++) {
     chain = chain.then(() => undefined);
   }
   return chain;
+}
+
+describe('DNS lookup outcomes', () => {
+  it('records even a rejection with no value, and observes an abort raised during lookup startup', async () => {
+    const options = {
+      mode: 'a' as const,
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+    };
+    const failed = new DnsProvider(
+      { resolveHost: () => Promise.reject(undefined), resolveSrv: () => Promise.resolve([]) },
+      createFakeRuntime(),
+      options,
+    );
+    await expect(failed.resolve('billing')).rejects.toBeUndefined();
+    await expect(failed.isHealthy()).rejects.toBeUndefined();
+    const abort = new AbortController();
+    const error = new Error('startup abort');
+    const provider = new DnsProvider(
+      {
+        resolveHost: () => {
+          abort.abort(error);
+          return new Promise<never>(() => {});
+        },
+        resolveSrv: () => Promise.resolve([]),
+      },
+      createFakeRuntime(),
+      options,
+    );
+    await expect(provider.resolve('billing', abort.signal)).rejects.toBe(error);
+    await expect(provider.isHealthy()).rejects.toBe(error);
+  });
+  for (const mode of ['srv', 'a'] as const) {
+    for (const [field, value, absent] of [
+      ['code', 'ENOTFOUND', true],
+      ['code', 'ENODATA', true],
+      ['name', 'NotFound', true],
+      ['code', 'ETIMEOUT', false],
+      ['code', 'ECONNREFUSED', false],
+      ['code', 'ESERVFAIL', false],
+    ] as const) {
+      it(`${mode} treats ${value} as ${absent ? 'an empty answer' : 'a failure'}`, async () => {
+        const cause = Object.assign(new Error(value), { [field]: value });
+        const error = mode === 'a' ? new Error('DNS lookup failed', { cause }) : cause;
+        const resolver = {
+          resolveHost: () => Promise.reject(error),
+          resolveSrv: () => Promise.reject(error),
+        };
+        const provider = new DnsProvider(resolver, createFakeRuntime(), {
+          mode,
+          port: 80,
+          domainTemplate: '{service}.svc',
+          watchIntervalMs: 100,
+        });
+        if (absent) expect(await provider.resolve('billing')).toEqual([]);
+        else await expect(provider.resolve('billing')).rejects.toBe(error);
+      });
+    }
+  }
+  it('limits cause traversal and refuses nonobjects', () => {
+    for (const value of [null, undefined, 'ENOTFOUND', {}]) expect(isNameAbsent(value)).toBe(false);
+    let error: Error = Object.assign(new Error(), { code: 'ENOTFOUND' });
+    for (let n = 0; n < 5; n++) error = new Error('wrapped', { cause: error });
+    expect(isNameAbsent(error)).toBe(true);
+    error = new Error('too deep', { cause: error });
+    expect(isNameAbsent(error)).toBe(false);
+  });
+  it('abandons a hung lookup at abort, records failure, and ignores its late success', async () => {
+    let finish!: (value: readonly string[]) => void;
+    const resolver = {
+      resolveHost: () =>
+        new Promise<readonly string[]>((resolve) => {
+          finish = resolve;
+        }),
+      resolveSrv: () => Promise.resolve([]),
+    };
+    const provider = new DnsProvider(resolver, createFakeRuntime(), {
+      mode: 'a',
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+    });
+    const controller = new AbortController();
+    const error = new Error('read bound');
+    const call = provider.resolve('billing', controller.signal);
+    controller.abort(error);
+    await expect(call).rejects.toBe(error);
+    finish(['10.0.0.1']);
+    await flush();
+    await expect(provider.isHealthy()).rejects.toBe(error);
+    await expect(provider.resolve('billing', controller.signal)).rejects.toBe(error);
+  });
+  it('arms the interval before the first tick, skips raw overlap after its bound, and retries after the lookup settles', async () => {
+    const runtime = createFakeRuntime();
+    let calls = 0;
+    let finish!: (list: string[]) => void;
+    const resolver = {
+      resolveHost: () => {
+        calls++;
+        return calls === 1
+          ? new Promise<string[]>((resolve) => {
+              finish = resolve;
+            })
+          : Promise.resolve(['10.0.0.1']);
+      },
+      resolveSrv: () => Promise.resolve([]),
+    };
+    const provider = new DnsProvider(resolver, runtime, {
+      mode: 'a',
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+      resolveTimeoutMs: 50,
+    });
+    const seen: unknown[] = [];
+    const stop = await provider.watch('billing', (list) => seen.push(list));
+    expect(runtime.intervals).toHaveLength(1);
+    await flush();
+    runtime.runIntervals();
+    await flush();
+    expect(calls).toBe(1);
+    runtime.runTimeouts();
+    await flush();
+    await expect(provider.isHealthy()).rejects.toThrow('within 50 ms');
+    runtime.runIntervals();
+    await flush();
+    expect(calls).toBe(1);
+    finish(['late']);
+    await flush();
+    runtime.runIntervals();
+    await flush();
+    expect(calls).toBe(2);
+    expect(seen).toHaveLength(1);
+    expect(await provider.isHealthy()).toBe(true);
+    stop();
+    runtime.runIntervals();
+    expect(calls).toBe(2);
+  });
+});
+
+for (const previousFailure of [false, true]) {
+  it(`does not change DNS health when a hung watch is stopped (previous failure ${previousFailure})`, async () => {
+    const runtime = createFakeRuntime();
+    let hung = false;
+    const error = new Error('previous DNS failure');
+    const resolver = {
+      resolveSrv: () => Promise.resolve([]),
+      resolveHost: () =>
+        hung
+          ? new Promise<never>(() => {})
+          : previousFailure
+            ? Promise.reject(error)
+            : Promise.resolve(['10.0.0.1']),
+    };
+    const provider = new DnsProvider(resolver, runtime, {
+      mode: 'a',
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+    });
+    await provider.resolve('billing').catch(() => {});
+    hung = true;
+    const deliveries: unknown[] = [];
+    const stop = await provider.watch('billing', (list) => {
+      deliveries.push(list);
+    });
+    await flush();
+    stop();
+    await flush();
+    expect(deliveries).toEqual([]);
+    if (previousFailure) await expect(provider.isHealthy()).rejects.toBe(error);
+    else expect(await provider.isHealthy()).toBe(true);
+    expect(runtime.timeouts.every((timer) => timer.cleared)).toBe(true);
+    expect(runtime.intervals.every((timer) => timer.cleared)).toBe(true);
+  });
+}
+for (const value of [-1, NaN, Infinity, 2147483648]) {
+  it(`refuses direct DNS resolveTimeoutMs=${value}`, () => {
+    expect(
+      () =>
+        new DnsProvider(createFakeDns({}), createFakeRuntime(), {
+          mode: 'srv',
+          domainTemplate: '{service}',
+          watchIntervalMs: 100,
+          resolveTimeoutMs: value,
+        }),
+    ).toThrow('resolveTimeoutMs');
+  });
+}
+it('accepts a directly constructed DNS watch with an unbounded tick', async () => {
+  const runtime = createFakeRuntime();
+  const provider = new DnsProvider(createFakeDns({}), runtime, {
+    mode: 'srv',
+    domainTemplate: '{service}',
+    watchIntervalMs: 100,
+    resolveTimeoutMs: 0,
+  });
+  const stop = await provider.watch('billing', () => {});
+  await flush();
+  stop();
+  expect(runtime.timeouts).toHaveLength(0);
+});
+
+it('does not hide an aggregate timeout behind absent members or hide failed members behind an absent code', () => {
+  const absent = Object.assign(new Error('absent'), { code: 'ENODATA' });
+  const timed = Object.assign(new AggregateError([absent]), { code: 'ETIMEOUT' });
+  expect(isNameAbsent(timed)).toBe(false);
+  expect(
+    isNameAbsent(Object.assign(new AggregateError([new Error('failed')]), { code: 'ENODATA' })),
+  ).toBe(false);
+});
+for (const mode of ['a', 'srv'] as const) {
+  for (const outcome of ['resolve', 'reject'] as const) {
+    it(`shares one pending raw ${mode} lookup across aborted cold reads until it ${outcome}s`, async () => {
+      let calls = 0;
+      let finish!: () => void;
+      let fail!: (error: Error) => void;
+      const raw = new Promise<void>((yes, no) => {
+        finish = yes;
+        fail = no;
+      });
+      const resolver: IDnsResolver = {
+        resolveHost: () => {
+          calls++;
+          return raw.then(() => ['10.0.0.1']);
+        },
+        resolveSrv: () => {
+          calls++;
+          return raw.then(() => [srv('node', 80, 0, 1)]);
+        },
+      };
+      const provider = new DnsProvider(resolver, createFakeRuntime(), {
+        mode,
+        port: 80,
+        domainTemplate: '{service}',
+        watchIntervalMs: 100,
+      });
+      for (let n = 0; n < 3; n++) {
+        const controller = new AbortController();
+        const reason = new Error('caller deadline');
+        const pending = provider.resolve('billing', controller.signal);
+        controller.abort(reason);
+        await expect(pending).rejects.toBe(reason);
+      }
+      expect(calls).toBe(1);
+      // A different name is independent, and one caller aborting must not
+      // cancel either a shared raw query or another caller's wait.
+      const other = provider.resolve('orders');
+      const waiting = provider.resolve('billing');
+      expect(calls).toBe(2);
+      if (outcome === 'resolve') {
+        finish();
+        expect(await waiting).toHaveLength(1);
+        expect(await other).toHaveLength(1);
+      } else {
+        const error = new Error('resolver failed');
+        fail(error);
+        await expect(waiting).rejects.toBe(error);
+        await expect(other).rejects.toBe(error);
+      }
+      await flush();
+      await provider.resolve('billing').catch(() => {});
+      expect(calls).toBe(3);
+    });
+  }
+  it(`keeps only one raw ${mode} lookup pending across bounded watch intervals`, async () => {
+    let calls = 0;
+    const hung = () => {
+      calls++;
+      return new Promise<never>(() => {});
+    };
+    const runtime = createFakeRuntime();
+    const provider = new DnsProvider({ resolveHost: hung, resolveSrv: hung }, runtime, {
+      mode,
+      port: 80,
+      domainTemplate: '{service}',
+      watchIntervalMs: 100,
+      resolveTimeoutMs: 50,
+    });
+    const seen: unknown[] = [];
+    const stop = await provider.watch('billing', (list) => seen.push(list));
+    await flush();
+    runtime.advance(50);
+    runtime.runTimeouts();
+    await flush();
+    for (let n = 0; n < 5; n++) {
+      runtime.advance(100);
+      runtime.runIntervals();
+      await flush();
+      runtime.runTimeouts();
+      await flush();
+    }
+    expect(calls).toBe(1);
+    expect(seen).toEqual([]);
+    await expect(provider.isHealthy()).rejects.toThrow('within 50 ms');
+    stop();
+  });
 }

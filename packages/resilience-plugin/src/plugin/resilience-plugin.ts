@@ -7,6 +7,7 @@
  * @module
  */
 import type { IPlugin, IResilienceService } from '@setu-ts/common';
+import { breakerPolicyRangeError } from '@setu-ts/common';
 import type { ResiliencePluginOptions } from '../interfaces/index.ts';
 import { ResilienceService } from '../services/resilience-service.ts';
 import { validateRetryPolicy } from '../patterns/retry.ts';
@@ -21,7 +22,7 @@ import { VERSION } from '../version.ts';
  * closures and is garbage-collected with them.
  *
  * @param options - Default policies for `true`-valued `wrap` fields
- * @throws {RangeError} During registration for an invalid defaultRetry limit or delay
+ * @throws {RangeError} During registration for an invalid defaultRetry or defaultCircuitBreaker
  * @returns A plugin registering an `IResilienceService` under `'resilience'`
  *
  * @example
@@ -42,6 +43,10 @@ export function ResiliencePlugin(options?: ResiliencePluginOptions): IPlugin {
     priority: 500,
 
     register(ctx) {
+      if (options?.defaultCircuitBreaker !== undefined) {
+        const refusal = breakerPolicyRangeError(options.defaultCircuitBreaker);
+        if (refusal !== null) throw refusal;
+      }
       if (options?.defaultRetry !== undefined) {
         validateRetryPolicy(options.defaultRetry, 'ResiliencePlugin.defaultRetry');
       }

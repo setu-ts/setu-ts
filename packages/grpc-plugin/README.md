@@ -35,7 +35,7 @@ manager that matches your runtime:
 
 ```bash
 # Deno
-deno add npm:@setu-ts/grpc-plugin npm:@connectrpc/connect@^2.1.2 npm:@bufbuild/protobuf@^2.7.0
+deno add npm:@setu-ts/grpc-plugin npm:@connectrpc/connect@^2.2.0 npm:@bufbuild/protobuf@^2.7.0
 # npm
 npm i @setu-ts/grpc-plugin @connectrpc/connect @bufbuild/protobuf
 # Bun
@@ -110,17 +110,70 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   every error naming the target would carry them. So does a URL target with a query or fragment,
   which Connect never sends; an error about a URL target names only its origin. A `clients` key is a
   target and is checked the same way at `GrpcPlugin()`. After each call the client reports to
-  discovery — `failure` for `Unavailable` (a refused, reset or closed connection), `success`
-  otherwise — so an instance that refuses connections is ejected.
-- **Connections.** One HTTP/2 session per instance, shared by every call to it and closed with the
-  application. Each session may buffer 64 MB (Node's `maxSessionMemory`; its default of 10 MB reset
-  streams once sixteen 1 MB replies were in flight on one connection). At most 64 instance origins
-  keep a session; the least recently used is forgotten first, never closed by the client — a call
-  may still be on it. connect-node closes a session once it has had no stream for 60 s (its default
-  is 15 minutes), so an evicted session closes 60 s after its last stream ends, and the
-  application's stop closes whatever is left. A stream the application drops without cancelling it
-  stays open until its deadline (or, with Connect's `timeoutMs: 0`, until the application stops).
-  Each reply message is bounded by the plugin's `readMaxBytes`, as each request is.
+  discovery: an instance fails when it did not answer, refused the stream, returned `Unavailable`,
+  `Unimplemented`, `DeadlineExceeded` (wire or not), or returned `Canceled` on its own. Every other
+  server answer reports success, including application codes and `Internal`, `Unknown`, `DataLoss`.
+  A status Connect itself cannot decode (such as 99) is a protocol failure when the server sent it
+  as its own status; a peer relaying a downstream's invalid-status message under a valid status
+  stays an answer. Status details (`grpc-status-details-bin`) take precedence over the header; valid
+  status 13 remains an application answer. The same codes without a server answer fail. A request
+  that makes a healthy handler throw must not eject replicas. A replica whose handlers fail every
+  call with `Internal` (a broken dependency, say) is not ejected by call outcomes. Take it out
+  through readiness (health checks) instead. On the default `connect` protocol a well-formed JSON
+  error object (`application/json`) on any non-200 unary answer is read as a server answer, its code
+  taken from the body's `code` field or else from the HTTP status (404 `Unimplemented`; 429, 502,
+  503, 504 `Unavailable`; 400 `Internal`; 401 and 403 their auth codes; any other status `Unknown`).
+  It fails only when that code is `Unavailable`, `Unimplemented`, `DeadlineExceeded` or `Canceled`,
+  so a wrong service or proxy that answers every call with, say, a JSON 400, 401, 403 or 500 counts
+  as answered and is not ejected by call outcomes either; an HTML error page is no answer and fails.
+  A stream reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers (by the server, or by
+  this client's own HTTP/2 session when it is over its memory cap) means this client's behaviour
+  looked excessive (Node's server says so for more than 128 header fields): it is never counted
+  against the instance and is not resent, and the call fails as `ResourceExhausted` with
+  `GrpcExcessiveLoadError` as its `cause`. A reset after the response headers is not covered: a
+  unary call then reports failure, and a streaming call surfaces it while iterating and reports
+  nothing. A few client-side faults raised before the request leaves report nothing: Connect's
+  binary serialization failure (`Internal`), its `writeMaxBytes` refusal (`ResourceExhausted`), and
+  a request header Node refuses before sending: a connection-specific header on HTTP/2
+  (`connection`, `keep-alive`, `proxy-connection`, `upgrade`, `transfer-encoding`, `http2-settings`,
+  `te` other than `trailers`) or a control character in a header value on HTTP/1.1. A header name or
+  value that `Headers` itself rejects fails the call before any instance is picked. A call whose
+  header list (RFC 7541 §4.1 sizes) is over the peer's advertised HTTP/2
+  `SETTINGS_MAX_HEADER_LIST_SIZE` is stopped before the peer processes it. Counting follows Node's
+  Latin-1 encoding; Bun sends UTF-8, so values above U+007F are undercounted there (gRPC metadata
+  values are ASCII by spec). If the list is also over 8 KiB (8192 octets), it is the caller's fault,
+  with `GrpcHeaderListTooLargeError` as its error's `cause`: no report or resend. At or under 8 KiB
+  it counts as `failure` against that instance; unary calls are resent once to another pick within
+  the remaining deadline, like a refused stream: the peer advertised less than any gRPC default. If
+  the resend meets the same fault, the call fails as `Unavailable`, with a message naming the header
+  size and advertised limit. Calls started before the session holds the peer's SETTINGS (the first
+  on each new session, and after a reconnect or GOAWAY) skip that advertised-limit check. When no
+  header-list limit was known when the call started, a `REFUSED_STREAM` on a sent header list over
+  64 KiB (65536 octets) instead fails with `GrpcHeaderListTooLargeError` (on Node the client's
+  HTTP/2 library refused to send it; another peer may refuse it itself): no report and no resend.
+  Its `size` is the sent list's RFC size and its `limit` is the client's 65536-octet threshold. At
+  or under 65536, a refusal still reports failure and is resent; an accepted larger list is
+  unaffected. A refusal from a peer shutting down (its session closed or destroyed) stays a refused
+  stream and is resent. Caller cancellation reports nothing. Streaming reports success when response
+  headers arrive; later iteration errors report nothing. A deadline tighter than healthy latency can
+  eject a healthy instance, bounded by discovery's defaults (5 failures in 30 s, 50% cap, never the
+  last instance, 30 s ejection). Passing mass client disconnects through to outbound calls (aborting
+  thousands of in-flight calls at once) can trip the peer's limit on stream resets: a Node server
+  (`streamResetBurst` 1000, `streamResetRate` 33 by default) then closes the session with GOAWAY
+  `INTERNAL_ERROR`, the calls on it fail, and the instance is reported failed. The ejection that
+  follows is bounded the same way (30 s, at most 50%, never the last instance).
+- **Connections.** A Service address that balances connections pins every call to one pod. Discover
+  pods themselves with DNS mode `'a'` over a headless Service, or the `kubernetes` provider, so each
+  pod is an instance and round-robin spreads calls. One HTTP/2 session per instance, shared by every
+  call to it and closed with the application. Each session may buffer 64 MB (Node's
+  `maxSessionMemory`; its default of 10 MB reset streams once sixteen 1 MB replies were in flight on
+  one connection). At most 64 instance origins keep a session; the least recently used is forgotten
+  first, never closed by the client — a call may still be on it. connect-node closes a session once
+  it has had no stream for 60 s (its default is 15 minutes), so an evicted session closes 60 s after
+  its last stream ends, and the application's stop closes whatever is left. A stream the application
+  drops without cancelling it stays open until its deadline (or, with Connect's `timeoutMs: 0`,
+  until the application stops). Each reply message is bounded by the plugin's `readMaxBytes`, as
+  each request is.
 - **Defaults.** The Connect protocol, binary, over HTTP/2, with a 5 s deadline. Per target in
   `clients`, or per client in `grpcClient()`'s options: `basePath`, `protocol` (`'connect'`,
   `'grpc'`, `'grpc-web'`), `httpVersion` (`'2'`, `'1.1'`; native gRPC needs `'2'`) and `timeoutMs`
@@ -132,10 +185,22 @@ const billing = grpcClient(app.services, BillingService, 'billing');
   `REFUSED_STREAM`, never processed). The client reports that instance's failure and sends a unary
   call once more on another pick, within what is left of the call's deadline (its own, or the
   configured one). That spares most unary calls during a restart; a call whose retry is refused too
-  (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`.
-  Only the refusal itself is resent — Node's stream error, connect-node's own reading of the reset
-  code, or Bun's stream refused after `GOAWAY` — never an error a server sent, even one whose
-  message names `REFUSED_STREAM`: that server ran its handler.
+  (by the only instance, say) still fails, and a refused streaming call rejects as `Unavailable`. A
+  refused stream (Node's stream error, connect-node's own reading of the reset code, or Bun's stream
+  refused after `GOAWAY`; never an error a server sent, even one whose message names
+  `REFUSED_STREAM`: that server ran its handler) or an `Unavailable` carrying response metadata
+  `x-setu-unprocessed: shutdown` gets this one resend. The marker comparison is exact and does not
+  depend on the wire flag. The kernel's pre-pipeline drain 503 carries it even with a custom error
+  responder. Over HTTP/2 a draining Setu server on Node refuses a new stream instead (its drain
+  `GOAWAY`), so the marked 503 reaches a client over HTTP/1.1 (`httpVersion: '1.1'` on `connect` or
+  `grpc-web`) or through a proxy that forwards the kernel's answer. Unmarked `Unavailable`, other
+  marker values, other codes and streaming calls are not resent. A second marked failure surfaces to
+  the caller. Retry setup races caller abort and the remaining deadline. Stopping before the resend
+  starts returns the original refusal, records no outcome for that unsent attempt, and cannot
+  dispatch through a late pick. A resend that starts returns its own outcome. The instance still
+  reports failure. The header is reserved: an application setting it on its own `Unavailable` claims
+  the request was not processed and gets one resend of that unary call. The kernel does not strip it
+  from application responses. The server's own post-`close()` 503 is unmarked.
 - **Caching.** The same arguments return the same client; each service definition keeps at most 256
   clients, the least recently used dropped first, so a target built from request data cannot grow
   the cache without bound.
@@ -239,11 +304,13 @@ are left to Connect's automatic `unimplemented` responder.
 
 ## Errors
 
-| Error                  | Thrown when                                                                                                                                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GrpcRuntimeLoadError` | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                         |
-| `GrpcDescriptorError`  | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                         |
-| `GrpcUnavailableError` | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true` |
+| Error                         | Thrown when                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GrpcRuntimeLoadError`        | A Connect/Protobuf-ES specifier cannot be imported at registration, or `@connectrpc/connect-node` on a client's first call                                                                                                                                                                                                                                                                                                                       |
+| `GrpcDescriptorError`         | An embedded descriptor set cannot be decoded or lacks its expected service                                                                                                                                                                                                                                                                                                                                                                       |
+| `GrpcExcessiveLoadError`      | The `cause` of a `ResourceExhausted` call whose stream was reset with HTTP/2 `ENHANCE_YOUR_CALM` before the response headers, by the server or by this client's own session over its memory cap (this client's behaviour excessive, such as more than 128 header fields on Node); no report or resend                                                                                                                                            |
+| `GrpcHeaderListTooLargeError` | The `cause` of a call over both the peer's advertised header-list limit and 8 KiB, or over the client's 65536-octet threshold when no header-list limit was known when the call started and the stream is refused on an open session (on Node, the client's HTTP/2 library refused to send it); carries `size` and `limit`; no report or resend. At or under 8 KiB, exceeding an advertised limit counts against the instance and is resent once |
+| `GrpcUnavailableError`        | **Deprecated — never thrown since M70a.** Retained as published surface only; gRPC dispatch no longer depends on any adapter capability, so `handleRequest` is always serviceable and `available` is always `true`                                                                                                                                                                                                                               |
 
 ## Limitations
 
@@ -297,6 +364,8 @@ are left to Connect's automatic `unimplemented` responder.
   There, use Connect or gRPC-Web (`buf curl --protocol connect` or `--protocol grpcweb`, a generated
   Connect client, or Envoy's `grpc_web` filter in front of a native fleet); `grpcurl` implements
   native gRPC only.
+- **Cancelling a response stream** aborts the handler's `ctx.signal` before awaiting its iterator
+  cleanup, with no bound. A handler that ignores the signal still holds the stream until it yields.
 
 ## Health Indicator
 
@@ -332,24 +401,26 @@ base64 -w0 < reflection.binpb  # 2332 chars
 
 ## Exports
 
-| Export                  | Kind      |
-| ----------------------- | --------- |
-| `adaptConnectModule`    | function  |
-| `grpcClient`            | function  |
-| `grpcClientProvider`    | function  |
-| `GrpcPlugin`            | function  |
-| `GrpcDescriptorError`   | class     |
-| `GrpcRuntimeLoadError`  | class     |
-| `GrpcService`           | class     |
-| `GrpcUnavailableError`  | class     |
-| `CAPABILITIES`          | const     |
-| `ConnectModuleLike`     | interface |
-| `GrpcClientOptions`     | interface |
-| `GrpcPluginOptions`     | interface |
-| `GrpcServiceDefinition` | interface |
-| `IGrpcService`          | interface |
-| `GrpcServingStatus`     | type      |
-| `RpcFetchHandler`       | type      |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `adaptConnectModule`          | function  |
+| `grpcClient`                  | function  |
+| `grpcClientProvider`          | function  |
+| `GrpcPlugin`                  | function  |
+| `GrpcDescriptorError`         | class     |
+| `GrpcExcessiveLoadError`      | class     |
+| `GrpcHeaderListTooLargeError` | class     |
+| `GrpcRuntimeLoadError`        | class     |
+| `GrpcService`                 | class     |
+| `GrpcUnavailableError`        | class     |
+| `CAPABILITIES`                | const     |
+| `ConnectModuleLike`           | interface |
+| `GrpcClientOptions`           | interface |
+| `GrpcPluginOptions`           | interface |
+| `GrpcServiceDefinition`       | interface |
+| `IGrpcService`                | interface |
+| `GrpcServingStatus`           | type      |
+| `RpcFetchHandler`             | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

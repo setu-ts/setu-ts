@@ -20,6 +20,7 @@ import type { DiscoveryProvider, SelfRegistration } from '../interfaces/index.ts
 import type { ServiceDiscoveryPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';
 import { createProvider } from '../providers/provider-factory.ts';
+import { createWarnBudget } from './warn-budget.ts';
 import { ServiceDiscoveryService } from '../services/service-discovery-service.ts';
 import { SelfRegistrationNotSupportedError } from '../errors.ts';
 import { isMissingFile, TOKEN_PATH } from '../providers/kubernetes-provider.ts';
@@ -84,7 +85,29 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         source: `service-discovery-plugin: ${provider.kind}`,
         logger: () => ctx.logger,
       });
-      const service = new ServiceDiscoveryService(provider, ctx.runtime, resolved, reporter);
+      // One shared budget caps the warn lines of names with no non-empty list
+      // (possibly taken from requests); a name with a list always warns.
+      const resolveLogger = createWarnBudget(
+        () => ctx.logger,
+        () => ctx.runtime.hrtime(),
+        `service-discovery-plugin: ${provider.kind} resolve`,
+      );
+      const service = new ServiceDiscoveryService(
+        provider,
+        ctx.runtime,
+        resolved,
+        reporter,
+        (serviceName, warm) =>
+          createConnectionErrorReporter({
+            source: `service-discovery-plugin: ${provider.kind} resolve '${serviceName}'`,
+            logger: warm ? () => ctx.logger : resolveLogger,
+          }),
+        (serviceName, error) =>
+          ctx.logger?.warn(`service-discovery-plugin: watch listener for '${serviceName}' failed`, {
+            serviceName,
+            error: describeError(error),
+          }),
+      );
       ctx.services.register<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY, service);
 
       if (registration !== undefined) {
@@ -108,8 +131,9 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
       // M70c: the indicator composes three facts. `everResolved` is `false`
       // until the first successful provider read (so a backend that was never
       // reached is `down`, not `up` — the X10-3 case the old comment hid);
-      // `degraded` means a stale cache is being served; `isHealthy()` is the
-      // live reachability probe. Mapping: never resolved AND not reachable is
+      // `degraded` means a warm name's last read failed or an empty answer is held
+      // during its grace. `isHealthy()` is the provider probe or DNS's last lookup
+      // outcome, read through the same 5 s cache. Never resolved AND not reachable is
       // `down`; otherwise `up`. A serving warm cache stays in rotation while
       // the shared backend failure remains visible in data.
       const discoveryIndicator = async (): Promise<HealthCheckResult> => {
@@ -125,6 +149,7 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
             watchedServices: service.watchedServices,
             ejectedInstances: service.ejectedInstances,
             degraded,
+            staleForMs: service.staleForMs,
             reachable,
             everResolved,
           },
