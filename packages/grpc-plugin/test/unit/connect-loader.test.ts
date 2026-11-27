@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { errorFromJson } from '@connectrpc/connect/protocol-connect';
+import { findTrailerError } from '@connectrpc/connect/protocol-grpc';
 /**
  * Unit tests for the Connect runtime loader: the pure `adaptConnectModule`
  * adapter and the per-specifier failure branches of `loadConnectModule`, driven
@@ -23,6 +26,33 @@ import {
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 import { fakeFile, fakeService } from '../fixtures/fake-connect-runtime.ts';
 import type { FileRegistryLike } from '../../src/interfaces/connect-runtime.ts';
+
+it('reads response metadata only from real Connect errors, for wire and non-wire answers', async () => {
+  const runtime = await loadConnectModule();
+  const headers = new Headers({ 'x-peer': 'draining' });
+  const fallback = new ConnectError('HTTP 503', Code.Unavailable, headers);
+  const wire = errorFromJson({}, headers, fallback);
+  expect(runtime.errorMetadata(fallback)).toBe(fallback.metadata);
+  expect(runtime.errorMetadata(wire)).toBe(wire.metadata);
+  expect(runtime.errorMetadata(wire)?.get('x-peer')).toBe('draining');
+  expect(
+    runtime.errorMetadata(new ConnectError('other code', Code.Internal, headers))?.get('x-peer'),
+  ).toBe('draining');
+  expect(runtime.errorMetadata(new Error('reset'))).toBeUndefined();
+  expect(runtime.errorMetadata({ metadata: headers })).toBeUndefined();
+});
+
+it('reads the real wire flag on trailer and JSON errors, never on HTTP-status or transport errors', async () => {
+  const runtime = await loadConnectModule();
+  const fallback = new ConnectError('HTTP 503', Code.Unavailable);
+  const json = errorFromJson({}, new Headers(), fallback);
+  const trailer = findTrailerError(new Headers({ 'grpc-status': '5', 'grpc-message': 'absent' }));
+  expect(runtime.isWireError(json)).toBe(true);
+  expect(runtime.isWireError(trailer)).toBe(true);
+  expect(runtime.isWireError(fallback)).toBe(false);
+  expect(runtime.isWireError(new Error('reset'))).toBe(false);
+  expect(runtime.isWireError(Object.assign(new Error(), { isWireError: true }))).toBe(false);
+});
 
 /** Records every call the adapter makes into the fake modules. */
 interface Calls {
@@ -56,7 +86,7 @@ function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
       },
       createClient: (service, transport) => ({ service, transport }),
       ConnectError: FakeConnectError,
-      Code: { Unavailable: 14 },
+      Code: { Unavailable: 14, ResourceExhausted: 8 },
     },
     protobuf: {
       createFileRegistry: (fdSet) => {
@@ -298,6 +328,9 @@ describe('adaptConnectModule — the client side (M139b §3.12)', () => {
     expect(runtime.isUnavailable(new Error('down'))).toBe(false);
     const cause = new Error('refused');
     expect((runtime.unavailable('again', cause) as Error & { cause?: unknown }).cause).toBe(cause);
+    const calm = runtime.resourceExhausted('calm', cause) as FakeConnectError & { cause?: unknown };
+    expect([calm.message, calm.code, calm.cause]).toEqual(['calm', 8, cause]);
+    expect(runtime.isUnavailable(calm)).toBe(false);
   });
 });
 

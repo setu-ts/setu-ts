@@ -1,14 +1,12 @@
-# @setu-ts/grpc-plugin — Connect and gRPC-Web services
+# @setu-ts/grpc-plugin — RPC services
 
 **Add it:** `setu add grpc` adds it with its `@connectrpc/connect` and `@bufbuild/protobuf` peers,
 and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`; an outbound client also needs
-`@connectrpc/connect-node`, and runs on Node and Bun only: on Cloudflare Workers `grpcClient()`
-throws a TypeError, and on Deno the client can crash the process when a peer goes away. It provides
+`@connectrpc/connect-node`, and runs on Node and Bun only: on Workers `grpcClient()` throws a
+TypeError, and on Deno the client can crash the process when a peer leaves. Provides
 `CAPABILITIES.GRPC` (`IGrpcService`).
 
 ## Serve generated service descriptors
-
-Pass your generated descriptor and implementation into this config helper:
 
 ```ts
 import { GrpcPlugin } from '@setu-ts/grpc-plugin';
@@ -41,18 +39,23 @@ export function registerRpcService(
 
 ## Behaviour the types do not show
 
-- `basePath` defaults to `/`; a prefixed deployment needs a matching client base URL.
+- `basePath` defaults to `/`; a prefix needs a matching client URL.
 - `reflection` and `health` default to `true`.
-- Native `application/grpc` requests are refused with gRPC status 12 (HTTP 200); Connect and
+- Native gRPC needs Node/Bun with `RuntimePlugin({ http2 })`; otherwise status 12. Connect and
   gRPC-Web are served.
-- Registering the same service type name twice throws. Omitting the implementation registers a
-  service for reflection only.
-- The health bridge reports serving without a health capability; an aggregate degraded status is not
-  serving.
+- A duplicate service type name throws; no implementation means reflection only.
+- Server answers (handler errors) succeed; status Connect cannot decode, no answer, unavailable,
+  unimplemented, deadline and peer cancel fail. Abort, pre-send faults and early ENHANCE_YOUR_CALM
+  resets report nothing, as do headers over a peer's advertised limit and 8 KiB, or over 64 KiB
+  refused on an open session with no known limit; at or under 8 KiB the instance fails.
+- Marked drain 503s resent once; discover pods.
+- Stream cancel aborts `ctx.signal`, then awaits cleanup unbounded.
+- Health works without HealthPlugin; aggregate degraded is not serving.
 
-## Other options
+## Options
 
-- `interceptors` installs application Connect interceptors.
-- `connectModule` injects an already-loaded runtime; `adaptConnectModule` adapts loaded modules.
-- `GrpcRuntimeLoadError` reports a missing runtime; `GrpcDescriptorError` reports invalid
-  descriptors.
+- `interceptors` adds Connect interceptors.
+- `connectModule` injects a loaded runtime; `adaptConnectModule` adapts modules.
+- `GrpcRuntimeLoadError`: missing runtime; `GrpcDescriptorError`: bad descriptors;
+  `GrpcHeaderListTooLargeError`: caller headers too large; `GrpcExcessiveLoadError`: an
+  ENHANCE_YOUR_CALM reset, not resent.

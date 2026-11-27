@@ -78,18 +78,21 @@ export function universalRequest(call: RpcCall, signal?: AbortSignal): Universal
  *
  * @param universal - The universal handler's response
  * @param streaming - Whether the procedure streams its response
+ * @param abort - The response-streaming procedure's controller, aborted before
+ *   `return()` on cancel
  * @returns The reply
  */
 export async function replyFromUniversal(
   universal: UniversalServerResponseLike,
   streaming: boolean,
+  abort?: AbortController,
 ): Promise<RpcReply> {
   const headers = universal.header ?? new Headers();
   if (universal.body === undefined) {
     return { status: universal.status, headers, body: null };
   }
   if (streaming) {
-    return { status: universal.status, headers, body: iterableStream(universal.body) };
+    return { status: universal.status, headers, body: iterableStream(universal.body, abort) };
   }
   return { status: universal.status, headers, body: await gather(universal.body) };
 }
@@ -117,9 +120,14 @@ async function gather(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
  * handler's `finally`.
  *
  * @param body - The iterable
+ * @param abort - The response-streaming procedure's controller, aborted before
+ *   `return()` on cancel
  * @returns The stream
  */
-export function iterableStream(body: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+export function iterableStream(
+  body: AsyncIterable<Uint8Array>,
+  abort?: AbortController,
+): ReadableStream<Uint8Array> {
   const iterator = body[Symbol.asyncIterator]();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -130,7 +138,8 @@ export function iterableStream(body: AsyncIterable<Uint8Array>): ReadableStream<
       }
       controller.enqueue(next.value);
     },
-    async cancel() {
+    async cancel(reason) {
+      abort?.abort(reason);
       await iterator.return?.();
     },
   });

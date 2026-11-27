@@ -9,6 +9,7 @@
  * @module
  */
 import type { LoadBalanceStrategy } from '@setu-ts/common';
+import { deadlineRangeError } from '@setu-ts/common';
 import type {
   DiscoveryProvider,
   EjectionOptions,
@@ -21,13 +22,18 @@ import type {
 /** Options every arm shares. */
 interface CommonDiscoveryOptions {
   /**
-   * Milliseconds a resolved instance list is served from cache.
+   * Age in milliseconds at which a call starts a background refresh.
    *
-   * `0` disables caching so every `resolve` hits the backend. A watched
-   * service invalidates its own entry on every change, so this is a safety net
-   * rather than the primary freshness mechanism.
+   * Warm names always return the cached list. `0` refreshes on every call,
+   * coalesced while a refresh runs. Failed refreshes keep the last good list.
+   * Must be a finite number from 0 to 2147483647; anything else (`NaN`,
+   * `Infinity`, a negative) is refused with a `RangeError` at construction.
    */
   readonly cacheTtlMs?: number;
+  /** Read bound in milliseconds; default 2000, `0` unbounded. @since 0.14.0 */
+  readonly resolveTimeoutMs?: number;
+  /** Hold a warm list on empty answers for this long; default 30000, `0` immediate. @since 0.14.0 */
+  readonly emptyAnswerGraceMs?: number;
   /** Default selection strategy; `PickOptions.strategy` overrides it per call. */
   readonly strategy?: LoadBalanceStrategy;
   /** Outlier-ejection tuning, or `false` to disable ejection entirely. */
@@ -116,6 +122,8 @@ export interface KubernetesDiscoveryOptions extends CommonDiscoveryOptions {
 interface DnsDiscoveryCommon extends CommonDiscoveryOptions {
   /** Discriminant. */
   readonly provider: 'dns';
+  /** IP literals with optional ports; requires runtime.createDnsResolver. @since 0.14.0 */
+  readonly servers?: readonly string[];
   /** `{service}` is replaced with the requested name. */
   readonly domainTemplate?: string;
   /** Whether resolved instances speak TLS. */
@@ -199,8 +207,12 @@ const DEFAULT_EJECTION: Required<EjectionOptions> = {
  * @since 0.2.0
  */
 export interface ResolvedDiscoveryOptions {
-  /** Cache TTL in milliseconds; `0` disables caching. */
+  /** Age that starts a background refresh; `0` refreshes on every call. */
   readonly cacheTtlMs: number;
+  /** Provider read bound; `0` unbounded. */
+  readonly resolveTimeoutMs: number;
+  /** Empty-answer grace; `0` replaces at once. */
+  readonly emptyAnswerGraceMs: number;
   /** Default selection strategy. */
   readonly strategy: LoadBalanceStrategy;
   /** Ejection tuning, or `false` when disabled. */
@@ -216,6 +228,57 @@ export interface ResolvedDiscoveryOptions {
   readonly waitSeconds: number;
 }
 
+/** The largest `cacheTtlMs`: the largest delay a runtime timer accepts. */
+const MAX_CACHE_TTL_MS = 2147483647;
+
+/** Strict dotted IPv4, also used for the tail of an IPv4-mapped IPv6 literal. */
+function isIpv4(address: string): boolean {
+  const parts = address.split('.');
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^(0|[1-9]\d{0,2})$/.test(part) && Number(part) <= 255)
+  );
+}
+
+/** Web URL parsing validates IPv6 syntax without importing a runtime API. */
+function isIpv6(address: string): boolean {
+  if (!/^[\da-fA-F:.]+$/.test(address) || !address.includes(':')) return false;
+  if (address.includes('.') && !isIpv4(address.slice(address.lastIndexOf(':') + 1))) return false;
+  try {
+    new URL(`http://[${address}]/`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Matches the runtime's IP-literal grammar, including its refusal of IPv6 zones. */
+function validateDnsServers(servers: readonly string[]): void {
+  if (!Array.isArray(servers) || servers.length === 0) {
+    throw new RangeError('servers must be a non-empty array');
+  }
+  for (let index = 0; index < servers.length; index++) {
+    const entry = servers[index];
+    if (typeof entry === 'string') {
+      const bracketed = /^\[([^\]]+)\]:(\d+)$/.exec(entry);
+      const ipv4Port = /^([^:]+):(\d+)$/.exec(entry);
+      const parts = bracketed ?? ipv4Port;
+      const address = parts ? parts[1]! : entry;
+      const port = parts ? Number(parts[2]) : 53;
+      const validAddress = bracketed
+        ? isIpv6(address)
+        : ipv4Port
+          ? isIpv4(address)
+          : isIpv4(address) || isIpv6(address);
+      if (validAddress && port >= 1 && port <= 65535) continue;
+    }
+    const shown = typeof entry === 'string' ? `'${entry}'` : `(${typeof entry})`;
+    throw new RangeError(
+      `servers[${index}] ${shown} must be an IP literal with an optional decimal port (1..65535); a port needs brackets for IPv6`,
+    );
+  }
+}
+
 /**
  * Applies every documented default exactly once.
  *
@@ -229,6 +292,26 @@ export interface ResolvedDiscoveryOptions {
  * @since 0.2.0
  */
 export function resolveOptions(options: ServiceDiscoveryPluginOptions): ResolvedDiscoveryOptions {
+  if (options.provider === 'dns' && options.servers !== undefined)
+    validateDnsServers(options.servers);
+  const resolveTimeoutMs = options.resolveTimeoutMs ?? 2000;
+  const emptyAnswerGraceMs = options.emptyAnswerGraceMs ?? 30_000;
+  const cacheTtlMs = options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000;
+  // `cacheTtlMs` is refused like the two bounds: a `NaN` (an unset variable
+  // through `Number()`) would make `age >= cacheTtlMs` always false, so a warm
+  // list would never be refreshed, with nothing reporting it.
+  for (const [name, value] of [
+    ['resolveTimeoutMs', resolveTimeoutMs],
+    ['emptyAnswerGraceMs', emptyAnswerGraceMs],
+  ] as const) {
+    const refusal = deadlineRangeError(name, value);
+    if (refusal !== null) throw refusal;
+  }
+  if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0 || cacheTtlMs > MAX_CACHE_TTL_MS) {
+    throw new RangeError(
+      `cacheTtlMs must be a finite number from 0 to ${MAX_CACHE_TTL_MS} (0 refreshes on every warm call).`,
+    );
+  }
   const watchIntervalMs =
     'watchIntervalMs' in options && options.watchIntervalMs !== undefined
       ? options.watchIntervalMs
@@ -243,7 +326,9 @@ export function resolveOptions(options: ServiceDiscoveryPluginOptions): Resolved
     options.ejection === false ? false : { ...DEFAULT_EJECTION, ...(options.ejection ?? {}) };
 
   const base = {
-    cacheTtlMs: options.cacheTtlMs !== undefined ? options.cacheTtlMs : 30_000,
+    resolveTimeoutMs,
+    emptyAnswerGraceMs,
+    cacheTtlMs,
     strategy: options.strategy ?? ('round-robin' as const),
     ejection,
     watchIntervalMs,

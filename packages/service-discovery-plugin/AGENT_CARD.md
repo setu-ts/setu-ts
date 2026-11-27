@@ -1,9 +1,9 @@
-# @setu-ts/service-discovery-plugin — locate and select service instances
+# @setu-ts/service-discovery-plugin
 
-**Add it:** `setu add service-discovery` adds it and prints the registration for `setu.config.ts`.
-It provides `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
+**Add:** `setu add service-discovery`; register in `setu.config.ts`. Provides
+`CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
 
-## Configure a static service pool
+## Static pool
 
 ```ts
 import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
@@ -16,7 +16,7 @@ export const discovery = ServiceDiscoveryPlugin({
 });
 ```
 
-## Resolve an upstream URL from a route
+## URL
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -35,22 +35,25 @@ export function registerBillingRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour the types do not show
+## Rules
 
-- `resolveUrl` and `pick` return `null` for an empty pool. `resolve` lists all known instances,
-  including ejected ones; `pick` filters ejected instances, falling back to the full pool if needed.
-- Selection defaults to round-robin. A per-call `strategy` overrides the configured default.
-- Resolved lists are cached for 30000 ms by default; `cacheTtlMs: 0` disables cache reuse.
-  Concurrent cold reads of one service share a backend read.
-- Ejection depends on application `report(instance, outcome)` calls. By default five failures within
-  30000 ms eject for 30000 ms, subject to a 50% pool cap; success clears the state.
-- A watch delivers the full list and refreshes the cache on change. Stop it using the returned
-  unsubscribe function.
+- `resolve` includes ejected instances; `pick` filters with full-pool fallback. `pick`/`resolveUrl`
+  return `null` when empty. Default round-robin.
+- Warm reads use cache; a read (watched too) starts background refresh once `cacheTtlMs` old (30000
+  ms; `0` every call; bad values refused). Cold reads share `resolveTimeoutMs` (2000 ms; `0`
+  unbounded).
+- Failed warm refreshes retry at 1, 2, 4, 8, 16, 30 s; cold failures are unspaced.
+- `emptyAnswerGraceMs` holds warm lists on empty answers (30000 ms; `0` immediate). A timer re-reads
+  at expiry; empty results reach watchers unprompted. Nonempty answers/close end it.
+- One provider watch per name; joiners get the cache now; lists may repeat.
+- Data `degraded` (status stays `up`): warm failures/held empties. `staleForMs`: failed-list age.
+  All providers cache health for 5 s; DNS uses its last lookup outcome. DNS absent names resolve
+  `[]`; other errors reject.
+- Warm reporters survive cold failures (256 cold reporters; 20 cold warns/min). At most 256
+  unwatched empty-only names stay cached. Sync/async listener errors are isolated, warn once.
+  Superseded reads open no outage.
+- Consul ids default to `<serviceName>@<address>:<port>`; escape `%`/`@` as `%25`/`%40`.
+- Five failures in 30000 ms eject for 30000 ms, with a 50% pool cap; success clears state.
 
-## Other options
-
-- `provider` also selects `'consul'`, `'kubernetes'`, `'dns'` or `'custom'` with `discovery`.
-- `strategy` also accepts `'random'` and `'weighted-random'`; `ejection: false` disables ejection.
-- `selfRegistration` is Consul-only; other providers reject it with
-  `SelfRegistrationNotSupportedError`. DNS requires the runtime DNS surface.
-- A failed self-deregistration warns with `describeError`: one line, URL userinfo masked.
+Providers: static/consul/kubernetes/dns/custom. Strategies: random/weighted-random.
+`ejection: false` disables ejection. DNS needs runtime `dns` (`servers`: `createDnsResolver`).

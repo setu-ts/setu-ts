@@ -13,7 +13,7 @@ import { KubernetesProvider } from '../../src/providers/kubernetes-provider.ts';
 import { DnsProvider } from '../../src/providers/dns-provider.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
 import type { DiscoveryProvider } from '../../src/interfaces/index.ts';
-import type { IFileSystem } from '@setu-ts/common';
+import type { DnsResolverOptions, IFileSystem } from '@setu-ts/common';
 import { createFakeDns, createFakeHttp, createFakeRuntime } from '../fixtures/fakes.ts';
 
 const noopFs = {
@@ -24,6 +24,66 @@ const noopFs = {
   mkdir: () => Promise.resolve(),
   rm: () => Promise.resolve(),
 } as IFileSystem;
+
+describe('chosen DNS resolver', () => {
+  it.each([
+    [0, 0],
+    [2.1, 3],
+    [2000, 2000],
+    [2147483646.5, 2147483647],
+  ])(
+    'passes resolveTimeoutMs %s as integer %s and uses the returned resolver',
+    async (bound, integer) => {
+      const seen: DnsResolverOptions[] = [];
+      const runtime = {
+        ...createFakeRuntime({ dns: createFakeDns({ a: ['10.0.0.1'] }) }),
+        createDnsResolver(options: DnsResolverOptions) {
+          seen.push(options);
+          return createFakeDns({ a: ['10.0.0.2'] });
+        },
+      };
+      const options = {
+        provider: 'dns',
+        mode: 'a',
+        port: 9000,
+        servers: ['127.0.0.1:7853'],
+        resolveTimeoutMs: bound,
+      } as const;
+      expect(
+        (await createProvider(options, resolveOptions(options), runtime).resolve('billing'))[0]
+          .host,
+      ).toBe('10.0.0.2');
+      expect(seen).toEqual([{ servers: options.servers, timeoutMs: integer }]);
+    },
+  );
+  it('uses runtime.dns without creating a resolver when servers is omitted', async () => {
+    const runtime = {
+      ...createFakeRuntime({ dns: createFakeDns({ a: ['10.0.0.1'] }) }),
+      createDnsResolver: () => {
+        throw new Error('must not create');
+      },
+    };
+    const options = { provider: 'dns', mode: 'a', port: 80 } as const;
+    expect(
+      (await createProvider(options, resolveOptions(options), runtime).resolve('billing'))[0].host,
+    ).toBe('10.0.0.1');
+  });
+  it('uses a chosen resolver even without runtime.dns', async () => {
+    const runtime = { ...createFakeRuntime(), createDnsResolver: () => createFakeDns({}) };
+    const options = { provider: 'dns', mode: 'srv', servers: ['::1'] } as const;
+    expect(
+      await createProvider(options, resolveOptions(options), runtime).resolve('billing'),
+    ).toEqual([]);
+  });
+  it('refuses servers without the runtime factory, even with a default resolver', () => {
+    const options = { provider: 'dns', mode: 'srv', servers: ['::1'] } as const;
+    const runtime = createFakeRuntime({ dns: createFakeDns({}) });
+    expect(() => createProvider(options, resolveOptions(options), runtime)).toThrow(
+      DiscoveryUnavailableError,
+    );
+    expect(() => createProvider(options, resolveOptions(options), runtime)).toThrow('servers');
+  });
+});
 
 describe('createProvider — arms', () => {
   it('builds a StaticProvider for the static arm', () => {

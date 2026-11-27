@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type { IRuntimeServices, ServiceInstance, Unsubscribe } from '@setu-ts/common';
 import type { DiscoveryProvider, IDiscoveryHttp } from '../interfaces/index.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
@@ -107,6 +108,7 @@ export class KubernetesProvider implements DiscoveryProvider {
    * Resolves the bearer token, reading the projected file when no explicit
    * token was configured.
    *
+   * @param signal - Caller cancellation; abandoned reads never update the token memo
    * @returns The `Authorization` header value
    * @throws {DiscoveryUnavailableError} If the projected token file does not
    * exist (not running in a pod); configure token and apiServer explicitly.
@@ -114,7 +116,8 @@ export class KubernetesProvider implements DiscoveryProvider {
    * character an HTTP header value cannot carry, with a fixed message that
    * never contains the token (M139f audit M1)
    */
-  async authHeader(): Promise<string> {
+  async authHeader(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
     if (this.#options.token !== undefined) {
       return bearer(this.#options.token);
     }
@@ -150,7 +153,9 @@ export class KubernetesProvider implements DiscoveryProvider {
     }
     const value = new TextDecoder().decode(bytes).trim();
     const header = bearer(value);
-    this.#cachedToken = { value, stampMs: now };
+    if (!signal?.aborted && (this.#cachedToken === null || this.#cachedToken.stampMs <= now)) {
+      this.#cachedToken = { value, stampMs: now };
+    }
     return header;
   }
 
@@ -193,9 +198,12 @@ export class KubernetesProvider implements DiscoveryProvider {
     return instances;
   }
 
-  async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  async resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    const authorization = await this.authHeader(signal);
+    signal?.throwIfAborted();
     const response = await this.#http.request(this.listUrl(serviceName), {
-      headers: { Authorization: await this.authHeader() },
+      headers: { Authorization: authorization },
+      ...(signal !== undefined ? { signal } : {}),
     });
     if (!response.ok) {
       throw new Error(
@@ -219,23 +227,30 @@ export class KubernetesProvider implements DiscoveryProvider {
    * @throws {Error} The fetch rejection, the abort, or a non-2xx status
    */
   async isHealthy(): Promise<boolean> {
-    const controller = new AbortController();
-    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
-    try {
-      const url =
-        `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
-        `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
-      const response = await this.#http.request(url, {
-        headers: { Authorization: await this.authHeader() },
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
-      }
-      return true;
-    } finally {
-      this.#runtime.clearTimeout(timer);
-    }
+    return await withDeadline(
+      async (signal) => {
+        const url =
+          `${this.#options.apiServer}/apis/discovery.k8s.io/v1/namespaces/` +
+          `${encodeURIComponent(this.#options.namespace)}/endpointslices?limit=1`;
+        const authorization = await this.authHeader(signal);
+        signal.throwIfAborted();
+        const response = await this.#http.request(url, {
+          headers: { Authorization: authorization },
+          signal,
+        });
+        if (!response.ok)
+          throw new Error(`Kubernetes EndpointSlice probe failed with HTTP ${response.status}`);
+        return true;
+      },
+      {
+        timeoutMs: 2000,
+        timing: resolveProbeTiming(this.#runtime),
+        onTimeout: () =>
+          new Error(
+            'The Kubernetes API server did not answer the reachability probe within 2000 ms',
+          ),
+      },
+    );
   }
 
   watch(
@@ -248,7 +263,7 @@ export class KubernetesProvider implements DiscoveryProvider {
       http: this.#http,
       runtime: this.#runtime,
       listUrl: (extra) => this.listUrl(serviceName, extra),
-      authHeader: () => this.authHeader(),
+      authHeader: (signal) => this.authHeader(signal),
       map: (body) => this.mapSlices(body, serviceName),
       resourceVersionOf: (body) => (body as SliceList).metadata?.resourceVersion ?? null,
     });

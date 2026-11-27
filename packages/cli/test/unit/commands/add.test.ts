@@ -4029,7 +4029,7 @@ describe('M133 setu add mcp', () => {
 describe('setu add graphql and grpc record their runtime peers', () => {
   const CASES: readonly (readonly [name: string, peers: Readonly<Record<string, string>>])[] = [
     ['graphql', { graphql: '^16' }],
-    ['grpc', { '@connectrpc/connect': '^2.1.2', '@bufbuild/protobuf': '^2.7.0' }],
+    ['grpc', { '@connectrpc/connect': '^2.2.0', '@bufbuild/protobuf': '^2.7.0' }],
   ];
   it.each(CASES)('%s on npm', async (name, peers) => {
     const h = harness({

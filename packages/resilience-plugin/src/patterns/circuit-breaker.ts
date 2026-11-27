@@ -5,12 +5,13 @@
  * @module
  */
 import type {
-  CircuitBreakerCountPolicy,
   CircuitBreakerPolicy,
   CircuitState,
   ICircuitBreaker,
+  IBreakerWindow,
   ResilientCall,
 } from '@setu-ts/common';
+import { createBreakerWindow } from '@setu-ts/common';
 import { CircuitOpenError } from '../errors.ts';
 import { throwIfAborted } from './abort.ts';
 
@@ -23,11 +24,10 @@ import { throwIfAborted } from './abort.ts';
  * time (never `Date.now()`).
  */
 export class CircuitBreaker implements ICircuitBreaker {
-  readonly #policy: CircuitBreakerCountPolicy;
+  readonly #resetTimeout: number;
   readonly #hrtime: () => number;
 
-  /** Monotonic timestamps of recent failures, oldest first. */
-  #failures: number[] = [];
+  readonly #window: IBreakerWindow;
   /** Current state; `open` is realized lazily via {@linkcode state}. */
   #state: CircuitState = 'closed';
   /** Monotonic timestamp the breaker last opened. */
@@ -38,16 +38,20 @@ export class CircuitBreaker implements ICircuitBreaker {
   /**
    * @param policy - The breaker thresholds and windows
    * @param hrtime - A monotonic clock (`runtime.hrtime()`)
-   * @throws {RangeError} When `policy` is the rate arm (`failureRateThreshold`),
-   * which this version of the plugin does not support yet
+   * @throws {RangeError} When the policy fails breakerPolicyRangeError
    */
   constructor(policy: CircuitBreakerPolicy, hrtime: () => number) {
-    if (policy.threshold === undefined) {
-      throw new RangeError(
-        'circuitBreaker: the rate arm (failureRateThreshold) is not supported by this version of @setu-ts/resilience-plugin',
-      );
-    }
-    this.#policy = policy;
+    // One read of each field: the checked copy is the one used, so a getter
+    // cannot pass the check and then hand the cooldown something else.
+    const snapshot = {
+      threshold: policy.threshold,
+      failureRateThreshold: policy.failureRateThreshold,
+      minimumCalls: policy.minimumCalls,
+      timeout: policy.timeout,
+      resetTimeout: policy.resetTimeout,
+    } as CircuitBreakerPolicy;
+    this.#window = createBreakerWindow(snapshot, hrtime);
+    this.#resetTimeout = snapshot.resetTimeout;
     this.#hrtime = hrtime;
   }
 
@@ -94,7 +98,9 @@ export class CircuitBreaker implements ICircuitBreaker {
 
     // closed
     try {
-      return await fn(signal ?? new AbortController().signal);
+      const result = await fn(signal ?? new AbortController().signal);
+      this.#window.recordSuccess();
+      return result;
     } catch (error) {
       this.#recordFailure();
       throw error;
@@ -108,7 +114,7 @@ export class CircuitBreaker implements ICircuitBreaker {
       const result = await fn(signal ?? new AbortController().signal);
       // Success → close and clear the failure window.
       this.#state = 'closed';
-      this.#failures = [];
+      this.#window.reset();
       return result;
     } catch (error) {
       // Failure → re-open and reset the cooldown.
@@ -122,19 +128,14 @@ export class CircuitBreaker implements ICircuitBreaker {
 
   /** Records a closed-state failure and trips open when the threshold is met. */
   #recordFailure(): void {
-    const now = this.#hrtime();
-    this.#failures.push(now);
-    // Drop failures older than the rolling window.
-    const cutoff = now - this.#policy.timeout;
-    this.#failures = this.#failures.filter((t) => t > cutoff);
-    if (this.#failures.length >= this.#policy.threshold) {
+    if (this.#window.recordFailure()) {
       this.#state = 'open';
-      this.#openedAt = now;
+      this.#openedAt = this.#hrtime();
     }
   }
 
   /** True once the open→half-open cooldown has elapsed. */
   #cooldownElapsed(): boolean {
-    return this.#hrtime() - this.#openedAt >= this.#policy.resetTimeout;
+    return this.#hrtime() - this.#openedAt >= this.#resetTimeout;
   }
 }

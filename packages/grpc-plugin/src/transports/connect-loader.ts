@@ -48,7 +48,7 @@ const SPECIFIERS = {
  */
 const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
   connect:
-    'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
+    'deno add npm:@connectrpc/connect@^2.2.0 · npm i @connectrpc/connect · bun add @connectrpc/connect',
   protobuf:
     'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
   wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
@@ -66,9 +66,13 @@ export interface ConnectCoreModuleLike {
     metadata?: undefined,
     outgoingDetails?: undefined,
     cause?: unknown,
-  ) => Error & { readonly code: number };
-  /** The `Code` enum; only `Unavailable` is read. */
-  Code: { readonly Unavailable: number };
+  ) => Error & {
+    readonly code: number;
+    readonly isWireError?: boolean;
+    readonly metadata?: Headers;
+  };
+  /** The `Code` enum; only `Unavailable` and `ResourceExhausted` are read. */
+  Code: { readonly Unavailable: number; readonly ResourceExhausted: number };
 }
 
 /** Structural shape of `@bufbuild/protobuf`. */
@@ -165,8 +169,23 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
         cause,
       );
     },
+    resourceExhausted(message: string, cause?: unknown): Error {
+      return new connect.ConnectError(
+        message,
+        connect.Code.ResourceExhausted,
+        undefined,
+        undefined,
+        cause,
+      );
+    },
+    isWireError(error: unknown): boolean {
+      return error instanceof connect.ConnectError && error.isWireError === true;
+    },
     isUnavailable(error: unknown): boolean {
       return error instanceof connect.ConnectError && error.code === connect.Code.Unavailable;
+    },
+    errorMetadata(error: unknown): Headers | undefined {
+      return error instanceof connect.ConnectError ? error.metadata : undefined;
     },
   };
 }

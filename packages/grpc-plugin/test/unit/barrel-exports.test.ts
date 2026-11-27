@@ -14,6 +14,8 @@ describe('grpc-plugin barrel', () => {
     expect(typeof barrel.adaptConnectModule).toBe('function');
     expect(typeof barrel.GrpcUnavailableError).toBe('function');
     expect(typeof barrel.GrpcRuntimeLoadError).toBe('function');
+    expect(typeof barrel.GrpcHeaderListTooLargeError).toBe('function');
+    expect(typeof barrel.GrpcExcessiveLoadError).toBe('function');
     expect(typeof barrel.GrpcDescriptorError).toBe('function');
     expect(barrel.CAPABILITIES.GRPC).toBe('grpc');
   });
@@ -58,6 +60,8 @@ describe('grpc-plugin barrel', () => {
     expect(Object.keys(barrel).sort()).toEqual([
       'CAPABILITIES',
       'GrpcDescriptorError',
+      'GrpcExcessiveLoadError',
+      'GrpcHeaderListTooLargeError',
       'GrpcPlugin',
       'GrpcRuntimeLoadError',
       'GrpcService',

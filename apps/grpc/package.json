@@ -8,8 +8,8 @@
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/grpc-plugin": "workspace:^",
-    "@connectrpc/connect": "^2.1.2",
-    "@connectrpc/connect-web": "^2.1.2",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-web": "^2.2.0",
     "@bufbuild/protobuf": "^2.7.0"
   },
   "devDependencies": {},

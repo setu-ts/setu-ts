@@ -1,7 +1,7 @@
 # @setu-ts/resilience-plugin — protect calls to unreliable services
 
-**Add it:** `setu add resilience` adds it and wires `ResiliencePlugin()` in a recognized functional
-config. It provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
+**Add:** `setu add resilience` wires `ResiliencePlugin()` in a recognized functional config.
+Provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
 
 ## Retry and limit an upstream HTTP call
 
@@ -33,21 +33,23 @@ export function registerBillingRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
-- Layers execute bulkhead, circuit breaker, retry, timeout, then the supplied function.
-- Breaker and bulkhead state live per `wrap` call; retain the callable across requests.
-- `retry.limit` counts total attempts; `1` means one attempt. It must be a safe integer at least 1;
-  retry delay must be finite and non-negative. Invalid defaults throw RangeError at registration; an
-  invalid selected policy throws RangeError at wrap time. Delays, breaker windows, cooldowns and
-  timeouts are milliseconds. Timeout applies separately to each attempt.
+- Layers execute bulkhead, circuit breaker, retry, timeout, then the function.
+- Breaker and bulkhead state live per `wrap`; retain the callable across requests.
+- A breaker policy is a count or rate arm, not both.
+- `retry.limit` counts total attempts (safe integer at least 1); delay is finite and non-negative.
+  Invalid defaults throw RangeError at registration; selected policies at wrap. All timing is ms;
+  timeout applies per attempt.
+- Breakers skip already-aborted calls and count the final result after retries. An unrecovered
+  timeout fails even if the function ignores abort and later resolves; without timeout, it succeeds.
 - Timeout aborts the attempt's signal. Forward it to the underlying I/O to cancel that work;
-  ignoring it only rejects the caller's wait. A caller signal cancels the whole chain.
+  ignoring it only rejects the caller's wait. Caller cancellation stops retries and queued work.
 - A full bulkhead rejects after its queue fills; omitted `maxQueue` means no waiting queue.
 
 ## Other options
 
 - `retry: true`, `circuitBreaker: true` and `bulkhead: true` require matching `defaultRetry`,
   `defaultCircuitBreaker` and `defaultBulkhead` policies on `ResiliencePlugin`.
-- Omitted or `false` policy layers are disabled; an explicit object overrides the default.
+- Omitted/`false` layers are disabled; an object overrides the default.
 - `TimeoutError`, `BulkheadFullError` and `CircuitOpenError` carry HTTP hints 504, 503 and 503.

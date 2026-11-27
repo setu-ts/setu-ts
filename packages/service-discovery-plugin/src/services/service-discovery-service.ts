@@ -2,7 +2,7 @@
  * `ServiceDiscoveryService` — the {@linkcode IServiceDiscovery} implementation
  * registered under `CAPABILITIES.SERVICE_DISCOVERY`.
  *
- * Owns the read-through cache, the in-flight coalescing, the balancer, and the
+ * Owns the background-refreshed cache, the in-flight coalescing, the balancer, and the
  * ejection filter, so a provider only answers "who is running this service".
  *
  * @module
@@ -12,6 +12,7 @@ import {
   describeError,
   resolveProbeTiming,
   withHttpStatusHint,
+  withDeadline,
 } from '@setu-ts/common';
 import type {
   ConnectionErrorReporter,
@@ -20,14 +21,19 @@ import type {
   PickOptions,
   ServiceInstance,
   ServiceOutcome,
+  TimerHandle,
   Unsubscribe,
 } from '@setu-ts/common';
 import type { DiscoveryProvider } from '../interfaces/index.ts';
 import type { ResolvedDiscoveryOptions } from '../options.ts';
 import { createLoadBalancer, type LoadBalancer } from '../balancer/load-balancer.ts';
+import { RefreshBackoff } from './refresh-backoff.ts';
 import { EjectionTracker } from './ejection-tracker.ts';
 import { instanceUrl } from '../url/instance-url.ts';
 import { DiscoveryUnavailableError } from '../errors.ts';
+
+/** Cached names that have only ever answered empty, before the oldest is evicted. */
+const MAX_EMPTY_ONLY_NAMES = 256;
 
 /** A reporter that drops every report, for a service built without one. */
 const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} };
@@ -36,6 +42,24 @@ const SILENT_REPORTER: ConnectionErrorReporter = { report() {}, recovered() {} }
 interface CacheEntry {
   instances: readonly ServiceInstance[];
   stampMs: number;
+  servedSinceMs: number;
+  snapshot: readonly ReturnType<typeof snapshotInstance>[];
+  failed: boolean;
+  emptySince?: number;
+}
+
+/** A cache acceptance and whether its list changed. */
+interface IAcceptedAnswer {
+  readonly instances: readonly ServiceInstance[];
+  readonly changed: boolean;
+}
+
+/** One backend watch shared by a name's subscribers. */
+interface INameWatch {
+  readonly listeners: Set<(instances: readonly ServiceInstance[]) => void>;
+  ready: Promise<void>;
+  stop: Unsubscribe | undefined;
+  closed: boolean;
 }
 
 /**
@@ -54,10 +78,24 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   readonly #cache = new Map<string, CacheEntry>();
   readonly #inFlight = new Map<string, Promise<readonly ServiceInstance[]>>();
   readonly #watches = new Set<Unsubscribe>();
-  #degraded = false;
+  readonly #backoff: RefreshBackoff;
+  readonly #resolveReporters = new Map<string, ConnectionErrorReporter>();
+  readonly #resolveReporter: (name: string, warm: boolean) => ConnectionErrorReporter;
+  readonly #onListenerError: (name: string, error: unknown) => void;
+  readonly #listenerCalls = new WeakMap<(instances: readonly ServiceInstance[]) => void, number>();
+  readonly #listenerFailures = new Map<
+    string,
+    Set<(instances: readonly ServiceInstance[]) => void>
+  >();
+  readonly #watchSequences = new Map<string, number>();
+  readonly #nameWatches = new Map<string, INameWatch>();
+  /** Cached names that have only ever answered empty, oldest first. */
+  readonly #emptyOnly = new Set<string>();
+  readonly #emptyTimers = new Map<string, TimerHandle>();
+  #closed = false;
   /**
    * M70c: set on the first successful provider read. Distinct from
-   * `#degraded` (which requires a prior success to fall back to), this is what
+   * per-name failure state, this is what
    * lets the indicator report `down` for a provider that has never once
    * reached its backend — the X10-3 case.
    */
@@ -69,13 +107,22 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
    * @param options - Options after defaults
    * @param reporter - Receives each probe failure's reason and each recovery
    *   (M139f X10-3); the plugin passes a logging reporter
+   * @param resolveReporter - Builds an independent reporter for each failing name;
+   *   `warm` says whether the name already has a non-empty cached list
+   * @param onListenerError - Receives one listener error per name until every failing listener has succeeded or unsubscribed, or the watch stopped
    */
   constructor(
     provider: DiscoveryProvider,
     runtime: IRuntimeServices,
     options: ResolvedDiscoveryOptions,
     reporter: ConnectionErrorReporter = SILENT_REPORTER,
+    resolveReporter: (name: string, warm: boolean) => ConnectionErrorReporter = () =>
+      SILENT_REPORTER,
+    onListenerError: (name: string, error: unknown) => void = () => {},
   ) {
+    this.#backoff = new RefreshBackoff(() => runtime.hrtime());
+    this.#resolveReporter = resolveReporter;
+    this.#onListenerError = onListenerError;
     this.#provider = provider;
     this.#runtime = runtime;
     this.#options = options;
@@ -113,9 +160,20 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     return this.#provider.kind;
   }
 
-  /** Whether the last refresh failed and a stale snapshot is being served. */
+  /** Whether a warm name last failed or holds an empty answer during its grace. */
   get degraded(): boolean {
-    return this.#degraded;
+    return [...this.#cache.values()].some(
+      (entry) => entry.failed || entry.emptySince !== undefined,
+    );
+  }
+
+  /** Age of the oldest list whose last refresh failed, or zero. */
+  get staleForMs(): number {
+    let age = 0;
+    for (const entry of this.#cache.values()) {
+      if (entry.failed) age = Math.max(age, this.#runtime.hrtime() - entry.servedSinceMs);
+    }
+    return age;
   }
 
   /**
@@ -154,29 +212,32 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
   }
 
   async resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+    if (this.#closed) throw new DiscoveryUnavailableError('Service discovery is closed.');
     const cached = this.#cache.get(serviceName);
-    if (
-      cached !== undefined &&
-      this.#options.cacheTtlMs > 0 &&
-      this.#runtime.hrtime() - cached.stampMs < this.#options.cacheTtlMs
-    ) {
+    if (cached !== undefined) {
+      if (
+        this.#runtime.hrtime() - cached.stampMs >= this.#options.cacheTtlMs &&
+        !this.#inFlight.has(serviceName) &&
+        this.#backoff.ready(serviceName)
+      ) {
+        void this.#startRead(serviceName).catch(() => {
+          /* Failure is recorded by #read. */
+        });
+      }
       return cached.instances;
     }
+    return await (this.#inFlight.get(serviceName) ?? this.#startRead(serviceName));
+  }
 
-    // Coalesced per name: a burst of concurrent picks for one cold service
-    // issues ONE backend read, not one per caller.
-    const existing = this.#inFlight.get(serviceName);
-    if (existing !== undefined) {
-      return await existing;
-    }
-
-    const read = this.#read(serviceName, cached);
+  #startRead(serviceName: string): Promise<readonly ServiceInstance[]> {
+    const read = this.#read(serviceName).finally(() => {
+      if (this.#inFlight.get(serviceName) === read) this.#inFlight.delete(serviceName);
+      this.#scheduleEmptyRefresh(serviceName);
+      if (!this.#inFlight.has(serviceName) && !this.#nameWatches.has(serviceName))
+        this.#watchSequences.delete(serviceName);
+    });
     this.#inFlight.set(serviceName, read);
-    try {
-      return await read;
-    } finally {
-      this.#inFlight.delete(serviceName);
-    }
+    return read;
   }
 
   async pick(serviceName: string, options?: PickOptions): Promise<ServiceInstance | null> {
@@ -205,55 +266,347 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
     this.#ejection.record(instance.serviceName, instance, outcome, known);
   }
 
+  /**
+   * Subscribes to a full list through one shared provider watch per name.
+   * A later subscriber may receive the cached list immediately; repeated lists
+   * may be delivered. The backend watch stops with its last subscriber.
+   * @param serviceName - Logical service name
+   * @param listener - Receives the full current list; its failures are isolated
+   * @returns The unsubscribe function
+   */
   async watch(
     serviceName: string,
     listener: (instances: readonly ServiceInstance[]) => void,
   ): Promise<Unsubscribe> {
-    const unsubscribe = await this.#provider.watch(serviceName, (instances) => {
-      // A change makes the cached entry wrong immediately, so the TTL is a
-      // safety net for unwatched services rather than the freshness mechanism
-      // for watched ones.
-      this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
-      this.#degraded = false;
-      this.#everResolved = true;
-      listener(instances);
-    });
-
+    if (this.#closed) return () => {};
+    let state = this.#nameWatches.get(serviceName);
+    const joining = state !== undefined;
+    if (state === undefined) {
+      state = { listeners: new Set(), ready: Promise.resolve(), stop: undefined, closed: false };
+      this.#nameWatches.set(serviceName, state);
+      const created = state;
+      created.ready = Promise.resolve()
+        .then(() =>
+          created.closed
+            ? () => {}
+            : this.#provider.watch(serviceName, (instances) => {
+                if (!created.closed) {
+                  this.#watchSequences.set(
+                    serviceName,
+                    (this.#watchSequences.get(serviceName) ?? 0) + 1,
+                  );
+                  const accepted = this.#accept(serviceName, instances);
+                  this.#broadcast(serviceName, accepted.instances);
+                }
+              }),
+        )
+        .then((stop) => {
+          created.stop = stop;
+          if (created.closed) stop();
+        });
+    }
+    const subscribed = (instances: readonly ServiceInstance[]): unknown => listener(instances);
+    state.listeners.add(subscribed);
+    try {
+      const cached = this.#cache.get(serviceName);
+      if (joining && cached !== undefined)
+        this.#invokeListener(serviceName, subscribed, cached.instances);
+      await state.ready;
+    } catch (error) {
+      state.listeners.delete(subscribed);
+      if (state.listeners.size === 0) this.#stopWatch(serviceName, state);
+      throw error;
+    }
+    const active = state;
     const wrapped = (): void => {
       this.#watches.delete(wrapped);
-      unsubscribe();
+      active.listeners.delete(subscribed);
+      this.#forgetListener(serviceName, subscribed);
+      if (active.listeners.size === 0) this.#stopWatch(serviceName, active);
     };
+    if (this.#closed) return () => {};
     this.#watches.add(wrapped);
     return wrapped;
   }
 
-  /** Stops every active watch and drops ejection state. */
+  /**
+   * Stops watches and clears cache, refresh, retry, reporter and ejection state.
+   * @throws {AggregateError} After attempting every provider stop, if any failed
+   */
   close(): void {
-    for (const unsubscribe of [...this.#watches]) {
-      unsubscribe();
+    this.#closed = true;
+    // Invalidate every callback before running user/provider cleanup: a stop
+    // may throw or synchronously deliver through a different watch.
+    const stops: Unsubscribe[] = [];
+    for (const state of this.#nameWatches.values()) {
+      state.closed = true;
+      state.listeners.clear();
+      if (state.stop !== undefined) stops.push(state.stop);
     }
+    this.#nameWatches.clear();
     this.#watches.clear();
+    this.#cache.clear();
+    this.#inFlight.clear();
+    this.#backoff.clear();
+    this.#resolveReporters.clear();
+    this.#listenerFailures.clear();
+    this.#watchSequences.clear();
+    this.#emptyOnly.clear();
+    for (const name of this.#emptyTimers.keys()) this.#clearEmptyTimer(name);
     this.#ejection?.clear();
+    const errors: unknown[] = [];
+    for (const stop of stops) {
+      try {
+        stop();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0)
+      throw new AggregateError(errors, 'Service discovery watch cleanup failed.');
   }
 
-  /** Reads the backend, falling back to a stale entry when one exists. */
-  async #read(
-    serviceName: string,
-    stale: CacheEntry | undefined,
-  ): Promise<readonly ServiceInstance[]> {
+  #stopWatch(name: string, state: INameWatch): void {
+    if (state.closed) return;
+    state.closed = true;
+    state.listeners.clear();
+    this.#listenerFailures.delete(name);
+    if (this.#nameWatches.get(name) === state) this.#nameWatches.delete(name);
+    state.stop?.();
+    if (!this.#inFlight.has(name)) this.#watchSequences.delete(name);
+    if (!this.#closed) this.#evictEmptyOnly();
+  }
+
+  #clearEmptyTimer(name: string): void {
+    const timer = this.#emptyTimers.get(name);
+    if (timer !== undefined) this.#runtime.clearTimeout(timer);
+    this.#emptyTimers.delete(name);
+  }
+
+  #scheduleEmptyRefresh(name: string): void {
+    const entry = this.#cache.get(name);
+    if (this.#closed || entry?.emptySince === undefined || this.#emptyTimers.has(name)) return;
+    const delay = Math.max(
+      entry.emptySince + this.#options.emptyAnswerGraceMs - this.#runtime.hrtime(),
+      this.#backoff.remainingMs(name),
+    );
+    const timer = this.#runtime.setTimeout(
+      () => {
+        this.#emptyTimers.delete(name);
+        if (this.#closed || this.#cache.get(name)?.emptySince === undefined) return;
+        if (!this.#backoff.ready(name)) {
+          this.#scheduleEmptyRefresh(name);
+          return;
+        }
+        if (!this.#inFlight.has(name)) {
+          void this.#startRead(name).catch(() => {
+            /* #read records the failure. */
+          });
+        }
+      },
+      Math.max(0, delay),
+    );
+    this.#emptyTimers.set(name, timer);
+  }
+
+  #forgetListener(name: string, listener: (instances: readonly ServiceInstance[]) => void): void {
+    const failed = this.#listenerFailures.get(name);
+    failed?.delete(listener);
+    if (failed?.size === 0) this.#listenerFailures.delete(name);
+  }
+
+  #invokeListener(
+    name: string,
+    listener: (instances: readonly ServiceInstance[]) => void,
+    instances: readonly ServiceInstance[],
+  ): void {
+    const call = (this.#listenerCalls.get(listener) ?? 0) + 1;
+    this.#listenerCalls.set(listener, call);
+    const current = (): boolean =>
+      this.#listenerCalls.get(listener) === call &&
+      this.#nameWatches.get(name)?.listeners.has(listener) === true;
     try {
-      const instances = await this.#provider.resolve(serviceName);
-      this.#cache.set(serviceName, { instances, stampMs: this.#runtime.hrtime() });
-      this.#degraded = false;
-      this.#everResolved = true;
-      return instances;
+      const result: unknown = listener(instances);
+      if (
+        result !== null &&
+        (typeof result === 'object' || typeof result === 'function') &&
+        'then' in result &&
+        typeof result.then === 'function'
+      ) {
+        void Promise.resolve(result).then(
+          () => {
+            if (current()) this.#forgetListener(name, listener);
+          },
+          (error: unknown) => {
+            if (current()) this.#listenerFailed(name, listener, error);
+          },
+        );
+      } else if (current()) this.#forgetListener(name, listener);
     } catch (error) {
-      if (stale !== undefined) {
-        // Serving a slightly old address list beats serving none: the
-        // instances in it are overwhelmingly still up, and the alternative is
-        // failing every call while the backend is unreachable.
-        this.#degraded = true;
-        return stale.instances;
+      if (current()) this.#listenerFailed(name, listener, error);
+    }
+  }
+
+  #listenerFailed(
+    name: string,
+    listener: (instances: readonly ServiceInstance[]) => void,
+    error: unknown,
+  ): void {
+    const failed =
+      this.#listenerFailures.get(name) ??
+      new Set<(instances: readonly ServiceInstance[]) => void>();
+    const warn = failed.size === 0;
+    failed.add(listener);
+    this.#listenerFailures.set(name, failed);
+    if (warn) {
+      try {
+        this.#onListenerError(name, error);
+      } catch {
+        /* A diagnostic sink must not change discovery or skip subscribers. */
+      }
+    }
+  }
+
+  #broadcast(name: string, instances: readonly ServiceInstance[]): void {
+    const state = this.#nameWatches.get(name);
+    const sequence = this.#watchSequences.get(name);
+    for (const listener of [...(state?.listeners ?? [])]) {
+      if (state?.closed || this.#nameWatches.get(name) !== state) break;
+      if (this.#watchSequences.get(name) !== sequence) break;
+      if (state?.listeners.has(listener)) this.#invokeListener(name, listener, instances);
+    }
+  }
+
+  #resolveReporterFor(name: string): ConnectionErrorReporter {
+    // `warm`: the name has a non-empty list in hand, so a failure is an outage
+    // of a service already in use (the plugin never caps those warnings). An
+    // empty-only name (an absent name, possibly from a request) is not warm.
+    const warm = (this.#cache.get(name)?.instances.length ?? 0) > 0;
+    const reporter = this.#resolveReporters.get(name) ?? this.#resolveReporter(name, warm);
+    this.#resolveReporters.delete(name);
+    this.#resolveReporters.set(name, reporter);
+    const cold = [...this.#resolveReporters.keys()].filter(
+      (key) => (this.#cache.get(key)?.instances.length ?? 0) === 0,
+    );
+    if (cold.length > 256) this.#resolveReporters.delete(cold[0]!);
+    return reporter;
+  }
+
+  #readSucceeded(name: string): void {
+    this.#backoff.reset(name);
+    // The reporter lives only while the name's failure run is open, so the
+    // cold-name bound counts failures open now, never recovered or warm names.
+    const reporter = this.#resolveReporters.get(name);
+    if (reporter !== undefined) {
+      this.#resolveReporters.delete(name);
+      reporter.recovered();
+    }
+    this.#everResolved = true;
+  }
+
+  /**
+   * Evicts empty-only names until at most {@linkcode MAX_EMPTY_ONLY_NAMES}
+   * remain, oldest first, never a watched one or the one just stored, and a
+   * failing one only when no other is left; an evicted name's retry spacing
+   * and reporter go with it. Watched names can keep the set above the cap.
+   */
+  #evictEmptyOnly(current?: string): void {
+    while (this.#emptyOnly.size > MAX_EMPTY_ONLY_NAMES) {
+      const name =
+        this.#evictableEmptyOnly(current, false) ?? this.#evictableEmptyOnly(current, true);
+      if (name === undefined) return;
+      this.#emptyOnly.delete(name);
+      this.#cache.delete(name);
+      this.#backoff.reset(name);
+      this.#resolveReporters.delete(name);
+    }
+  }
+
+  /** The oldest evictable empty-only name; failing ones only when allowed. */
+  #evictableEmptyOnly(current: string | undefined, failing: boolean): string | undefined {
+    for (const name of this.#emptyOnly) {
+      if (name === current || this.#nameWatches.has(name)) continue;
+      if (!failing && this.#cache.get(name)?.failed === true) continue;
+      return name;
+    }
+    return undefined;
+  }
+
+  /** Store every successful read and watch delivery through the same empty rule. */
+  #accept(serviceName: string, instances: readonly ServiceInstance[]): IAcceptedAnswer {
+    const old = this.#cache.get(serviceName);
+    const now = this.#runtime.hrtime();
+    const emptySince = old?.emptySince ?? now;
+    const held =
+      instances.length === 0 &&
+      old !== undefined &&
+      old.instances.length > 0 &&
+      now - emptySince < this.#options.emptyAnswerGraceMs;
+    const accepted = held ? old.instances : instances;
+    // Names that have only ever answered empty (absent DNS names, services not
+    // yet registered) are cached like any other, so `cacheTtlMs` still spaces
+    // their reads and watchers still see them. Their number is bounded: past
+    // the cap, the oldest unwatched one is evicted, so names taken from
+    // requests that only answer empty cannot grow it without bound. Nonempty
+    // names remain until close; an answering wildcard can grow that cache.
+    if (accepted.length === 0 && (old === undefined || this.#emptyOnly.has(serviceName))) {
+      this.#emptyOnly.delete(serviceName);
+      this.#emptyOnly.add(serviceName);
+    } else {
+      this.#emptyOnly.delete(serviceName);
+    }
+    this.#cache.set(serviceName, {
+      instances: accepted,
+      stampMs: now,
+      servedSinceMs: held ? old.servedSinceMs : now,
+      snapshot: accepted.map(snapshotInstance),
+      failed: false,
+      ...(held ? { emptySince } : {}),
+    });
+    this.#readSucceeded(serviceName);
+    this.#evictEmptyOnly(serviceName);
+    if (held) this.#scheduleEmptyRefresh(serviceName);
+    else this.#clearEmptyTimer(serviceName);
+    const changed =
+      old === undefined || !sameInstances(old.snapshot, this.#cache.get(serviceName)!.snapshot);
+    return { instances: accepted, changed };
+  }
+
+  async #read(serviceName: string): Promise<readonly ServiceInstance[]> {
+    const sequence = this.#watchSequences.get(serviceName) ?? 0;
+    let instances: readonly ServiceInstance[];
+    try {
+      const ms = this.#options.resolveTimeoutMs;
+      instances = await withDeadline(
+        (signal) => {
+          if (this.#closed) throw new DiscoveryUnavailableError('Service discovery is closed.');
+          return this.#provider.resolve(serviceName, signal);
+        },
+        {
+          timeoutMs: ms,
+          timing: resolveProbeTiming(this.#runtime),
+          onTimeout: () =>
+            new Error(
+              `${this.#provider.kind} discovery did not answer the read for '${serviceName}' within ${ms} ms`,
+            ),
+        },
+      );
+    } catch (error) {
+      if (!this.#closed) {
+        const stale = this.#cache.get(serviceName);
+        // A newer watch delivery arrived while this read was in flight: the
+        // list in hand is fresher than the failed read, so it is not marked
+        // failed and no retry spacing starts.
+        if ((this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
+          // An evicted watch entry was empty-only, so its newest answer is still [].
+          return stale?.instances ?? [];
+        }
+        this.#resolveReporterFor(serviceName).report(error);
+        if (stale !== undefined) {
+          stale.failed = true;
+          this.#backoff.failed(serviceName);
+          return stale.instances;
+        }
       }
       // A provider's own DiscoveryUnavailableError is a configuration fault (a
       // multi-port Kubernetes service with no portName), not an outage: it
@@ -273,5 +626,58 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
         },
       );
     }
+    if (this.#closed) return instances;
+    if ((this.#watchSequences.get(serviceName) ?? 0) !== sequence) {
+      this.#readSucceeded(serviceName);
+      return this.#cache.get(serviceName)?.instances ?? [];
+    }
+    const accepted = this.#accept(serviceName, instances);
+    if (accepted.changed) this.#broadcast(serviceName, accepted.instances);
+    return accepted.instances;
   }
+}
+
+/** Read the committed ServiceInstance fields, including prototype accessors. */
+function snapshotInstance(instance: ServiceInstance) {
+  return {
+    id: instance.id,
+    serviceName: instance.serviceName,
+    host: instance.host,
+    port: instance.port,
+    secure: instance.secure,
+    weight: instance.weight,
+    tags: instance.tags === undefined ? undefined : [...instance.tags],
+    metadata: instance.metadata === undefined ? undefined : { ...instance.metadata },
+  };
+}
+
+/** Compare field values; object identity and property enumerability do not define a change. */
+function sameInstances(
+  before: readonly ReturnType<typeof snapshotInstance>[],
+  after: readonly ReturnType<typeof snapshotInstance>[],
+): boolean {
+  return (
+    before.length === after.length &&
+    before.every((a, index) => {
+      const b = after[index]!;
+      return (
+        a.id === b.id &&
+        a.serviceName === b.serviceName &&
+        a.host === b.host &&
+        a.port === b.port &&
+        a.secure === b.secure &&
+        a.weight === b.weight &&
+        (a.tags === undefined
+          ? b.tags === undefined
+          : b.tags !== undefined &&
+            a.tags.length === b.tags.length &&
+            a.tags.every((tag, i) => tag === b.tags![i])) &&
+        (a.metadata === undefined
+          ? b.metadata === undefined
+          : b.metadata !== undefined &&
+            Object.keys(a.metadata).length === Object.keys(b.metadata).length &&
+            Object.entries(a.metadata).every(([key, value]) => b.metadata![key] === value))
+      );
+    })
+  );
 }

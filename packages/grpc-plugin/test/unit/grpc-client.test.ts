@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { CAPABILITIES } from '@setu-ts/common';
+import { describe, expect, it, vi } from 'vitest';
+import { Code, ConnectError } from '@connectrpc/connect';
+import { CAPABILITIES, UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN } from '@setu-ts/common';
 import type {
   GrpcClientOptions,
   GrpcServiceDefinition,
@@ -16,7 +17,6 @@ import {
   CLIENT_MAX_SESSION_MEMORY_MB,
   GrpcClients,
   instanceOrigin,
-  isRefusedStream,
   MAX_CLIENT_ORIGINS,
   MAX_CLIENTS_PER_DEFINITION,
   targetBase,
@@ -24,6 +24,9 @@ import {
   WORKERS_REFUSAL,
 } from '../../src/client/grpc-client.ts';
 import type { GrpcClientDeps } from '../../src/client/grpc-client.ts';
+import { isRefusedStream } from '../../src/client/call-outcome.ts';
+import { PeerHeaderListLimitError } from '../../src/client/header-list-guard.ts';
+import { loadConnectModule } from '../../src/transports/connect-loader.ts';
 import { grpcClient } from '../../src/client/grpc-client-helper.ts';
 import {
   CONNECT_NODE_SPECIFIER,
@@ -31,16 +34,250 @@ import {
   loadConnectNode,
 } from '../../src/client/connect-node-loader.ts';
 import type { ConnectNodeModuleLike } from '../../src/client/connect-node-loader.ts';
-import { GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
+import { GrpcExcessiveLoadError, GrpcRuntimeLoadError } from '../../src/errors/grpc-errors.ts';
 import type { ClientTransportLike } from '../../src/interfaces/connect-runtime.ts';
 import { GrpcService } from '../../src/services/grpc-service.ts';
 import { EmbeddedDescriptors } from '../../src/descriptors/embedded-descriptors.ts';
 import {
   createFakeConnectRuntime,
+  FakeResourceExhaustedError,
   FakeUnavailableError,
 } from '../fixtures/fake-connect-runtime.ts';
 
 const BILLING: GrpcServiceDefinition = { typeName: 'billing.v1.BillingService', method: {} };
+
+describe('unprocessed shutdown answers', () => {
+  const marked = (wire: boolean) => {
+    const error = Object.assign(new FakeUnavailableError('draining'), { isWireError: wire });
+    error.metadata.set(UNPROCESSED_HEADER, UNPROCESSED_SHUTDOWN);
+    return error;
+  };
+  for (const stop of ['abort', 'deadline', 'unbounded abort'] as const) {
+    for (const late of ['resolve', 'reject'] as const) {
+      it(`settles a pending retry pick on ${stop} before its late ${late}`, async () => {
+        vi.useFakeTimers();
+        const controller = new AbortController();
+        const refusal = marked(true);
+        const discovery = fakeDiscovery([instance('first', 1)]);
+        let picks = 0;
+        let finish!: (found: ServiceInstance) => void;
+        let fail!: (error: Error) => void;
+        const picking = new Promise<ServiceInstance>((yes, no) => {
+          finish = yes;
+          fail = no;
+        });
+        discovery.pick = () => (++picks === 1 ? Promise.resolve(instance('first', 1)) : picking);
+        let sends = 0;
+        const { clients: c } = clients(
+          { discovery: () => discovery, clock: () => performance.now() },
+          fakeNode(() => {
+            sends++;
+            return Promise.reject(refusal);
+          }),
+        );
+        const client = c.client(BILLING, 'billing') as { transport: ClientTransportLike };
+        let settled = false;
+        let result: unknown;
+        const pending = client.transport
+          .unary({}, controller.signal, stop === 'unbounded abort' ? 0 : 100, undefined, {})
+          .catch((error: unknown) => {
+            settled = true;
+            result = error;
+          });
+        try {
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(picks).toBe(2);
+          if (stop === 'deadline') await vi.advanceTimersByTimeAsync(100);
+          else controller.abort(new Error('caller stopped'));
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(settled).toBe(true);
+          expect(result).toBe(refusal);
+          if (late === 'resolve') finish(instance('late', 2));
+          else fail(new Error('late pick failure'));
+          await pending;
+          for (let n = 0; n < 50; n++) await Promise.resolve();
+          expect(sends).toBe(1);
+          expect(discovery.reports).toEqual([['first', 'failure']]);
+          expect(vi.getTimerCount()).toBe(0);
+        } finally {
+          finish(instance('cleanup', 2));
+          await pending;
+          c.close();
+          vi.useRealTimers();
+        }
+      });
+    }
+  }
+  it('preserves the first refusal when retry setup rejects after the budget', async () => {
+    let now = 0;
+    const refusal = marked(false);
+    const discovery = fakeDiscovery([instance('first', 1)]);
+    let picks = 0;
+    discovery.pick = () => {
+      if (++picks === 1) return Promise.resolve(instance('first', 1));
+      now = 101;
+      return Promise.reject(new Error('late resolution failure'));
+    };
+    const { clients: c } = clients(
+      { discovery: () => discovery, clock: () => now },
+      fakeNode(() => Promise.reject(refusal)),
+    );
+    try {
+      await expect(call(c.client(BILLING, 'billing'), undefined, 100)).rejects.toBe(refusal);
+      expect(discovery.reports).toEqual([['first', 'failure']]);
+    } finally {
+      c.close();
+    }
+  });
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, 3e9])(
+    'resends marked Unavailable when the per-call timeout is out of timer range (%s)',
+    async (timeoutMs) => {
+      const discovery = fakeDiscovery([instance('draining', 1), instance('live', 2)]);
+      let attempts = 0;
+      const node = fakeNode(() =>
+        ++attempts === 1 ? Promise.reject(marked(false)) : Promise.resolve('ok'),
+      );
+      const { clients: c } = clients({ discovery: () => discovery }, node);
+      try {
+        expect(await call(c.client(BILLING, 'billing'), undefined, timeoutMs)).toBe('ok');
+        expect(attempts).toBe(2);
+      } finally {
+        c.close();
+      }
+    },
+  );
+  it.each([false, true])(
+    'resends marked Unavailable once on a new pick with the remaining deadline (wire=%s)',
+    async (wire) => {
+      const discovery = fakeDiscovery([instance('draining', 1), instance('live', 2)]);
+      let now = 0;
+      let attempts = 0;
+      const error = marked(wire);
+      const node = fakeNode(() => {
+        if (++attempts === 1) {
+          now = 25.2;
+          return Promise.reject(error);
+        }
+        return Promise.resolve('ok');
+      });
+      const { clients: c } = clients({ discovery: () => discovery, clock: () => now }, node);
+      expect(await call(c.client(BILLING, 'billing'), undefined, 100)).toBe('ok');
+      expect(attempts).toBe(2);
+      expect(
+        node.built.map((built) => [built.options['baseUrl'], built.calls[0]!.timeoutMs]),
+      ).toEqual([
+        ['http://127.0.0.1:1', 100],
+        ['http://127.0.0.1:2', 74],
+      ]);
+      expect(discovery.reports).toEqual([
+        ['draining', 'failure'],
+        ['live', 'success'],
+      ]);
+    },
+  );
+  it.each(['missing', 'other value', 'other code', 'stream'] as const)(
+    'does not resend %s',
+    async (kind) => {
+      const error = kind === 'other code' ? new FakeResourceExhaustedError('busy') : marked(true);
+      if (kind === 'missing') error.metadata.delete(UNPROCESSED_HEADER);
+      else
+        error.metadata.set(
+          UNPROCESSED_HEADER,
+          kind === 'other value' ? 'Shutdown' : UNPROCESSED_SHUTDOWN,
+        );
+      let attempts = 0;
+      const node = fakeNode(() => {
+        attempts++;
+        return Promise.reject(error);
+      });
+      const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+      const { clients: c } = clients({ discovery: () => discovery }, node);
+      const client = c.client(BILLING, 'billing');
+      await expect(kind === 'stream' ? callStream(client) : call(client)).rejects.toBe(error);
+      expect(attempts).toBe(1);
+      expect(discovery.reports).toHaveLength(1);
+    },
+  );
+  it('surfaces the second marked error without a third send', async () => {
+    const errors = [marked(false), marked(true)];
+    let attempts = 0;
+    const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+    const { clients: c } = clients(
+      { discovery: () => discovery },
+      fakeNode(() => Promise.reject(errors[attempts++])),
+    );
+    await expect(call(c.client(BILLING, 'billing'))).rejects.toBe(errors[1]);
+    expect(attempts).toBe(2);
+    expect(discovery.reports).toEqual([
+      ['a', 'failure'],
+      ['b', 'failure'],
+    ]);
+  });
+  it('does not resend after the deadline is spent', async () => {
+    let now = 0;
+    let attempts = 0;
+    const error = marked(false);
+    const { clients: c } = clients(
+      { clock: () => now },
+      fakeNode(() => {
+        attempts++;
+        now = 100;
+        return Promise.reject(error);
+      }),
+    );
+    await expect(call(c.client(BILLING, 'http://h:1'), undefined, 100)).rejects.toBe(error);
+    expect(attempts).toBe(1);
+  });
+  it('does not resend when the caller aborts between the refusal and the resend', async () => {
+    const controller = new AbortController();
+    let reads = 0;
+    let attempts = 0;
+    const error = marked(false);
+    const { clients: c } = clients(
+      {
+        clock: () => {
+          if (++reads === 2) controller.abort();
+          return 0;
+        },
+      },
+      fakeNode(() => {
+        attempts++;
+        return Promise.reject(error);
+      }),
+    );
+    const client = c.client(BILLING, 'http://h:1') as { transport: ClientTransportLike };
+    await expect(client.transport.unary({}, controller.signal, 100, undefined, {})).rejects.toBe(
+      error,
+    );
+    expect(attempts).toBe(1);
+  });
+  it('does not send if the caller aborts while the resend is picking an instance', async () => {
+    const controller = new AbortController();
+    const error = marked(true);
+    let attempts = 0;
+    const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+    const pick = discovery.pick.bind(discovery);
+    let picks = 0;
+    discovery.pick = (name, options) => {
+      if (++picks === 2) controller.abort();
+      return pick(name, options);
+    };
+    const { clients: c } = clients(
+      { discovery: () => discovery },
+      fakeNode(() => {
+        attempts++;
+        return Promise.reject(error);
+      }),
+    );
+    const client = c.client(BILLING, 'billing') as { transport: ClientTransportLike };
+    await expect(client.transport.unary({}, controller.signal, 100, undefined, {})).rejects.toBe(
+      error,
+    );
+    expect(picks).toBe(2);
+    expect(attempts).toBe(1);
+    expect(discovery.reports).toEqual([['a', 'failure']]);
+  });
+});
 
 /** What a fake transport was asked to do, and with which options it was built. */
 interface Built {
@@ -120,6 +357,9 @@ function fakeNode(outcome: () => Promise<unknown> = () => Promise.resolve('ok'))
         }
         abort(): void {
           this.#entry.aborted = true;
+        }
+        request(): Promise<never> {
+          return Promise.reject(new Error('the fake transport never opens a stream'));
         }
         state(): string {
           stateReads.count++;
@@ -460,9 +700,14 @@ describe('GrpcClients', () => {
       'http://127.0.0.1:1/grpc',
       'http://127.0.0.1:2/grpc',
     ]);
-    fail = new FakeUnavailableError('refused');
+    fail = Object.assign(new FakeUnavailableError('refused'), {
+      cause: Object.assign(new Error('connect failed'), { code: 'ECONNREFUSED' }),
+    });
     await expect(call(client)).rejects.toBe(fail);
-    fail = new Error('InvalidArgument from the server');
+    fail = Object.assign(new Error('InvalidArgument from the server'), {
+      code: 3,
+      isWireError: true,
+    });
     await expect(callStream(client)).rejects.toBe(fail);
     expect(discovery.reports).toEqual([
       ['a', 'success'],
@@ -738,7 +983,7 @@ describe('GrpcClients', () => {
     expect(error).toBeInstanceOf(GrpcRuntimeLoadError);
     expect((error as GrpcRuntimeLoadError).specifier).toBe(CONNECT_NODE_SPECIFIER);
     expect((error as Error).message).toBe(
-      'Cannot load Connect runtime module: @connectrpc/connect-node. Run: deno add npm:@connectrpc/connect-node@^2.1.2 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node',
+      'Cannot load Connect runtime module: @connectrpc/connect-node. Run: deno add npm:@connectrpc/connect-node@^2.2.0 · npm i @connectrpc/connect-node · bun add @connectrpc/connect-node',
     );
   });
 });
@@ -830,6 +1075,41 @@ function connectNodeReading(
 }
 
 describe('refused streams (REFUSED_STREAM)', () => {
+  it('resends an undersized header-limit refusal once and preserves size and limit if both picks refuse', async () => {
+    const real = await loadConnectModule();
+    for (const succeeds of [true, false]) {
+      const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+      const local = new PeerHeaderListLimitError(8192, 1024);
+      const wrapped = ConnectError.from(local, Code.Internal);
+      expect(wrapped.cause).toBe(local);
+      let attempts = 0;
+      const node = fakeNode(() => {
+        attempts++;
+        return succeeds && attempts === 2 ? Promise.resolve('ok') : Promise.reject(wrapped);
+      });
+      const { clients: c } = clients(
+        {
+          discovery: () => discovery,
+          runtime: { ...createFakeConnectRuntime(), unavailable: real.unavailable },
+        },
+        node,
+      );
+      const result: unknown = await call(c.client(BILLING, 'billing')).catch((e: unknown) => e);
+      expect(attempts).toBe(2);
+      expect(discovery.reports).toEqual([
+        ['a', 'failure'],
+        ['b', succeeds ? 'success' : 'failure'],
+      ]);
+      if (succeeds) expect(result).toBe('ok');
+      else {
+        expect(result).toBeInstanceOf(ConnectError);
+        expect((result as ConnectError).code).toBe(Code.Unavailable);
+        expect((result as ConnectError).rawMessage).toBe(local.message);
+        expect((result as Error).cause).toBe(wrapped);
+      }
+    }
+  });
+
   it.each([
     ['Node stream error in the cause chain', nodeRefusal(), true],
     ["connect-node's reset-code reading", connectNodeReading(), true],
@@ -920,6 +1200,71 @@ describe('refused streams (REFUSED_STREAM)', () => {
       ['a', 'failure'],
       ['a', 'failure'],
     ]);
+  });
+
+  it('neither reports nor resends a call the server reset with ENHANCE_YOUR_CALM, and names it', async () => {
+    const calm = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+      },
+    );
+    for (const shape of [calm, new Error('[internal] reset', { cause: calm })]) {
+      const discovery = fakeDiscovery([instance('a', 1), instance('b', 2)]);
+      let attempts = 0;
+      const node = fakeNode(() => {
+        attempts++;
+        return Promise.reject(shape);
+      });
+      const { clients: c } = clients({ discovery: () => discovery }, node);
+      const error = (await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)) as Error & {
+        cause?: unknown;
+      };
+      expect(attempts).toBe(1);
+      expect(discovery.reports).toEqual([]);
+      expect(error).toBeInstanceOf(FakeResourceExhaustedError);
+      expect(error.cause).toBeInstanceOf(GrpcExcessiveLoadError);
+      expect(error.message).toBe((error.cause as Error).message);
+      expect((error.cause as Error & { cause?: unknown }).cause).toBe(shape);
+      expect(isRefusedStream(error)).toBe(false);
+    }
+  });
+
+  it('a wire error copying the ENHANCE_YOUR_CALM text follows the normal outcome rule', async () => {
+    const discovery = fakeDiscovery([instance('a', 1)]);
+    const copied = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+        isWireError: true,
+      },
+    );
+    const node = fakeNode(() => Promise.reject(copied));
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    expect(await call(c.client(BILLING, 'billing')).catch((e: unknown) => e)).toBe(copied);
+    expect(discovery.reports).toEqual([['a', 'failure']]);
+  });
+
+  it('a caller abort during an ENHANCE_YOUR_CALM reset rethrows the original error', async () => {
+    const discovery = fakeDiscovery([instance('a', 1)]);
+    const calm = Object.assign(
+      new Error('Stream closed with error code NGHTTP2_ENHANCE_YOUR_CALM'),
+      {
+        code: 'ERR_HTTP2_STREAM_ERROR',
+      },
+    );
+    const abort = new AbortController();
+    const node = fakeNode(() => {
+      abort.abort();
+      return Promise.reject(calm);
+    });
+    const { clients: c } = clients({ discovery: () => discovery }, node);
+    const { transport } = c.client(BILLING, 'billing') as { transport: ClientTransportLike };
+    const error = await transport
+      .unary({}, abort.signal, undefined, undefined, {})
+      .catch((e: unknown) => e);
+    expect(error).toBe(calm);
+    expect(discovery.reports).toEqual([]);
   });
 
   it("keeps connect-node's own Unavailable reading as is, and fails the retry with a different error as that error", async () => {
@@ -1049,4 +1394,144 @@ describe('review fixes (M139b)', () => {
       expect(noDeadline.built[0]!.calls.map((x) => x.timeoutMs)).toEqual([none, none]);
     }
   });
+});
+
+it('reports unary deadline failure, omits caller abort, and reports streaming success only at headers', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080)]);
+  let error: unknown = Object.assign(new Error('deadline'), { code: 4 });
+  const node = fakeNode(() => Promise.reject(error));
+  const { clients: clientSet } = clients({ discovery: () => discovery }, node);
+  const client = clientSet.client(BILLING, 'billing');
+  await expect(call(client)).rejects.toBe(error);
+  expect(discovery.reports).toEqual([['a', 'failure']]);
+  discovery.reports.length = 0;
+  const abort = new AbortController();
+  abort.abort();
+  const transport = (client as { transport: ClientTransportLike }).transport;
+  error = Object.assign(new Error('canceled'), { code: 1 });
+  await expect(transport.unary({}, abort.signal, undefined, undefined, {})).rejects.toBe(error);
+  expect(discovery.reports).toEqual([]);
+  clientSet.close();
+  const streaming = clients(
+    { discovery: () => discovery },
+    fakeNode(() =>
+      Promise.resolve({
+        message: {
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('late deadline')),
+          }),
+        },
+      }),
+    ),
+  );
+  const result = (await callStream(streaming.clients.client(BILLING, 'billing'))) as {
+    message: AsyncIterable<unknown>;
+  };
+  await expect(result.message[Symbol.asyncIterator]().next()).rejects.toThrow('late deadline');
+  expect(discovery.reports).toEqual([['a', 'success']]);
+  streaming.clients.close();
+});
+
+it('does not resend an unmarked drain 503', async () => {
+  let calls = 0;
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  const error = Object.assign(new FakeUnavailableError('HTTP 503'), {
+    metadata: new Headers({ 'content-type': 'text/plain' }),
+  });
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      return Promise.reject(error);
+    }),
+  );
+  await expect(call(clientSet.client(BILLING, 'billing'))).rejects.toBe(error);
+  expect(calls).toBe(1);
+  expect(discovery.reports).toEqual([['a', 'failure']]);
+  clientSet.close();
+});
+
+it('neither reports nor retries a caller-aborted refused stream', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  const abort = new AbortController();
+  const refused = Object.assign(new Error('NGHTTP2_REFUSED_STREAM'), {
+    code: 'ERR_HTTP2_STREAM_ERROR',
+  });
+  let calls = 0;
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      abort.abort();
+      return Promise.reject(refused);
+    }),
+  );
+  const client = clientSet.client(BILLING, 'billing') as { transport: ClientTransportLike };
+  await expect(client.transport.unary({}, abort.signal, undefined, undefined, {})).rejects.toBe(
+    refused,
+  );
+  expect(calls).toBe(1);
+  expect(discovery.reports).toEqual([]);
+  clientSet.close();
+});
+
+it('refuses an invalid caller header before picking or reporting an instance', async () => {
+  const discovery = fakeDiscovery([instance('a', 8080), instance('b', 8081)]);
+  let picks = 0;
+  const pick = discovery.pick.bind(discovery);
+  discovery.pick = (...args: Parameters<typeof pick>) => {
+    picks++;
+    return pick(...args);
+  };
+  let calls = 0;
+  const { clients: clientSet } = clients(
+    { discovery: () => discovery },
+    fakeNode(() => {
+      calls++;
+      return Promise.resolve({});
+    }),
+  );
+  const client = clientSet.client(BILLING, 'billing') as { transport: ClientTransportLike };
+  for (const header of [{ 'x a': '1' }, { 'x-a': 'a\nb' }, { 'x-a': 'é€' }]) {
+    await expect(
+      client.transport.unary({}, undefined, undefined, header, {}),
+    ).rejects.toBeInstanceOf(TypeError);
+    await expect(
+      client.transport.stream({}, undefined, undefined, header, (async function* () {})()),
+    ).rejects.toBeInstanceOf(TypeError);
+  }
+  expect(picks).toBe(0);
+  expect(calls).toBe(0);
+  expect(discovery.reports).toEqual([]);
+  // A valid header, given as a plain object, still reaches the transport.
+  await client.transport.unary({}, undefined, undefined, { 'x-a': 'ok' }, {});
+  expect(calls).toBe(1);
+  clientSet.close();
+});
+
+it('does not send or report a resend whose pick consumed the remaining deadline', async () => {
+  const discovery = fakeDiscovery([instance('first', 1), instance('second', 2)]);
+  let picks = 0;
+  let now = 0;
+  let sent = 0;
+  const pick = discovery.pick.bind(discovery);
+  discovery.pick = async (name) => {
+    const found = await pick(name);
+    if (++picks === 2) now = 101;
+    return found;
+  };
+  const refusal = Object.assign(new Error('NGHTTP2_REFUSED_STREAM'), {
+    code: 'ERR_HTTP2_STREAM_ERROR',
+  });
+  const node = fakeNode(() => {
+    sent++;
+    return Promise.reject(refusal);
+  });
+  const { clients: c } = clients({ discovery: () => discovery, clock: () => now }, node);
+  await expect(call(c.client(BILLING, 'billing'), undefined, 100)).rejects.toThrow(
+    'refused the call',
+  );
+  expect(picks).toBe(2);
+  expect(sent).toBe(1);
+  expect(discovery.reports).toEqual([['first', 'failure']]);
 });

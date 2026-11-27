@@ -120,6 +120,33 @@ async function startCaller(instances: { id: string; port: number }[]): Promise<I
 }
 
 describeNode('grpcClient — a member calling another through the plugin', () => {
+  it('splits 100 successful unary calls across two discovered ports under round robin', async () => {
+    const one = await startServer();
+    const two = await startServer();
+    const caller = await startCaller([
+      { id: 'one', port: one },
+      { id: 'two', port: two },
+    ]);
+    const discovery = caller.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+    const counts = new Map<string, number>();
+    const outcomes: string[] = [];
+    const report = discovery.report.bind(discovery);
+    discovery.report = (instance, outcome) => {
+      outcomes.push(outcome);
+      counts.set(instance.id, (counts.get(instance.id) ?? 0) + 1);
+      report(instance, outcome);
+    };
+    const { echo } = await definitions();
+    const client = grpcClient(caller.services, echo as never, 'echo') as unknown as EchoClient;
+    for (let n = 0; n < 100; n++)
+      expect((await client.echo({ message: 'balanced' })).response).toContain('echo: balanced');
+    expect(outcomes).toEqual(Array.from({ length: 100 }, () => 'success'));
+    expect(counts.size).toBe(2);
+    for (const count of counts.values()) {
+      expect(count).toBeGreaterThanOrEqual(40);
+      expect(count).toBeLessThanOrEqual(60);
+    }
+  });
   it('calls unary and streaming procedures over Connect and native gRPC', async () => {
     const port = await startServer();
     const caller = await startCaller([{ id: 'live', port }]);

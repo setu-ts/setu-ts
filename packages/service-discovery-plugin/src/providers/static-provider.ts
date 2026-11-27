@@ -35,7 +35,9 @@ export class StaticProvider implements DiscoveryProvider {
     this.#runtime = runtime;
   }
 
-  resolve(serviceName: string): Promise<readonly ServiceInstance[]> {
+  resolve(serviceName: string, signal?: AbortSignal): Promise<readonly ServiceInstance[]> {
+    // An in-memory read has no cancellable I/O.
+    void signal;
     return Promise.resolve(this.#instances(serviceName));
   }
 
