@@ -40,24 +40,25 @@ A malformed handshake is refused before the connection opens: no `onOpen` or `on
 `Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400 on every runtime. A
 `Sec-WebSocket-Version` the runtime does not speak is refused too: Node (`ws`) and Deno accept 13
 and 8 and answer anything else 400 with `Sec-WebSocket-Version: 13, 8`; Bun and Workers accept 13
-only and answer 426 (Workers with `Upgrade: websocket` and `Sec-WebSocket-Version: 13`; Bun's own
-426 carries no `Upgrade`). On Workers the adapter applies these checks itself, before the platform
-creates the socket pair, because workerd checks the handshake only after the Worker has accepted it.
-It checks requests from the edge, which workerd marks with `request.cf`. A Worker-to-Worker call
-over a service binding or Durable Object stub has no `cf` and no key (workerd builds that
-handshake), so it is not checked and opens as before — including Cloudflare's documented form,
-`fetch(url, { headers: { Upgrade: 'websocket' } })` with no `Connection: Upgrade`. On Node, Bun and
-Deno a request without `Connection: Upgrade` is not an upgrade (RFC 6455) and gets the route's 404.
-Three limits remain. In local dev (`wrangler dev` puts its own proxy Worker in front) and behind any
-gateway Worker, workerd gives the app a rebuilt handshake (a fresh valid key) whatever the client
-sent, so the pre-check cannot see a malformed one there and the route's `onOpen` runs before the
-client is refused. A gateway that forwards with `new Request(url, request)` keeps `cf`; one that
-forwards only the headers (`fetch(url, { headers: request.headers })`) does not, and the request is
-then treated as a Worker-to-Worker call. Where an edge request lacks `cf`, as in the dashboard
-preview, it is treated as a Worker-to-Worker call: the check is skipped and an Upgrade-only request
-is routed as an upgrade. And whether production Cloudflare hands the Worker the client's own
-handshake headers, which is what the pre-check needs, is not verified by this repository's tests,
-which run on local workerd. Browsers send version 13.
+only and answer 426 (Workers with `Upgrade: websocket`, `Connection: Upgrade` and
+`Sec-WebSocket-Version: 13`; Bun's own 426 carries no `Upgrade`). On Workers the adapter applies
+these checks itself, before the platform creates the socket pair, because workerd checks the
+handshake only after the Worker has accepted it. It checks requests from the edge, which workerd
+marks with `request.cf`. A Worker-to-Worker call over a service binding or Durable Object stub has
+no `cf` and no key (workerd builds that handshake), so it is not checked and opens as before —
+including Cloudflare's documented form, `fetch(url, { headers: { Upgrade: 'websocket' } })` with no
+`Connection: Upgrade`. On Node, Bun and Deno a request without `Connection: Upgrade` is not an
+upgrade (RFC 6455) and gets the route's 404. Three limits remain. In local dev (`wrangler dev` puts
+its own proxy Worker in front) and behind any gateway Worker, workerd gives the app a rebuilt
+handshake (a fresh valid key) whatever the client sent, so the pre-check cannot see a malformed one
+there and the route's `onOpen` runs before the client is refused. A gateway that forwards with
+`new Request(url, request)` keeps `cf`; one that forwards only the headers
+(`fetch(url, { headers: request.headers })`) does not, and the request is then treated as a
+Worker-to-Worker call. Where an edge request lacks `cf`, as in the dashboard preview, it is treated
+as a Worker-to-Worker call: the check is skipped and an Upgrade-only request is routed as an
+upgrade. And whether production Cloudflare hands the Worker the client's own handshake headers,
+which is what the pre-check needs, is not verified by this repository's tests, which run on local
+workerd. Browsers send version 13.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
@@ -214,19 +215,19 @@ new `ws.room('lobby')` reach the same connections, once each.
 
 ## Options
 
-| Option             | Type                                                                 | Default     | Description                                                                                                                                                                 |
-| ------------------ | -------------------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's own, that may open a socket. Exact http(s) origins (`'https://app.example.com'`), no wildcards; an invalid entry throws at construction. |
-| `checkOrigin`      | `boolean`                                                            | `true`      | Check every handshake's `Origin` (see below). `false` admits any origin.                                                                                                    |
-| `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                                          |
-| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval, from `0` to 2147483647; `0` disables it and creates no timer at all. Anything else throws.                                                              |
-| `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                            |
-| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a peer is closed with `1001`; `0` disables. A negative, infinite or `NaN` value throws.                                                         |
-| `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                      |
-| `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                                              |
-| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`.                      |
-| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —           | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                                           |
-| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —           | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                                                  |
+| Option             | Type                                                                 | Default     | Description                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's own, that may open a socket. Exact http(s) origins (`'https://app.example.com'`), no wildcards; an invalid entry throws at construction.                     |
+| `checkOrigin`      | `boolean`                                                            | `true`      | Check every handshake's `Origin` (see below). `false` admits any origin.                                                                                                                        |
+| `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                                                              |
+| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval, from `0` to 2147483647; `0` disables it and creates no timer at all. A value outside that range (or `NaN`) makes `WebSocketPlugin()` throw; a fractional value is accepted. |
+| `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                |
+| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a peer is closed with `1001`; `0` disables. A negative, infinite or `NaN` value throws.                                                                             |
+| `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                                          |
+| `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                                                                  |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`.                                          |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —           | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                                                               |
+| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —           | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                                                                      |
 
 **Cross-site handshakes are refused.** A browser attaches the user's cookies to a WebSocket
 handshake from any page, and the handshake is a `GET`, so no CSRF middleware sees it. Every
