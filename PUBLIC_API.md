@@ -14498,11 +14498,12 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 ### Per-connection realtime links (0.14.0)
 
 `IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
-(queued until open; `false` when closed or called from a request that does not own the link, so the
-caller publishes another way) and `close(): void` (idempotent; while an open, the first or a reopen,
-is in flight, frames already queued are still sent once it opens, kept alive through `waitUntil`
-where the backplane has one; frames queued while a lost link waits to reopen are dropped with one
-`warn`). `IRealtimeLinkBackplane extends IRealtimeBackplane` adds
+(queued until open; `false` when closed, called from a request that does not own the link, or
+refused by the implementation's queue or frame bound, so the caller publishes another way) and
+`close(): void` (idempotent; while an open, the first or a reopen, is in flight, frames already
+queued are still sent once it opens, kept alive through `waitUntil` where the backplane has one;
+frames queued while a lost link waits to reopen are dropped with one `warn`).
+`IRealtimeLinkBackplane extends IRealtimeBackplane` adds
 `openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
 owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and
 `publishViaHub(frame): Promise<void>` (publishes without a socket, from any request; reaches every
@@ -17582,11 +17583,15 @@ to the request that created it, so `DurableObjectBackplane` implements `IRealtim
 connection from that connection's own request, and `publishViaHub(frame)` POSTs a frame to the hub
 (`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
 request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
-(request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning),
-reopens a lost socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost`
-once with `{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin`
-and receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports
-a close or an error is retired and closed rather than left open at the hub, so the next call reopens
+(request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning) and
+up to 1 MiB of frame data (`LINK_QUEUE_BYTE_BUDGET` = 1,048,576, counted on `frame.data.length`): a
+frame that would pass the budget, or one above the hub's 33,554,432 cap, is not queued and `publish`
+returns `false`, so `websocket-plugin` POSTs it through `publishViaHub` (where the hub answers 413
+above the cap, logged as `cloudflare: backplane publish failed` with `status: 413`). reopens a lost
+socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
+`{ topic, connection }`. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and
+receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a
+close or an error is retired and closed rather than left open at the hub, so the next call reopens
 it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
 different requests never touch a socket another request owns; a failed POST is logged as
 `cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the

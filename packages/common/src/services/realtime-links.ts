@@ -37,8 +37,9 @@ export interface IRealtimeConnectionLink {
    *
    * @param frame - The frame to publish
    * @returns `false` when the frame could not be handed to the link (it is
-   *   closed, or the call came from a request that does not own it); the
-   *   caller then publishes another way
+   *   closed, the call came from a request that does not own it, or the
+   *   implementation's queue or frame bound refuses it); the caller then
+   *   publishes another way
    */
   publish(frame: RealtimeFrame): boolean;
   /**

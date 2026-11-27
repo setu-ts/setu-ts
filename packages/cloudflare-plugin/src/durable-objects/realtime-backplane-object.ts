@@ -32,7 +32,7 @@ export interface RealtimeBackplaneObjectCoreOptions {
  * received WebSocket message (32 MiB), so nothing the hub forwards can exceed
  * what a link may receive.
  */
-const MAX_FRAME_BYTES = 33_554_432;
+export const MAX_FRAME_BYTES = 33_554_432;
 
 /**
  * Fans one replica's broadcast out to every other connected replica.

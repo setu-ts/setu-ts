@@ -1553,3 +1553,20 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     twice. Resolving it needs a decision on whether a kept `Room` is addressed by name at all.
     `RequestBoundRooms.closeAll` now guards its logger, so the service's catch around it was
     removed.
+- **CodeRabbit on #619 (review body, connection-link.ts): link queue byte budget (maintainer
+  decision (b), 1 MiB).** Application broadcasts were unbounded, so a link could queue 64 frames of
+  up to the hub's 32 MiB cap each while it opened.
+  - **Rule.** Beside the 64-frame bound, `LINK_QUEUE_BYTE_BUDGET` = 1,048,576 bytes of
+    `frame.data.length`, a constant rather than an option. A frame that would take the queue past
+    it, or one above `MAX_FRAME_BYTES` (now exported from the hub core) even on an open link, makes
+    `publish` return `false`, and `RequestBoundRooms` POSTs it through `publishViaHub`. The hub
+    answers 413 above the cap, which the backplane logs with `status: 413`. A drained, dropped or
+    cleared frame gives its bytes back, and a full queue counts the oldest frame's bytes as freed
+    before checking.
+  - **Tests.** `connection-link.test.ts`: the budget boundary, the cap on an open link, bytes back
+    after a drain and reopen, and bytes back from the count drop.
+    `test/realtime-link-byte-budget.test.ts` (the real `RequestBoundRooms` and hub core): a frame
+    above the budget goes by POST and is delivered; 20 × 100 KiB frames give 10 POSTs and every
+    frame arrives; a frame above the cap gives the 413 log.
+  - **Negative controls.** The count-only queue fails five of these. A `#shift` that keeps the bytes
+    fails the two accounting tests.

@@ -25,12 +25,20 @@ import type {
 } from '../durable-objects/do-facades.ts';
 import { asUpgradeResponse } from '../durable-objects/do-facades.ts';
 import { isRealtimeFrame } from '../durable-objects/frame-guard.ts';
+import { MAX_FRAME_BYTES } from '../durable-objects/realtime-backplane-object.ts';
 
 /** The synthetic URL a link is opened with. Only the path is meaningful. */
 const LINK_URL = 'https://realtime-backplane.internal/link';
 
 /** Frames queued while the link opens; beyond this the oldest is dropped. */
 export const LINK_QUEUE_LIMIT = 64;
+
+/**
+ * Bytes of frame data (`frame.data.length`, the encoded payload) a link queues
+ * while it opens. A frame that would take the queue past this is not queued:
+ * `publish` returns `false` and the caller publishes it through the hub.
+ */
+export const LINK_QUEUE_BYTE_BUDGET = 1_048_576;
 
 /** Delays before each reopen of a lost link. */
 export const LINK_REOPEN_DELAYS_MS: readonly number[] = [500, 1000, 2000];
@@ -72,6 +80,8 @@ export interface ConnectionLinkOptions {
 export class ConnectionLink implements IRealtimeConnectionLink {
   readonly #options: ConnectionLinkOptions;
   readonly #queue: RealtimeFrame[] = [];
+  /** `frame.data.length` summed over {@linkcode #queue}. */
+  #queuedBytes = 0;
   #socket: IDurableObjectClientSocket | undefined;
   #closed = false;
   /**
@@ -98,10 +108,19 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   publish(frame: RealtimeFrame): boolean {
     if (this.#closed) return false;
+    const size = frame.data.length;
+    // Above the hub's cap no socket message can carry it either; the hub's
+    // HTTP publish answers it with a 413 the caller reports.
+    if (size > MAX_FRAME_BYTES) return false;
     const socket = this.#socket;
     if (socket === undefined) {
-      if (this.#queue.length >= LINK_QUEUE_LIMIT) {
-        this.#queue.shift();
+      // A full queue drops its oldest frame to take this one, so those bytes
+      // are free for it.
+      const full = this.#queue.length >= LINK_QUEUE_LIMIT;
+      const freed = full ? (this.#queue[0]?.data.length ?? 0) : 0;
+      if (this.#queuedBytes - freed + size > LINK_QUEUE_BYTE_BUDGET) return false;
+      if (full) {
+        this.#shift();
         if (!this.#overflowReported) {
           this.#overflowReported = true;
           this.#options.logger?.()?.warn('cloudflare: backplane link queue full, oldest dropped', {
@@ -112,6 +131,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
         }
       }
       this.#queue.push(frame);
+      this.#queuedBytes += size;
       return true;
     }
     try {
@@ -142,7 +162,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
         dropped: this.#queue.length,
       });
     }
-    this.#queue.length = 0;
+    this.#clearQueue();
     if (this.#timer !== undefined) {
       this.#options.timers.clearTimeout(this.#timer);
       this.#timer = undefined;
@@ -192,7 +212,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
           connection: this.#options.connectionId,
           dropped: unsent,
         });
-        this.#queue.length = 0;
+        this.#clearQueue();
       }
       closeQuietly(socket);
       return;
@@ -231,9 +251,21 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       } catch {
         break;
       }
-      this.#queue.shift();
+      this.#shift();
     }
     return this.#queue.length;
+  }
+
+  /** Takes the oldest queued frame off the queue and its bytes off the budget. */
+  #shift(): void {
+    const frame = this.#queue.shift();
+    if (frame !== undefined) this.#queuedBytes -= frame.data.length;
+  }
+
+  /** Empties the queue and its byte count. */
+  #clearQueue(): void {
+    this.#queue.length = 0;
+    this.#queuedBytes = 0;
   }
 
   /** Schedules a reopen, or gives up after the last delay. */
@@ -247,14 +279,14 @@ export class ConnectionLink implements IRealtimeConnectionLink {
         connection: this.#options.connectionId,
         dropped: this.#queue.length,
       });
-      this.#queue.length = 0;
+      this.#clearQueue();
       return;
     }
     if (this.#closed) return;
     const delay = LINK_REOPEN_DELAYS_MS[this.#reopens];
     if (delay === undefined) {
       this.#closed = true;
-      this.#queue.length = 0;
+      this.#clearQueue();
       this.#options.logger?.()?.warn('cloudflare: backplane link lost', {
         topic: this.#options.topic,
         connection: this.#options.connectionId,

@@ -491,6 +491,9 @@ when that connection is a member of the room. Without the arm, `ws.room()` and `
   application area keeps fan-out small. The hub object's soft limit is 1,000 requests per second,
   which route broadcasts count against.
 - **`room.size` is this isolate's count** of open members, as everywhere else.
+- **While a link opens** it queues up to 64 frames and 1 MiB of frame data. A broadcast that would
+  pass the byte budget, or is above the hub's 32 MiB cap, goes through the hub's HTTP publish
+  instead, where the hub refuses one above the cap with 413 and the failure is logged.
 - **A lost link** reopens up to three times (0.5 s, 1 s, 2 s apart), then logs
   `cloudflare: backplane link lost` once and stays closed.
 

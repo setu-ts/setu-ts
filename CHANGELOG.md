@@ -610,7 +610,9 @@ All notable changes to this project are documented here. The format follows
     as it arrived, without the dead-letter fields. `retryDelaySeconds: 0` overrides the queue's
     `retry_delay`.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
-    closing link could not.
+    closing link could not. While it opens, a link queues at most 1 MiB of frame data beside the
+    64-frame bound; a broadcast past that, or above the hub's 32 MiB cap, goes through the hub's
+    HTTP publish.
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a retained room still delivers to members it regains, and a connection whose link
     cannot open is closed with 1011.

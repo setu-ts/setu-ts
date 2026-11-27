@@ -21,6 +21,7 @@ import type { IRuntimeServices, RealtimeFrame } from '@setu-ts/common';
 import type { IServiceBinding } from '../../../src/bindings/facades.ts';
 import {
   ConnectionLink,
+  LINK_QUEUE_BYTE_BUDGET,
   LINK_QUEUE_LIMIT,
   LINK_REOPEN_DELAYS_MS,
 } from '../../../src/realtime/connection-link.ts';
@@ -113,6 +114,60 @@ describe('ConnectionLink', () => {
     expect(got).toHaveLength(LINK_QUEUE_LIMIT);
     expect(got[0]?.data).toBe('m3');
     expect(logger.records.filter((r) => r.message.includes('queue full'))).toHaveLength(1);
+  });
+
+  it('refuses a frame that would pass the byte budget while opening, keeping what it queued', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const got: RealtimeFrame[] = [];
+    link(namespace, (f) => got.push(f));
+    await setImmediate();
+    const sender = link(namespace, () => {});
+    const half = 'x'.repeat(LINK_QUEUE_BYTE_BUDGET / 2);
+
+    expect(sender.publish(frame(half))).toBe(true);
+    expect(sender.publish(frame(half))).toBe(true); // exactly the budget
+    expect(sender.publish(frame('y'))).toBe(false); // one byte past it
+    await setImmediate();
+
+    expect(got.map((f) => f.data.length)).toEqual([half.length, half.length]);
+  });
+
+  it('refuses a frame above the hub cap even on an open link', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const sender = link(namespace, () => {});
+    await setImmediate();
+
+    expect(sender.publish(frame('x'.repeat(33_554_433)))).toBe(false);
+    expect(namespace.clients[0]?.sent).toEqual([]);
+  });
+
+  it('gives a drained frame its bytes back, so a reopen can queue the full budget again', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const sender = link(namespace, () => {}, { timers });
+    const full = 'x'.repeat(LINK_QUEUE_BYTE_BUDGET);
+    expect(sender.publish(frame(full))).toBe(true);
+    await setImmediate(); // opens and drains
+
+    namespace.clients[0]?.fire('close', { data: '' });
+    // Waiting to reopen: queued again, against an emptied budget.
+    expect(sender.publish(frame(full))).toBe(true);
+    timers.runNext();
+    await setImmediate();
+
+    expect(namespace.clients[1]?.sent).toHaveLength(1);
+    namespace.clients[1]?.fire('close', { data: '' });
+    expect(sender.publish(frame(full))).toBe(true);
+  });
+
+  it('gives a frame dropped by the count bound its bytes back', () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const sender = link(namespace, () => {});
+    const share = 'x'.repeat(Math.floor(LINK_QUEUE_BYTE_BUDGET / LINK_QUEUE_LIMIT));
+    for (let i = 0; i < LINK_QUEUE_LIMIT; i++) expect(sender.publish(frame(share))).toBe(true);
+
+    // Each further frame drops the oldest; its bytes leave the budget with it.
+    for (let i = 0; i < 10; i++) expect(sender.publish(frame(share))).toBe(true);
   });
 
   it('drops traffic that is not a realtime frame', async () => {
