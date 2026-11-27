@@ -902,7 +902,7 @@ here.
 - **Milestone 143m** (`messaging-plugin` + `queue-plugin` + `realtime-backplane-plugin` — broker and
   queue bounds, health, errors and options: Service Bus publish bound and concurrency, SQS/SNS
   request bounds and probe, RabbitMQ 503/504 sources, RPC 504/502, Pub/Sub dead-letter bound, outbox
-  catch-up, an injected Redis pair's bounded open; 15 V13 rows plus V13-271) — complete (PR
+  catch-up, an injected Redis pair's bounded open; 15 V13 rows plus V13-279) — complete (PR
   pending).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
