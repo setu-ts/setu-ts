@@ -71,8 +71,10 @@ export interface DurableObjectBackplaneOptions {
   readonly onHandlerError?: (error: unknown, frame: RealtimeFrame) => void;
   /**
    * Keeps a {@linkcode DurableObjectBackplane.publishViaHub} POST alive after
-   * the response it was issued from has been sent. Absent, the POST is awaited
-   * by its caller's promise only.
+   * the response it was issued from has been sent, and a connection link's
+   * open alive when its connection closes first, so the socket that arrives is
+   * still closed at the hub. Absent, the POST is awaited by its caller's
+   * promise only, and on workerd the hub can keep such a socket open.
    * @since 0.14.0
    */
   readonly waitUntil?: (promise: Promise<unknown>) => void;

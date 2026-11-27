@@ -64,8 +64,10 @@ export interface ConnectionLinkOptions {
   /** Logger accessor, read when something is reported. */
   readonly logger?: () => ILogger | undefined;
   /**
-   * Keeps an early close's flush alive after its connection's request ends
-   * (the backplane's `waitUntil`). Absent, the flush runs unprotected.
+   * Keeps an early close's work alive after its connection's request ends
+   * (the backplane's `waitUntil`): the flush of queued frames, or with none
+   * queued the open in flight, whose socket is then closed. Absent, both run
+   * unprotected, and on workerd the hub can keep that socket open.
    */
   readonly waitUntil?: (promise: Promise<unknown>) => void;
 }
