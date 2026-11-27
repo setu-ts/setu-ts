@@ -1600,9 +1600,11 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
     arrive first.
   - **The workerd e2e waits** for the name to empty on the server.
   - **Second pass, and the re-audit's one Low finding.**
-    - **Sender with `except`.** When a broadcast's `except` names another member and the sender's
-      link refuses it, the sender also gets it locally. The refusing link is not on the hub yet, or
-      the hub refuses the frame, so no second copy reaches it.
+    - **Sender with `except` (tried, reverted).** A local copy for a sender whose broadcast names
+      another member duplicated the hub's copy. The hub accepts a link's socket before the client
+      sees it open (measured on workerd), and a frame names one exclusion only. That case keeps the
+      hub's copy, which a link not yet accepted misses; PUBLIC_API says so. A broadcast with no
+      `except` is unaffected: the sender gets the local copy, and the hub's copy excludes it.
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as
