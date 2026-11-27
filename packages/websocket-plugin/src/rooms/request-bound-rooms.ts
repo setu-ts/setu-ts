@@ -73,9 +73,14 @@ export class RequestBoundRooms {
       // Only a misbuilt backplane fails here (a hand-made
       // DurableObjectBackplane without `timers`); a connection left open would
       // receive nothing from its rooms, so the caller closes it.
-      this.#logger?.warn('websocket: backplane link could not open', {
-        error: describeError(error),
-      });
+      try {
+        this.#logger?.warn('websocket: backplane link could not open', {
+          error: describeError(error),
+        });
+      } catch {
+        // A logger that throws must not keep the caller from closing the
+        // connection.
+      }
       return false;
     }
     this.#links.set(conn, link);

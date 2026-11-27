@@ -608,8 +608,11 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/cloudflare-plugin`, `@setu-ts/websocket-plugin`, `@setu-ts/runtime`, `@setu-ts/kernel`
   (M143o, #619, review).**
   - **Queues:** on its last delivery, a Workers job whose dead-letter copy is refused is forwarded
-    as it arrived, without the dead-letter fields. `retryDelaySeconds: 0` overrides the queue's
-    `retry_delay`.
+    as it arrived, without the dead-letter fields. A body that is not the adapter's own job envelope
+    is forwarded with `contentType: 'v8'`, so a binary body is not turned into `{}` by JSON.
+    `retryDelaySeconds: 0` overrides the queue's `retry_delay`, also when a dead-letter send fails
+    and the job is retried. A forwarded job is acknowledged before its outcome is logged, so a
+    logger that throws cannot cause a second dead-letter copy.
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not. A link closed while it opens, with nothing queued, hands the open to
     `waitUntil`, so its socket is still closed at the hub after the connection's request ends. While
@@ -628,9 +631,11 @@ All notable changes to this project are documented here. The format follows
   - **Close replies:** the Workers adapter retries a refused close echo with 1000.
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a
-    connection whose link cannot open is closed with 1011.
+    connection whose link cannot open is closed with 1011, also when the logger throws while
+    reporting it.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
-    link close or the logger throws.
+    link close or the logger throws. A peer's close removes it, its rooms and its link even when the
+    runtime's heartbeat stop throws.
   - **Cleanup:** a stream's own end hands an asynchronous `ctx.defer` cleanup to `waitUntil`.
 - **`@setu-ts/static-plugin` (M143o, #619).** A static asset served with CORS keeps `Vary: Origin`:
   the handler appends `Accept-Encoding` to `Vary` instead of replacing it, so a shared cache no

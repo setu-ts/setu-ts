@@ -672,6 +672,91 @@ describe('WorkersQueue exhausted jobs (V13-197)', () => {
     expect(accepted).toEqual(['not an envelope']);
   });
 
+  it('acks a job whose original was sent even when the warning logger throws', async () => {
+    // Only the line reported after the dead-letter write throws.
+    const throwing = new RecordingLogger();
+    throwing.warn = (message: string) => {
+      if (message.includes('the original job was sent')) throw new Error('logger down');
+    };
+    const { queue, dlq } = build({ logger: () => throwing });
+    let first = true;
+    dlq.send = () => {
+      if (first) {
+        first = false;
+        return Promise.reject(new RangeError('message too large'));
+      }
+      return Promise.resolve();
+    };
+    queue.process('j', always);
+
+    const reserve = delivered('j', { n: 1 }, { attempts: 4 });
+    await expect(queue.dispatch(new FakeQueueBatch('q', [reserve]))).resolves.toBeUndefined();
+
+    expect(reserve.disposition).toBe('acked');
+  });
+
+  it('retries a job whose dead-letter send failed even when the error logger throws', async () => {
+    const throwing = new RecordingLogger();
+    throwing.error = (message: string) => {
+      if (message.includes('dead-letter send failed')) throw new Error('logger down');
+    };
+    const { queue, dlq } = build({ logger: () => throwing });
+    dlq.send = () => Promise.reject(new TypeError('queue unavailable'));
+    queue.process('j', always);
+
+    const message = delivered('j', {}, { attempts: 3 });
+    await expect(queue.dispatch(new FakeQueueBatch('q', [message]))).resolves.toBeUndefined();
+
+    expect(message.disposition).toBe('retried');
+  });
+
+  it('applies the configured retry delay when a dead-letter send fails', async () => {
+    // retryDelaySeconds: 0 must be sent explicitly, or the consumer's
+    // retry_delay applies instead.
+    const { queue, dlq } = build({ retryDelaySeconds: 0 });
+    dlq.send = () => Promise.reject(new TypeError('queue unavailable'));
+    queue.process('j', always);
+
+    const message = delivered('j', {}, { attempts: 3 });
+    await queue.dispatch(new FakeQueueBatch('q', [message]));
+
+    expect(message.retryOptions).toEqual({ delaySeconds: 0 });
+  });
+
+  it('forwards an unroutable body losslessly, on the copy and on the last-delivery original', async () => {
+    // JSON serialization would turn a binary body into {}.
+    const { queue, dlq } = build();
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const refused: unknown[] = [];
+    let first = true;
+    dlq.send = (body: unknown, options?: unknown) => {
+      if (first) {
+        first = false;
+        refused.push(options);
+        return Promise.reject(new RangeError('message too large'));
+      }
+      dlq.sends.push({ body, options: options as never });
+      return Promise.resolve();
+    };
+    queue.process('known', () => {});
+
+    const binary = new FakeQueueMessage('cf-b', bytes, 4);
+    await queue.dispatch(new FakeQueueBatch('q', [binary]));
+
+    expect(binary.disposition).toBe('acked');
+    expect(refused).toEqual([{ contentType: 'v8' }]);
+    expect(dlq.sends.map((s) => [s.body, s.options])).toEqual([[bytes, { contentType: 'v8' }]]);
+  });
+
+  it('keeps a job envelope on the default JSON serialization when forwarding it', async () => {
+    const { queue, dlq } = build();
+    queue.process('j', always);
+
+    await queue.dispatch(new FakeQueueBatch('q', [delivered('j', { n: 1 }, { attempts: 3 })]));
+
+    expect(dlq.sends.map((s) => s.options)).toEqual([undefined]);
+  });
+
   it('on the last delivery, retries when the original job is refused too', async () => {
     const { queue, dlq } = build();
     dlq.send = () => Promise.reject(new TypeError('queue unavailable'));

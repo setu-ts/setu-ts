@@ -34,6 +34,7 @@ import type {
 import {
   composeBehaviorChain,
   decodeFrameData,
+  describeError,
   encodeFrameData,
   hasConnectionLinks,
   isWebSocketUpgradeRequest,
@@ -1005,7 +1006,19 @@ export class WebSocketService implements IWebSocketService {
         }
         const closing = conn;
         closing.markClosed();
-        stopHeartbeat();
+        try {
+          stopHeartbeat();
+        } catch (error: unknown) {
+          // A runtime whose timer stop throws must not keep a closed peer
+          // registered, counted against maxConnections, or holding its link.
+          try {
+            this.#logger?.warn('websocket: heartbeat stop failed on close', {
+              error: describeError(error),
+            });
+          } catch {
+            // The cleanup below still runs.
+          }
+        }
         this.#heartbeatStops.delete(closing);
         this.#connections.delete(closing);
         this.#rooms.evict(closing);

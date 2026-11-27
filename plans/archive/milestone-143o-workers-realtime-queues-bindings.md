@@ -1623,6 +1623,16 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       malformed. Guard rows at 16 and 17 and a four-transport row fail without the cap.
     - **`createQueueHandler` example.** Its JSDoc composed a queue arm with no `deadLetterQueue`,
       which `process()` refuses; it now names `JOBS_DLQ`.
+    - **CodeRabbit on `7d1918ea6`.** Fixed:
+      - a dead-letter outcome is acknowledged before it is logged, and both log lines are guarded;
+      - a failed dead-letter send retries through `#retry`, honouring `retryDelaySeconds: 0`;
+      - a non-envelope body is forwarded with `contentType: 'v8'`;
+      - `open()` still reports `false` when the logger throws, so the 1011 close happens;
+      - a heartbeat stop that throws no longer skips the peer's close cleanup;
+      - README and PUBLIC_API wording on the Workers fallback, `onClose` after an `await` and the
+        sender's copy. Held for the maintainer: measuring the opening-queue budget in UTF-8 bytes
+        rather than `frame.data.length`, and telling the connection when its link exhausts its
+        reopens.
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as

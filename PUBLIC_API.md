@@ -5510,13 +5510,14 @@ ws.route(
   `hasConnectionLinks` (`@setu-ts/common`; the Durable Object arm of `@setu-ts/cloudflare-plugin`)
   each connection opens its own link in its sink's `onOpen`, and `Room.broadcast` publishes once —
   over the link of the connection whose event is dispatching, else over the `except` connection's
-  link, else through `publishViaHub` — delivering to the sender itself only when its own link
-  carried the frame. Each link delivers to its connection when that connection is a member of the
-  frame's room and is not excluded. The isolate-level subscription and the shared heartbeat interval
-  are not used; each connection runs its own heartbeat. Without such a backplane, `room()` and
-  `peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the Durable Object
-  arm. `WebSocketService.isRequestBound` reports the mode; `RoomRegistry.isMember(name, conn)` and
-  `Room.has(conn)` read membership without creating a room.
+  link, else through `publishViaHub`. The sender gets its own broadcast locally, once, unless it
+  names itself as `except`: when its link carried the frame, and when its link refused it too, with
+  the hub's copy then excluding the sender. Each link delivers to its connection when that
+  connection is a member of the frame's room and is not excluded. The isolate-level subscription and
+  the shared heartbeat interval are not used; each connection runs its own heartbeat. Without such a
+  backplane, `room()` and `peek()` throw `WebSocketRoomsUnavailableError` and the startup notice
+  names the Durable Object arm. `WebSocketService.isRequestBound` reports the mode;
+  `RoomRegistry.isMember(name, conn)` and `Room.has(conn)` read membership without creating a room.
 - A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
   costs only the rooms that peer had actually joined rather than a scan of every live room. The
   index is maintained through the `RoomMembershipListener` the registry gives each `Room` it

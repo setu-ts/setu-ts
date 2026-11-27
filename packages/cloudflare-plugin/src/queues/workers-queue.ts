@@ -16,11 +16,17 @@ import type {
   IJob,
   IQueue,
   JobProcessor,
+  LogMetadata,
   ProcessOptions,
   RecurringOptions,
 } from '@setu-ts/common';
 import type { LoggerSource } from '../background/wait-until.ts';
-import type { IQueueMessage, IQueueMessageBatch, IQueueProducer } from '../bindings/facades.ts';
+import type {
+  IQueueMessage,
+  IQueueMessageBatch,
+  IQueueProducer,
+  QueueSendOptions,
+} from '../bindings/facades.ts';
 import { describeError } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 import { runBounded } from './bounded-map.ts';
@@ -35,6 +41,9 @@ const DEFAULT_CONCURRENCY = 1;
 
 /** The platform's default `max_retries`, and this queue's default `maxRetries`. */
 const DEFAULT_MAX_RETRIES = 3;
+
+/** Serialization for a forwarded body this adapter did not write: structured clone, lossless. */
+const LOSSLESS: QueueSendOptions = { contentType: 'v8' };
 
 /** The platform's largest `max_retries`. */
 const MAX_RETRIES_LIMIT = 100;
@@ -531,21 +540,34 @@ export class WorkersQueue implements IQueue {
       attempts: message.attempts,
       ...(lastChance ? {} : { error: describeError(reason) }),
     };
+    // A body that is not this adapter's envelope came from another producer
+    // and may not survive JSON (an ArrayBuffer becomes `{}`), so it is
+    // forwarded with the structured-clone serialization. Envelopes keep the
+    // default JSON one.
+    const lossless = envelope === undefined;
     try {
-      await target.send(copy);
+      await (lossless ? target.send(copy, LOSSLESS) : target.send(copy));
     } catch (error: unknown) {
       // On the last delivery the added fields can push a job near the Queues
       // size limit over it; the original body is sent instead, once, so
       // the job still reaches the dead-letter queue.
-      if (lastChance && (await this.#sendOriginal(target, message))) {
-        this.#logger?.()?.warn(
-          'cloudflare-queue: dead-letter copy refused on the last delivery; the original job was sent',
-          { queue, ...where, attempts: message.attempts },
-        );
+      if (lastChance && (await this.#sendOriginal(target, message, lossless))) {
+        // Settled before it is reported, so a logger that throws cannot undo it.
         message.ack();
+        this.#reportQuietly(
+          'warn',
+          'cloudflare-queue: dead-letter copy refused on the last delivery; the original job was sent',
+          {
+            queue,
+            ...where,
+            attempts: message.attempts,
+          },
+        );
         return;
       }
-      this.#logger?.()?.error(
+      this.#retry(message);
+      this.#reportQuietly(
+        'error',
         lastChance
           ? 'cloudflare-queue: dead-letter send failed on the last delivery; the job leaves the ' +
               "adapter (the platform's dead_letter_queue, or deleted)"
@@ -557,7 +579,6 @@ export class WorkersQueue implements IQueue {
           error: error instanceof Error ? error.name : typeof error,
         },
       );
-      message.retry();
       return;
     }
     message.ack();
@@ -567,14 +588,28 @@ export class WorkersQueue implements IQueue {
    * Sends the message's body as it arrived (a job envelope, or an unroutable
    * body as is), so nothing is added to a message near the size limit.
    *
+   * @param lossless - Whether to send with the structured-clone serialization
    * @returns Whether the send succeeded
    */
-  async #sendOriginal(target: IQueueProducer, message: IQueueMessage): Promise<boolean> {
+  async #sendOriginal(
+    target: IQueueProducer,
+    message: IQueueMessage,
+    lossless: boolean,
+  ): Promise<boolean> {
     try {
-      await target.send(message.body);
+      await (lossless ? target.send(message.body, LOSSLESS) : target.send(message.body));
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /** Logs a settled message's outcome; a logger that throws does not reach dispatch. */
+  #reportQuietly(level: 'warn' | 'error', text: string, meta: LogMetadata): void {
+    try {
+      this.#logger?.()?.[level](text, meta);
+    } catch {
+      // The message is already settled; only the log line is lost.
     }
   }
 

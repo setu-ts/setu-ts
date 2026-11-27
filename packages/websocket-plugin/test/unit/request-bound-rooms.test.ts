@@ -587,6 +587,45 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
       createFakeLogger(),
       failing,
     );
+    let transport!: OwnedTransport;
+    service.route('/ws', {
+      onOpen: () => {
+        // The close must come after: none has happened when onOpen runs.
+        events.push(`open, closes so far: ${String(transport.closes.length)}`);
+      },
+    });
+    const decision = await service.createUpgradeRouter()(upgradeRequest('http://w/ws'));
+    if (decision === null || !decision.accept) throw new Error('not accepted');
+    world.run('a', () => {
+      transport = ownedTransport(world);
+      decision.sink.onOpen(transport);
+    });
+
+    expect(events).toEqual(['open, closes so far: 0']);
+    expect(transport.closes).toEqual([{ code: 1011, reason: 'Backplane link unavailable' }]);
+  });
+
+  it('still closes with 1011 when the logger throws while reporting the failed link', async () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const failing = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => {
+        throw new Error('no timers');
+      },
+    };
+    const logger = createFakeLogger();
+    logger.warn = () => {
+      throw new Error('logger down');
+    };
+    const events: string[] = [];
+    const service = new WebSocketService(
+      workersRuntime(),
+      resolveOptions(undefined),
+      true,
+      logger,
+      failing,
+    );
     service.route('/ws', {
       onOpen: () => {
         events.push('open');
@@ -617,6 +656,27 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
 
     expect(h.service.connectionCount).toBe(0);
     expect(h.runtime.intervals.filter((i) => !i.cleared)).toEqual([]);
+    // One close attempt per connection: the first throw did not stop the rest.
+    expect(h.world.violations.filter((v) => v.startsWith('socket owned by a'))).toHaveLength(1);
+    expect(h.world.violations.filter((v) => v.startsWith('socket owned by b'))).toHaveLength(1);
+  });
+
+  it('removes a closing connection and closes its link when the heartbeat stop throws', async () => {
+    const h = await rooms();
+    await h.connect('a');
+    await h.connect('b');
+    const links = h.hub.links.size;
+    h.runtime.clearInterval = () => {
+      throw new Error('timer host down');
+    };
+
+    expect(() => {
+      h.disconnect('a');
+    }).not.toThrow();
+
+    expect(h.service.connectionCount).toBe(1);
+    expect(h.service.room('lobby').size).toBe(1);
+    expect(h.hub.links.size).toBe(links - 1);
   });
 
   it('delivers to members of a room the application retained after it emptied', async () => {

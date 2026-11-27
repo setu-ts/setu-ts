@@ -396,7 +396,9 @@ reuse whichever broker `MessagingPlugin` already registered.
 
 Rooms now fan out across every replica sharing that transport, including
 `RoomBroadcastOptions.except` — connection ids are UUIDs, so the exclusion is honored cluster-wide.
-Remove the plugin and behavior returns to in-process, with no application change.
+Remove the plugin and behavior returns to in-process, with no application change, on every runtime
+but Cloudflare Workers: there, without the Durable Object arm, `ws.room()` and `ws.peek()` throw
+(see the Workers section below).
 
 Two things stay local by design: `room.size` counts this replica's members only (a cluster-wide
 count is inherently asynchronous and cannot satisfy the synchronous getter), and per-connection
@@ -425,13 +427,16 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   namespace. Without the arm, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` and
   the startup notice names the arm; `ws.route()` keeps working for single-socket routes.
 - **Ordering.** A broadcast from inside a member's handler (`onOpen`, `onMessage`, `onClose`), or
-  after an `await` in it with `except: connection`, goes over that member's link, so one member's
-  frames arrive in order. The exception is a link still opening whose 1 MiB queue budget the next
-  frame would pass: that frame goes through the hub and can arrive before the queued ones. The
-  sender still gets its own such broadcast exactly once when `except` names nobody or another
-  member: it is sent locally, and the hub's copy excludes the sender. A sender that names itself as
-  `except` gets no copy, as on every runtime. A broadcast from a route is published through the hub
-  with no order relative to members' frames, as with any cross-replica backplane.
+  after an `await` in `onOpen` or `onMessage` with `except: connection`, goes over that member's
+  link, so one member's frames arrive in order. `onClose` is the exception after an `await`: the
+  closing connection's link is closed once the handler's synchronous part returns, so a later
+  broadcast goes through the hub and can arrive before that member's earlier frames. The exception
+  is a link still opening whose 1 MiB queue budget the next frame would pass: that frame goes
+  through the hub and can arrive before the queued ones. The sender still gets its own such
+  broadcast exactly once when `except` names nobody or another member: it is sent locally, and the
+  hub's copy excludes the sender. A sender that names itself as `except` gets no copy, as on every
+  runtime. A broadcast from a route is published through the hub with no order relative to members'
+  frames, as with any cross-replica backplane.
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
   left as a member that receives nothing. Only a backplane built without its timers fails this way;
   `CloudflarePlugin` always passes them.
