@@ -3,9 +3,8 @@
  * {@linkcode MessageBrokerAdapter} seam.
  *
  * The public contract has no `isReady()`/`reachability()` members, but the
- * health indicator reads them. When the custom instance already exposes the
- * full internal seam (a callable `isReady` **and** `reachability`), it is
- * returned unchanged. Otherwise a thin wrapper tracks connect-resolved /
+ * health indicator reads them. A wrapper always validates caller options and
+ * forwards optional framework header members. It tracks connect-resolved /
  * disconnect-run for `isReady`, and derives `reachability` from the public
  * `isHealthy?()` port member when the instance provides one — `true`/`false`
  * from it, `undefined` (reported as `reachable: 'unknown'`) when it does not
@@ -14,39 +13,45 @@
  * @module
  */
 
-import type { IMessageBroker } from '@setu-ts/common';
+import type { ICustomMessageBroker } from '../interfaces/index.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { validatePublishOptions } from './publish-options.ts';
+import {
+  PUBLISH_REQUIRE_ROUTE,
+  registerRoutedPublish,
+  routedPublishAvailable,
+  validatePublishOptions,
+} from './publish-options.ts';
 
 /**
  * Converts a public {@linkcode IMessageBroker} into a
  * {@linkcode MessageBrokerAdapter} that satisfies the health indicator.
  *
  * @param instance - The custom broker instance
+ * @param warn - Optional once-only missing-header-channel warning
  * @returns A MessageBrokerAdapter wrapping the instance
+ * @since 0.14.0
  */
-export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter {
+export function asBrokerAdapter(
+  instance: ICustomMessageBroker,
+  warn?: (message: string) => void,
+): MessageBrokerAdapter {
   const candidate = instance as unknown as {
     isReady?: unknown;
-    reachability?: unknown;
     isHealthy?: unknown;
-    publishWithHeaders?: unknown;
-    subscribeWithHeaders?: unknown;
-    requestWithHeaders?: unknown;
   };
-  if (
-    typeof candidate.isReady === 'function' &&
-    typeof candidate.reachability === 'function' &&
-    typeof candidate.isHealthy === 'function' &&
-    typeof candidate.publishWithHeaders === 'function' &&
-    typeof candidate.subscribeWithHeaders === 'function' &&
-    typeof candidate.requestWithHeaders === 'function'
-  ) {
-    // Instance already carries the full internal seam — return unchanged.
-    return instance as MessageBrokerAdapter;
-  }
-
   let connected = false;
+  let warned = false;
+  const warnOnce = (): void => {
+    if (warned) return;
+    warned = true;
+    try {
+      warn?.(
+        'Custom broker has no framework header channel for this operation; traces will not cross this broker',
+      );
+    } catch {
+      /* Reporting cannot prevent transport operations. */
+    }
+  };
 
   /**
    * Tri-state reachability (M70c): delegates to the wrapped instance's
@@ -65,7 +70,7 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
     return await (probe as () => Promise<boolean>).call(instance);
   };
 
-  return {
+  const adapter: MessageBrokerAdapter = {
     connect: async () => {
       await instance.connect();
       connected = true;
@@ -75,26 +80,40 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
       connected = false;
     },
     publish: async (topic, message, options) => {
-      await instance.publish(topic, message, await validatePublishOptions(options));
+      await adapter.publishWithHeaders(topic, message, {}, options);
     },
-    publishWithHeaders: async (topic, message, _headers, options) => {
-      // The custom instance owns its own header channel, so the framework
-      // headers are dropped as before; the caller options are validated here and
-      // forwarded, so a custom broker is held to the same rules as a built-in.
-      await instance.publish(topic, message, await validatePublishOptions(options));
+    publishWithHeaders: async (topic, message, headers, options) => {
+      const requireRoute =
+        (options as typeof options & { readonly [PUBLISH_REQUIRE_ROUTE]?: unknown })?.[
+          PUBLISH_REQUIRE_ROUTE
+        ] === true;
+      const parsed = await validatePublishOptions(options);
+      const validated = requireRoute
+        ? Object.freeze({ ...parsed, [PUBLISH_REQUIRE_ROUTE]: true })
+        : parsed;
+      if (instance.publishWithHeaders !== undefined) {
+        await instance.publishWithHeaders(topic, message, headers, validated);
+      } else {
+        if (Object.keys(headers).length > 0) warnOnce();
+        await instance.publish(topic, message, validated);
+      }
     },
     subscribe: (topic, handler, options) => instance.subscribe(topic, handler, options),
     subscribeWithHeaders: (topic, handler, options) => instance.subscribe(topic, handler, options),
-    requestWithHeaders: (topic, message, _headers, options) =>
-      instance.request(topic, message, options),
-    request: (topic, message, options) => instance.request(topic, message, options),
+    requestWithHeaders: (topic, message, headers, options) => {
+      if (instance.requestWithHeaders !== undefined)
+        return instance.requestWithHeaders(topic, message, headers, options);
+      if (Object.keys(headers).length > 0) warnOnce();
+      return instance.request(topic, message, options);
+    },
+    request: (topic, message, options) => adapter.requestWithHeaders(topic, message, {}, options),
     respond: (topic, handler, options) => instance.respond(topic, handler, options),
     isReady: (): boolean => {
       // Prefer the instance's own lifecycle signal when it has one; only fall
       // back to the tracked connect/disconnected flag for instances that lack
       // `isReady` (the original public contract).
       if (typeof candidate.isReady === 'function') {
-        return (candidate.isReady as () => boolean)();
+        return (candidate.isReady as () => boolean).call(instance);
       }
       return connected;
     },
@@ -104,4 +123,6 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
       return reachable !== false;
     },
   };
+  registerRoutedPublish(adapter, () => routedPublishAvailable(instance));
+  return adapter;
 }

@@ -509,7 +509,10 @@ describe('RabbitMqQueue', () => {
         availableAtMs: runtime.now(),
       };
 
-      await expect(queue.enqueue(job)).rejects.toThrow('not connected');
+      await expect(queue.enqueue(job)).rejects.toMatchObject({
+        name: 'BackendUnavailableError',
+        cause: { message: expect.stringContaining('not connected') },
+      });
     });
 
     it('reserve throws when not connected', async () => {

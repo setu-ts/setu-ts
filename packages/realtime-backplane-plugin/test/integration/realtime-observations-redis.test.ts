@@ -123,7 +123,7 @@ for (const redisVariant of REDIS_CLIENTS) {
           skip: REDIS_URL === undefined,
         },
         async () => {
-          const topic = `m98l-${crypto.randomUUID()}`;
+          const topic = `m143m-observations-${crypto.randomUUID()}`;
           const a = await replica(REDIS_URL!, topic, ORIGIN_A, 'a');
           const b = await replica(REDIS_URL!, topic, ORIGIN_B, 'b');
           let socket: WebSocket | undefined;

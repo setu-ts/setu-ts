@@ -420,8 +420,9 @@ Every package must include:
 - Tests must not connect to real databases, Redis, message brokers, or external APIs.
 - Use in-memory adapters (`MemoryAdapter`, `MemoryStore`, `InMemoryBroker`).
 - Use `createMockPlugin()` for mocking plugin services.
-- Integration tests that require real dependencies must be guarded with
-  `describe.skipIf(!process.env.RUN_INTEGRATION)`. (Test files are the one sanctioned exception to
+- A test that needs a real backend is skipped unless that backend's own connection variable is set,
+  for example `describe.skipIf(!process.env['REDIS_URL'])` (likewise `RABBITMQ_URL`, `NATS_URL`,
+  `SQS_ENDPOINT_URL`, …); there is no global switch. (Test files are the one sanctioned exception to
   the `runtime.env` rule — they run under the Node-based test runner, not inside the framework.)
 
 ### 6.8 Snapshot Testing

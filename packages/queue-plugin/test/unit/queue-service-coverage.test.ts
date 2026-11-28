@@ -506,7 +506,7 @@ describe('QueueService - coverage', () => {
       await svc.disconnect();
     });
 
-    it('still reports a poll that fails outside the per-name reserve', async () => {
+    it('reports a malformed reserve result through the per-name task tracker', async () => {
       // A reserve that resolves to something not iterable fails in the
       // dispatch loop, past the per-name catch: the worker loop's own backstop
       // reports it rather than letting it escape the interval callback.
@@ -526,7 +526,7 @@ describe('QueueService - coverage', () => {
 
       await ownRuntime.advanceMs(200);
 
-      expect(reported).toContain('queue poll failed');
+      expect(reported).toContain('queue reserve failed');
       await svc.disconnect();
     });
 

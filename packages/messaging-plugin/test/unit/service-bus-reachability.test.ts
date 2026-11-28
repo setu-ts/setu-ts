@@ -1,8 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IServiceBusTransport } from '../../src/brokers/service-bus-broker.ts';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { clockRuntime } from '../fixtures/clock-runtime.ts';
+import { serviceBusTransport, flushCloud } from '../fixtures/cloud-transports.ts';
+import { serviceBusFaults } from '../fixtures/service-bus-errors.ts';
 
 function makeTransport(options?: {
   isHealthy?: () => Promise<boolean | undefined>;
@@ -71,23 +74,26 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
     // The recorded failure IS a fact about the data plane.
     expect(await broker.reachability()).toBe(false);
     expect(await broker.isHealthy()).toBe(false);
   });
 
-  it('a publish failure WITH a statusCode leaves reachability() untouched', async () => {
+  it('a non-retryable entity refusal leaves reachability untouched', async () => {
+    const refusal = serviceBusFaults.find(({ code }) => code === 'MessagingEntityNotFound')!.error;
     const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
       connectionString: 'Endpoint=sb://test/',
       client: makeTransport({
         isHealthy: () => Promise.resolve(undefined),
-        send: () =>
-          Promise.reject(Object.assign(new Error('MessagingEntityNotFound'), { statusCode: 404 })),
+        send: () => Promise.reject(refusal),
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('MessagingEntityNotFound');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toBe(refusal);
     // A deleted topic is an application-level fact, not a network outage:
     // no evidence recorded, so the management probe answers.
     expect(await broker.reachability()).toBeUndefined();
@@ -150,7 +156,10 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
 
     manual.advance(10);
     expect(await broker.reachability()).toBe(false);
@@ -169,7 +178,10 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
 
     // M101a (V8-1): the read that finds the negative outcome answers it at
     // once; the positive probe it started clears the outcome for the NEXT read.
@@ -209,7 +221,10 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
       }),
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toBe('boom');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: 'boom',
+    });
     expect(await broker.reachability()).toBe(false);
   });
 
@@ -284,6 +299,49 @@ describe('dataPlaneEvidenceMs is validated at construction (M95b review)', () =>
 });
 
 describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8-1)', () => {
+  it.each(['publish', 'delivery'] as const)(
+    'preserves newer positive %s evidence when an older recovery probe succeeds',
+    async (outcome) => {
+      const clock = clockRuntime();
+      const h = serviceBusTransport();
+      const held = Promise.withResolvers<boolean | undefined>();
+      const probe = vi
+        .fn(() => Promise.resolve<boolean | undefined>(undefined))
+        .mockReturnValueOnce(held.promise);
+      Object.assign(h.transport, { isHealthy: probe });
+      const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+        client: h.transport,
+        dataPlaneEvidenceMs: 20000,
+      });
+      await broker.connect();
+      try {
+        if (outcome === 'delivery') await broker.subscribe('orders', () => {});
+        vi.mocked(h.transport.send).mockRejectedValueOnce(new Error('socket'));
+        await expect(broker.publish('orders', {})).rejects.toMatchObject({
+          name: 'BackendOutcomeUnknownError',
+        });
+        expect(await broker.reachability()).toBe(false);
+        await flushCloud();
+        expect(probe).toHaveBeenCalledTimes(1);
+        if (outcome === 'publish') await broker.publish('orders', {});
+        else await h.opens[0]!.deliver({ payload: '{}', ack: () => {}, nack: () => {} });
+        expect(await broker.reachability()).toBe(true);
+        held.resolve(true);
+        await flushCloud();
+        await clock.advance(6000);
+        expect(await broker.reachability()).toBe(true);
+        expect(probe).toHaveBeenCalledTimes(1);
+        await clock.advance(14000);
+        expect(await broker.reachability()).toBeUndefined();
+        expect(probe).toHaveBeenCalledTimes(2);
+      } finally {
+        held.resolve(true);
+        await broker.disconnect();
+        expect(clock.timerCount()).toBe(0);
+      }
+    },
+  );
+
   function failingBroker(isHealthy: () => Promise<boolean | undefined>): ServiceBusBroker {
     return new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
       connectionString: 'Endpoint=sb://test/',
@@ -304,7 +362,10 @@ describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8
       return new Promise<boolean | undefined>(() => {});
     });
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
 
     // Raced against a microtask flush: the answer must be available before
     // ANY timer could fire, not merely before the 2 s probe bound.
@@ -319,7 +380,10 @@ describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8
     let release: (value: boolean) => void = () => {};
     const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
 
     expect(await broker.reachability()).toBe(false);
     await flushMicrotasks();
@@ -332,7 +396,10 @@ describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8
     for (const outcome of [undefined, false]) {
       const broker = failingBroker(() => Promise.resolve(outcome));
       await broker.connect();
-      await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset');
+      await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+        name: 'BackendOutcomeUnknownError',
+        cause: { message: expect.stringContaining('connection reset') },
+      });
 
       expect(await broker.reachability()).toBe(false);
       await flushMicrotasks();
@@ -344,12 +411,18 @@ describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8
     let release: (value: boolean) => void = () => {};
     const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
     expect(await broker.reachability()).toBe(false);
 
     // A newer failure replaces the outcome (and rebuilds the probe) before
     // the old probe answers.
-    await expect(broker.publish('orders', { id: 2 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 2 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
     await flushMicrotasks();
     release(true);
     await flushMicrotasks();
@@ -361,7 +434,10 @@ describe('ServiceBusBroker answers a retained negative outcome at once (M101a V8
     let release: (value: boolean) => void = () => {};
     const broker = failingBroker(() => new Promise<boolean>((resolve) => (release = resolve)));
     await broker.connect();
-    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+    await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+      name: 'BackendOutcomeUnknownError',
+      cause: { message: 'connection reset by peer' },
+    });
     expect(await broker.reachability()).toBe(false);
 
     await flushMicrotasks();

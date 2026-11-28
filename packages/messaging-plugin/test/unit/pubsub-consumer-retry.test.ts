@@ -197,7 +197,7 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
   );
 
   it.each(['exists', 'inspection-rejects', 'no-inspector', 'already-exists'])(
-    'preserves original create failure: %s',
+    'names missing topics and preserves other create failures: %s',
     async (kind) => {
       const h = harness({ deadLetterTopic: 'dead' });
       const cause = Object.assign(new Error('create failed'), {
@@ -208,7 +208,14 @@ describe('Pub/Sub consumer retry and dead-letter policy', () => {
         vi.mocked(h.transport.topicExists!).mockRejectedValue(new Error('inspect-secret'));
       if (kind === 'no-inspector') delete h.transport.topicExists;
       await h.broker.connect();
-      await expect(h.broker.subscribe('orders', () => {})).rejects.toBe(cause);
+      if (kind === 'already-exists')
+        await expect(h.broker.subscribe('orders', () => {})).rejects.toBe(cause);
+      else
+        await expect(h.broker.subscribe('orders', () => {})).rejects.toMatchObject({
+          name: 'PubSubTopicMissingError',
+          topic: 'orders',
+          cause,
+        });
       expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('inspect-secret');
       await h.broker.disconnect();
     },

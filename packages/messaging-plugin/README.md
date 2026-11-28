@@ -10,9 +10,7 @@ cloud client is an **optional** dependency, lazily imported or injected.
 
 ## Installation
 
-```typescript
-import { MessagingPlugin } from '@setu-ts/messaging-plugin';
-```
+Install with `pnpm add @setu-ts/messaging-plugin`. Import `MessagingPlugin` as shown below.
 
 ## Usage
 
@@ -136,8 +134,8 @@ Omitting `name` registers under the bare `CAPABILITIES.MESSAGING` token as plugi
 `messaging-plugin.<name>` — so several brokers can coexist in one application.
 
 Every other option is arm-specific — `url`/`client` for `'redis-streams'`, credentials for the cloud
-arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
-than a startup throw. See [Brokers](#brokers) for the full arm list.
+arms, an injected `ICustomMessageBroker` for `'custom'`. A missing per-arm field is a compile error
+rather than a startup throw. See [Brokers](#brokers) for the full arm list.
 
 Broker-specific `logger` options are string sinks (`{ error: (message: string) => void }`). Broker
 failures are rendered into that message with the error name, message, safe classifier fields, cause
@@ -188,16 +186,16 @@ handler. With no behaviours configured, no `PipelinedBroker` decorator is applie
 
 ## Brokers
 
-| `broker`          | Backing client            | Request-reply | Driven against a real backend in CI |
-| ----------------- | ------------------------- | ------------- | ----------------------------------- |
-| `'memory'`        | none                      | yes           | — (in-process; no backend)          |
-| `'redis-streams'` | `ioredis`                 | yes           | yes — Redis 7 (`redis-real` suites) |
-| `'rabbitmq'`      | `amqplib`                 | yes           | yes — RabbitMQ 4 (outage suite)     |
-| `'nats'`          | NATS JetStream client     | yes           | yes — `nats:2-alpine -js` (M90d)    |
-| `'kafka'`         | `kafkajs`                 | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
-| `'pubsub'`        | `@google-cloud/pubsub`    | yes²          | no — emulator suite is local-only   |
-| `'service-bus'`   | `@azure/service-bus`      | yes²          | no — emulator suite is local-only   |
-| `'custom'`        | injected `IMessageBroker` | yes³          | — (whatever the adapter provides)   |
+| `broker`          | Backing client                  | Request-reply | Driven against a real backend in CI |
+| ----------------- | ------------------------------- | ------------- | ----------------------------------- |
+| `'memory'`        | none                            | yes           | — (in-process; no backend)          |
+| `'redis-streams'` | `ioredis`                       | yes           | yes — Redis 7 (`redis-real` suites) |
+| `'rabbitmq'`      | `amqplib`                       | yes           | yes — RabbitMQ 4 (outage suite)     |
+| `'nats'`          | NATS JetStream client           | yes           | yes — `nats:2-alpine -js` (M90d)    |
+| `'kafka'`         | `kafkajs`                       | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
+| `'pubsub'`        | `@google-cloud/pubsub`          | yes²          | no — emulator suite is local-only   |
+| `'service-bus'`   | `@azure/service-bus`            | yes²          | no — emulator suite is local-only   |
+| `'custom'`        | injected `ICustomMessageBroker` | yes³          | — (whatever the adapter provides)   |
 
 ¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
 pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
@@ -237,7 +235,10 @@ Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounde
 terminal dead-letter forward is the one exception, always bounded at 15,000 ms). The bound covers
 every broker round trip the publish makes, so a paused broker — which keeps its socket open and
 answers nothing — rejects the call instead of leaving it pending forever. A rejection is not proof
-the message was dropped: RabbitMQ may still accept it after the bound.
+the message was dropped: RabbitMQ may still accept it after the bound. A `request()` ends at its own
+`timeoutMs` even while its publish is pending, so a request sees `PublishTimeoutError` only when
+`publishTimeoutMs` is the shorter of the two; with `publishTimeoutMs: 0` that publish keeps running
+in the background after the request has timed out.
 
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';
@@ -542,7 +543,37 @@ after 1, 2, 5, 10 and then every 30 seconds until it succeeds or the broker disc
 subscription is closed, the broker reports unreachable, so the messaging health indicator is `down`.
 The closure and the recovery are each logged once.
 
+On Pub/Sub, a subscription create failing with gRPC code 5 throws `PubSubTopicMissingError` naming
+the source topic and subscription and advising creation of the topic. The original error is on
+`cause`. A configured missing dead-letter topic still takes precedence as
+`PubSubDeadLetterTopicMissingError`; an inconclusive check names that topic as another possible
+cause. Topic inspection uses a 1500 ms bound with SDK retries disabled; attachment failures keep
+their original error.
+
 ### Service Bus retries
+
+| Service Bus option   | Default | Meaning                                                                                                              |
+| -------------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| `publishTimeoutMs`   | `15000` | Whole send, including SDK retries; `0` disables. Expiry aborts the SDK signal and throws `PublishTimeoutError` (504) |
+| `maxConcurrentCalls` | `1`     | Integer 1–1000 on application subscriptions, including realtime fan-out; reply inboxes stay at 1                     |
+
+A receive-side transport outage makes a consume-only service not-ready. Only outages with source
+`receive` count; settlement errors do not. A successful publish, a delivered application or
+reply-inbox message, or a positive management probe restores reachability. To keep this dependency
+out of readiness, use `HealthPlugin({ readiness: { exclude: ['messaging'] } })`.
+
+Send outages throw `BackendOutcomeUnknownError` (504), because a retried send may already have
+arrived. Classification checks refusal codes `UnauthorizedAccess`, `MessagingEntityNotFound`,
+`MessagingEntityDisabled`, `MessageSizeExceeded` and `QuotaExceeded` before `retryable`, so even an
+SDK `UnauthorizedAccess` with `retryable: true` is returned unchanged and does not mark the data
+plane down. An `AggregateError` whose last inner error has one of these refusal codes stays a
+refusal; every other aggregate is an outage, even with a final `SessionLockLost` and
+`retryable: false`. For non-aggregate errors, outages are `retryable: true`, codes
+`ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and socket codes `ECONNREFUSED`,
+`ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and `EAI_AGAIN`. The
+fallback applies only when `code` and `retryable` are undefined and `statusCode` is not a number.
+Status-only errors with a numeric `statusCode` are returned unchanged without changing reachability
+evidence. Publish deadline expiry is `PublishTimeoutError` (504).
 
 Since 0.14.0 a failing Service Bus handler is retried with a delay by default. The broker holds the
 message for the delay while the SDK renews its lock, then abandons it; on the final attempt, or when
@@ -558,17 +589,18 @@ message for the delay while the SDK renews its lock, then abandons it; on the fi
 The attempt number is the message's `deliveryCount` plus one (the count starts at 0). A hold never
 outlives the lock budget: when less than the delay remains of 300 s minus a 60 s margin, the message
 is abandoned at once with one warning. `unsubscribe()` and `disconnect()` abandon held messages at
-once. The receiver handles one message at a time, so a failing message holds its subscription for
-the sum of its delays (about 156 s at the defaults). Reading `maxDeliveryCount` needs the admin
-connection.
+once. At `maxConcurrentCalls: 1` a failing message holds its subscription for the sum of its delays
+(about 156 s at the defaults). A retry hold occupies one slot: set concurrency above 1 for
+throughput, allowing later messages (including realtime frames) to run first. Reading
+`maxDeliveryCount` needs the admin connection.
 
 ### Publish bounds
 
-Every broker arm — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams and NATS — bounds each transport
-publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC requests/replies and
-outbox relay publishes. The Pub/Sub terminal dead-letter forward is always bounded at 15,000 ms,
-even with `0`. A value outside 0–2147483647, `NaN` or Infinity throws `RangeError` at plugin and
-broker construction.
+The network broker arms — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams, NATS and Service Bus — bound
+each transport publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC
+requests/replies and outbox relay publishes. The Pub/Sub terminal dead-letter forward is always
+bounded at 15,000 ms, even with `0`. A value outside 0–2147483647, `NaN` or Infinity throws
+`RangeError` at plugin and broker construction.
 
 An expired publish rejects with the exported `PublishTimeoutError`, which carries the published
 topic and the configured bound as the readonly fields `topic` and `timeoutMs`:
@@ -729,7 +761,20 @@ Per-broker limits:
   `TypeError` naming the missing method (add both methods to the client; other subscriptions are
   unaffected).
 - **Service Bus.** Creating and deleting the subscription needs the `Manage` right; a refusal is
-  logged as such. A failed delete on close is logged and left to the 5-minute idle deletion.
+  logged as such. A failed delete on close is logged and left to the 5-minute idle deletion. A
+  receive-side outage longer than that idle lifetime can expire the subscription. When its receiver
+  reports `MessagingEntityNotFound`, the broker retires it and recreates the same per-instance
+  subscription and receiver, so delivery resumes. Recovery retries every second through receive
+  outages and transient administration failures (408, 429, most 5xx, a request that got no answer,
+  or a create that does not answer within 5 seconds), and when a receiver open finds the recreated
+  subscription missing again. Each cleanup step it waits on (abandoning held deliveries, then the
+  old receiver's close, and the delete after a failed open) is bounded at 5 seconds; past it, a
+  warning naming that step is logged once per subscription and recovery continues; `unsubscribe()`
+  and `disconnect()` also stop waiting for such a close after 5 seconds. Its first failure logs one
+  warning; any other failure, such as 401, 403, a 404 on a create or a missing `Manage` right, stops
+  recovery for that subscription. Copies published while the subscription is missing are lost;
+  recovery does not replay them. Transient receive errors and durable competing subscriptions do not
+  trigger this recreation.
 - **Pub/Sub.** A failed delete on close is logged and left to the one-day idle expiry.
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.
@@ -776,9 +821,55 @@ const app = createApplication({
 Every instance reads every reply on that topic and discards the ones it did not originate, so give a
 high-traffic service its own `replyTopic` to bound the fan-out.
 
-`RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling.
+`RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling. With
+`errorHandler`, they answer 504 (`Gateway Timeout`) and 502 (`Bad Gateway`) respectively. On the
+built-in brokers, `timeoutMs` counts from the `request()` call, so it also bounds opening the reply
+inbox and publishing; `disconnect()` rejects a request still waiting for its inbox.
+`RequestTimeoutError.topic` and `.timeoutMs` name the request and its bound when created by the
+broker. The fixed timeout detail says the request may have been handled; the remote error text stays
+on `remoteMessage` and is never served in the response body.
+
+Service Bus reply subscriptions use `autoDeleteOnIdleMs: 300000` (five idle minutes) so a crashed
+requester leaves no permanent inbox. A live receiver keeps it active, but a receive-side outage
+longer than that idle lifetime can expire it. A receive report of `MessagingEntityNotFound`, or a
+send confirming that the shared reply topic is missing, invalidates the local cached inbox. The next
+request recreates it once the shared reply topic exists; when the topic itself is missing the
+request fails with `ReplyInboxUnavailableError` when the refusal arrives within `timeoutMs` (a later
+one surfaces as `RequestTimeoutError`), because the broker creates no topics. Requests already in
+flight may still time out. A request whose inbox is retired while it opens waits for the next one,
+and is refused after three in a row. `disconnect()` waits at most 5 s for reply-inbox cleanup still
+in flight, then logs one warning and continues; an inbox open that answers later is still closed.
+Transient receive errors retain the inbox, and clean shutdown still deletes it.
 `MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
 broker's former refusal and no broker throws it now.
+
+## Writing a custom broker
+
+`CustomMessagingOptions.instance` accepts `ICustomMessageBroker`, extending `IMessageBroker` with
+optional `publishWithHeaders(topic, message, headers, options?)` and
+`requestWithHeaders(topic, request, headers, options?)`. These are framework-owned trace headers,
+including `traceparent` and `tracestate`; deliver them through `MessageMetadata.headers` on
+`subscribe`, so the consumer span joins the producer's trace. Caller options are always validated
+first, including reserved-header refusal, even if the instance implements the internal adapter
+members. Without a header member the wrapper calls `publish` or `request`; it warns once when
+non-empty trace headers would be dropped.
+
+```typescript
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+import type { ICustomMessageBroker } from '@setu-ts/messaging-plugin';
+import type { IPlugin } from '@setu-ts/common';
+
+export function messagingFor(instance: ICustomMessageBroker): IPlugin {
+  return MessagingPlugin({ broker: 'custom', instance });
+}
+```
+
+The instance owns RPC correlation and reply cleanup, and must implement `request` and `respond`. An
+optional `isHealthy()` feeds the wrapper's boolean reachability; without it health is unknown. The
+wrapper tracks connection lifecycle (or calls an existing `isReady` through its owner). `subscribe`
+receives every option, including `fanOut`: return `ISubscription.fanOut: true` only when every
+subscribing instance receives a copy. The wrapper calls `subscribe`, not an internal
+`subscribeWithHeaders`; it derives health from `isHealthy`, not an internal `reachability`.
 
 ## Trace propagation
 
@@ -1196,7 +1287,7 @@ await db.transaction(async (uow) => {
     },
   );
 });
-// Optional: request a sweep now instead of waiting for the next interval.
+// Request a sweep after the transaction commits, avoiding up to intervalMs of waiting.
 outbox.dispatch();
 ```
 
@@ -1430,6 +1521,21 @@ large after conversion, so the relay still refuses it as `invalid-row` in `claim
 `leaseUntil`. The Prisma path is not driven in this repository.
 
 ### The relay
+
+Without `outbox.dispatch()` after the transaction resolves, a committed row waits up to
+`relay.intervalMs` (default 1000 ms) for a scheduled sweep. Every sweep is limited by `publishLimit`
+(default 100), and rows run serially: claim, publish, then mark. A full sweep with zero failures
+starts a follow-up, including with `relay.schedule: false` after `dispatch()`. Follow-ups yield
+through `runtime.setTimeout(..., 0)`, so event-loop timers can run between batches. During a backlog
+the relay runs back-to-back until it drains; throughput is bounded by the serial cost of a row. The
+extra store work is one claim and one mark per delivered row, the cost of delivering the backlog.
+There is no switch or tuning option for this chain; `publishLimit` caps each sweep and `intervalMs`
+spaces scheduled sweeps, but neither throttles the chain. A sweep with any failure is never followed
+up; retry backoff still applies. Closing stops the chain.
+
+The first full sweep warns `outbox relay is at its sweep budget` with `publishLimit` and
+`intervalMs`; the first failure-free completed lap logs `outbox relay caught up` at info. A sweep
+with failures neither starts nor clears that warning episode.
 
 The relay walks the pending set in LAPS, keyset-paged on `position`, examining rows one at a time. A
 failed row, a row in retry backoff, a row held by another relay, or a row whose status write failed
@@ -1979,31 +2085,35 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
 **Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
-records the outcome of every real publish — the **data plane** — as evidence and `reachability()`
-consults it FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs`
-(default `5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected
-topic or a quota error is an application-level fact, never an outage) resolves `false` until a
-successful publish or positive management probe contradicts it. **Since M101a** that retained
-failure is answered at once: the management probe runs in the background, and only a `true` answer
-clears the outcome, for the NEXT read — before, `reachability()` awaited the probe, whose own 2 s
-bound tied the indicator's, so the indicator's bound fired first and a recorded outage was reported
-`up`. A failure inside a window the indicator has already cached as `up` is reported at the first
-poll after that 5 s cache expires. The plane distinction is the substance: the management round trip
-proves the **management** plane is reachable — evidence about the data plane, never proof of it —
-and that gap is what let a stopped namespace report `up` while every publish threw. Two further
-changes, and the first has **two layers** because the health indicator is not the only caller. The
-indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
-bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
-condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
-open. `RabbitMqBroker`, `ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build
-their own cached, bounded probes, which is what `isHealthy()` reads; that inner layer is what
-protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'` transport, which
-resolves the broker itself and never passes through this indicator. Second, the RabbitMQ probe is a
-real round trip (a throwaway channel open/close), replacing the connection-fault flag read that a
-hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
-Bus management plane is unreachable and that publishes nothing keeps reporting
-`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
-can publish synthetically.
+records real publish outcomes (including timeouts), receive outages only from source `receive`, and
+delivered application and reply-inbox messages as **data-plane** evidence. `reachability()` consults
+it FIRST: a successful publish or delivery resolves `true` for
+`ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`); a publish outage or deadline, or a receive
+outage, resolves `false` until a successful publish, delivery or positive management probe
+contradicts it. Refusal codes take precedence over `retryable`. An `AggregateError` stays a refusal
+only when its last inner error has a refusal code; every other aggregate is an outage. See
+[Service Bus retries](#service-bus-retries) for the full classification. Refusals stay unchanged and
+do not mark the data plane down. **Since M101a** that retained failure is answered at once: the
+management probe runs in the background, and only a `true` answer clears the outcome, for the NEXT
+read — before, `reachability()` awaited the probe, whose own 2 s bound tied the indicator's, so the
+indicator's bound fired first and a recorded outage was reported `up`. A failure inside a window the
+indicator has already cached as `up` is reported at the first poll after that 5 s cache expires. The
+plane distinction is the substance: the management round trip proves the **management** plane is
+reachable — evidence about the data plane, never proof of it — and that gap is what let a stopped
+namespace report `up` while every publish threw. Two further changes, and the first has **two
+layers** because the health indicator is not the only caller. The indicator wraps every arm's
+`reachability()` in its own `createCachedProbe` (5-second TTL, 2-second bound), which is the
+universal outer bound: a probe that cannot answer — a **hung** broker, the condition a stopped one
+never produces — settles `reachable: 'unknown'` instead of holding `/health` open. `RabbitMqBroker`,
+`ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build their own cached, bounded
+probes, which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller,
+such as `realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and
+never passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway
+channel open/close), replacing the connection-fault flag read that a hung broker never trips.
+Residual exposure, stated rather than implied: a deployment whose Service Bus management plane is
+unreachable and that has no publish outcome, receive outage or delivery keeps reporting
+`reachable: 'unknown'` with status `up` — an operator who needs the signal can publish
+synthetically.
 
 A Kafka publish bound covers everything `send()` waits for, including leader election for a topic
 the broker auto-creates on first use — measured at over 2 s right after a broker restart — so keep
@@ -2068,6 +2178,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `PublishTimeoutError`                   | class     |
 | `PubSubDeadLetterTopicMissingError`     | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
+| `PubSubTopicMissingError`               | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |
 | `RemoteHandlerError`                    | class     |
@@ -2078,6 +2189,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `ConsumerRetryOptions`                  | interface |
 | `CustomMessagingOptions`                | interface |
 | `EventsMessagingBridgeOptions`          | interface |
+| `ICustomMessageBroker`                  | interface |
 | `IInbox`                                | interface |
 | `IMessageBroker`                        | interface |
 | `INatsHeaders`                          | interface |

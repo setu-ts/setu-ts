@@ -68,7 +68,7 @@ export async function realFanOutPair(
   close(): Promise<void>;
 }> {
   const runtime = createNodeRuntimeServices();
-  const prefix = 'm143p-' + runtime.uuid();
+  const prefix = 'm143m-' + runtime.uuid();
   const topic = prefix + '-frames';
   const serializer = new JsonSerializer();
   let brokers: [IMessageBroker, IMessageBroker];

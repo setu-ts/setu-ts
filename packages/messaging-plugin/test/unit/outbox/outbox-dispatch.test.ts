@@ -55,6 +55,8 @@ describe('IOutbox.dispatch', () => {
     expect(handed).toHaveLength(50);
     await h.write({ n: 2 });
     hold.open();
+    for (let n = 0; n < 20; n++) await flush();
+    await h.clock.advance(0);
     await Promise.all(handed);
     // The running sweep plus exactly one follow-up.
     expect(h.store.count('scanPending')).toBe(2);
@@ -74,8 +76,15 @@ describe('IOutbox.dispatch', () => {
     let second: Promise<unknown> | undefined;
     // Runs after the running sweep clears itself and before the follow-up
     // decides: a scheduled sweep starts in that window.
-    first.then(() => (second = h.sweep()));
+    const secondHold = gate();
+    first.then(() => {
+      h.store.faults.failedKeys = () => secondHold.promise;
+      second = h.sweep();
+    });
     hold.open();
+    for (let n = 0; n < 20; n++) await flush();
+    await h.clock.advance(0);
+    secondHold.open();
     await Promise.all(handed);
     await second;
     expect(h.store.count('failedKeys')).toBe(2); // the follow-up joined, it did not start a third

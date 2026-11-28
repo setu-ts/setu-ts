@@ -208,8 +208,9 @@ describe('V12-54 injected connect cancellation', () => {
       ' ',
     );
     expect(readme).toContain('Both pairs get reporting watches');
-    expect(readme).toContain('`close()` QUITs an injected pair too');
-    expect(readme).toContain('open overtaken by `close()` leaves the injected pair');
+    expect(readme).toContain('After a successful open');
+    expect(readme).toContain('QUITs an injected pair too');
+    expect(readme).toContain('It stops waiting, removes its own listeners and watches');
     expect(readme).not.toContain('Ignored for an injected pair');
     expect(readme).not.toContain('gets no listener');
   });
@@ -272,7 +273,7 @@ describe('V12-54 injected connect cancellation', () => {
       expect(fake.eventListeners.get('ready')).toHaveLength(0);
     }
   });
-  it('V12-55 successful injected open is QUIT by close and reports connection events', async () => {
+  it('quits a successfully opened injected pair on close and reports connection events', async () => {
     const client = new FakeRedisClient();
     const subscriber = new FakeRedisClient();
     const report = vi.fn();
@@ -292,6 +293,7 @@ describe('V12-54 injected connect cancellation', () => {
     expect(report).toHaveBeenCalledWith(error);
     await backplane.close();
     expect([client.quitCount, subscriber.quitCount]).toEqual([1, 1]);
+    expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
     for (const fake of [client, subscriber])
       expect(fake.eventListeners.get('error')).toHaveLength(0);
   });
@@ -482,8 +484,13 @@ describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
     const backplane = new RedisBackplane(
       {
         transport: 'redis',
-        client,
-        subscriber: new FakeRedisClient(),
+        url: 'redis://test',
+        module: {
+          create: (() => {
+            let next = 0;
+            return () => (next++ === 0 ? client : new FakeRedisClient());
+          })(),
+        },
         connectionErrorReporter: { report: (e) => errors.push(e), recovered: () => {} },
       },
       'a',
@@ -492,6 +499,8 @@ describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
     await backplane.connect();
     await backplane.close();
     expect(errors).toHaveLength(1);
+    expect(client.listenerCount('error')).toBe(1);
+    client.emit('end');
     expect(client.listenerCount('error')).toBe(0);
   });
 
@@ -1019,7 +1028,7 @@ describe('RedisBackplane', () => {
     await backplane.close();
   });
 
-  it('unsubscribes, detaches its listener, and quits both connections on close', async () => {
+  it('unsubscribes, detaches its listener and quits both injected connections', async () => {
     const client = new FakeRedisClient();
     const subscriber = new FakeRedisClient();
     const backplane = new RedisBackplane(
@@ -1036,6 +1045,7 @@ describe('RedisBackplane', () => {
     expect(subscriber.subscribed).toEqual([]);
     expect(subscriber.quitCount).toBe(1);
     expect(client.quitCount).toBe(1);
+    expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
 
     // The listener is detached, so late traffic reaches nothing.
     subscriber.emit('realtime', JSON.stringify(FRAME));
@@ -1301,8 +1311,8 @@ describe('RedisBackplane close racing an open', () => {
     release();
     await connecting;
 
-    expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
-    expect(clients[1]?.subscribed).toEqual([]);
+    expect(clients.map((c) => c.disconnectCount)).toEqual([1, 1]);
+    expect(clients[1]?.disconnectCount).toBe(1);
     expect(clients[1]?.listenerCount).toBe(0);
 
     // The backplane is closed, not connected: publishing reaches nothing, and
@@ -1333,6 +1343,7 @@ describe('RedisBackplane close racing an open', () => {
     expect(subscriber.listenerCount).toBe(0);
     expect(subscriber.quitCount).toBe(0);
     expect(client.quitCount).toBe(0);
+    expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
   });
 
   it('still retires the pair when the rollback unsubscribe fails', async () => {
@@ -1356,7 +1367,7 @@ describe('RedisBackplane close racing an open', () => {
     // rejected connect() on what is already a shutdown path.
     await connecting;
 
-    expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
+    expect(clients.map((c) => c.disconnectCount)).toEqual([1, 1]);
   });
 
   it('reopens cleanly after a close superseded an open', async () => {
@@ -1412,7 +1423,7 @@ describe('RedisBackplane close racing an open', () => {
     expect(clients.length).toBe(4);
 
     release();
-    await expect(first).rejects.toThrow('SUBSCRIBE refused');
+    await first; // Cancellation won; the late rejection is absorbed.
 
     // The stale rejection must not retract the live attempt's memo, or the next
     // connect() would open a third pair alongside the connected one.
@@ -1453,7 +1464,16 @@ describe('RedisBackplane close during an outage', () => {
     const client = new FakeRedisClient();
     const subscriber = new FakeRedisClient();
     const backplane = new RedisBackplane(
-      { transport: 'redis', client, subscriber },
+      {
+        transport: 'redis',
+        url: 'redis://test',
+        module: {
+          create: (() => {
+            let next = 0;
+            return () => [client, subscriber][next++];
+          })(),
+        },
+      },
       'node-a',
       'realtime',
     );
@@ -1547,7 +1567,7 @@ describe('RedisBackplane rollback of a failed open', () => {
     ]);
   });
 
-  it('force-disconnects the connections when close lands mid-open and their QUIT fails', async () => {
+  it('force-disconnects owned connections without QUIT when close cancels SUBSCRIBE', async () => {
     const clients: FakeRedisClient[] = [];
     let release: (() => void) | undefined;
     const module: IRedisModule = {
@@ -1574,8 +1594,8 @@ describe('RedisBackplane rollback of a failed open', () => {
     await connecting;
 
     expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([
-      [1, 1],
-      [1, 1],
+      [0, 1],
+      [0, 1],
     ]);
   });
 });
@@ -1810,10 +1830,10 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
   });
 
   it("keeps a newer open's subscription on an injected pair, at any close() offset (V12-53)", async () => {
-    // Only offsets where close() lands while the first open is in flight: once
-    // it has installed the pair, close() QUITs it, and the second open then
-    // runs on a closed connection.
+    // Only a pending open leaves the injected pair caller-owned. Once the
+    // first open installs it, normal close QUITs both connections.
     let inFlight = 0;
+    let sawInstalled = false;
     for (let delay = 0; delay <= 12; delay++) {
       const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
       const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
@@ -1839,6 +1859,9 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       );
       const first = backplane.connect();
       for (let tick = 0; tick < delay; tick++) await Promise.resolve();
+      // Publish reaches the fake synchronously only after the pair is installed.
+      void backplane.publish(FRAME).catch(() => {});
+      const installed = client.published.length > 0;
       const closing = backplane.close();
       // A second open on the same pair starts before the first one retires.
       const second = backplane.connect();
@@ -1846,13 +1869,22 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       await second;
       await closing;
       await setImmediate();
-      if (subscriber.quitCount > 0) break;
+      if (installed) {
+        sawInstalled = true;
+        expect([client.quitCount, subscriber.quitCount]).toEqual([1, 1]);
+        expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
+        await backplane.close();
+        break;
+      }
+      expect([client.quitCount, subscriber.quitCount]).toEqual([0, 0]);
+      expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
       inFlight = delay + 1;
       // Whatever the offset, the live open keeps its subscription.
       expect(server.has('realtime'), `offset ${delay}`).toBe(true);
       await backplane.close();
     }
     expect(inFlight).toBeGreaterThan(1);
+    expect(sawInstalled).toBe(true);
   });
 
   it('retires the pair without waiting on a silent host after the ready wait (V12-53)', async () => {
@@ -1910,6 +1942,7 @@ describe('RedisBackplane owned publisher readiness (M139f X3-3)', () => {
       // waits on UNSUBSCRIBE; that one is bounded by the caller's own client.
       void closing;
       expect([client.disconnectCount, subscriber.disconnectCount]).toEqual([0, 0]);
+      expect([client.quitCount, subscriber.quitCount]).toEqual([0, 0]);
       expect(unsubscribes).toBeLessThanOrEqual(1);
     }
   });
@@ -2130,7 +2163,7 @@ describe('RedisBackplane close() during a SUBSCRIBE that never answers (V12-53)'
     }
   });
 
-  it('leaves an injected pair connected and removes only its listeners', async () => {
+  it('cancels an opening borrowed pair and removes its listeners', async () => {
     const client = Object.assign(new FakeRedisClient(), { status: 'ready' });
     const subscriber = Object.assign(new FakeRedisClient(), { status: 'ready' });
     subscriber.holdSubscribe();

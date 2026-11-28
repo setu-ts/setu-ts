@@ -10,6 +10,7 @@
 import {
   type AddJobOptions,
   createCachedProbe,
+  describeError,
   toBackendFault,
   type HealthCheckResult,
   type HealthIndicatorFn,
@@ -21,7 +22,7 @@ import {
 } from '@setu-ts/common';
 import type { IRuntimeServices, QueueDepthScope, TimerHandle } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
-import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
+import type { QueuePluginOptions, StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { notifyFailed, runJob, toJob } from '../processors/job-processor.ts';
 import { SqsDeadLetterTargetMissingError } from '../errors.ts';
 import { toReportableError } from './reportable-error.ts';
@@ -39,6 +40,37 @@ const PROBE_TTL_MS = 5000;
 
 /** Per-probe timeout (M90b), in milliseconds. A slower probe counts as unreachable. */
 const PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * Validates shared queue health and retry options at either construction entry.
+ * @param options - Queue configuration subset
+ * @returns Resolved health cache and timeout
+ * @throws {RangeError} For invalid cache, timeout or retry delay
+ * @since 0.14.0
+ * @internal
+ */
+export function resolveQueueServiceOptions(options?: {
+  health?: QueuePluginOptions['health'];
+  retryDelayMs?: QueuePluginOptions['retryDelayMs'];
+}): { probeCacheMs: number; probeTimeoutMs: number } {
+  const probeCacheMs = options?.health?.probeCacheMs ?? PROBE_TTL_MS;
+  const probeTimeoutMs = options?.health?.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
+  for (const [name, value, min] of [
+    ['probeCacheMs', probeCacheMs, 0],
+    ['probeTimeoutMs', probeTimeoutMs, 1],
+  ] as const) {
+    if (!Number.isInteger(value) || value < min || value > 2147483647)
+      throw new RangeError(`queue health.${name} must be an integer from ${min} to 2147483647`);
+  }
+  const delay = options?.retryDelayMs;
+  if (
+    delay !== undefined &&
+    typeof delay !== 'function' &&
+    (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0)
+  )
+    throw new RangeError('retryDelayMs must be a function or a finite non-negative number');
+  return { probeCacheMs, probeTimeoutMs };
+}
 
 /**
  * Minimal logger surface the service reports through — structurally compatible
@@ -107,7 +139,11 @@ export class QueueService implements IQueue {
    * Per-loop failure state (M131a X88-9): the set of loop names currently in a
    * failure run, so a loop reports once per state change rather than per poll.
    */
-  #loopFailing = new Set<string>();
+  #loopFailing = new Map<string, number>();
+  readonly #reserveTasks = new Set<Promise<void>>();
+  readonly #health: { probeCacheMs: number; probeTimeoutMs: number };
+  readonly #retryDelayMs: QueuePluginOptions['retryDelayMs'];
+  #retryWarned = false;
   /**
    * Present only when the application registered `CAPABILITIES.METRICS`. Every
    * call site is optional-chained, so an application without the metrics plugin
@@ -126,6 +162,8 @@ export class QueueService implements IQueue {
     options?: {
       defaultMaxAttempts?: number;
       pollIntervalMs?: number;
+      health?: QueuePluginOptions['health'];
+      retryDelayMs?: QueuePluginOptions['retryDelayMs'];
       /** Optional logger; when absent, failures are reported nowhere (see #report). */
       logger?: QueueLogger | undefined;
       /** Optional metrics collector; absent when the metrics capability is not registered. */
@@ -135,6 +173,8 @@ export class QueueService implements IQueue {
     },
   ) {
     this.#adapter = adapter;
+    this.#health = resolveQueueServiceOptions(options);
+    this.#retryDelayMs = options?.retryDelayMs;
     this.#runtime = runtime;
     this.#defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
     this.#pollIntervalMs = options?.pollIntervalMs ?? 1000;
@@ -184,22 +224,26 @@ export class QueueService implements IQueue {
    * Reports a looping failure once per state change (M131a X88-9): one `warn`
    * when the failure starts, nothing per poll in between.
    */
-  #loopFailed(name: string, error: unknown, meta?: Record<string, unknown>): void {
+  #loopFailed(
+    name: string,
+    error: unknown,
+    meta?: Record<string, unknown>,
+    message = `queue ${name} failed`,
+  ): void {
     const logger = this.#logger;
     if (logger === undefined) {
       return;
     }
     const starting = !this.#loopFailing.has(name);
-    this.#loopFailing.add(name);
+    this.#loopFailing.set(name, (this.#loopFailing.get(name) ?? 0) + 1);
     if (!starting) {
       return;
     }
     try {
-      const err = toReportableError(error);
       // `warn` is optional on a queue logger; one with only `error` still hears
       // about the failure, as it did before X88-9.
       const report = logger.warn ?? logger.error;
-      report.call(logger, `queue ${name} failed`, { error: err.message, ...meta });
+      report.call(logger, message, { error: describeError(error), ...meta });
     } catch {
       // A broken logger must not take the loop down.
     }
@@ -209,15 +253,20 @@ export class QueueService implements IQueue {
    * Reports a looping recovery once (M131a X88-9): one `info` on recovery, so
    * the next failure warns again. A no-op when the loop was not failing.
    */
-  #loopRecovered(name: string): void {
+  #loopRecovered(
+    name: string,
+    message = `queue ${name} recovered`,
+    meta?: Record<string, unknown>,
+  ): void {
     const logger = this.#logger;
+    const failures = this.#loopFailing.get(name);
     // The state clears first, whether or not the logger can say so: otherwise
     // a logger without `info` would never hear the loop's next failure.
     if (logger === undefined || !this.#loopFailing.delete(name) || logger.info === undefined) {
       return;
     }
     try {
-      logger.info(`queue ${name} recovered`);
+      logger.info(message, { failures, ...meta });
     } catch {
       // A broken logger must not take the loop down.
     }
@@ -252,12 +301,16 @@ export class QueueService implements IQueue {
     for (const handle of this.#renewalHandles) this.#runtime.clearInterval(handle);
     this.#renewalHandles.clear();
 
-    await this.#adapter.disconnect();
-    await Promise.allSettled(this.#preparations.values());
-    this.#preparations.clear();
-    this.#preparationRefused.clear();
-    this.#preparationReported.clear();
-    this.#preparationRetry.clear();
+    try {
+      await this.#adapter.disconnect();
+    } finally {
+      await Promise.allSettled(this.#reserveTasks);
+      await Promise.allSettled(this.#preparations.values());
+      this.#preparations.clear();
+      this.#preparationRefused.clear();
+      this.#preparationReported.clear();
+      this.#preparationRetry.clear();
+    }
   }
 
   isReady(): boolean {
@@ -490,10 +543,10 @@ export class QueueService implements IQueue {
     }
     const adapter = this.#adapter;
     return createCachedProbe<boolean | undefined>({
-      probe: () => isHealthy.call(adapter),
+      probe: () => isHealthy.call(adapter, this.#health.probeTimeoutMs),
       fallback: undefined,
-      ttlMs: PROBE_TTL_MS,
-      timeoutMs: PROBE_TIMEOUT_MS,
+      ttlMs: this.#health.probeCacheMs,
+      timeoutMs: this.#health.probeTimeoutMs,
       hrtime: this.#runtime.hrtime.bind(this.#runtime),
       setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
       clearTimer: (handle) => this.#runtime.clearTimeout(handle),
@@ -565,7 +618,7 @@ export class QueueService implements IQueue {
       // The loop must survive a transient adapter failure, but the failure is
       // reported rather than discarded.
       this.#poll().catch((error: unknown) => {
-        this.#report('queue poll failed', error);
+        this.#loopFailed('poll', error);
       });
     }, this.#pollIntervalMs);
   }
@@ -583,8 +636,8 @@ export class QueueService implements IQueue {
     }, this.#pollIntervalMs);
   }
 
+  // eslint-disable-next-line require-await -- A malformed iterator must reject through the poll backstop.
   async #poll(): Promise<void> {
-    const now = this.#runtime.now();
     const generation = this.#generation;
 
     for (const [name, reg] of this.#processors.entries()) {
@@ -608,45 +661,57 @@ export class QueueService implements IQueue {
       // Mark reserve as in progress
       reg.reserveInProgress = true;
 
-      try {
-        if (this.#adapter.prepareConsumer !== undefined) {
-          try {
-            await this.prepare(name);
-          } catch (error) {
-            if (this.#connected && generation === this.#generation)
-              this.#preparationFailed(name, error);
-            continue;
-          }
-          if (!this.#connected || generation !== this.#generation) return;
-          this.#preparationRetry.delete(name);
-        }
-        let jobs: readonly StoredJob<unknown>[];
+      const task = (async () => {
         try {
-          jobs = await this.#adapter.reserve<unknown>(name, limit, now);
-        } catch (error) {
-          // One name's failure must not stop the names after it this tick
-          // (M106 audit R4-1); it is reported and retried on the next tick.
-          this.#report('queue reserve failed', error, { name });
-          continue;
+          if (this.#adapter.prepareConsumer !== undefined) {
+            try {
+              await this.prepare(name);
+            } catch (error) {
+              if (this.#connected && generation === this.#generation)
+                this.#preparationFailed(name, error);
+              return;
+            }
+            if (!this.#connected || generation !== this.#generation) return;
+            this.#preparationRetry.delete(name);
+          }
+          let jobs: readonly StoredJob<unknown>[];
+          try {
+            jobs = await this.#adapter.reserve<unknown>(name, limit, this.#runtime.now());
+          } catch (error) {
+            // One name's failure must not stop the names after it this tick
+            // (M106 audit R4-1); it is reported and retried on the next tick.
+            if (this.#connected && generation === this.#generation)
+              this.#loopFailed(`reserve:${name}`, error, { name }, 'queue reserve failed');
+            return;
+          }
+
+          if (!this.#connected || generation !== this.#generation) return;
+          this.#loopRecovered(`reserve:${name}`, 'queue reserve recovered', { name });
+
+          for (const storedJob of jobs) {
+            // Increment in-flight counter
+            reg.inFlight++;
+
+            // Update job attempts to 1 (first delivery)
+            const jobWithAttempts: StoredJob<unknown> = {
+              ...storedJob,
+              attempts: storedJob.attempts === 0 ? 1 : storedJob.attempts,
+            };
+
+            // Dispatch job
+            this.#dispatchJob(jobWithAttempts, reg as ProcessorRegistration<unknown>);
+          }
+        } finally {
+          reg.reserveInProgress = false;
         }
-
-        for (const storedJob of jobs) {
-          // Increment in-flight counter
-          reg.inFlight++;
-
-          // Update job attempts to 1 (first delivery)
-          const jobWithAttempts: StoredJob<unknown> = {
-            ...storedJob,
-            attempts: storedJob.attempts === 0 ? 1 : storedJob.attempts,
-          };
-
-          // Dispatch job
-          this.#dispatchJob(jobWithAttempts, reg as ProcessorRegistration<unknown>);
-        }
-      } finally {
-        reg.reserveInProgress = false;
-      }
+      })().catch((error: unknown) => {
+        if (this.#connected && generation === this.#generation)
+          this.#loopFailed(`reserve:${name}`, error, { name }, 'queue reserve failed');
+      });
+      this.#reserveTasks.add(task);
+      void task.finally(() => this.#reserveTasks.delete(task));
     }
+    this.#loopRecovered('poll');
   }
 
   #dispatchJob<T>(storedJob: StoredJob<T>, reg: ProcessorRegistration<T>): void {
@@ -732,6 +797,16 @@ export class QueueService implements IQueue {
           reg.processor,
           (message, error, meta) => this.#report(message, error, meta),
           {
+            ...(this.#retryDelayMs === undefined ? {} : { retryDelayMs: this.#retryDelayMs }),
+            warn: (message) => {
+              if (this.#retryWarned) return;
+              this.#retryWarned = true;
+              try {
+                (this.#logger?.warn ?? this.#logger?.error)?.call(this.#logger, message);
+              } catch {
+                /* Diagnostics cannot change retries. */
+              }
+            },
             ...(reg.onFailed === undefined ? {} : { onFailed: reg.onFailed }),
             onProcessorOutcome: (name: string, outcome: JobOutcome) =>
               this.#collector?.jobSettled(name, outcome),
@@ -806,9 +881,17 @@ export class QueueService implements IQueue {
           availableAtMs: now,
         });
       } catch (error) {
-        this.#report('queue recurring enqueue failed', error, { name: rec.name });
+        this.#loopFailed(
+          `recurring-enqueue:${rec.id}`,
+          error,
+          { name: rec.name },
+          'queue recurring enqueue failed',
+        );
         continue;
       }
+      this.#loopRecovered(`recurring-enqueue:${rec.id}`, 'queue recurring enqueue recovered', {
+        name: rec.name,
+      });
 
       // Advance the recurring schedule
       try {
