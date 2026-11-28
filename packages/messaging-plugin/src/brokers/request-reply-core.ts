@@ -232,7 +232,11 @@ export class RequestReplyCore {
     };
 
     try {
-      await this.#deps.publish(requestChannel(topic), envelope, headers);
+      // As with the inbox open, a publish that outlives the deadline (or
+      // close()) must not hold the caller; its later failure is nobody's to report.
+      const publishing = this.#deps.publish(requestChannel(topic), envelope, headers);
+      publishing.catch(() => undefined);
+      await Promise.race([publishing, reply as Promise<never>]);
     } catch (err) {
       abandon();
       throw err;

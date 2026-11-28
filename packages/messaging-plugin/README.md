@@ -235,7 +235,10 @@ Each `publish()` is bounded by `publishTimeoutMs` (default `15000`, `0` unbounde
 terminal dead-letter forward is the one exception, always bounded at 15,000 ms). The bound covers
 every broker round trip the publish makes, so a paused broker — which keeps its socket open and
 answers nothing — rejects the call instead of leaving it pending forever. A rejection is not proof
-the message was dropped: RabbitMQ may still accept it after the bound.
+the message was dropped: RabbitMQ may still accept it after the bound. A `request()` ends at its own
+`timeoutMs` even while its publish is pending, so a request sees `PublishTimeoutError` only when
+`publishTimeoutMs` is the shorter of the two; with `publishTimeoutMs: 0` that publish keeps running
+in the background after the request has timed out.
 
 ```typescript
 import { MessagingPlugin } from '@setu-ts/messaging-plugin';

@@ -287,6 +287,68 @@ describe('RequestReplyCore', () => {
     await core.close();
   });
 
+  it('ends a request at timeoutMs when its publish never settles', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore({
+      publish: () => new Promise<void>(() => {}),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (onReply) => t.openInbox(onReply),
+    });
+    await expect(core.request('t', {}, { timeoutMs: 20 })).rejects.toBeInstanceOf(
+      RequestTimeoutError,
+    );
+    expect(t.liveTimers.size).toBe(0);
+    await core.close();
+  });
+
+  it('releases a request whose publish is pending when close() runs', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore({
+      publish: () => new Promise<void>(() => {}),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (onReply) => t.openInbox(onReply),
+    });
+    const request = core.request('t', {}, { timeoutMs: 60000 }).catch((error: unknown) => error);
+    await flush();
+    await core.close();
+    expect(await request).toMatchObject({
+      message: 'Broker disconnected before a reply was received',
+    });
+    expect(t.liveTimers.size).toBe(0);
+  });
+
+  it('resolves with a reply that arrives before its publish settles, dropping a later publish error', async () => {
+    const t = new FakeTransport();
+    let failPublish: ((error: Error) => void) | undefined;
+    const core = new RequestReplyCore({
+      publish: async (topic, message) => {
+        if (!topic.startsWith('rr.req')) return t.publish(topic, message);
+        // Hold this publish open, then deliver the request.
+        const held = new Promise<void>((_, reject) => {
+          failPublish = reject;
+        });
+        await t.deliver(topic, message);
+        return held;
+      },
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (onReply) => t.openInbox(onReply),
+    });
+    await core.respond('t', () => 'pong');
+    expect(await core.request('t', {}, { timeoutMs: 1000 })).toBe('pong');
+    failPublish!(new Error('late publish failure'));
+    await flush();
+    await core.close();
+  });
+
   it('rejects a request still acquiring its inbox when close() runs', async () => {
     const t = new FakeTransport();
     const core = new RequestReplyCore({
@@ -600,9 +662,10 @@ describe('RequestReplyCore', () => {
     try {
       const request = core.request('t', {}, { timeoutMs: 5 }).catch((error: unknown) => error);
       await new Promise((resolve) => setTimeout(resolve, 30));
+      // The whole-call deadline ends the request while publish is still pending.
+      expect(await request).toBeInstanceOf(RequestTimeoutError);
+      // The publish failing afterwards is observed, never unhandled.
       releasePublish!(new Error('publish bound'));
-      // The publish error wins: the caller never held the timed-out reply.
-      expect(await request).toMatchObject({ message: 'publish bound' });
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(unhandled).toEqual([]);
     } finally {
