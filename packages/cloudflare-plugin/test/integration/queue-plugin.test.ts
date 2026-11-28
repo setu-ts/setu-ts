@@ -25,7 +25,13 @@ import type { HealthCheckResult, IApplication, IQueue } from '@setu-ts/common';
 import type { ILogger, IPlugin } from '@setu-ts/common';
 import { CloudflareBindingMissingError, CloudflarePlugin } from '../../src/index.ts';
 import { createQueueHandler } from '../../src/index.ts';
-import { FakeQueueBatch, FakeQueueMessage, FakeQueueProducer, RecordingLogger } from '../fakes.ts';
+import {
+  FakeKv,
+  FakeQueueBatch,
+  FakeQueueMessage,
+  FakeQueueProducer,
+  RecordingLogger,
+} from '../fakes.ts';
 
 /** Runs a named health indicator the way `health-plugin` would. */
 async function checkHealth(app: IApplication, name: string): Promise<HealthCheckResult> {
@@ -43,7 +49,10 @@ describe('CloudflarePlugin queue arm', () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        CloudflarePlugin({ env: { JOBS: producer }, queue: { binding: 'JOBS' } }),
+        CloudflarePlugin({
+          env: { JOBS: producer },
+          queue: { binding: 'JOBS', deadLetterQueue: false },
+        }),
       ],
     });
 
@@ -78,7 +87,10 @@ describe('CloudflarePlugin queue arm', () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        CloudflarePlugin({ env: { JOBS: producer }, queue: { binding: 'JOBS' } }),
+        CloudflarePlugin({
+          env: { JOBS: producer },
+          queue: { binding: 'JOBS', deadLetterQueue: false },
+        }),
       ],
     });
 
@@ -112,7 +124,7 @@ describe('CloudflarePlugin queue arm', () => {
         RuntimePlugin(),
         CloudflarePlugin({
           env: { REPORTS: producer },
-          queue: { binding: 'REPORTS', name: 'reports' },
+          queue: { binding: 'REPORTS', name: 'reports', deadLetterQueue: false },
         }),
       ],
     });
@@ -226,7 +238,10 @@ describe('CloudflarePlugin queue arm', () => {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
-        CloudflarePlugin({ env: { JOBS: producer }, queue: { binding: 'JOBS' } }),
+        CloudflarePlugin({
+          env: { JOBS: producer },
+          queue: { binding: 'JOBS', deadLetterQueue: false },
+        }),
         lateLogger,
       ],
     });
@@ -247,5 +262,91 @@ describe('CloudflarePlugin queue arm', () => {
     expect(logger.records.at(0)?.meta).toMatchObject({ job: 'unknown', registered: ['known'] });
 
     await app.stop();
+  });
+});
+
+describe('CloudflarePlugin queue arm: exhausted jobs (V13-197)', () => {
+  it('passes maxRetries, deadLetterQueue and retryDelaySeconds through to the queue', async () => {
+    const producer = new FakeQueueProducer();
+    const dlq = new FakeQueueProducer();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({
+          env: { JOBS: producer, JOBS_DLQ: dlq },
+          queue: {
+            binding: 'JOBS',
+            maxRetries: 2,
+            deadLetterQueue: 'JOBS_DLQ',
+            retryDelaySeconds: 5,
+          },
+        }),
+      ],
+    });
+    await app.start();
+    const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+    const failed: string[] = [];
+    queue.process(
+      'j',
+      () => {
+        throw new Error('always');
+      },
+      { onFailed: (job) => void failed.push(job.id) },
+    );
+    await queue.add('j', { n: 1 });
+    const body = producer.sends.at(0)?.body;
+
+    const first = new FakeQueueMessage('cf-1', body, 1);
+    const last = new FakeQueueMessage('cf-1', body, 2);
+    await createQueueHandler(app)(new FakeQueueBatch('jobs', [first]));
+    await createQueueHandler(app)(new FakeQueueBatch('jobs', [last]));
+
+    expect(first.retryOptions).toEqual({ delaySeconds: 5 });
+    expect(last.disposition).toBe('acked');
+    expect(failed).toHaveLength(1);
+    expect(dlq.sends.at(0)?.body).toMatchObject({ name: 'j', data: { n: 1 }, attempts: 2 });
+    expect(typeof (dlq.sends.at(0)?.body as { failedAt?: unknown }).failedAt).toBe('number');
+    await app.stop();
+  });
+
+  it('refuses at boot a deadLetterQueue naming a binding that is not a queue producer', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({
+          env: { JOBS: new FakeQueueProducer(), CACHE: new FakeKv() },
+          queue: { binding: 'JOBS', deadLetterQueue: 'CACHE' },
+        }),
+      ],
+    });
+    await expect(app.start()).rejects.toThrow(/CACHE/);
+  });
+
+  it('refuses process() when the arm names no dead-letter target', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({ env: { JOBS: new FakeQueueProducer() }, queue: { binding: 'JOBS' } }),
+      ],
+    });
+    await app.start();
+    const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+    expect(() => {
+      queue.process('j', () => {});
+    }).toThrow(/deadLetterQueue/);
+    await app.stop();
+  });
+
+  it('refuses at boot a deadLetterQueue that is the queue it serves', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        CloudflarePlugin({
+          env: { JOBS: new FakeQueueProducer() },
+          queue: { binding: 'JOBS', deadLetterQueue: 'JOBS' },
+        }),
+      ],
+    });
+    await expect(app.start()).rejects.toThrow(/the queue it serves/);
   });
 });

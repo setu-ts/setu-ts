@@ -100,3 +100,54 @@ describe('CloudflarePlugin.register — the hostless marker and the Workers warn
     expect(isHostlessRegistry(registry)).toBe(true);
   });
 });
+
+describe('CloudflarePlugin falls back to the runtime waitUntil (D12)', () => {
+  /** A context whose runtime carries a recording waitUntil. */
+  function ctxWithRuntimeWaitUntil(held: Promise<unknown>[], logger?: ILoggerLike) {
+    const services = new MockServiceRegistry();
+    const runtime = {
+      platform: () => 'cloudflare-workers',
+      waitUntil: (promise: Promise<unknown>) => {
+        held.push(promise);
+      },
+    } as unknown as IRuntimeServices;
+    const ctx = {
+      services,
+      runtime,
+      health: { register: (): void => {} },
+      ...(logger === undefined ? {} : { logger }),
+    } as unknown as IPluginContext;
+    return { ctx, services };
+  }
+
+  it('uses the runtime waitUntil with no option: not hostless, no warning, work reaches it', () => {
+    const held: Promise<unknown>[] = [];
+    const { logger, warnings } = recordingLogger();
+    const { ctx, services } = ctxWithRuntimeWaitUntil(held, logger);
+
+    CloudflarePlugin({ env: {} }).register(ctx);
+
+    const registry = services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+    expect(isHostlessRegistry(registry)).toBe(false);
+    expect(warnings).toEqual([]);
+    registry.waitUntil(Promise.resolve('work'));
+    expect(held).toHaveLength(1);
+  });
+
+  it('lets an explicit waitUntil option win over the runtime one', () => {
+    const fromRuntime: Promise<unknown>[] = [];
+    const fromOption: Promise<unknown>[] = [];
+    const { ctx, services } = ctxWithRuntimeWaitUntil(fromRuntime);
+
+    CloudflarePlugin({
+      env: {},
+      waitUntil: (promise) => {
+        fromOption.push(promise);
+      },
+    }).register(ctx);
+
+    services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE).waitUntil(Promise.resolve());
+    expect(fromOption).toHaveLength(1);
+    expect(fromRuntime).toEqual([]);
+  });
+});

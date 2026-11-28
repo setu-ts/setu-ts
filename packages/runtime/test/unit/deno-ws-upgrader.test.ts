@@ -44,7 +44,14 @@ function recordingSink(): WebSocketEventSink & { events: string[] } {
 }
 
 function upgradeRequest(url = 'http://localhost/ws'): Request {
-  return new Request(url, { headers: { upgrade: 'websocket', connection: 'Upgrade' } });
+  return new Request(url, {
+    headers: {
+      upgrade: 'websocket',
+      connection: 'Upgrade',
+      'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==',
+      'sec-websocket-version': '13',
+    },
+  });
 }
 
 describe('bindDenoSocketToSink', () => {

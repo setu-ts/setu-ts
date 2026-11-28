@@ -19,7 +19,7 @@ import type {
   WebSocketUpgradeIntent,
   WebSocketUpgradeRouter,
 } from '@setu-ts/common';
-import { isPromiseLike, upgradeIntentOf } from '@setu-ts/common';
+import { isPromiseLike, isWebSocketUpgradeRequest, upgradeIntentOf } from '@setu-ts/common';
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
@@ -27,11 +27,47 @@ import {
 import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
+import { WebSocketCeilingReport } from '../shared/websocket-ceiling.ts';
+import { refuseHandshakeHeaders, WORKERD_VERSION_RULE } from '../shared/handshake-headers.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
 import {
   bindCloudflareSocketToSink,
   createDefaultCloudflareWebSocketHost,
+  WORKERS_WS_MAX_MESSAGE_BYTES,
 } from './cf-ws-upgrader.ts';
+
+/**
+ * Whether a request is a Worker-to-Worker subrequest: workerd sets `cf` on a
+ * request that arrives from the edge and leaves it unset on a service
+ * binding's or Durable Object stub's `fetch`. The dashboard preview is the
+ * documented exception: its edge requests carry no `cf`, so they are treated as
+ * internal (the websocket-plugin README names it).
+ */
+function isInternalSubrequest(request: Request): boolean {
+  return (request as Request & { readonly cf?: unknown }).cf === undefined;
+}
+
+/**
+ * The request the kernel routes on. Cloudflare's documented Worker-to-Worker
+ * socket is `fetch(url, { headers: { Upgrade: 'websocket' } })`, with no
+ * `Connection: Upgrade`, which RFC 6455 requires and `isWebSocketUpgradeRequest`
+ * reads. For such an internal subrequest only, the routed copy gains
+ * `Connection: Upgrade`, so it reaches a WebSocket route; workerd builds that
+ * handshake itself. A request carrying `cf` is routed as sent, and the shared
+ * rule is unchanged on Node, Bun and Deno, where an Upgrade-only request is no
+ * upgrade. `Upgrade` is read first, so an ordinary request costs one header
+ * lookup.
+ */
+function asWorkerToWorkerUpgrade(request: Request): Request {
+  const headers = request.headers;
+  if (headers.get('upgrade') === null || isWebSocketUpgradeRequest(headers)) return request;
+  if (!isInternalSubrequest(request)) return request;
+  const routed = new Headers(headers);
+  const connection = headers.get('connection');
+  routed.set('connection', connection === null ? 'Upgrade' : `${connection}, Upgrade`);
+  // The shared rule decides, so an `Upgrade` other than `websocket` stays as sent.
+  return isWebSocketUpgradeRequest(routed) ? new Request(request, { headers: routed }) : request;
+}
 
 /**
  * Internal handle for a Cloudflare Workers HTTP server.
@@ -43,10 +79,20 @@ export class CloudflareWorkersServerHandle {
   readonly #upgrades = new UpgradeRouterStore();
   #wsHost: CloudflareWebSocketHost | null;
   readonly #maxBodyBytes: number | undefined;
+  readonly #ceiling: WebSocketCeilingReport;
 
-  constructor(wsHost?: CloudflareWebSocketHost, maxBodyBytes?: number) {
+  constructor(
+    wsHost?: CloudflareWebSocketHost,
+    maxBodyBytes?: number,
+    reportError?: (record: Readonly<Record<string, unknown>>) => void,
+  ) {
     this.#wsHost = wsHost ?? null;
     this.#maxBodyBytes = maxBodyBytes;
+    this.#ceiling = new WebSocketCeilingReport(
+      WORKERS_WS_MAX_MESSAGE_BYTES,
+      'cloudflare-workers',
+      reportError,
+    );
   }
 
   /**
@@ -81,7 +127,10 @@ export class CloudflareWorkersServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        asWorkerToWorkerUpgrade(request),
+        this.#maxBodyBytes,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -110,13 +159,34 @@ export class CloudflareWorkersServerHandle {
   /**
    * Performs the WebSocket handshake using the Cloudflare WebSocketPair.
    */
-  #performUpgrade(_request: Request, intent: WebSocketUpgradeIntent): Response {
+  #performUpgrade(request: Request, intent: WebSocketUpgradeIntent): Response {
+    // workerd checks the handshake only after the Worker accepted the pair,
+    // which would run the route's onOpen for a malformed one (V13-278). An
+    // internal subrequest (a service binding or Durable Object stub) carries
+    // no `cf` and no key: workerd builds that handshake itself, so it is not
+    // checked. Edge requests carry `cf`; a gateway that forwards with
+    // `new Request(url, request)` keeps it, one that forwards only the
+    // headers does not (nor does the dashboard preview, see
+    // isInternalSubrequest).
+    const refusal = isInternalSubrequest(request)
+      ? undefined
+      : refuseHandshakeHeaders(request.headers, WORKERD_VERSION_RULE);
+    if (refusal !== undefined) {
+      intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: refusal.reason });
+      return refusal.header === 'key'
+        ? new Response(null, { status: 400 })
+        : new Response(null, {
+            status: 426,
+            headers: { 'sec-websocket-version': '13', upgrade: 'websocket', connection: 'Upgrade' },
+          });
+    }
     try {
       // Resolved lazily so the Workers-global boundary cast is never evaluated
       // on a runtime that has no WebSocketPair.
       this.#wsHost ??= createDefaultCloudflareWebSocketHost();
 
       const { client, server } = this.#wsHost.createPair();
+      this.#ceiling.check(intent.sink);
       bindCloudflareSocketToSink(server, intent.sink);
       return this.#wsHost.createUpgradeResponse(client, intent.protocol);
     } catch (cause) {
@@ -142,7 +212,11 @@ export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
   #handle: CloudflareWorkersServerHandle;
 
   constructor(wsHost?: CloudflareWebSocketHost, options?: HttpAdapterOptions) {
-    this.#handle = new CloudflareWorkersServerHandle(wsHost, options?.maxBodyBytes);
+    this.#handle = new CloudflareWorkersServerHandle(
+      wsHost,
+      options?.maxBodyBytes,
+      options?.reportError,
+    );
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

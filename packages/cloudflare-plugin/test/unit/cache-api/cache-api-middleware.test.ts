@@ -725,7 +725,7 @@ describe('cacheApiMiddleware — ttlSeconds', () => {
       return Promise.resolve();
     });
 
-    expect(cache.puts.at(0)?.response.headers.get('cache-control')).toBe('public, max-age=300');
+    expect(cache.puts.at(0)?.response.headers.get('cache-control')).toBe('max-age=300');
     expect(ctx.response.snapshot().headers.has('cache-control')).toBe(false);
   });
 

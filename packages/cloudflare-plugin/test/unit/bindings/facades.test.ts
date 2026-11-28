@@ -22,6 +22,7 @@ import {
   isKvNamespace,
   isQueueProducer,
   isR2Bucket,
+  isServiceBinding,
 } from '../../../src/index.ts';
 import { FakeKv, FakeR2 } from '../../fakes.ts';
 
@@ -123,5 +124,27 @@ describe('isDurableObjectNamespace', () => {
 
   it('rejects a member that is present but not callable', () => {
     expect(isDurableObjectNamespace({ idFromName: 'nope', get: () => {} })).toBe(false);
+  });
+});
+
+describe('binding shapes that overlap (V13-201)', () => {
+  const fn = (): void => {};
+  /** A real R2 bucket has every KV member name too. */
+  const r2Like = { get: fn, put: fn, delete: fn, list: fn, head: fn, createMultipartUpload: fn };
+
+  it('refuses an R2 bucket that carries all four KV members, by its R2-only members', () => {
+    expect(isKvNamespace(r2Like)).toBe(false);
+    expect(isKvNamespace({ get: fn, put: fn, delete: fn, list: fn, head: fn })).toBe(false);
+    expect(
+      isKvNamespace({ get: fn, put: fn, delete: fn, list: fn, createMultipartUpload: fn }),
+    ).toBe(false);
+    expect(isR2Bucket(r2Like)).toBe(true);
+  });
+
+  it('accepts a service binding by its fetch, and nothing without one', () => {
+    expect(isServiceBinding({ fetch: fn })).toBe(true);
+    expect(isServiceBinding(new FakeKv())).toBe(false);
+    expect(isServiceBinding({ send: fn, sendBatch: fn })).toBe(false);
+    expect(isServiceBinding(null)).toBe(false);
   });
 });

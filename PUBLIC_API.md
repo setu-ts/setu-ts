@@ -914,6 +914,7 @@ interface IRuntimeServices {
   createDnsResolver?(options: DnsResolverOptions): IDnsResolver; // since 0.14.0
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
+  waitUntil?(promise: Promise<unknown>): void; // since 0.14.0
 }
 
 type RuntimeSignal = 'SIGTERM' | 'SIGINT' | 'SIGHUP'; // 'SIGHUP' since 0.14.0
@@ -966,14 +967,27 @@ that resolves names internally and exposes no lookup surface. Callers must degra
 it is not present; the `ServiceDiscoveryPlugin`'s `'dns'` provider throws a typed
 `DiscoveryUnavailableError` during `register()`, naming the alternatives.
 
-| Member              | Node | Deno           | Bun | Workers |
-| ------------------- | ---- | -------------- | --- | ------- |
-| `fs`                | ✅   | ✅             | ✅  | ❌      |
-| `workers`           | ✅   | ✅             | ✅  | ❌      |
-| `dns`               | ✅   | ✅             | ✅  | ❌      |
-| `createDnsResolver` | ✅   | ✅             | ✅  | ❌      |
-| `onSignal`          | ✅   | ✅ (not Win32) | ✅  | ❌      |
-| `onFatalError`      | ✅   | ✅             | ✅  | ❌      |
+| Member              | Node | Deno           | Bun | Workers                                  |
+| ------------------- | ---- | -------------- | --- | ---------------------------------------- |
+| `fs`                | ✅   | ✅             | ✅  | ❌                                       |
+| `workers`           | ✅   | ✅             | ✅  | ❌                                       |
+| `dns`               | ✅   | ✅             | ✅  | ❌                                       |
+| `createDnsResolver` | ✅   | ✅             | ✅  | ❌                                       |
+| `onSignal`          | ✅   | ✅ (not Win32) | ✅  | ❌                                       |
+| `onFatalError`      | ✅   | ✅             | ✅  | ❌                                       |
+| `waitUntil`         | ❌   | ❌             | ❌  | ✅ (with `RuntimePlugin({ waitUntil })`) |
+
+`waitUntil` (0.14.0) keeps the current invocation alive until a promise settles, on a platform that
+may end an invocation with its response. Only the Cloudflare Workers runtime has it, and only when
+`RuntimePlugin({ waitUntil })` (or `createRuntimeServices({ waitUntil })`,
+`createCloudflareRuntimeServices({ waitUntil })`) was given `waitUntil` from `cloudflare:workers` —
+the module import, which resolves the current request, never one request's `ctx.waitUntil`. The
+kernel hands it, once per chain, the cleanup that can outlive the handed-back response: the
+cancel-then-cleanup chain when a client leaves a streamed body, a late asynchronous `ctx.defer`, a
+handler still running after an early response with its cleanups, and the cleanups of a request whose
+error responder threw. A missing or throwing `waitUntil` loses only the extension, never the
+cleanup. `CloudflarePlugin` uses it when its own `waitUntil` option is omitted; an explicit option
+wins.
 
 `onSignal` registers a process-termination handler so an application can run `app.stop()` — its
 shutdown hooks, discovery deregistration, and broker disconnects — before the process dies. Handlers
@@ -5374,9 +5388,9 @@ app.register(
 | `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's public origin, allowed to open a WebSocket. Each entry an exact `http:`/`https:` origin (`new URL(o).origin === o`), no `*` wildcard; an invalid entry throws at construction, naming its index. Ships in 0.12.0                                                                                                                                                               |
 | `checkOrigin`      | `boolean`                                                            | `true`      | Whether every handshake's `Origin` is checked: one that is neither the public origin (`requestOriginOf`, honouring a trusted proxy) nor listed is refused `403` before route guards and before a connection slot; a missing `Origin` (non-browser client) is admitted. `false` admits any origin. Ships in 0.12.0                                                                                                 |
 | `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                                                                                                                           |
-| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                                                                                                                         |
+| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval, from `0` to 2147483647; `0` disables it and creates no timer. Anything else throws.                                                                                                                                                                                                                                                                                                           |
 | `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                                                                                                                  |
-| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                                                                                                                       |
+| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a connection is closed with `1001`; `0` disables. A negative, infinite or `NaN` value throws. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                                                                           |
 | `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                                                                                                                                                                                                                                                            |
 | `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.                                                                                                                                                                                                                           |
 | `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path `route()` registrations. An entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a `RegistryFactory` resolved at `onInit`.                                                                                                                                                                                                                                            |
@@ -5426,28 +5440,29 @@ ws.route(
 
 ### Exports
 
-| Export                       | Kind             | Purpose                                                                |
-| ---------------------------- | ---------------- | ---------------------------------------------------------------------- |
-| `WebSocketPlugin`            | function         | Creates the plugin                                                     |
-| `WebSocketService`           | class            | The `IWebSocketService` implementation registered under the token      |
-| `WebSocketConnection`        | class            | The `IWebSocketConnection` implementation                              |
-| `Room`                       | class            | The `WebSocketRoom` implementation                                     |
-| `RoomRegistry`               | class            | Owns live rooms, creating on demand and discarding when empty          |
-| `WsRouteTable`               | class            | Exact-path route table with subprotocol selection                      |
-| `HeartbeatSweeper`           | class            | The interval implementing `heartbeatMs` / `idleTimeoutMs`              |
-| `WebSocketUnavailableError`  | class            | Thrown by `route()` when the adapter offers no upgrade seam            |
-| `resolveOptions`             | function         | Applies option defaults and rejects a contradictory configuration      |
-| `frameByteLength`            | function         | Measures a frame in bytes (text by UTF-8 encoding, not string length)  |
-| `buildContext`               | function         | Builds the `WebSocketConnectionContext` from an upgrade request        |
-| `parseRequestedProtocols`    | function         | Parses a `Sec-WebSocket-Protocol` header into tokens                   |
-| `selectProtocol`             | function         | Picks the subprotocol to echo, or refuses                              |
-| `WebSocketPluginOptions`     | type             | The options above                                                      |
-| `RealtimeDiagnosticsOptions` | type (re-export) | From `@setu-ts/common` — the M98l `diagnostics` option                 |
-| `WsRoute`, `WsRouteMatch`    | type             | Route table entry and match result                                     |
-| `HeartbeatOptions`           | type             | Resolved heartbeat configuration                                       |
-| `RoomMembershipListener`     | type             | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates     |
-| `RoomPublisher`              | type             | Forwards a local broadcast to other replicas; supplied by a backplane  |
-| `LocalBroadcastOptions`      | type             | `broadcastLocal` options — adds `exceptId` to exclude by connection ID |
+| Export                           | Kind             | Purpose                                                                  |
+| -------------------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `WebSocketPlugin`                | function         | Creates the plugin                                                       |
+| `WebSocketService`               | class            | The `IWebSocketService` implementation registered under the token        |
+| `WebSocketConnection`            | class            | The `IWebSocketConnection` implementation                                |
+| `Room`                           | class            | The `WebSocketRoom` implementation                                       |
+| `RoomRegistry`                   | class            | Owns live rooms, creating on demand and discarding when empty            |
+| `WsRouteTable`                   | class            | Exact-path route table with subprotocol selection                        |
+| `HeartbeatSweeper`               | class            | The interval implementing `heartbeatMs` / `idleTimeoutMs`                |
+| `WebSocketUnavailableError`      | class            | Thrown by `route()` when the adapter offers no upgrade seam              |
+| `WebSocketRoomsUnavailableError` | class            | Thrown by `room()`/`peek()` on Workers without a link backplane (0.14.0) |
+| `resolveOptions`                 | function         | Applies option defaults and rejects a contradictory configuration        |
+| `frameByteLength`                | function         | Measures a frame in bytes (text by UTF-8 encoding, not string length)    |
+| `buildContext`                   | function         | Builds the `WebSocketConnectionContext` from an upgrade request          |
+| `parseRequestedProtocols`        | function         | Parses a `Sec-WebSocket-Protocol` header into tokens                     |
+| `selectProtocol`                 | function         | Picks the subprotocol to echo, or refuses                                |
+| `WebSocketPluginOptions`         | type             | The options above                                                        |
+| `RealtimeDiagnosticsOptions`     | type (re-export) | From `@setu-ts/common` — the M98l `diagnostics` option                   |
+| `WsRoute`, `WsRouteMatch`        | type             | Route table entry and match result                                       |
+| `HeartbeatOptions`               | type             | Resolved heartbeat configuration                                         |
+| `RoomMembershipListener`         | type             | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates       |
+| `RoomPublisher`                  | type             | Forwards a local broadcast to other replicas; supplied by a backplane    |
+| `LocalBroadcastOptions`          | type             | `broadcastLocal` options — adds `exceptId`/`exceptIds` to exclude by ID  |
 
 ### Notes
 
@@ -5476,6 +5491,11 @@ ws.route(
   replacement implementation of `IWebSocketService` must supply it. At the registry level,
   `RoomRegistry.get(name)` creates on lookup too; use `RoomRegistry.peek(name)` for reads of
   client-supplied room names.
+- **A room object is a handle onto its name's one member set (0.14.0).** A `WebSocketRoom` kept
+  after it emptied and a later `room(name)` act on the same members: a join, leave, broadcast,
+  `size` or `has` through either reaches the same connections, a connection joined through both is
+  one member, and remote frames reach each member once, on every runtime. A name with no members is
+  still released, and a name looked up but never joined is still reclaimed.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -5483,7 +5503,22 @@ ws.route(
   connection IDs come from `runtime.uuid()` and are globally unique, so the frame carries the
   excluded ID. `Room.size` keeps reporting **local** membership either way. `Room.broadcastLocal` is
   the local-only delivery path the backplane subscriber uses (its `LocalBroadcastOptions` adds
-  `exceptId`); applications call `broadcast`.
+  `exceptId`, and `exceptIds` since 0.14.0); applications call `broadcast`.
+- **Request-bound mode on Cloudflare Workers (0.14.0).** workerd ties a socket to the request that
+  accepted it, so when `runtime.platform()` is `'cloudflare-workers'` no code writes to, reads the
+  native state of, or closes a connection from another request. With a backplane that passes
+  `hasConnectionLinks` (`@setu-ts/common`; the Durable Object arm of `@setu-ts/cloudflare-plugin`)
+  each connection opens its own link in its sink's `onOpen`, and `Room.broadcast` publishes once —
+  over the link of the connection whose event is dispatching, else over the `except` connection's
+  link, else through `publishViaHub`. When the sender is an open member of the room and not the
+  `except` connection, it is sent its own broadcast locally, once (a send that throws on a closing
+  socket is dropped): when its link carried the frame, and when its link refused it too, with the
+  hub's copy then excluding the sender. Each link delivers to its connection when that connection is
+  a member of the frame's room and is not excluded. The isolate-level subscription and the shared
+  heartbeat interval are not used; each connection runs its own heartbeat. Without such a backplane,
+  `room()` and `peek()` throw `WebSocketRoomsUnavailableError` and the startup notice names the
+  Durable Object arm. `WebSocketService.isRequestBound` reports the mode;
+  `RoomRegistry.isMember(name, conn)` and `Room.has(conn)` read membership without creating a room.
 - A `RoomRegistry` keeps a reverse `connection → rooms` index, so evicting a disconnecting peer
   costs only the rooms that peer had actually joined rather than a scan of every live room. The
   index is maintained through the `RoomMembershipListener` the registry gives each `Room` it
@@ -14467,6 +14502,37 @@ export; callers cannot mutate the classification vocabulary.
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
+### Per-connection realtime links (0.14.0)
+
+`IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
+(queued until open, unless the implementation declares an outage first and drops the queue; `false`
+when closed, called from a request that does not own the link, refused by the implementation's queue
+or frame bound, or in an outage, so the caller publishes another way) and `close(): void`
+(idempotent; while an open, the first or a reopen, is in flight, frames already queued are still
+sent once it opens, kept alive through `waitUntil` where the backplane has one; frames queued while
+a lost link waits to reopen are dropped with one `warn`).
+`IRealtimeLinkBackplane extends IRealtimeBackplane` adds
+`openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
+owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and
+`publishViaHub(frame): Promise<void>` (publishes without a socket, from any request; reaches every
+link, the caller's own included).
+`hasConnectionLinks(backplane): backplane is IRealtimeLinkBackplane` is true when both members are
+functions.
+
+`RealtimeFrame.exceptIds?: readonly string[]` (0.14.0) lists further connection IDs a broadcast
+excludes, beside `exceptId`: a receiver skips a member whose `id` equals `exceptId` or appears in
+`exceptIds`. `websocket-plugin` sets it only on Workers, for a sender whose own link refused its
+broadcast and which also names another member as `except`: the sender, when an open member of the
+room, is sent a local copy (a send that throws on a closing socket is dropped) and is listed here,
+so the hub's copy never reaches it too. The shipped guards (`isRealtimeFrame` in
+`realtime-backplane-plugin` and the one the Durable Object backplane's links and isolate socket run
+on arriving frames; the hub itself forwards bytes unread) refuse a frame whose `exceptIds` is not an
+array of strings, or has more than `REALTIME_FRAME_EXCEPT_IDS_LIMIT` (16) entries, since every
+receiver checks each member against the list; the plugin itself sends one. A custom transport that
+rebuilds frames field by field must carry it. The backplane is still registered under
+`CAPABILITIES.REALTIME_BACKPLANE`; `websocket-plugin` narrows it with the guard on Cloudflare
+Workers, where a socket belongs to the request that accepted it.
+
 <!-- version:history -->
 
 ### Realtime subscriber dispatch (0.11.0)
@@ -14688,7 +14754,7 @@ reaches `redactors[<string>]`):
 | Multi-tenancy          | `IMultiTenancyService`, `ITenantRepository`, `ITenantUnitOfWork` (since 0.13.0), `ITenantResolver`, `ITenant`, `ITenantRegistry` (since 0.12.0; `IMultiTenancyService.lookupTenant` likewise)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | SSR                    | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | SSE                    | `ISseService`, `ISseConnection`, `SseChannel`, `SseMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Realtime backplane     | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Realtime backplane     | `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`, `REALTIME_FRAME_EXCEPT_IDS_LIMIT` (16, 0.14.0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | WebSocket              | `IWebSocketService`, `IWebSocketConnection`, `IWebSocketTransport`, `WebSocketRoom`, `RoomBroadcastOptions`, `WebSocketHandlers`, `WebSocketRouteOptions`, `WebSocketConnectionContext`, `WebSocketCloseEvent`, `WebSocketReadyState`, `WebSocketEventSink`, `WebSocketUpgradeDecision`, `WebSocketUpgradeRouter`, `WebSocketUpgradeGuard`, `WebSocketGuardDecision`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Worker pool            | `IWorkerPool`, `WorkerRunOptions`, `TaskPoolStats`, `WorkerReadySignal`, `WorkerTaskRequest`, `WorkerTaskReply`, `WorkerErrorShape`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Session                | `ISessionService`, `ISession`, `ISessionStore`, `SessionData`, `SessionView`, `CookieAttributes`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -15740,10 +15806,12 @@ Contract notes:
   provides:
 
   ```typescript
-  import { env } from 'cloudflare:workers';
+  import { env, waitUntil } from 'cloudflare:workers';
 
-  const app = createApplication({ plugins: [RuntimePlugin({ env })] });
+  const app = createApplication({ plugins: [RuntimePlugin({ env, waitUntil })] });
   ```
+
+  `waitUntil` (0.14.0) becomes `runtime.waitUntil`; see Available Runtime Services.
 
   Only the record's **string** entries populate `runtime.env`, which is contracted as
   `Readonly<Record<string, string | undefined>>`; object bindings are filtered out by the pure
@@ -17346,28 +17414,31 @@ other runtime — and injection is what the platform docs recommend for testabil
 
 ### Options
 
-| Option                           | Type                  | Default      | Consumer / behavior                                                                                              |
-| -------------------------------- | --------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `env`                            | `CloudflareWorkerEnv` | required     | `BindingRegistry` — the record every accessor reads                                                              |
-| `waitUntil`                      | `WaitUntilHost`       | —            | `resolveWaitUntil` — delegated to; omit off Workers                                                              |
-| `requireBindings`                | `readonly string[]`   | `[]`         | `register()` — throws naming every absent entry                                                                  |
-| `cache.binding`                  | `string`              | —            | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`                                                   |
-| `cache.name`                     | `string`              | `'default'`  | Plugin factory — derives `cache.<name>` when not `'default'`                                                     |
-| `cache.prefix`                   | `string`              | —            | `KvCacheStore` — key prefix; **required to call `clear()`**                                                      |
-| `cache.defaultTtlSeconds`        | `number`              | —            | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                                                        |
-| `storage.binding`                | `string`              | —            | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                                                       |
-| `storage.name`                   | `string`              | `'default'`  | Plugin factory — derives `storage.<name>` when not `'default'`                                                   |
-| `storage.prefix`                 | `string`              | —            | `R2Storage` — object-key prefix                                                                                  |
-| `queue.binding`                  | `string`              | —            | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`                                               |
-| `queue.name`                     | `string`              | `'default'`  | Plugin factory — derives `queue.<name>` when not `'default'`                                                     |
-| `queue.maxDelaySeconds`          | `number`              | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                       |
-| `messaging.binding`              | `string`              | —            | `WorkersBroker` — the producer binding serving `CAPABILITIES.MESSAGING`; validated at `register()`               |
-| `messaging.name`                 | `string`              | `'default'`  | Plugin factory — derives `messaging.<name>` when not `'default'`                                                 |
-| `messaging.rpc.binding`          | `string`              | —            | `WorkersBroker` — the Durable Object namespace serving reply inboxes; absent, `request`/`respond` throw          |
-| `messaging.rpc.defaultTimeoutMs` | `number`              | `5000`       | `RequestCorrelation` — reply budget when `RequestOptions.timeoutMs` is omitted                                   |
-| `durableObject.binding`          | `string`              | —            | `DurableObjectBackplane` — the namespace serving `CAPABILITIES.REALTIME_BACKPLANE`; validated at `register()`    |
-| `durableObject.name`             | `string`              | `'default'`  | Plugin factory — derives `realtime-backplane.<name>` when not `'default'`                                        |
-| `durableObject.topic`            | `string`              | `'realtime'` | `DurableObjectBackplane` — the `idFromName` value every replica shares; two apps sharing a namespace must differ |
+| Option                           | Type                             | Default      | Consumer / behavior                                                                                                                                                |
+| -------------------------------- | -------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `env`                            | `CloudflareWorkerEnv`            | required     | `BindingRegistry` — the record every accessor reads                                                                                                                |
+| `waitUntil`                      | `WaitUntilHost`                  | —            | `resolveWaitUntil` — delegated to; omit off Workers                                                                                                                |
+| `requireBindings`                | `readonly string[]`              | `[]`         | `register()` — throws naming every absent entry                                                                                                                    |
+| `cache.binding`                  | `string`                         | —            | `KvCacheStore` — the KV namespace serving `CAPABILITIES.CACHE`                                                                                                     |
+| `cache.name`                     | `string`                         | `'default'`  | Plugin factory — derives `cache.<name>` when not `'default'`                                                                                                       |
+| `cache.prefix`                   | `string`                         | —            | `KvCacheStore` — key prefix; **required to call `clear()`**                                                                                                        |
+| `cache.defaultTtlSeconds`        | `number`                         | —            | `KvCacheStore.set` — applied when `ttlSeconds` is omitted                                                                                                          |
+| `storage.binding`                | `string`                         | —            | `R2Storage` — the R2 bucket serving `CAPABILITIES.STORAGE`                                                                                                         |
+| `storage.name`                   | `string`                         | `'default'`  | Plugin factory — derives `storage.<name>` when not `'default'`                                                                                                     |
+| `storage.prefix`                 | `string`                         | —            | `R2Storage` — object-key prefix                                                                                                                                    |
+| `queue.binding`                  | `string`                         | —            | `WorkersQueue` — the producer binding serving `CAPABILITIES.QUEUE`                                                                                                 |
+| `queue.name`                     | `string`                         | `'default'`  | Plugin factory — derives `queue.<name>` when not `'default'`                                                                                                       |
+| `queue.maxDelaySeconds`          | `number`                         | `86400`      | `WorkersQueue.add` — a larger `delayMs` throws rather than being truncated                                                                                         |
+| `queue.maxRetries`               | `number`                         | `3`          | `WorkersQueue` — the consumer's `max_retries`; whole number 1 to 100, refused at `register()` otherwise; a job's budget is `min(maxAttempts, maxRetries)` (0.14.0) |
+| `queue.deadLetterQueue`          | `string \| false`                | —            | `WorkersQueue.process` — a producer binding for exhausted jobs (shape-checked at `register()`), or `false` to discard them; absent, `process()` throws (0.14.0)    |
+| `queue.retryDelaySeconds`        | `number \| (attempts) => number` | —            | `WorkersQueue` — redelivery delay, bounded by `maxDelaySeconds`; `0` overrides the queue's `retry_delay`, absent keeps it (0.14.0)                                 |
+| `messaging.binding`              | `string`                         | —            | `WorkersBroker` — the producer binding serving `CAPABILITIES.MESSAGING`; validated at `register()`                                                                 |
+| `messaging.name`                 | `string`                         | `'default'`  | Plugin factory — derives `messaging.<name>` when not `'default'`                                                                                                   |
+| `messaging.rpc.binding`          | `string`                         | —            | `WorkersBroker` — the Durable Object namespace serving reply inboxes; absent, `request`/`respond` throw                                                            |
+| `messaging.rpc.defaultTimeoutMs` | `number`                         | `5000`       | `RequestCorrelation` — reply budget when `RequestOptions.timeoutMs` is omitted                                                                                     |
+| `durableObject.binding`          | `string`                         | —            | `DurableObjectBackplane` — the namespace serving `CAPABILITIES.REALTIME_BACKPLANE`; validated at `register()`                                                      |
+| `durableObject.name`             | `string`                         | `'default'`  | Plugin factory — derives `realtime-backplane.<name>` when not `'default'`                                                                                          |
+| `durableObject.topic`            | `string`                         | `'realtime'` | `DurableObjectBackplane` — the `idFromName` value every replica shares; two apps sharing a namespace must differ                                                   |
 
 ### Exports
 
@@ -17381,14 +17452,14 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `R2Storage`, `R2StorageOptions`                                                                                                                                                                                                                                                                                                         | class + types |
 | `D1Adapter`, `D1AdapterOptions`, `D1EntityMapping`                                                                                                                                                                                                                                                                                      | class + types |
 | `WaitUntilHost`, `LoggerSource`                                                                                                                                                                                                                                                                                                         | types         |
-| `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`                                                                                                                                                                                                                                                                                    | class + types |
+| `WorkersQueue`, `WorkersQueueOptions`, `JobIdSource`, `RetryDelaySeconds`                                                                                                                                                                                                                                                               | class + types |
 | `createQueueHandler`, `QueueHandler`, `QueueHandlerOptions`                                                                                                                                                                                                                                                                             | fn + types    |
 | `WorkersBroker`, `WorkersBrokerOptions`, `ReplyInboxBinding`, `BrokerRuntime`                                                                                                                                                                                                                                                           | class + types |
 | `createMessagingHandler`, `MessagingHandler`, `MessagingHandlerOptions`                                                                                                                                                                                                                                                                 | fn + types    |
 | `ReplyInboxObjectCore`, `ReplyInboxObjectCoreOptions`                                                                                                                                                                                                                                                                                   | class + type  |
 | `WorkersCron`, `WorkersCronOptions`, `CronHandler`                                                                                                                                                                                                                                                                                      | class + types |
 | `createScheduledHandler`, `ScheduledHandler`                                                                                                                                                                                                                                                                                            | fn + type     |
-| `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`                                                                                                                                                                                                                                                                          | fn + types    |
+| `cacheApiMiddleware`, `CacheApiMiddlewareOptions`, `ICacheApi`, `cacheApiKey`, `CacheApiKeyInput`, `purgeCacheApi`, `PurgeCacheApiTarget`                                                                                                                                                                                               | fn + types    |
 | `assessCacheability`, `CacheabilityInput`, `CacheRefusal`                                                                                                                                                                                                                                                                               | fn + types    |
 | `RealtimeBackplaneObjectCore`, `RealtimeBackplaneObjectCoreOptions`                                                                                                                                                                                                                                                                     | class + type  |
 | `DistributedLockObjectCore`, `DistributedLockObjectCoreOptions`                                                                                                                                                                                                                                                                         | class + type  |
@@ -17402,8 +17473,8 @@ other runtime — and injection is what the platform docs recommend for testabil
 | `IDurableObjectState`, `IDurableObjectStorage`, `IDurableObjectWebSocket`, `IDurableObjectClientSocket`, `DurableObjectMessageEvent`                                                                                                                                                                                                    | types         |
 | `VectorizeVectorStore`, `VectorizeIndexLike`, `VectorizeVectorLike`, `VectorizeVectorStoreOptions`                                                                                                                                                                                                                                      | class + types |
 | `IKvNamespace`, `IR2Bucket`, `IR2Object`, `IR2ObjectBody`, `ID1Database`, `ID1PreparedStatement`, `D1Result`, `IQueueProducer`, `IQueueMessage`, `IQueueMessageBatch`, `IScheduledController`, `IServiceBinding`, `IDurableObjectNamespace`, `CloudflareWorkerEnv`, `KvPutOptions`, `KvListOptions`, `KvListResult`, `QueueSendOptions` | types         |
-| `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isQueueProducer`, `isDurableObjectNamespace`                                                                                                                                                                                                                                            | guards        |
-| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareObjectNotFoundError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                         | errors        |
+| `isKvNamespace`, `isR2Bucket`, `isD1Database`, `isQueueProducer`, `isDurableObjectNamespace`, `isServiceBinding`                                                                                                                                                                                                                        | guards        |
+| `CloudflareBindingMissingError`, `CloudflareUnsupportedError`, `CloudflareRequestTimeoutError`, `CloudflareRemoteHandlerError`                                                                                                                                                                                                          | errors        |
 
 ### `D1Adapter` — D1 as a first-class database
 
@@ -17526,22 +17597,64 @@ connections stay open; `getWebSockets()` is the only membership that survives, s
 membership used. The payload is re-broadcast verbatim and never parsed, which keeps the object
 schema-ignorant — a future widening of `RealtimeFrame` needs no redeploy of the application's class.
 
-**The subscription guarantee is narrower than "durable", deliberately.** A Worker isolate is evicted
-at Cloudflare's discretion and its outbound WebSockets go with it. That is sound rather than lossy
-because the members the subscription serves are client sockets held by the _same_ isolate, and an
-HTTP-triggered Worker stays alive while its clients remain connected — so losing the isolate loses
-the subscription and its members together. The socket opens lazily on first publish and reopens
-after any failure.
+**Client sockets belong to a request, not to the isolate (0.14.0).** workerd ties every I/O object
+to the request that created it, so `DurableObjectBackplane` implements `IRealtimeLinkBackplane`
+(`@setu-ts/common`): `openConnectionLink(connectionId, deliver)` opens one link per client
+connection from that connection's own request, and `publishViaHub(frame)` POSTs a frame to the hub
+(`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
+request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
+(request-bound mode). A link queues up to 64 frames while it opens (oldest dropped, one warning) and
+up to 1 MiB (1,048,576 bytes) of frame data, counted as the UTF-8 length of `frame.data`, the unit
+the hub's cap uses. A frame that would pass that budget, or whose serialized form (the exclusion
+fields the plugin adds included) is above the hub's 33,554,432-byte cap, is refused (`publish`
+returns `false`), so `websocket-plugin` POSTs it through `publishViaHub`. The hub answers 413 above
+the cap, logged as `cloudflare: backplane publish failed` with `status: 413`. A sender that is an
+open member of the room and whose own link refuses a broadcast is sent it locally, exactly once (a
+send that throws on a closing socket is dropped), when `except` names nobody or another member; a
+sender that names itself as `except` gets no copy, as on every runtime. The hub's copy excludes the
+sender: as `exceptId` when the broadcast has no `except`, otherwise in `exceptIds` beside the
+caller's `except`, so its link drops that copy whether or not the hub had accepted the link yet.
+Frames sent through the hub while queued ones wait can arrive before them. A link reopens a lost
+socket for as long as its connection is open: after 0.5 s, 1 s and 2 s, then doubling to a 30 s cap.
+Once the third reopen has failed, each connection's link logs
+`cloudflare: backplane link still reopening` once, with `{ topic, connection, dropped }` and no
+frame content, drops the frames it had queued (they would reach other replicas late) and refuses new
+ones, so broadcasts go through the hub's HTTP publish; when a reopen then succeeds it logs
+`cloudflare: backplane link restored` at `info`. The connection stays open meanwhile, and frames
+other replicas publish during the outage are not delivered to it. Its connection's `close()` clears
+the pending reopen. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and receives
+only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a close or an
+error is retired and closed rather than left open at the hub, so the next call reopens it.
+`publish(frame)` sends through `POST /publish`, never over that socket, so publishes from different
+requests never touch a socket another request owns; a failed POST is logged as
+`cloudflare: backplane publish failed`, never thrown: a refused frame (413, 400) each time, and a
+hub fault (a rejected call, or any other failing status, such as a 5xx or a 426 from a binding that
+is not the hub) once per run of them, logged again after a POST succeeds, since while the hub is
+down every broadcast falls back here. The hub fans the POST out to every socket, the publisher's own
+included, and the replica drops a frame whose `origin` is its own (the rule every backplane
+transport applies, along with dropping a frame that is not well-formed). A replica hears a frame
+only once its socket has joined the hub. The socket belongs to the request that opened it: on local
+workerd it keeps receiving after that request has answered, which is unverified on the platform.
+Each publish is its own call to the hub and the platform orders calls only within one stub, so other
+replicas may receive one replica's frames out of order.
 
-**Lock.** `DurableObjectLock` structurally satisfies `scheduler-plugin`'s `IDistributedLock` without
-importing it (a plugin may not import a plugin), and is app-constructed then handed over, matching
-`KvSessionStore` and `D1Adapter`:
+**Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
+Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses
+to register on Workers. It structurally matches `scheduler-plugin`'s `IDistributedLock`, but no
+runtime where `SchedulerPlugin` runs can hold the binding.
 
 ```typescript
-const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, { runtime });
-// `enabled: true` is NOT required — resolveLock consults `lock` before `enabled`.
-app.register(SchedulerPlugin({ distributedLock: { lock } }));
+const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+const lock = new DurableObjectLock(bindings.durableObject('LOCKS'), {
+  runtime: ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
+  keyPrefix: 'reports:',
+});
+const token = await lock.acquire('nightly', 60_000);
 ```
+
+`acquire(key, ttlMs)` throws a `RangeError` before any I/O unless `ttlMs` is a whole number of
+milliseconds from 1 to 2,147,483,647 (0.14.0); `DistributedLockObjectCore` answers 400 for the same
+values, which the client surfaces as `CloudflareUnsupportedError`.
 
 One object per lock key. Correctness comes from the platform: a Durable Object processes one event
 at a time and holds back delivery while a storage operation runs, so the read-compare-write is
@@ -17589,6 +17702,10 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
   `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
+- **A missing R2 object throws `StorageObjectNotFoundError` (0.14.0).** `R2Storage.get` and
+  `getStream` throw common's class, as `storage-plugin`'s `StorageService` does for every provider,
+  so the kernel answers `404` with the fixed detail and the key stays out of the body.
+  `CloudflareObjectNotFoundError` is removed.
 - **`R2Storage.getSignedUrl` rejects.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.
 - **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
@@ -17621,12 +17738,43 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   envelope — which is also what carries the job **name**, since a Cloudflare message body is
   arbitrary JSON and `IQueue.process` dispatches by name. The id the caller receives is therefore
   the id the processor sees as `job.id`.
-- **An unroutable message is RETRIED, never acked.** A body that is not a readable envelope, or a
-  name with no registered processor, is returned for redelivery and reported through the logger —
-  acking it would discard it permanently and silently, which is the failure a queue exists to
-  prevent. A processor that throws is likewise retried, leaving the queue's own `max_retries` and
-  dead-letter configuration to decide what happens next. `AddJobOptions.maxAttempts` is enforced at
-  dispatch, because Cloudflare's `max_retries` is queue-wide configuration rather than per message.
+- **An unroutable message is RETRIED while it has attempts left, never acked.** A body that is not a
+  readable envelope, or a name with no registered processor, is returned for redelivery and reported
+  through the logger — acking it would discard it permanently and silently, which is the failure a
+  queue exists to prevent. On its last attempt it is forwarded to the dead-letter producer (or
+  discarded with a warning when `deadLetterQueue` is `false`).
+- **An exhausted job is dead-lettered, never acked away (0.14.0).** `process()` throws
+  `CloudflareUnsupportedError` unless `deadLetterQueue` (constructor: `deadLetter`) is a producer or
+  `false`: the platform deletes a message that exhausts `max_retries` unless `wrangler.toml` has a
+  `dead_letter_queue`, which the binding does not expose. A job's budget is
+  `min(AddJobOptions.maxAttempts, maxRetries)` (`maxRetries` default 3, must equal `max_retries`); a
+  larger `maxAttempts` is capped with one warning per job name. On the final attempt
+  `ProcessOptions.onFailed` runs once (guarded), then the envelope plus `failedAt`, `attempts` and a
+  bounded `error` text is sent to the producer and the message acked; with `false` it is acked and
+  warned about, never the payload. The platform's last delivery is kept in reserve: a failed send
+  retries, and the redelivery forwards again without a second `onFailed`, its `error` then the fixed
+  reason `attempt budget exhausted` (or, past `maxRetries`, no error text at all). On the platform's
+  last delivery, if that send fails too, the message body is sent once more exactly as it arrived
+  (the envelope, or an unroutable body as is), without the dead-letter fields, and the message is
+  acked; only if that fails as well does the job leave the adapter (the platform's
+  `dead_letter_queue`, or deleted), which is logged. A dead-letter consumer therefore sees the copy
+  (`failedAt`, `attempts`, `error`; an unroutable body under `body`) or, rarely, the body alone.
+  Both go as JSON, except a body, envelope or not, that JSON would change (binary, a non-plain
+  object, a `bigint`, `undefined`, `-0` or a non-finite number, an array with a hole or an extra
+  key, an object reached twice; the check stops at 64 levels and treats anything deeper the same
+  way): its copy is sent with `contentType: 'v8'`, and the body alone as `bytes` for an
+  `ArrayBuffer`, else `v8`. An unroutable message is forwarded the same way, its copy's `error`
+  naming its own reason (`body is not a job envelope` or `no processor registered`, none past
+  `maxRetries`). On a queue with no dead-letter target (producer-only), an unroutable message on its
+  last attempt is retried for the platform's own `dead_letter_queue`. A `deadLetterQueue` naming the
+  queue's own binding, or a `deadLetter` that is its own producer, is refused, since each exhausted
+  job would loop. `retryDelaySeconds` (a number, or a function of the failed attempt) passes
+  `retry({ delaySeconds })`, bounded by `maxDelaySeconds`.
+- **A trace crosses the queue (0.14.0).** `WorkersBrokerOptions.telemetry` (a thunk;
+  `CloudflarePlugin` resolves `CAPABILITIES.TELEMETRY` per message) runs `publish` and `request` in
+  a `producer` span whose `traceparent` is written to the envelope's framework `trace` field (never
+  merged with the caller's headers), and each subscriber and responder in a `consumer` span parented
+  from it (a malformed or missing value starts a root span).
 - **`publish` reaches one consumer Worker, not every subscriber in the cluster.** Cloudflare allows
   **exactly one active consumer per queue**, so two Workers cannot both receive one published
   message; fan-out happens across the handlers registered inside that consumer. A topology needing
@@ -17665,9 +17813,12 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
 - **The RPC errors are this package's own classes.** `CloudflareRequestTimeoutError` and
   `CloudflareRemoteHandlerError` mirror `messaging-plugin`'s `RequestTimeoutError` and
   `RemoteHandlerError` but are distinct identities, because AI_GUIDELINES §2.2 forbids a plugin
-  importing another plugin and `common` carries no error class to promote them into. Which one an
+  importing another plugin and `common` has no RPC error class to promote them into. Which one an
   application catches is never ambiguous: both providers claim `CAPABILITIES.MESSAGING`, so the
-  kernel's duplicate-provider check guarantees exactly one is registered.
+  kernel's duplicate-provider check guarantees exactly one is registered. The Cloudflare classes
+  answer (0.14.0) a timeout `504` ("No reply arrived in time; the request may have been handled."),
+  a responder failure `502` ("The service that handled the request failed."); the topic, budget and
+  remote message stay in `message`, never in the body.
 - **Cron Triggers do NOT register `CAPABILITIES.SCHEDULER`, deliberately.** Of `IScheduler`'s eight
   methods only `cron` is expressible on Workers: `every` and `delay` arm a timer and the isolate is
   evicted between invocations (the same reason `scheduler-plugin` cannot run on Workers);
@@ -17715,8 +17866,25 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `Set-Cookie`; `assessCacheability` reports each as a `CacheRefusal` and the middleware skips the
   write. The 206 and `Vary: *` checks are unconditional — an operator may legitimately configure
   `cacheableStatuses: [200, 206]`, at which point only the explicit rule stops the platform
-  throwing. `Cache-Control: private=Set-Cookie` is the platform's documented opt-in and clears the
-  `set-cookie` refusal.
+  throwing. Since 0.14.0 `CacheRefusal` also has `'private'`: `Cache-Control` holding `private`
+  (with or without a field list) or `no-store`, or unreadable (an unclosed quote), read quote-aware.
+  `private=Set-Cookie` is therefore refused as `'set-cookie'` and `'private'`, and the middleware
+  warns once per instance naming that header.
+- **The edge cache stores nothing per visitor (0.14.0)**, the same rule as `cacheMiddleware`,
+  checked on read and on write because the key cannot carry `Vary`. A request carrying
+  `Authorization` or a cookie that counts (`credentialCookies`; any cookie by default, `[]` for
+  `Authorization` only) is served only a stored response that says `public` and whose `Vary` names
+  neither `Cookie` nor `Authorization`, and its response is stored only on those terms. A request
+  carrying any cookie is never served an entry varying on `Cookie` or `Authorization`. A response
+  captured with `PER_VISITOR_RESPONSE_STATE_KEY` set is never stored; one captured with
+  `COOKIE_DEPENDENT_RESPONSE_STATE_KEY` set is stored only from a request with no cookie and no
+  `Authorization`, with `Cookie` added to the stored `Vary`. `ttlSeconds` writes `max-age=N`, never
+  `public`.
+- **Eviction (0.14.0).** `cacheApiKey({ url, tenant?, locale? }): string | undefined` returns the
+  default key text (the middleware's default key calls it).
+  `purgeCacheApi({ url, tenant?, locales? }, { cache? }): Promise<number>` deletes the entry for
+  each listed locale (the no-locale entry when none is listed) and returns how many it deleted; `0`
+  where no Cache API exists. Local to the current data center, as `cache.delete` is.
 - **Only GET requests touch the edge cache — on the read as well as the write.** The cache key is a
   URL string, which the Cache API resolves as a GET request, so consulting it for a `POST` would
   serve the cached GET body and skip the handler entirely: a mutation silently discarded behind

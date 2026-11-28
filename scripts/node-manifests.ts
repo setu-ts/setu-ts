@@ -178,13 +178,18 @@ function workspaceName(specifier: string): string {
   return specifier.startsWith('jsr:') ? specifier.slice(4) : specifier;
 }
 
-/** True when a specifier is a relative path or a runtime builtin — never a dependency. */
+/**
+ * True when a specifier is a relative path or a runtime builtin — never a
+ * dependency. `cloudflare:` modules are workerd's builtins, imported by the
+ * Workers test fixtures.
+ */
 function isRelativeOrBuiltin(specifier: string): boolean {
   return (
     specifier.startsWith('./') ||
     specifier.startsWith('../') ||
     specifier.startsWith('/') ||
-    specifier.startsWith('node:')
+    specifier.startsWith('node:') ||
+    specifier.startsWith('cloudflare:')
   );
 }
 

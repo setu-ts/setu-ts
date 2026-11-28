@@ -689,8 +689,12 @@ export class NodeHttpServerHandle {
    * Reports a handshake failure at most once per distinct message.
    *
    * Only this catch — a server-side fault (`ws` missing, or `ws` throwing) — is
-   * reported. Node's listener catch and the Deno and Workers handshake catches
-   * are client-triggerable and stay silent (plan §3.8c). The record is
+   * reported. Node's listener catch and the Deno handshake catch are
+   * client-triggerable and stay silent (plan §3.8c). The Workers catch is not
+   * client-triggerable — the Workers adapter refuses a malformed handshake
+   * before it, so it fires only when the platform cannot create the socket
+   * pair, and answers 500 as this one does — but it lives in another adapter.
+   * The record is
    * `serializeError` of the cause: the load error's message and stack, no
    * request data.
    *

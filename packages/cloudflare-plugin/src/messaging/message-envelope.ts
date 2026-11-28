@@ -51,6 +51,13 @@ export interface PublishEnvelope {
    * header channel, so they ride the envelope and are surfaced on delivery.
    */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * The producer span's W3C `traceparent`, written by the framework when a
+   * telemetry service is registered (V13-210). Framework-owned and never
+   * merged with `headers`, so the caller's reserved-name rule is unchanged.
+   * @since 0.14.0
+   */
+  readonly trace?: string;
 }
 
 /** An RPC request awaiting a correlated reply. */
@@ -69,6 +76,11 @@ export interface RequestEnvelope {
   readonly replyTo: string;
   /** The caller's request payload. */
   readonly payload: unknown;
+  /**
+   * The producer span's W3C `traceparent`, as on {@linkcode PublishEnvelope}.
+   * @since 0.14.0
+   */
+  readonly trace?: string;
 }
 
 /**
@@ -133,6 +145,7 @@ export function encodePublishEnvelope(
     orderingKey?: string;
     deduplicationId?: string;
     headers?: Readonly<Record<string, string>>;
+    trace?: string;
   },
 ): PublishEnvelope {
   return {
@@ -144,6 +157,7 @@ export function encodePublishEnvelope(
     ...(fields?.orderingKey !== undefined ? { orderingKey: fields.orderingKey } : {}),
     ...(fields?.deduplicationId !== undefined ? { deduplicationId: fields.deduplicationId } : {}),
     ...(fields?.headers !== undefined ? { headers: fields.headers } : {}),
+    ...(fields?.trace !== undefined ? { trace: fields.trace } : {}),
   };
 }
 
@@ -212,8 +226,31 @@ export function encodeRequestEnvelope(
   correlationId: string,
   replyTo: string,
   payload: unknown,
+  trace?: string,
 ): RequestEnvelope {
-  return { v: ENVELOPE_VERSION, kind: 'rpc-req', topic, id, correlationId, replyTo, payload };
+  return {
+    v: ENVELOPE_VERSION,
+    kind: 'rpc-req',
+    topic,
+    id,
+    correlationId,
+    replyTo,
+    payload,
+    ...(trace !== undefined ? { trace } : {}),
+  };
+}
+
+/**
+ * The `traceparent` a delivered envelope carries, or `null` when it carries
+ * none (a string is required; the value itself is validated by the parser).
+ *
+ * @param envelope - The delivered envelope
+ * @returns The carried value, or `null`
+ * @since 0.14.0
+ */
+export function envelopeTrace(envelope: QueueEnvelope): string | null {
+  const trace: unknown = (envelope as { trace?: unknown }).trace;
+  return typeof trace === 'string' ? trace : null;
 }
 
 /**

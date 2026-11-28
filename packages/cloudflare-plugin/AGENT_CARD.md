@@ -6,8 +6,7 @@ plus the capabilities selected by its arms.
 
 ## Register platform cache and storage
 
-Call this from the Workers composition with its platform environment and background-work sink; put
-the returned plugin in the config's plugins array:
+Call it from the Workers composition; put the result in the config's plugins array:
 
 ```ts
 import { CloudflarePlugin } from '@setu-ts/cloudflare-plugin';
@@ -45,16 +44,17 @@ export function registerCatalogRoutes(router: IRouterApi): void {
 - Omitted arms register nothing. Cache supplies `CAPABILITIES.CACHE` (`ICacheStore`); storage
   supplies `CAPABILITIES.STORAGE` (`IStorage`). Named arms derive separate capability tokens.
 - KV default expiry and edge `ttlSeconds` use seconds; omitting KV expiry means no expiry.
-- The edge cache is per datacenter. Without an available cache, middleware passes through.
-- Edge hits skip the handler; put per-route caching after guards for responses needing
-  authorization.
-- Pass the platform `waitUntil` to extend background work beyond the response.
+- The edge cache is per datacenter; without one, middleware passes through.
+- Edge hits skip the handler; put per-route caching after guards. Per-visitor responses are never
+  stored; `purgeCacheApi` evicts.
+- Pass the platform `waitUntil` so background work outlives the response.
 
 ## Other options
 
-- `queue` supplies `IQueue`; consuming needs `createQueueHandler(app)`.
-- `messaging` supplies `IMessageBroker`; `rpc` enables replies through a Durable Object binding.
-- `durableObject` supplies `IRealtimeBackplane`; `WorkersCron`/`createScheduledHandler` handle cron.
-- `VectorizeVectorStore` serves vectors: namespace = scope, hashed ids; refuses `replaceSource` and
-  `deleteScope`.
+- `queue` supplies `IQueue`; consuming needs `createQueueHandler(app)` and `deadLetterQueue`
+  (producer or `false`).
+- `messaging` supplies `IMessageBroker`; `rpc` adds replies via a Durable Object.
+- `durableObject` supplies `IRealtimeBackplane` (rooms need it); `WorkersCron` handles cron.
+- `bindings.service('NAME').fetch()` calls a Worker; deploy it first.
+- `VectorizeVectorStore` serves vectors (namespace = scope; no `replaceSource`/`deleteScope`).
 - `D1Adapter`, `KvSessionStore` and `DurableObjectIdempotencyStore` adapt other platform services.

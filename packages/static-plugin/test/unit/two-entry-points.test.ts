@@ -60,6 +60,11 @@ describe('two entry points', () => {
           this._headers.set(name, value);
           return this;
         },
+        appendHeader(name: string, value: string) {
+          const existing = this._headers.get(name);
+          this._headers.set(name, existing === undefined ? value : `${existing}, ${value}`);
+          return this;
+        },
         send(body?: Uint8Array | ReadableStream<Uint8Array>) {
           this._body = body ?? new Uint8Array();
           return this;
@@ -193,6 +198,11 @@ describe('two entry points', () => {
         },
         header(name: string, value: string) {
           this._headers.set(name, value);
+          return this;
+        },
+        appendHeader(name: string, value: string) {
+          const existing = this._headers.get(name);
+          this._headers.set(name, existing === undefined ? value : `${existing}, ${value}`);
           return this;
         },
         send(body?: Uint8Array | ReadableStream<Uint8Array>) {

@@ -39,25 +39,25 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IWebSocketService } from '@setu-ts/common';
 
 const ws = ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-ws.peek('lobby')?.broadcastJson({ event: 'deployment', version: '1.2' });
+ws.room('lobby').broadcastJson({ event: 'deployment', version: '1.2' });
 ```
 
 ## Behaviour
 
 - Paths match exactly; send variable data through the query. Route factories resolve at `onInit`.
-- Without an adapter upgrade seam, `available` is false and registering a route throws
+- Without an adapter upgrade seam `available` is false and `route` throws
   `WebSocketUnavailableError`. `app.fetch` and `app.inject` do not establish Node sockets.
-- Rooms are created by `room`; `peek` returns `undefined` without creating one. Closing a connection
-  automatically removes it from rooms.
-- `heartbeatMs` and `idleTimeoutMs` default to `0` (off); an idle timeout requires a heartbeat.
-  `maxConnections` defaults to `0` (unlimited) and refuses excess upgrades with 503.
-- Rooms are local without a backplane. With one, sizes stay local and `except` applies only on the
-  originating replica.
+- `room` creates a room; `peek` does not. Closing leaves every room.
+- `heartbeatMs`/`idleTimeoutMs` default to `0` (off; invalid throws); idle needs a heartbeat.
+  `maxConnections` (default `0`, unlimited) refuses excess upgrades with 503.
+- Rooms are local without a backplane. With one, sizes and `except` stay per replica.
+- Workers rooms need a link-capable backplane (`CloudflarePlugin({ durableObject })` is one), else
+  `room`/`peek` throw `WebSocketRoomsUnavailableError`.
 
 ## Other options
 
 - `maxMessageBytes` defaults to 1 MiB; `0` disables it. Oversized messages close 1009. Node bounds
   the read; Bun's transport cap is 16 MB. Bun/Deno check after buffering.
 - Route `options.guards` checks upgrades before acceptance; `protocols` selects a subprotocol.
-- `behaviors` wraps incoming messages; `diagnostics` opts into observations and `scalingNotice`
-  controls the local-only startup notice.
+- `behaviors` wrap incoming messages; `diagnostics` opts in to observations; `scalingNotice` toggles
+  the startup notice.

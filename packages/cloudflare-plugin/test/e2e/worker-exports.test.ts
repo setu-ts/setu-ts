@@ -59,7 +59,7 @@ async function buildWorker(): Promise<{
       RuntimePlugin(),
       CloudflarePlugin({
         env: { JOBS: producer },
-        queue: { binding: 'JOBS' },
+        queue: { binding: 'JOBS', deadLetterQueue: false },
         waitUntil: (promise): void => {
           background.push(promise);
         },

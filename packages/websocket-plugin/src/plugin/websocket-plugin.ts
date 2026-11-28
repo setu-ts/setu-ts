@@ -21,6 +21,7 @@ import {
   CAPABILITIES,
   compileRealtimeDiagnosticsAlias,
   createRealtimeObservationCollector,
+  hasConnectionLinks,
   PLUGIN_PRIORITY,
   resolveRegistryEntry,
 } from '@setu-ts/common';
@@ -66,7 +67,9 @@ const PLUGIN_NAME = 'websocket-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
- * @throws {Error} If `idleTimeoutMs` is set without a `heartbeatMs` to sweep on,
+ * @throws {Error} If `heartbeatMs` or `idleTimeoutMs` is negative, infinite or
+ *   `NaN`, `heartbeatMs` is above 2^31-1, `idleTimeoutMs` is set without a
+ *   `heartbeatMs` to sweep on,
  *   `allowedOrigins` holds an entry that is not an absolute http(s) origin, or
  *   `checkOrigin` is not a boolean, or `maxMessageBytes` is not a whole number
  *   from 0 to 2^31-1; refused when `WebSocketPlugin()` is called
@@ -131,7 +134,21 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         ? ctx.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE)
         : undefined;
 
-      if (backplane === undefined && options?.scalingNotice !== false) {
+      if (
+        ctx.runtime.platform() === 'cloudflare-workers' &&
+        (backplane === undefined || !hasConnectionLinks(backplane)) &&
+        options?.scalingNotice !== false
+      ) {
+        // On Workers a client socket belongs to the request that accepted it,
+        // so rooms need the Durable Object backplane's per-connection links;
+        // the in-process fallback the line below describes does not exist here.
+        ctx.logger?.info(
+          'websocket: rooms on Cloudflare Workers need the Durable Object backplane. Register ' +
+            "CloudflarePlugin({ durableObject: { binding: '<BINDING>' } }) from " +
+            '@setu-ts/cloudflare-plugin; without it ws.room() throws and single-socket routes ' +
+            'still work.',
+        );
+      } else if (backplane === undefined && options?.scalingNotice !== false) {
         // Said once at startup because the alternative is silent: behind more
         // than one replica a room broadcast reaches only the clients on this
         // process, which looks like partial delivery rather than an error.
@@ -205,8 +222,10 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         }),
       );
 
+      // A request-bound service (Workers) receives through per-connection links
+      // and never through the isolate-level subscription.
       const unsubscribe =
-        backplane === undefined
+        backplane === undefined || service.isRequestBound
           ? undefined
           : await backplane.subscribe((frame) => {
               service.deliverRemoteFrame(frame);

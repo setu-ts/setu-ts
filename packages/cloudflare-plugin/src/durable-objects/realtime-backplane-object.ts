@@ -28,6 +28,13 @@ export interface RealtimeBackplaneObjectCoreOptions {
 }
 
 /**
+ * The largest frame `POST /publish` accepts: workerd's ceiling for one
+ * received WebSocket message (32 MiB), so nothing the hub forwards can exceed
+ * what a link may receive.
+ */
+export const MAX_FRAME_BYTES = 33_554_432;
+
+/**
  * Fans one replica's broadcast out to every other connected replica.
  *
  * **This class holds no state.** Not as a simplification — as a correctness
@@ -82,19 +89,25 @@ export class RealtimeBackplaneObjectCore {
   }
 
   /**
-   * Answers a replica's WebSocket upgrade.
+   * Answers a replica's WebSocket upgrade, or a `POST /publish`.
    *
    * @param request - The request the stub forwarded
-   * @returns A 101 carrying the client half, or a 426 for a non-upgrade request
+   * @returns A 101 carrying the client half, or a 426 for a non-upgrade
+   *   request; for `POST /publish`, 204, 413 above 33,554,432 bytes, or 400 for
+   *   a body that is not valid UTF-8
    * @throws {Error} When `WebSocketPair` is unavailable and no host was injected
    */
   fetch(request: Request): Promise<Response> {
+    if (request.method === 'POST' && new URL(request.url).pathname === '/publish') {
+      return this.#publish(request);
+    }
     if (request.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return Promise.resolve(
         new Response(
           'This Durable Object serves the Setu-TS realtime backplane and accepts ' +
-            'only WebSocket upgrades.',
-          { status: 426 },
+            'only WebSocket upgrades and POST /publish.',
+          // RFC 9110 §15.5.22: a 426 names the protocol to upgrade to.
+          { status: 426, headers: { upgrade: 'websocket', connection: 'Upgrade' } },
         ),
       );
     }
@@ -109,6 +122,32 @@ export class RealtimeBackplaneObjectCore {
     // runtime reaches this line.
     const init = { status: 101, webSocket: pair.client } as unknown as ResponseInit;
     return Promise.resolve(new Response(null, init));
+  }
+
+  /**
+   * Fans one POSTed frame out to every connected socket, the publisher's own
+   * link included (a POST has no socket to exclude). The body is forwarded
+   * verbatim, never parsed; the receiving side validates it.
+   * @param request - The POST carrying one serialized frame
+   * @returns 204; 413 above the platform's received-message ceiling; 400 for
+   *   a body that is not valid UTF-8 (decoding it would replace every bad
+   *   byte with U+FFFD, up to three times its size on the hub's sockets)
+   */
+  async #publish(request: Request): Promise<Response> {
+    const declared = Number(request.headers.get('content-length') ?? '0');
+    if (declared > MAX_FRAME_BYTES) return new Response(null, { status: 413 });
+    const body = await readBounded(request, MAX_FRAME_BYTES);
+    if (body === TOO_LARGE) return new Response(null, { status: 413 });
+    if (body === NOT_UTF8) return new Response(null, { status: 400 });
+    for (const socket of this.#state.getWebSockets()) {
+      try {
+        socket.send(body);
+      } catch {
+        // One unwritable peer must never cost the rest their frame.
+        continue;
+      }
+    }
+    return new Response(null, { status: 204 });
   }
 
   /**
@@ -171,5 +210,55 @@ export class RealtimeBackplaneObjectCore {
     } catch {
       return;
     }
+  }
+}
+
+/** {@linkcode readBounded}'s answer for a body larger than its limit. */
+const TOO_LARGE: unique symbol = Symbol('too large');
+/** {@linkcode readBounded}'s answer for a body that is not valid UTF-8. */
+const NOT_UTF8: unique symbol = Symbol('not utf-8');
+
+/**
+ * Reads a request body as text, stopping as soon as it passes `limit` bytes
+ * (a body without `Content-Length` is otherwise read whole first). The decode
+ * is strict: a lenient one would turn each invalid byte into a three-byte
+ * U+FFFD and send the hub's sockets a frame larger than the limit.
+ *
+ * @returns The text, {@linkcode TOO_LARGE} once the body is larger than
+ *   `limit`, or {@linkcode NOT_UTF8} when it does not decode
+ */
+async function readBounded(
+  request: Request,
+  limit: number,
+): Promise<string | typeof TOO_LARGE | typeof NOT_UTF8> {
+  const stream = request.body;
+  if (stream === null) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      try {
+        await reader.cancel();
+      } catch {
+        // The body is refused either way.
+      }
+      return TOO_LARGE;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return NOT_UTF8;
   }
 }

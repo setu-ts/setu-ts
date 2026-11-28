@@ -11,7 +11,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
-import { runDeferred } from './deferred.ts';
+import { keepAlive, runDeferred } from './deferred.ts';
 import type { DeferredCleanup } from './deferred.ts';
 
 /**
@@ -217,7 +217,10 @@ class RequestContext implements IRequestContext {
    */
   defer(cleanup: DeferredCleanup): void {
     if (this.#completed) {
-      void runDeferred([cleanup], this.#registry);
+      // After the response: on a platform that ends the invocation with it,
+      // an asynchronous cleanup is kept alive through the runtime's waitUntil.
+      const pending = runDeferred([cleanup], this.#registry);
+      if (pending !== undefined) keepAlive(this.#registry, pending);
       return;
     }
     if (this.#deferred === undefined) {

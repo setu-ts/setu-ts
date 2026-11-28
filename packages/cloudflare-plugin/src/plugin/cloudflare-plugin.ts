@@ -18,12 +18,13 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@setu-ts/common';
 
+import type { WaitUntilHost } from '../background/wait-until.ts';
 import { markHostlessRegistry, resolveWaitUntil } from '../background/wait-until.ts';
 import { instanceToken } from '../instance-token.ts';
 import { WorkersBroker } from '../messaging/workers-broker.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { BindingRegistry } from '../bindings/binding-registry.ts';
-import { CloudflareBindingMissingError } from '../errors.ts';
+import { CloudflareBindingMissingError, CloudflareUnsupportedError } from '../errors.ts';
 import { createCloudflareIndicator } from '../health/indicator.ts';
 import type { CloudflarePluginOptions } from '../options.ts';
 import { WorkersQueue } from '../queues/workers-queue.ts';
@@ -135,6 +136,17 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         throw CloudflareBindingMissingError.absent(missing.join("', '"), available);
       }
 
+      // The explicit option wins; otherwise the runtime's `waitUntil`, which a
+      // Worker entry passes to `RuntimePlugin` once for the kernel and this
+      // plugin alike (D12). Read here, at register(): `RuntimePlugin` registers
+      // first (HIGHEST priority).
+      const runtimeWaitUntil = ctx.runtime.waitUntil;
+      const waitUntilHost: WaitUntilHost | undefined =
+        options.waitUntil ??
+        (runtimeWaitUntil === undefined
+          ? undefined
+          : (promise: Promise<unknown>): void => runtimeWaitUntil.call(ctx.runtime, promise));
+
       const registry = new BindingRegistry(
         bindings,
         vars,
@@ -144,7 +156,7 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         // `provides` — which the `optionalDependencies` ordering edge cannot
         // see. Reading it when the failure happens is what makes the reporting
         // this seam promises actually happen.
-        resolveWaitUntil(options.waitUntil, () => ctx.logger),
+        resolveWaitUntil(waitUntilHost, () => ctx.logger),
       );
       ctx.services.register<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE, registry);
 
@@ -153,13 +165,14 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
       // Workers an application's own background work still needs a sink, so
       // one warning names the remedy. Off Workers nothing is logged: running
       // the promise to completion is correct there (wait-until.ts).
-      if (options.waitUntil === undefined) {
+      if (waitUntilHost === undefined) {
         markHostlessRegistry(registry);
         if (ctx.runtime.platform() === 'cloudflare-workers') {
           ctx.logger?.warn(
             'cloudflare: CloudflarePlugin received no waitUntil host; work passed to ' +
               'bindings.waitUntil() may be cut off when the response is sent. Import ' +
-              "{ waitUntil } from 'cloudflare:workers' in the Worker entry and pass it " +
+              "{ waitUntil } from 'cloudflare:workers' in the Worker entry and pass it to " +
+              'RuntimePlugin (CloudflarePlugin falls back to it), or to CloudflarePlugin, ' +
               'through the application factory.',
           );
         }
@@ -195,6 +208,23 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           ...(queueArm.options.maxDelaySeconds === undefined
             ? {}
             : { maxDelaySeconds: queueArm.options.maxDelaySeconds }),
+          ...(queueArm.options.maxRetries === undefined
+            ? {}
+            : { maxRetries: queueArm.options.maxRetries }),
+          ...(queueArm.options.deadLetterQueue === undefined
+            ? {}
+            : queueArm.options.deadLetterQueue === queueArm.options.binding
+              ? refuseSelfDeadLetter(queueArm.options.binding)
+              : {
+                  deadLetter:
+                    queueArm.options.deadLetterQueue === false
+                      ? false
+                      : registry.queue(queueArm.options.deadLetterQueue),
+                }),
+          ...(queueArm.options.retryDelaySeconds === undefined
+            ? {}
+            : { retryDelaySeconds: queueArm.options.retryDelaySeconds }),
+          now: () => ctx.runtime.now(),
         });
         ctx.services.register<IQueue>(queueArm.token, queue);
       }
@@ -211,6 +241,12 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           {
             // A thunk, matching the waitUntil and queue seams above.
             logger: () => ctx.logger,
+            // Resolved when a message is sent or delivered, so a telemetry
+            // plugin registered after this one is still found (V13-210).
+            telemetry: () =>
+              ctx.services.has(CAPABILITIES.TELEMETRY)
+                ? ctx.services.get(CAPABILITIES.TELEMETRY)
+                : undefined,
             ...(rpc === undefined
               ? {}
               : {
@@ -245,6 +281,12 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
             topic: durableObjectArm.options.topic ?? DEFAULT_REALTIME_TOPIC,
             // A thunk, matching the waitUntil and queue seams above.
             logger: () => ctx.logger,
+            // Links reopen on the runtime's timers; a hub publish from a route
+            // is kept alive past the response through the registry's sink.
+            timers: ctx.runtime,
+            ...(waitUntilHost === undefined
+              ? {}
+              : { waitUntil: (promise: Promise<unknown>): void => registry.waitUntil(promise) }),
           },
         );
         ctx.services.register<IRealtimeBackplane>(durableObjectArm.token, backplane);
@@ -267,10 +309,21 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           messaging: messagingArm !== undefined,
           rpc: messagingArm?.options.rpc !== undefined,
           durableObject: durableObjectArm !== undefined,
-          waitUntil: options.waitUntil !== undefined,
+          waitUntil: waitUntilHost !== undefined,
           platform: ctx.runtime.platform(),
         }),
       );
     },
   };
+}
+
+/**
+ * Refuses a dead-letter target that is the queue it serves: each exhausted job
+ * would be re-enqueued and run again without end.
+ */
+function refuseSelfDeadLetter(binding: string): never {
+  throw new CloudflareUnsupportedError(
+    `The queue arm's deadLetterQueue '${binding}' is the queue it serves; an exhausted job ` +
+      'would be re-enqueued and run again without end. Bind a separate dead-letter queue.',
+  );
 }

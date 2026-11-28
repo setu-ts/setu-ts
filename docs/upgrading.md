@@ -12,6 +12,106 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Malformed WebSocket handshakes are refused on Deno and Workers (`@setu-ts/runtime`)
+
+Deno and Workers now refuse a handshake that Node's `ws` refuses, before the connection opens. A
+`Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400. Deno answers a `Sec-WebSocket-Version`
+other than 13 or 8 with 400, and Workers answers one other than 13 with 426. Before, Deno upgraded
+both, and on Workers the route's `onOpen` and `onClose` ran before the platform refused them. On
+Workers only requests from the edge are checked; a Worker-to-Worker socket over a service binding or
+Durable Object stub opens as before. A client that sends a real handshake, as every browser does,
+sees no change; a hand-written test or script that sends `Upgrade: websocket` without a valid key
+and version now gets the refusal.
+
+### A missing R2 object is `StorageObjectNotFoundError` (`@setu-ts/cloudflare-plugin`)
+
+`R2Storage.get` and `getStream` throw `StorageObjectNotFoundError` from `@setu-ts/common` for an
+object that does not exist, and `CloudflareObjectNotFoundError` is removed. Replace
+`instanceof CloudflareObjectNotFoundError` with `instanceof StorageObjectNotFoundError`; its `key`
+is the path you passed (without the store's prefix). Code that matched the old `name` or message
+(`R2 object '…' does not exist.`) matches `StorageObjectNotFoundError` and
+`Storage object not found: <path>` now. A route that lets the error through now answers 404 rather
+than a masked 500.
+
+### Raise the Workers toolchain pins (`@setu-ts/cli`)
+
+A Workers project generated before 0.14.0 pins `"wrangler": "~4.148.0"`, whose miniflare installs
+undici and sharp versions with High advisories. Raise it to `"wrangler": "~4.153.0"` and
+`"@cloudflare/workers-types"` to `"^5.20261023.1"` together, since wrangler declares a peer range on
+the types, then reinstall. New projects get these pins.
+
+### Pass `waitUntil` to `RuntimePlugin` on Workers (`@setu-ts/runtime`, `@setu-ts/cloudflare-plugin`)
+
+```typescript
+import { env, waitUntil } from 'cloudflare:workers';
+
+createApplication({ plugins: [RuntimePlugin({ env, waitUntil }), CloudflarePlugin({ env })] });
+```
+
+`RuntimePlugin({ waitUntil })` keeps the kernel's asynchronous `ctx.defer` cleanups alive after a
+client leaves (without it workerd may cut them off), and `CloudflarePlugin` uses the same function
+when its own `waitUntil` is omitted. An existing `CloudflarePlugin({ waitUntil })` keeps working and
+wins. Pass the module import, never one request's `ctx.waitUntil`.
+
+### Workers queue consumers need a dead-letter target (`@setu-ts/cloudflare-plugin`)
+
+`queue.process()` on a Workers queue now throws `CloudflareUnsupportedError` unless the queue arm
+says where an exhausted job goes (a `deadLetterQueue` naming the queue's own binding fails
+`app.start()`):
+
+```typescript
+CloudflarePlugin({
+  env,
+  waitUntil,
+  queue: { binding: 'JOBS', maxRetries: 3, deadLetterQueue: 'JOBS_DLQ' }, // or deadLetterQueue: false
+});
+```
+
+`deadLetterQueue` names a Queues producer binding (add a `[[queues.producers]]` stanza for it), or
+`false` discards exhausted jobs with one warning each. `maxRetries` must equal the consumer's
+`max_retries` in `wrangler.toml` (both default to 3), and be a whole number from 1 to 100: anything
+else throws a `RangeError` at startup. A job's attempt budget is now `min(maxAttempts, maxRetries)`,
+one fewer than the platform's deliveries, so a failed dead-letter send can be retried; a larger
+`maxAttempts` is capped with one warning per job name. `onFailed` now runs once on the final
+attempt. Keeping a `dead_letter_queue` in `wrangler.toml` as well is recommended. A Worker that only
+adds jobs needs nothing.
+
+### The edge cache stores nothing per visitor (`@setu-ts/cloudflare-plugin`)
+
+`cacheApiMiddleware` follows `cacheMiddleware`'s rule. A response with `Cache-Control: private` or
+`no-store` is no longer stored, **including `private=Set-Cookie`**, which Cloudflare's own docs
+suggest for caching a response that sets a cookie; the middleware logs one warning naming that
+header. Drop `Set-Cookie` from cacheable responses instead. A request carrying `Authorization` or a
+cookie is served only an entry that says `public` and does not vary on `Cookie` or `Authorization`;
+set `credentialCookies` to the cookies that identify a visitor if an analytics cookie should not
+make a request uncacheable. `ttlSeconds` now writes `max-age=N` without `public`, so return
+`Cache-Control: public, …` yourself for a response a signed-in visitor may share.
+`assessCacheability` reports the new `'private'` refusal and reports `'set-cookie'` whenever
+`Set-Cookie` is present; an exhaustive `switch` over `CacheRefusal` needs the new member. Evict
+after a write with `purgeCacheApi({ url, locales })`.
+
+### WebSocket rooms on Workers need the Durable Object arm (`@setu-ts/websocket-plugin`)
+
+On Cloudflare Workers, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` unless
+`CloudflarePlugin({ durableObject: { binding } })` is registered with its exported hub class (see
+the cloudflare-plugin README). Before, rooms on Workers silently reached only one member per Worker.
+
+A custom `IRealtimeBackplane` transport that rebuilds a `RealtimeFrame` from the fields it knows,
+rather than forwarding the whole object, must also carry the new optional `exceptIds` (a list of
+connection IDs, `@setu-ts/common`). Without it, a Workers sender whose broadcast excludes another
+member can receive that broadcast twice. The shipped transports forward the whole frame.
+
+`WebSocketPlugin()` now throws for a negative, infinite or `NaN` `heartbeatMs` or `idleTimeoutMs`,
+and for a `heartbeatMs` above 2147483647. Use `0` to disable either; a value read from the
+environment needs a numeric default.
+
+### Durable Object lock TTL, binding kinds (`@setu-ts/cloudflare-plugin`)
+
+`DurableObjectLock.acquire` throws a `RangeError` for a TTL that is not a whole number of
+milliseconds from 1 to 2147483647 (it used to grant every caller for `Infinity`, `NaN`, zero or a
+negative value). `isKvNamespace` refuses an R2-shaped binding, and `bindings.d1()` and
+`bindings.service()` throw `CloudflareBindingMissingError` for a binding of another kind.
+
 ### Discovery and gRPC calls (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`)
 
 Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`
@@ -2664,10 +2764,12 @@ not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hon
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
 copy the fix from a fresh scaffold:
 
-- **Workers:** pin `"wrangler": "~4.148.0"` and `"@cloudflare/workers-types": "^5.20261006.1"` as a
-  fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
-  `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
-  new entry carries, so a bindings-only deploy is picked up.
+- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
+  `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
+  `ERESOLVE`; for the current pins see
+  [Raise the Workers toolchain pins](#raise-the-workers-toolchain-pins-setu-tscli)), and replace
+  `src/index.ts`'s single memoized application with the per-`env` cache the new entry carries, so a
+  bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** run the build before production start. Use start:dev for
   development; see the M120 production scripts above.
 - **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which

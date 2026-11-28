@@ -60,8 +60,13 @@ export interface QueueHandlerOptions {
  *
  * @example
  * ```typescript
+ * // `process()` needs a dead-letter target: the name of a Queues producer
+ * // binding for the dead-letter queue, or `false` to discard.
  * const app = createApplication({
- *   plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, queue: { binding: 'JOBS' } })],
+ *   plugins: [
+ *     RuntimePlugin({ env }),
+ *     CloudflarePlugin({ env, queue: { binding: 'JOBS', deadLetterQueue: 'JOBS_DLQ' } }),
+ *   ],
  * });
  * await app.start();
  *

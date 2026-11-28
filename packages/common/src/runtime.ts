@@ -529,6 +529,33 @@ export interface IRuntimeServices {
    * @since 0.14.0
    */
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
+
+  /**
+   * Keeps the current invocation alive until `promise` settles, on a platform
+   * that may end an invocation once its response is done (Cloudflare Workers).
+   *
+   * Absent where a process outlives its requests (Node, Deno, Bun): work there
+   * simply continues, so there is nothing to extend. Absent rather than a no-op,
+   * so a caller can tell whether work after the response is protected. The
+   * kernel hands it the `ctx.defer` cleanups that run after a response was
+   * handed back (a client that left mid-stream, a late `defer`, a handler still
+   * running after an early response); `@setu-ts/cloudflare-plugin` uses it when
+   * its own `waitUntil` option is omitted.
+   *
+   * On Workers it is set only when the Worker entry passes `waitUntil` to
+   * `RuntimePlugin`; pass the module import (`import { waitUntil } from
+   * 'cloudflare:workers'`), which resolves the current request, never one
+   * request's `ctx.waitUntil`. Cloudflare keeps such work alive for up to 30
+   * seconds after the response.
+   *
+   * @param promise - Work that must not be cut off
+   * @example
+   * ```typescript
+   * runtime.waitUntil?.(flushMetrics());
+   * ```
+   * @since 0.14.0
+   */
+  waitUntil?(promise: Promise<unknown>): void;
 }
 
 /**

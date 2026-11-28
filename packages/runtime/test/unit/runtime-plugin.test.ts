@@ -90,6 +90,32 @@ function createFakeRuntimeServices(platform: RuntimePlatform = 'deno'): IRuntime
 // CF platform NO LONGER throws
 // ---------------------------------------------------------------------------
 
+describe('runtime-plugin | waitUntil (V13-200)', () => {
+  it('registers runtime services carrying the Worker entry waitUntil', async () => {
+    const { createApplication } = await import('@setu-ts/kernel');
+    const held: Promise<unknown>[] = [];
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin({
+          platform: 'cloudflare-workers',
+          waitUntil: (promise) => {
+            held.push(promise);
+          },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+      const work = Promise.resolve();
+      runtime.waitUntil?.(work);
+      expect(held).toEqual([work]);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
 describe('runtime-plugin | CF platform', () => {
   it('CF platform no longer throws', () => {
     const plugin = RuntimePlugin({ platform: 'cloudflare-workers' });

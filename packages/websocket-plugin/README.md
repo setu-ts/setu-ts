@@ -20,12 +20,12 @@ the cost of all of that.
 
 ## Runtime support
 
-| Runtime            | Backing primitive                                 | Upgrade arrives on | Extra dependency |
-| ------------------ | ------------------------------------------------- | ------------------ | ---------------- |
-| Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none             |
-| Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none             |
-| Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none             |
-| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`             |
+| Runtime            | Backing primitive                                 | Upgrade arrives on | Extra dependency                                |
+| ------------------ | ------------------------------------------------- | ------------------ | ----------------------------------------------- |
+| Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none                                            |
+| Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none (rooms: the Durable Object arm, see below) |
+| Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none                                            |
+| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`                                            |
 
 On Node, install `ws` (`npm install ws` / `deno add npm:ws`). It is an **optional** dependency
 loaded lazily on the first accepted upgrade, so a plain HTTP application never pulls it in; if it is
@@ -35,6 +35,30 @@ repairs a project where it is missing. When `RuntimePlugin` registers the applic
 handshake is also reported through `HttpAdapterOptions.reportError` — once per distinct message,
 never once per upgrade — so a missing `ws` is visible in the log instead of only as a refused
 socket.
+
+A malformed handshake is refused before the connection opens: no `onOpen` or `onClose` runs. A
+`Sec-WebSocket-Key` that is not 16 bytes of base64 gets 400 on every runtime. A
+`Sec-WebSocket-Version` the runtime does not speak is refused too: Node (`ws`) and Deno accept 13
+and 8 and answer anything else 400 with `Sec-WebSocket-Version: 13, 8`; Bun and Workers accept 13
+only and answer 426 (Workers with `Upgrade: websocket`, `Connection: Upgrade` and
+`Sec-WebSocket-Version: 13`; Bun's own 426 carries no `Upgrade`). On Workers the adapter applies
+these checks itself, before the platform creates the socket pair, because workerd checks the
+handshake only after the Worker has accepted it. It checks requests from the edge, which workerd
+marks with `request.cf`. A Worker-to-Worker call over a service binding or Durable Object stub has
+no `cf` and no key (workerd builds that handshake), so it is not checked and opens as before —
+including Cloudflare's documented form, `fetch(url, { headers: { Upgrade: 'websocket' } })` with no
+`Connection: Upgrade`. On Node, Bun and Deno a request without `Connection: Upgrade` is not an
+upgrade (RFC 6455) and gets the route's 404. Three limits remain. In local dev (`wrangler dev` puts
+its own proxy Worker in front) and behind any gateway Worker, workerd gives the app a rebuilt
+handshake (a fresh valid key) whatever the client sent, so the pre-check cannot see a malformed one
+there and the route's `onOpen` runs before the client is refused. A gateway that forwards with
+`new Request(url, request)` keeps `cf`; one that forwards only the headers
+(`fetch(url, { headers: request.headers })`) does not, and the request is then treated as a
+Worker-to-Worker call. Where an edge request lacks `cf`, as in the dashboard preview, it is treated
+as a Worker-to-Worker call: the check is skipped and an Upgrade-only request is routed as an
+upgrade. And whether production Cloudflare hands the Worker the client's own handshake headers,
+which is what the pre-check needs, is not verified by this repository's tests, which run on local
+workerd. Browsers send version 13.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
@@ -186,21 +210,24 @@ ws.route('/ws/chat', {
 });
 ```
 
+A room object is a handle onto its name's members: one kept from an earlier `ws.room('lobby')` and a
+new `ws.room('lobby')` reach the same connections, once each.
+
 ## Options
 
-| Option             | Type                                                                 | Default     | Description                                                                                                                                                                 |
-| ------------------ | -------------------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's own, that may open a socket. Exact http(s) origins (`'https://app.example.com'`), no wildcards; an invalid entry throws at construction. |
-| `checkOrigin`      | `boolean`                                                            | `true`      | Check every handshake's `Origin` (see below). `false` admits any origin.                                                                                                    |
-| `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                                          |
-| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval; `0` disables it and creates no timer at all.                                                                                                            |
-| `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                            |
-| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a peer is closed with `1001`; `0` disables.                                                                                                     |
-| `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                      |
-| `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                                              |
-| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`.                      |
-| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —           | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                                           |
-| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —           | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                                                  |
+| Option             | Type                                                                 | Default     | Description                                                                                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `allowedOrigins`   | `readonly string[]`                                                  | `[]`        | Browser origins, besides the app's own, that may open a socket. Exact http(s) origins (`'https://app.example.com'`), no wildcards; an invalid entry throws at construction.                     |
+| `checkOrigin`      | `boolean`                                                            | `true`      | Check every handshake's `Origin` (see below). `false` admits any origin.                                                                                                                        |
+| `maxConnections`   | `number`                                                             | `0`         | Simultaneous open connections; `0` is unlimited. At the limit, upgrades get `503`.                                                                                                              |
+| `heartbeatMs`      | `number`                                                             | `0`         | Heartbeat interval, from `0` to 2147483647; `0` disables it and creates no timer at all. A value outside that range (or `NaN`) makes `WebSocketPlugin()` throw; a fractional value is accepted. |
+| `heartbeatPayload` | `string`                                                             | `'ping'`    | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                |
+| `idleTimeoutMs`    | `number`                                                             | `0`         | Inbound silence after which a peer is closed with `1001`; `0` disables. A negative, infinite or `NaN` value throws.                                                                             |
+| `maxMessageBytes`  | `number`                                                             | `1_048_576` | Largest inbound message; `0` is unlimited. Oversized messages close with `1009`. Node enforces this while reading; Bun and Deno check after buffering.                                          |
+| `scalingNotice`    | `boolean`                                                            | `true`      | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                                                                  |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —           | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`.                                          |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —           | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                                                               |
+| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —           | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                                                                      |
 
 **Cross-site handshakes are refused.** A browser attaches the user's cookies to a WebSocket
 handshake from any page, and the handshake is a `GET`, so no CSRF middleware sees it. Every
@@ -369,7 +396,9 @@ reuse whichever broker `MessagingPlugin` already registered.
 
 Rooms now fan out across every replica sharing that transport, including
 `RoomBroadcastOptions.except` — connection ids are UUIDs, so the exclusion is honored cluster-wide.
-Remove the plugin and behavior returns to in-process, with no application change.
+Remove the plugin and behavior returns to in-process, with no application change, on every runtime
+but Cloudflare Workers: there, without the Durable Object arm, `ws.room()` and `ws.peek()` throw
+(see the Workers section below).
 
 Two things stay local by design: `room.size` counts this replica's members only (a cluster-wide
 count is inherently asynchronous and cannot satisfy the synchronous getter), and per-connection
@@ -385,7 +414,54 @@ WebSocketPlugin({ scalingNotice: false });
 
 That suppresses the message only. Room delivery is identical either way.
 
+### Rooms on Cloudflare Workers
+
+workerd ties every socket to the request that accepted it, and touching a socket from another
+request throws (`Cannot perform I/O on behalf of a different request`). A room that kept its members
+in one isolate-wide set and wrote to all of them from whichever request broadcast would therefore
+fail for every member but the sender. On Workers this plugin runs in **request-bound mode**:
+
+- Rooms need `CloudflarePlugin({ durableObject: { binding } })` from `@setu-ts/cloudflare-plugin`.
+  Each connection opens its own link to the topic's hub Durable Object from its own request, and a
+  broadcast reaches every member through its own link, on one Worker or across Workers sharing the
+  namespace. Without the arm, `ws.room()` and `ws.peek()` throw `WebSocketRoomsUnavailableError` and
+  the startup notice names the arm; `ws.route()` keeps working for single-socket routes.
+- **Ordering.** A broadcast from inside a member's handler (`onOpen`, `onMessage`, `onClose`), or
+  after an `await` in `onOpen` or `onMessage` with `except: connection`, goes over that member's
+  link, so one member's frames arrive in order. `onClose` is the exception after an `await`: the
+  closing connection's link is closed once the handler's synchronous part returns, so a later
+  broadcast goes through the hub and can arrive before that member's earlier frames. The exceptions
+  are a link still opening whose 1 MiB queue budget (UTF-8 bytes of frame data) the next frame would
+  pass, and a link in an outage, which refuses frames until it recovers: those frames go through the
+  hub and can arrive out of order. A sender that is an open member of the room is still sent its own
+  such broadcast exactly once when `except` names nobody or another member (a send that throws on a
+  closing socket is dropped): it is sent locally, and the hub's copy excludes the sender. A sender
+  that names itself as `except` gets no copy, as on every runtime. A broadcast from a route is
+  published through the hub with no order relative to members' frames, as with any cross-replica
+  backplane.
+- **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
+  left as a member that receives nothing. Only a backplane built without its timers fails this way;
+  `CloudflarePlugin` always passes them.
+- **A connection whose link is lost stays open.** Its link keeps reopening, backing off to 30 s, for
+  as long as the connection is open, and room delivery resumes once it reopens; frames other members
+  broadcast meanwhile do not reach it, as with any backplane during an outage. A lasting outage is
+  logged once per connection by the Cloudflare plugin, and that connection's broadcasts go through
+  the hub's HTTP publish meanwhile.
+- **`room.size`** counts this isolate's open members, without touching any socket.
+- **Heartbeats** run per connection, each from its own request, instead of one shared interval.
+- **A clean close is answered at once.** The Workers adapter replies to the peer's close frame
+  itself, so a client does not wait for its own timeout on a Worker whose `compatibility_date` is
+  before `web_socket_auto_reply_to_close` (2026-04-07).
+- **A message above 32 MiB** is refused by workerd itself (close 1009); a `maxMessageBytes` of `0`
+  or above that is reported once, at the first handshake that carries it, through the runtime's
+  error sink.
+
 ## Errors
+
+`WebSocketRoomsUnavailableError` is thrown by `room()` and `peek()` on Cloudflare Workers when the
+registered backplane gives no per-connection links (none registered, or any
+`RealtimeBackplanePlugin` transport: `memory`, `redis` or `messaging`), which only the Durable
+Object backplane does (see [Rooms on Cloudflare Workers](#rooms-on-cloudflare-workers)).
 
 `WebSocketUnavailableError` is exported for `instanceof` handling. It is thrown by `route()` when
 the registered `IHttpAdapter` implements no `setUpgradeRouter` seam — which happens only with a
@@ -416,45 +492,46 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `buildContext`               | function  |
-| `frameByteLength`            | function  |
-| `parseRequestedProtocols`    | function  |
-| `resolveOptions`             | function  |
-| `selectProtocol`             | function  |
-| `WebSocketPlugin`            | function  |
-| `HeartbeatSweeper`           | class     |
-| `Room`                       | class     |
-| `RoomRegistry`               | class     |
-| `WebSocketConnection`        | class     |
-| `WebSocketService`           | class     |
-| `WebSocketUnavailableError`  | class     |
-| `WsRouteTable`               | class     |
-| `CAPABILITIES`               | const     |
-| `HeartbeatOptions`           | interface |
-| `IWebSocketConnection`       | interface |
-| `IWebSocketService`          | interface |
-| `IWebSocketTransport`        | interface |
-| `LocalBroadcastOptions`      | interface |
-| `RealtimeDiagnosticsOptions` | interface |
-| `RoomBroadcastOptions`       | interface |
-| `RoomMembershipListener`     | interface |
-| `WebSocketCloseEvent`        | interface |
-| `WebSocketConnectionContext` | interface |
-| `WebSocketEventSink`         | interface |
-| `WebSocketHandlers`          | interface |
-| `WebSocketPluginOptions`     | interface |
-| `WebSocketRoom`              | interface |
-| `WebSocketRouteDefinition`   | interface |
-| `WebSocketRouteOptions`      | interface |
-| `WsRoute`                    | interface |
-| `RoomPublisher`              | type      |
-| `WebSocketReadyState`        | type      |
-| `WebSocketRouteEntry`        | type      |
-| `WebSocketUpgradeDecision`   | type      |
-| `WebSocketUpgradeRouter`     | type      |
-| `WsRouteMatch`               | type      |
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `buildContext`                   | function  |
+| `frameByteLength`                | function  |
+| `parseRequestedProtocols`        | function  |
+| `resolveOptions`                 | function  |
+| `selectProtocol`                 | function  |
+| `WebSocketPlugin`                | function  |
+| `HeartbeatSweeper`               | class     |
+| `Room`                           | class     |
+| `RoomRegistry`                   | class     |
+| `WebSocketConnection`            | class     |
+| `WebSocketRoomsUnavailableError` | class     |
+| `WebSocketService`               | class     |
+| `WebSocketUnavailableError`      | class     |
+| `WsRouteTable`                   | class     |
+| `CAPABILITIES`                   | const     |
+| `HeartbeatOptions`               | interface |
+| `IWebSocketConnection`           | interface |
+| `IWebSocketService`              | interface |
+| `IWebSocketTransport`            | interface |
+| `LocalBroadcastOptions`          | interface |
+| `RealtimeDiagnosticsOptions`     | interface |
+| `RoomBroadcastOptions`           | interface |
+| `RoomMembershipListener`         | interface |
+| `WebSocketCloseEvent`            | interface |
+| `WebSocketConnectionContext`     | interface |
+| `WebSocketEventSink`             | interface |
+| `WebSocketHandlers`              | interface |
+| `WebSocketPluginOptions`         | interface |
+| `WebSocketRoom`                  | interface |
+| `WebSocketRouteDefinition`       | interface |
+| `WebSocketRouteOptions`          | interface |
+| `WsRoute`                        | interface |
+| `RoomPublisher`                  | type      |
+| `WebSocketReadyState`            | type      |
+| `WebSocketRouteEntry`            | type      |
+| `WebSocketUpgradeDecision`       | type      |
+| `WebSocketUpgradeRouter`         | type      |
+| `WsRouteMatch`                   | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

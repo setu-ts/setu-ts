@@ -145,3 +145,58 @@ describe('DistributedLockObjectCore', () => {
     expect(held.expiresAt).toBeGreaterThanOrEqual(before + 30_000);
   });
 });
+
+describe('DistributedLockObjectCore TTL refusal (V13-204)', () => {
+  it.each([
+    ['null (Infinity or NaN after JSON)', { token: 't', ttlMs: null }],
+    ['zero', { token: 't', ttlMs: 0 }],
+    ['a string', { token: 't', ttlMs: '1000' }],
+    ['a fraction', { token: 't', ttlMs: 0.5 }],
+    ['above the bound', { token: 't', ttlMs: 2_147_483_648 }],
+    ['no token', { ttlMs: 1000 }],
+    ['a null body', null],
+  ])('answers 400 for %s', async (_label, body) => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    const response = await call(core, '/acquire', body);
+    expect(response.status).toBe(400);
+  });
+
+  it('still grants 1 and 2147483647', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await acquire(core, 'a', 2_147_483_647)).toBe('a');
+    const other = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await acquire(other, 'b', 1)).toBe('b');
+  });
+});
+
+describe('DistributedLockObjectCore refusal text', () => {
+  it('names the field that is wrong', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect(await (await call(core, '/acquire', { ttlMs: 1000 })).text()).toBe(
+      'token must be a string',
+    );
+    expect(await (await call(core, '/acquire', { token: 't', ttlMs: 0 })).text()).toContain(
+      'ttlMs',
+    );
+  });
+});
+
+describe('DistributedLockObjectCore /release refusal', () => {
+  it('answers 400 for a null body or a missing token', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    expect((await call(core, '/release', null)).status).toBe(400);
+    expect((await call(core, '/release', {})).status).toBe(400);
+  });
+});
+
+describe('DistributedLockObjectCore non-JSON body', () => {
+  it('answers 400, not a throw, for a body that is not JSON', async () => {
+    const core = new DistributedLockObjectCore(new FakeDurableObjectState(), { now: () => 1_000 });
+    for (const path of ['/acquire', '/release']) {
+      const response = await core.fetch(
+        new Request(`https://lock.internal${path}`, { method: 'POST', body: 'not json' }),
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+});

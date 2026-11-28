@@ -793,10 +793,10 @@ describe('real-backend CI wiring', () => {
     // instead by pointing npm at an empty cache: exit 1 before the fix with
     // `will be installed: wrangler@4.128.0` then the timeout, exit 0 after.
     //
-    // What IS pinnable is the ordering the fix consists of, and it is the whole
-    // fix: `npx wrangler` installs on first use, so spawning `wrangler dev` and
-    // only then starting a ten-second readiness budget loses that budget to the
-    // download. Resolving it first pays the install outside the window.
+    // What IS pinnable is the ordering the fix consists of. The example now
+    // pins wrangler as a devDependency, so `npx` resolves that bin and nothing
+    // downloads; the preflight still checks the bin runs before the ten-second
+    // readiness budget starts, so a missing one fails on its own line.
     const smoke = await readFile('apps/realtime-clients/smoke.ts', 'utf8');
     const preflight = smoke.indexOf("await runOrFail('npx', ['--yes', 'wrangler', '--version']);");
     const spawn = smoke.indexOf("startHost('npx'");

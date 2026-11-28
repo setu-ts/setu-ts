@@ -110,8 +110,12 @@ import { CAPABILITIES, type IQueue } from '@setu-ts/common';
 
 const app = createApplication({
   plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil, queue: { binding: 'JOBS' } }),
+    // One waitUntil for the kernel's cleanups and this plugin's background work.
+    RuntimePlugin({ env, waitUntil }),
+    CloudflarePlugin({
+      env,
+      queue: { binding: 'JOBS', maxRetries: 3, deadLetterQueue: 'JOBS_DLQ' },
+    }),
   ],
 });
 
@@ -129,7 +133,11 @@ queue.process<{ to: string }>(
   async (job) => {
     await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Welcome!' });
   },
-  { concurrency: 5 },
+  {
+    concurrency: 5,
+    // Once, on the final attempt, before the job goes to JOBS_DLQ.
+    onFailed: (job, error) => logger.error('welcome mail abandoned', { id: job.id, error }),
+  },
 );
 
 // The expression must match wrangler.toml `[triggers] crons` exactly.
@@ -154,12 +162,63 @@ export default {
 queue = "jobs"
 binding = "JOBS"
 
+# The dead-letter queue the adapter forwards exhausted jobs to.
+[[queues.producers]]
+queue = "jobs-dlq"
+binding = "JOBS_DLQ"
+
 [[queues.consumers]]
 queue = "jobs"
+max_retries = 3                  # must equal the queue arm's maxRetries
+dead_letter_queue = "jobs-dlq"   # a second net if the adapter's own forward fails twice
 
 [triggers]
 crons = ["0 3 * * *"]
 ```
+
+### When a job runs out of attempts
+
+A Worker that consumes a queue must say where an exhausted job goes, or `queue.process()` throws:
+`deadLetterQueue` names a producer binding for a dead-letter queue, or `deadLetterQueue: false`
+discards exhausted jobs with one warning each (never the payload). The adapter cannot read the
+consumer's `max_retries` or `dead_letter_queue` from the binding, and without a `dead_letter_queue`
+Cloudflare deletes a message that runs out of retries, so the adapter keeps the job itself.
+
+- **`maxRetries` must equal `max_retries` in `wrangler.toml`** (default 3, both sides). It must be a
+  whole number from 1 to 100; anything else throws a `RangeError` when the queue is built. A job's
+  attempt budget is `min(maxAttempts, maxRetries)`. A larger `maxAttempts` is capped, with one
+  warning per job name; raise both settings together to allow more attempts.
+- **`onFailed` runs once, on the final attempt**, with the error the processor threw. Then the job
+  is sent to the dead-letter queue unchanged, plus `failedAt`, `attempts` and a bounded `error`
+  text, and acked.
+- **One delivery stays in reserve.** The platform delivers a message up to `max_retries + 1` times
+  and the budget stops one short, so a dead-letter send that fails is retried on a later delivery
+  (on the default budget that is the last one, and the copy then carries no error text, to stay
+  under the message size limit; on an earlier one its `error` is the fixed reason
+  `attempt budget exhausted`). On the platform's last delivery, if that send fails too, the message
+  body is sent once more exactly as it arrived (the job envelope, or an unroutable body as is),
+  without the dead-letter fields, in case they pushed it over the size limit; only if that fails as
+  well does the job leave the adapter's hands: the platform writes it to `dead_letter_queue` when
+  one is configured, or deletes it. That is why the stanza above sets both. A dead-letter consumer
+  therefore sees two shapes: the copy with `failedAt`, `attempts` and `error` (an unroutable body
+  under `body`), and, rarely, the message body alone. Both are sent as JSON, which pull consumers
+  and the dashboard can read, unless the body, a job envelope or not, is one JSON would change (an
+  envelope whose `data` another producer filled with such a value included): an `ArrayBuffer` or
+  typed array, a `Date`, `Map` or other non-plain object, a `bigint`, `undefined`, `-0` or a
+  non-finite number, an array with a hole or an extra key, or an object reached twice (a cycle, or
+  one shared by two references). The check also stops at 64 levels and treats anything deeper the
+  same way, job envelopes included. Then the copy is sent with `contentType: 'v8'`, and the body
+  alone as `bytes` when it is an `ArrayBuffer`, else `v8`.
+- **A message the consumer cannot route** (not a job envelope, or a name with no processor) is
+  retried, and on its last attempt forwarded or discarded the same way. Its copy's `error` names its
+  own reason, `body is not a job envelope` or `no processor registered`, and a retried copy past
+  `maxRetries` carries none. A queue with no dead-letter target (one that only produces) keeps
+  retrying it for the platform's own `dead_letter_queue`.
+- **`deadLetterQueue` must be another queue.** Naming the queue's own binding fails `app.start()`:
+  each exhausted job would be re-enqueued and run again without end.
+- **`retryDelaySeconds`** spaces redeliveries: a number of seconds, or a function of the attempt
+  that failed, bounded by `maxDelaySeconds`. `0` redelivers at once, overriding the queue's
+  `retry_delay`; omitted, the queue's own `retry_delay` applies.
 
 ## Messaging
 
@@ -193,7 +252,7 @@ queue = "messages"
 # default reply budget, so every request() would time out.
 [[queues.consumers]]
 queue = "messages"
-max_batch_size = 1
+max_batch_size = 10
 max_batch_timeout = 0
 
 [[durable_objects.bindings]]
@@ -209,7 +268,12 @@ The `rpc` arm needs a Durable Object class your application exports, delegating 
 `ReplyInboxObjectCore` exactly as the realtime backplane's class does — see
 [the class you export](#the-class-you-export).
 
-Three things to know before you rely on it:
+The broker runs up to ten handlers of one batch at once, so `max_batch_size = 10` lets ten requests
+be answered together; a batch of one makes every request wait for the one before it. Measured on
+local workerd with a 250 ms responder: 50 concurrent requests were all answered in 1.6 s at 10 and
+took 13 s at 1, well past the default 5 s reply budget.
+
+Five things to know before you rely on it:
 
 - **`publish` reaches one consumer Worker, not every subscriber in the cluster.** Cloudflare allows
   exactly one active consumer per queue. Fan-out happens across the handlers registered inside that
@@ -219,6 +283,14 @@ Three things to know before you rely on it:
 - **A publish nobody subscribed to is acked, not retried.** Retrying ordinary pub/sub would burn the
   queue's retry budget and dead-letter every fire-and-forget message. An unreadable body is still
   retried, and a subscriber that throws is retried.
+- **A trace crosses the queue when a telemetry service is registered.** `publish` and `request` run
+  in a `producer` span whose `traceparent` rides the envelope's framework `trace` field, and each
+  subscriber and responder runs in a `consumer` span parented from it. Your own headers are carried
+  as before and never mixed with it.
+- **No fan-out subscription.** A queue reaches one consumer Worker, so a subscription here is never
+  delivered to every instance, and `RealtimeBackplanePlugin({ transport: 'messaging' })` cannot fan
+  frames out over this broker: a frame would reach one consumer Worker only. The Durable Object
+  backplane below is the Workers answer for realtime fan-out.
 
 Without the `rpc` arm, `request` and `respond` throw `CloudflareUnsupportedError` naming the binding
 to add — `publish` and `subscribe` are unaffected.
@@ -241,6 +313,14 @@ SessionPlugin({
   store: new KvSessionStore(env.SESSIONS as IKvNamespace, runtime),
 });
 ```
+
+**KV is outside the session plugin's revocation guarantee.** Workers KV is eventually consistent:
+Cloudflare says a change "may take up to 60 seconds or more to be visible in other global network
+locations". The session plugin's revocation markers (`revoked:<id>`, `superseded:<id>`) are KV
+writes too, so a logout or `regenerate()` may not yet be visible to a request served elsewhere, and
+a revoked session can be used there for that long. Use a Durable Object-backed store where a logout
+must hold everywhere at once. `KvCacheStore` under `cacheMiddleware` has the same delay for replayed
+entries.
 
 ## D1
 
@@ -401,16 +481,50 @@ CloudflarePlugin({ env, waitUntil, durableObject: { binding: 'REALTIME', topic: 
 ```
 
 That registers `CAPABILITIES.REALTIME_BACKPLANE`, which `websocket-plugin` and `sse-plugin` resolve
-on their own — so `ws.room('lobby')` and `sse.channel('news')` start reaching clients on other
-replicas with no further wiring. Register **either** this arm or `RealtimeBackplanePlugin`, never
-both: the kernel rejects two providers of one capability token.
+on their own. Register **either** this arm or `RealtimeBackplanePlugin`, never both: the kernel
+rejects two providers of one capability token.
 
-**The guarantee is narrower than "a durable subscription", deliberately.** A Worker isolate is
-evicted at Cloudflare's discretion and its outbound WebSockets go with it, so no Worker can hold a
-subscription indefinitely. What makes that sound rather than lossy is the coupling: the members the
-subscription serves are client WebSockets held by the _same_ isolate, and an HTTP-triggered Worker
-stays alive as long as its clients stay connected — so losing the isolate loses the subscription and
-its members together. The socket opens lazily on first publish and reopens after any failure.
+**Rooms on Workers need this arm.** workerd ties every socket to the request that accepted it, and
+touching a socket from another request throws. A room therefore never writes to its members from
+whichever request broadcasts. Each WebSocket connection opens its own link to the topic's hub object
+from its own request; a broadcast goes out once, and every link delivers it to its own connection
+when that connection is a member of the room. Without the arm, `ws.room()` and `ws.peek()` throw
+`WebSocketRoomsUnavailableError` on Workers; single-socket routes keep working.
+
+- **Ordering.** A broadcast from inside a member's handler (as `setu g ws-route` writes it, with
+  `except: connection`) travels over that member's link, so one member's frames arrive in order. The
+  exceptions are a link still opening whose 1 MiB queue budget the next frame would pass, and a link
+  in an outage, which refuses frames until it recovers: those frames go through the hub and can
+  arrive out of order. A broadcast from a route has no sender connection: it is POSTed to the hub,
+  with no order relative to members' frames, as with any cross-replica backplane.
+- **Cost.** The hub sends every frame of a topic to every link of that topic, so one topic per
+  application area keeps fan-out small. The hub object's soft limit is 1,000 requests per second,
+  which route broadcasts count against.
+- **`room.size` is this isolate's count** of open members, as everywhere else.
+- **While a link opens** it queues up to 64 frames and 1 MiB of frame data, counted in UTF-8 bytes
+  as the hub's cap is. A broadcast that would pass the byte budget, or is above the hub's 32 MiB
+  cap, goes through the hub's HTTP publish instead, where the hub refuses one above the cap with 413
+  and the failure is logged.
+- **A lost link** reopens for as long as its connection is open: after 0.5 s, 1 s and 2 s, then
+  doubling to a 30 s cap. Once the third reopen has failed, each connection's link logs
+  `cloudflare: backplane link still reopening` once, with `{ topic, connection, dropped }` and no
+  frame content, drops the frames it had queued (they would reach other replicas late) and refuses
+  new ones, so broadcasts go through the hub's HTTP publish; when a reopen then succeeds it logs
+  `cloudflare: backplane link restored` at `info`. The connection stays open meanwhile, and frames
+  other replicas publish during the outage are not delivered to it.
+
+**SSE channels** use one isolate-level socket to the hub, for receiving only. A channel publish is
+POSTed to the hub, so publishes from concurrent requests never touch a socket another request owns.
+The hub sends the frame back to the publisher's socket too, and the replica drops it by its own
+`origin`. Three limits remain:
+
+- A replica hears frames only once its socket has joined the hub. The socket opens on the first SSE
+  stream or publish, so frames published before then do not reach it.
+- The socket belongs to the request that opened it. On local workerd it keeps receiving after that
+  request has answered. That is unverified on the platform.
+- Other replicas may receive one replica's frames out of order. Each publish is its own call to the
+  hub, and the platform orders calls only within one stub. A stub, like a socket, cannot be kept
+  across requests: reusing one lost frames on local workerd.
 
 Two applications sharing one namespace must set different `topic` values, or each receives the
 other's frames.
@@ -424,25 +538,39 @@ of default logging. Hook and logger failures are swallowed.
 
 ### Distributed lock
 
-`DurableObjectLock` implements scheduler-plugin's `IDistributedLock` seam, so the lock can be handed
-to `SchedulerPlugin` on a **Node/Deno replica set** — the composition it exists for. Do not register
-`SchedulerPlugin` on Workers: `register()` refuses there with a `SchedulerUnavailableError`, naming
-`WorkersCron` and `[triggers] crons` as the replacement, because timers cannot fire on an isolate
-that is evicted between invocations. Workers use `WorkersCron`, above.
+A Durable Object binding exists only inside a Worker, so the lock is taken from Worker code: a
+route, a queue or cron handler, or another Durable Object. A Node or Deno process cannot hold the
+binding; a replica set outside Workers uses the scheduler's Redis lock. `SchedulerPlugin` itself
+refuses to register on Workers (`SchedulerUnavailableError`, naming `WorkersCron`), so this lock is
+not handed to it there.
 
 ```typescript
-// On a Node/Deno replica set — where SchedulerPlugin runs.
-import { DurableObjectLock } from '@setu-ts/cloudflare-plugin';
-import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import { CAPABILITIES, type IRuntimeServices } from '@setu-ts/common';
+import { DurableObjectLock, type ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
 
-const lock = new DurableObjectLock(env.LOCKS as IDurableObjectNamespace, {
-  runtime,
-  keyPrefix: 'reports:',
+app.router.post('/reports/run', {
+  handler: async (ctx) => {
+    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+    const lock = new DurableObjectLock(bindings.durableObject('LOCKS'), {
+      runtime: ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
+      keyPrefix: 'reports:',
+      binding: 'LOCKS',
+    });
+    const token = await lock.acquire('nightly', 60_000);
+    if (token === null) return ctx.response.status(409).text('already running');
+    try {
+      // ... the work only one caller may do at a time ...
+      return ctx.response.status(204).send();
+    } finally {
+      await lock.release('nightly', token);
+    }
+  },
 });
-
-// An injected lock wins outright — `enabled: true` is not needed.
-app.register(SchedulerPlugin({ distributedLock: { lock } }));
 ```
+
+The TTL is a whole number of milliseconds from 1 to 2,147,483,647 (about 24.8 days). Anything else
+(`Infinity`, `NaN`, zero, a negative or fractional value) throws a `RangeError` before any I/O, and
+the object answers 400 for it too.
 
 One Durable Object per lock key. Correctness comes from the platform rather than an algorithm: a
 Durable Object processes one event at a time and holds back delivery while a storage operation runs,
@@ -453,6 +581,45 @@ seconds of inactivity and a lock TTL routinely outlives that.
 A non-2xx from the object **throws** rather than reporting "not acquired" — a 404 means the binding
 points at the wrong class, and folding that into contention would silently disable every scheduled
 job.
+
+## Calling another Worker
+
+A service binding is a direct call to another Worker in the same account, with no public URL:
+
+```toml
+[[services]]
+binding = "BILLING"
+service = "billing-worker"
+
+# A Durable Object class another Worker owns is bound with script_name.
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeBackplaneObject"
+script_name = "chat-worker"
+```
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICloudflareBindings } from '@setu-ts/cloudflare-plugin';
+
+app.router.get('/invoices/:id', {
+  handler: async (ctx) => {
+    const bindings = ctx.services.get<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE);
+    const response = await bindings.service('BILLING').fetch(
+      new Request(`https://billing/invoices/${ctx.params['id'] ?? ''}`),
+    );
+    return ctx.response.status(response.status).json(await response.json());
+  },
+});
+```
+
+- **Deploy the bound Worker first.** A deploy whose `[[services]]` or `script_name` names a Worker
+  that does not exist yet fails.
+- **Nothing crosses the call by itself.** Headers such as `traceparent` or `Authorization` reach the
+  other Worker only when you send them; `@setu-ts/sdk` with its trace interceptor does that for you.
+- **Local tests** list the other Worker in the generated harness, `createTestHarness({ workers })`.
+- `bindings.service('NAME')` throws `CloudflareBindingMissingError` naming the binding when it is
+  absent or is not a service binding.
 
 ## Behaviour worth knowing before you deploy
 
@@ -473,10 +640,10 @@ job.
   plugin holds bindings at `register()` and never reads through them there, and the plugin's own
   health indicator performs no binding I/O. `VectorizeVectorStore.isHealthy()` does: it calls the
   index's `describe()` for `VectorStorePlugin`'s `vector-store` readiness indicator.
-- **An unroutable queue message is retried, never acked.** A body that is not one of this package's
-  job envelopes, or a job name with no registered processor, goes back for redelivery and is
-  reported through the logger. Acking would discard it permanently and silently. Your queue's
-  `max_retries` and dead-letter settings in `wrangler.toml` then decide what happens.
+- **An unroutable queue message is retried, never acked while it has attempts left.** A body that is
+  not one of this package's job envelopes, or a job name with no registered processor, goes back for
+  redelivery and is reported through the logger. On its last attempt it is forwarded to the
+  `deadLetterQueue` (or discarded with a warning when that is `false`).
 - **`queue.addRecurring` throws.** Cloudflare Queues has no recurring message. Declare the schedule
   in `[triggers] crons` and let a `WorkersCron` handler enqueue the work.
 - **There is no `IScheduler` on Workers, deliberately.** `every` and `delay` arm timers, and the
@@ -496,6 +663,10 @@ job.
 - **A failed cache write never fails your response.** `Cache.put` rejects for an oversized body or a
   quota error; the response is already built by then, so the failure is reported and the request
   succeeds uncached.
+- **One `waitUntil` covers the kernel and this plugin.** Pass `waitUntil` from `cloudflare:workers`
+  to `RuntimePlugin`: it keeps the kernel's `ctx.defer` cleanups alive after a client leaves, and
+  `CloudflarePlugin` uses it for its own background work when its `waitUntil` option is omitted. An
+  explicit `CloudflarePlugin({ waitUntil })` still works and wins.
 - **The write lands with or without a `waitUntil` host.** When the plugin received no host the
   middleware awaits `Cache.put` itself before the response returns — the write delays the response
   instead of being abandoned when the isolate is released (V9-23). Passing `waitUntil` moves the
@@ -513,9 +684,27 @@ job.
   un-normalized URL text, an unencodable id, or a reserved parameter on a request that lacks the
   value — is served uncached. A custom `key` must include both itself.
 - **The edge cache refuses some responses, and the middleware skips them rather than failing.**
-  Non-GET, 206, `Vary: *`, and an uncleared `Set-Cookie` all make `caches.default.put` throw; those
-  are checked first. `Cache-Control: private=Set-Cookie` is the platform's opt-in. Streaming
-  responses are never cached.
+  Non-GET, 206, `Vary: *`, and `Set-Cookie` all make `caches.default.put` throw; those are checked
+  first. Streaming responses are never cached.
+- **The edge cache stores nothing per visitor** — the same rule as `cache-plugin`'s
+  `cacheMiddleware`. `Cache-Control: private` (with or without a field list) or `no-store` is never
+  stored. A request carrying `Authorization` or a cookie (any cookie by default; the
+  `credentialCookies` option names the ones that count) is served only a stored response that says
+  `public` and whose `Vary` names neither `Cookie` nor `Authorization`, and its own response is
+  stored only on the same terms. A request carrying any cookie at all is never served an entry that
+  varies on `Cookie`. A response the session plugin marked as one visitor's is never stored, and one
+  it marked as cookie-dependent is stored only from a request carrying neither a cookie nor
+  `Authorization`, with `Cookie` added to the stored `Vary`. Because the key is the URL, `Vary`
+  cannot keep entries apart here, so the rule is checked when an entry is read as well as when it is
+  written. `ttlSeconds` adds `max-age` only, never `public`. Cloudflare's Cache API page suggests
+  `Cache-Control: private=Set-Cookie` to cache a response that sets a cookie; here that response is
+  not stored (any `private` refuses it), and the middleware warns once naming the header. Drop
+  `Set-Cookie` from cacheable responses instead.
+- **Evicting after a write.** `purgeCacheApi({ url, tenant?, locales? })` deletes the entries the
+  default key stored for a URL (each listed locale; the no-locale entry when none is listed) and
+  returns how many it deleted. `cacheApiKey` gives the same key text. Eviction is local to the data
+  center the Worker runs in, as `cache.delete` is; other locations keep their copy until it expires.
+  With a custom `key`, delete with your own key.
 - **A cache HIT is replayed as a stream**, so `app.inject()` cannot read its body — drive cached
   routes in tests with `app.fetch` and a web `Request`, which is what a Worker invokes anyway.
 - **Not verified against a live Worker.** Every binding is exercised against a fake built from the
@@ -542,6 +731,7 @@ MIT
 | ----------------------------------------- | --------- |
 | `assessCacheability`                      | function  |
 | `asUpgradeResponse`                       | function  |
+| `cacheApiKey`                             | function  |
 | `cacheApiMiddleware`                      | function  |
 | `CloudflarePlugin`                        | function  |
 | `createDefaultDurableObjectWebSocketHost` | function  |
@@ -553,8 +743,9 @@ MIT
 | `isKvNamespace`                           | function  |
 | `isQueueProducer`                         | function  |
 | `isR2Bucket`                              | function  |
+| `isServiceBinding`                        | function  |
+| `purgeCacheApi`                           | function  |
 | `CloudflareBindingMissingError`           | class     |
-| `CloudflareObjectNotFoundError`           | class     |
 | `CloudflareRemoteHandlerError`            | class     |
 | `CloudflareRequestTimeoutError`           | class     |
 | `CloudflareUnsupportedError`              | class     |
@@ -575,6 +766,7 @@ MIT
 | `WorkersQueue`                            | class     |
 | `BrokerRuntime`                           | interface |
 | `CacheabilityInput`                       | interface |
+| `CacheApiKeyInput`                        | interface |
 | `CacheApiMiddlewareOptions`               | interface |
 | `CacheClock`                              | interface |
 | `CloudflarePluginOptions`                 | interface |
@@ -618,6 +810,7 @@ MIT
 | `KvPutOptions`                            | interface |
 | `KvSessionStoreOptions`                   | interface |
 | `MessagingHandlerOptions`                 | interface |
+| `PurgeCacheApiTarget`                     | interface |
 | `QueueHandlerOptions`                     | interface |
 | `QueueSendOptions`                        | interface |
 | `R2PutOptions`                            | interface |
@@ -641,6 +834,7 @@ MIT
 | `LoggerSource`                            | type      |
 | `MessagingHandler`                        | type      |
 | `QueueHandler`                            | type      |
+| `RetryDelaySeconds`                       | type      |
 | `ScheduledHandler`                        | type      |
 | `WaitUntilHost`                           | type      |
 

@@ -7,8 +7,10 @@
 
 import type {
   ILogger,
-  IRealtimeBackplane,
+  IRealtimeConnectionLink,
   IRealtimeHandlerErrorReporter,
+  IRealtimeLinkBackplane,
+  IRuntimeServices,
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
@@ -21,9 +23,13 @@ import type {
 } from '../durable-objects/do-facades.ts';
 import { asUpgradeResponse } from '../durable-objects/do-facades.ts';
 import { isRealtimeFrame } from '../durable-objects/frame-guard.ts';
+import { ConnectionLink, keepAliveQuietly } from './connection-link.ts';
 
 /** The synthetic URL the stub is fetched with. Only the path is meaningful. */
 const CONNECT_URL = 'https://realtime-backplane.internal/connect';
+
+/** The synthetic URL a frame is POSTed to for fan-out without a socket. */
+const PUBLISH_URL = 'https://realtime-backplane.internal/publish';
 
 /**
  * Options for {@linkcode DurableObjectBackplane}.
@@ -63,23 +69,50 @@ export interface DurableObjectBackplaneOptions {
    * @since 0.11.0
    */
   readonly onHandlerError?: (error: unknown, frame: RealtimeFrame) => void;
+  /**
+   * Keeps a {@linkcode DurableObjectBackplane.publishViaHub} POST alive after
+   * the response it was issued from has been sent, and a connection link's
+   * open alive when its connection closes first, so the socket that arrives is
+   * still closed at the hub. Absent, the POST is awaited by its caller's
+   * promise only, and on workerd the hub can keep such a socket open.
+   * @since 0.14.0
+   */
+  readonly waitUntil?: (promise: Promise<unknown>) => void;
+  /**
+   * Timers for a connection link's reopen delays. Required to open links.
+   * @since 0.14.0
+   */
+  readonly timers?: Pick<IRuntimeServices, 'setTimeout' | 'clearTimeout'>;
 }
 
 /**
- * Carries {@linkcode RealtimeFrame}s between replicas over one WebSocket to a
- * Durable Object.
+ * Carries {@linkcode RealtimeFrame}s between replicas through one Durable
+ * Object per topic (the hub).
  *
- * **The guarantee is narrower than "a durable cross-replica subscription", and
- * deliberately so.** A Cloudflare Worker isolate is evicted at the platform's
- * discretion and its outbound WebSockets go with it, so no Worker can hold a
- * subscription indefinitely. What makes that sound rather than lossy is the
- * coupling: the members this subscription serves are client WebSockets held by
- * the *same* isolate, and an HTTP-triggered Worker stays alive as long as its
- * clients remain connected. Losing the isolate loses the subscription and the
- * members it was fanning out to **together**, which is consistent. The socket
- * is therefore opened lazily on the first publish and reopened after any
- * failure, rather than held open by a keepalive that would only fight the
- * platform's eviction.
+ * Two paths, because workerd ties every I/O object to the request that
+ * created it and touching it from another request throws:
+ *
+ * - **Per-connection links** ({@linkcode DurableObjectBackplane.openConnectionLink},
+ *   {@linkcode DurableObjectBackplane.publishViaHub}) are what WebSocket rooms
+ *   use on Workers. Each client connection opens its own link from its own
+ *   request, so every frame for it is delivered in the request that owns its
+ *   socket; a broadcast from any other request is POSTed to the hub, which
+ *   needs no socket. Client sockets are request-bound, never isolate-wide, so
+ *   a room cannot write to all its members from one request.
+ * - **The isolate socket** (`connect`/`subscribe`) receives frames for
+ *   consumers that hold one isolate-level subscription (`sse-plugin`). It is
+ *   opened lazily by `connect` or the first `publish`, and retired when it
+ *   reports a close or an error, so the next call reopens it. `publish`
+ *   sends through the hub's HTTP publish rather than this socket, so
+ *   publishes from different requests never touch a socket another request
+ *   owns; the frame's `origin` is what drops this replica's own echo. The
+ *   socket itself still belongs to the request that opened it. On local
+ *   workerd it keeps receiving after that request has answered; on the
+ *   platform that is unverified. A replica hears a frame only once its socket
+ *   has joined the hub, so frames published before then are not delivered.
+ *   Each publish is its own call to the hub, and the platform orders calls
+ *   only within one stub, which (like the socket) cannot be kept across
+ *   requests, so other replicas may receive one replica's frames out of order.
  *
  * @example
  * ```typescript
@@ -92,7 +125,7 @@ export interface DurableObjectBackplaneOptions {
  * ```
  * @since 0.2.0
  */
-export class DurableObjectBackplane implements IRealtimeBackplane {
+export class DurableObjectBackplane implements IRealtimeLinkBackplane {
   readonly origin: string;
   readonly #namespace: IDurableObjectNamespace;
   readonly #options: DurableObjectBackplaneOptions;
@@ -113,6 +146,8 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
    * reference to shut it down.
    */
   #generation = 0;
+  /** Set by a hub publish that failed for the hub's reason, cleared by one that succeeds. */
+  #publishFailing = false;
 
   /**
    * @param namespace - The Durable Object namespace binding
@@ -186,31 +221,116 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Publishes a frame to every other subscribed replica.
+   * Publishes a frame to every other subscribed replica, through the hub's
+   * HTTP publish. Opens the receiving socket first when none is open. A failed
+   * POST is logged, never thrown.
    *
    * @param frame - The frame to publish
-   * @throws {CloudflareUnsupportedError} When the socket cannot be opened
+   * @throws {CloudflareUnsupportedError} When the receiving socket cannot be
+   * opened
    */
   async publish(frame: RealtimeFrame): Promise<void> {
+    // The socket is opened (or kept) for receiving only. Sending on it would
+    // fail from every request but the one that opened it, since workerd ties
+    // the socket to that request: concurrent publishes from different requests
+    // retired and reopened it in turn. The hub's HTTP publish needs no socket.
+    // It fans out to every socket, this replica's own included, and the
+    // origin check in #receive drops that echo.
     await this.connect();
-    const socket = this.#socket;
-    if (socket === undefined) {
+    if (this.#socket === undefined) {
       // Only reachable when a close() raced this publish, in which case there
       // is deliberately nothing to send.
       return;
     }
+    await this.publishViaHub(frame);
+  }
+
+  /**
+   * Opens one connection's own link to the hub, from the request that owns
+   * the connection.
+   * @param connectionId - The connection's id, for log lines
+   * @param deliver - Receives every frame the hub sends the link
+   * @returns The link
+   * @throws {Error} When the backplane was built without `timers`
+   * @since 0.14.0
+   */
+  openConnectionLink(
+    connectionId: string,
+    deliver: (frame: RealtimeFrame) => void,
+  ): IRealtimeConnectionLink {
+    const timers = this.#options.timers;
+    if (timers === undefined) {
+      throw new Error('DurableObjectBackplane: openConnectionLink needs the timers option');
+    }
+    return new ConnectionLink({
+      hub: () => this.#namespace.get(this.#namespace.idFromName(this.#options.topic)),
+      binding: this.#options.binding,
+      topic: this.#options.topic,
+      connectionId,
+      deliver,
+      timers,
+      ...(this.#options.logger === undefined ? {} : { logger: this.#options.logger }),
+      ...(this.#options.waitUntil === undefined ? {} : { waitUntil: this.#options.waitUntil }),
+    });
+  }
+
+  /**
+   * Publishes a frame to every link and socket through the hub with an HTTP
+   * POST, which needs no socket and so works from any request. Handed to
+   * `waitUntil` when one was given, so a route that answers first does not cut
+   * it off. A failure is logged, never thrown.
+   * @param frame - The frame to publish
+   * @returns Resolves once the hub answered (or the POST failed)
+   * @since 0.14.0
+   */
+  publishViaHub(frame: RealtimeFrame): Promise<void> {
+    const posted = this.#post(frame);
+    keepAliveQuietly(this.#options.waitUntil, posted);
+    return posted;
+  }
+
+  /** The POST itself, with its failure reported. */
+  async #post(frame: RealtimeFrame): Promise<void> {
+    let status: number;
     try {
-      socket.send(JSON.stringify(frame));
+      const stub = this.#namespace.get(this.#namespace.idFromName(this.#options.topic));
+      const response = await stub.fetch(PUBLISH_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(frame),
+      });
+      status = response.status;
     } catch (error) {
-      // Reported rather than rethrown: both consuming plugins call publish
-      // detached (`void backplane.publish(f).catch(...)`), so an unreported
-      // throw here is invisible. Retiring the socket is what turns a dead
-      // connection into a reconnect instead of a permanently silent backplane.
-      this.#retire(socket);
+      this.#reportOutage({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
+    if (status >= 200 && status < 300) {
+      this.#publishFailing = false;
+      return;
+    }
+    // The hub refuses a frame above its cap with 413 and a body that is not
+    // UTF-8 with 400: that frame's fault, reported each time. Any other answer
+    // is the hub's (or the binding's), reported once per run of failures.
+    if (status === 413 || status === 400) this.#reportPublishFailure({ status });
+    else this.#reportOutage({ status });
+  }
+
+  /** Reports a hub failure once per run of them: while a hub is down every broadcast lands here. */
+  #reportOutage(detail: { readonly status: number } | { readonly error: string }): void {
+    if (this.#publishFailing) return;
+    this.#publishFailing = true;
+    this.#reportPublishFailure(detail);
+  }
+
+  /** Logs one failed hub publish, without frame content; a logger that throws is ignored. */
+  #reportPublishFailure(detail: { readonly status: number } | { readonly error: string }): void {
+    try {
       this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
         topic: this.#options.topic,
-        error: error instanceof Error ? error.message : String(error),
+        ...detail,
       });
+    } catch {
+      // Only the log line is lost.
     }
   }
 
@@ -256,6 +376,9 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
     if (this.#socket !== socket) return;
     this.#socket = undefined;
     this.#opening = undefined;
+    // Closed, not only dropped: an unreferenced socket stays open at the hub,
+    // which keeps fanning every frame out to it.
+    this.#closeQuietly(socket);
   }
 
   /**
@@ -290,10 +413,9 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
     } catch {
       return;
     }
-    // The own-origin check is belt and braces beside the object's sender
-    // exclusion: the reconnect path in this class makes it briefly possible for
-    // one replica to hold two sockets to the same object, and without this the
-    // second would deliver this replica's own broadcasts back to it.
+    // The own-origin check is what keeps a replica from hearing itself: its
+    // publishes go through the hub's HTTP publish, which fans out to every
+    // socket, this replica's own included.
     if (!isRealtimeFrame(parsed) || parsed.origin === this.origin) {
       return;
     }

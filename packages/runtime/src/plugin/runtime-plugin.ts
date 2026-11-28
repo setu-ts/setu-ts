@@ -77,6 +77,24 @@ export interface RuntimeOptions {
    */
   env?: Readonly<Record<string, unknown>>;
   /**
+   * The platform's `waitUntil` on Cloudflare Workers: pass the module import
+   * (`import { waitUntil } from 'cloudflare:workers'`), never one request's
+   * `ctx.waitUntil`, since the application serves every request. It becomes
+   * `IRuntimeServices.waitUntil`, which keeps the kernel's `ctx.defer` cleanups
+   * alive after a client leaves (up to the platform's 30 seconds), and which
+   * `CloudflarePlugin` uses when its own `waitUntil` is omitted. Ignored on
+   * Deno, Node and Bun.
+   *
+   * @example
+   * ```typescript
+   * import { env, waitUntil } from 'cloudflare:workers';
+   *
+   * const app = createApplication({ plugins: [RuntimePlugin({ env, waitUntil })] });
+   * ```
+   * @since 0.14.0
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+  /**
    * Maximum request-body size, in bytes, enforced where the body is read.
    * Omitted, the read is unbounded — the released behaviour, byte for byte.
    *
@@ -184,6 +202,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const runtimeAdapters = options?.adapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
   const workerEnv = options?.env;
+  const workerWaitUntil = options?.waitUntil;
   const maxBodyBytes = options?.maxBodyBytes;
   const http2 = options?.http2;
 
@@ -244,6 +263,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
         // undefined, so the factory's own defaults apply.
         ...(runtimeAdapters === undefined ? {} : { adapters: runtimeAdapters }),
         ...(workerEnv === undefined ? {} : { env: workerEnv }),
+        ...(workerWaitUntil === undefined ? {} : { waitUntil: workerWaitUntil }),
       });
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 

@@ -437,6 +437,7 @@ describe('RealtimeBackplanePlugin realtime observations (M98l)', () => {
       name: 'CANARY-room',
       data: 'CANARY-data',
       exceptId: 'CANARY-except',
+      exceptIds: ['CANARY-except-more'],
     });
     await harness.backplane.publish(canary);
     broker.deliver(canary);

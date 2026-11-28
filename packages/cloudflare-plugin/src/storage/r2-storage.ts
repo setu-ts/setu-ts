@@ -5,8 +5,9 @@
  */
 
 import type { IStorage, PutObjectOptions, SignedUrlOptions } from '@setu-ts/common';
+import { StorageObjectNotFoundError } from '@setu-ts/common';
 import type { IR2Bucket, R2PutOptions } from '../bindings/facades.ts';
-import { CloudflareObjectNotFoundError, CloudflareUnsupportedError } from '../errors.ts';
+import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**
  * Options for {@linkcode R2Storage}.
@@ -69,7 +70,7 @@ export class R2Storage implements IStorage {
   async get(path: string): Promise<Uint8Array> {
     const object = await this.#bucket.get(this.#key(path));
     if (object === null) {
-      throw new CloudflareObjectNotFoundError(path);
+      throw new StorageObjectNotFoundError(path);
     }
     return new Uint8Array(await object.arrayBuffer());
   }
@@ -79,12 +80,12 @@ export class R2Storage implements IStorage {
    *
    * @param path - The object path
    * @returns The object body as a stream
-   * @throws {CloudflareObjectNotFoundError} When the object does not exist
+   * @throws {StorageObjectNotFoundError} When the object does not exist (served as 404)
    */
   async getStream(path: string): Promise<ReadableStream<Uint8Array>> {
     const object = await this.#bucket.get(this.#key(path));
     if (object === null) {
-      throw new CloudflareObjectNotFoundError(path);
+      throw new StorageObjectNotFoundError(path);
     }
     return object.body;
   }

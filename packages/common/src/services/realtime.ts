@@ -74,7 +74,34 @@ export interface RealtimeFrame {
    * @since 0.2.0
    */
   readonly exceptId?: string;
+  /**
+   * Further connections excluded from this broadcast, by ID, beside
+   * {@linkcode RealtimeFrame.exceptId}. A receiver skips a member whose `id`
+   * equals `exceptId` or appears here.
+   *
+   * Set only when a sender must be excluded as well as the caller's `except`:
+   * on Workers, a sender whose own link refused its broadcast is sent its copy
+   * directly when it is an open member of the room (a send that throws on a
+   * closing socket is dropped), and is listed here so the hub's copy never
+   * reaches it a second time. A transport that rebuilds frames field by field must carry it.
+   *
+   * At most {@linkcode REALTIME_FRAME_EXCEPT_IDS_LIMIT} entries: the shipped
+   * guards drop a longer list as malformed, since every receiver checks each
+   * member against it.
+   *
+   * @since 0.14.0
+   */
+  readonly exceptIds?: readonly string[];
 }
+
+/**
+ * The most entries a {@linkcode RealtimeFrame.exceptIds} may carry. The
+ * shipped backplane guards drop a frame with more, as malformed; the plugin
+ * itself never sends more than one.
+ *
+ * @since 0.14.0
+ */
+export const REALTIME_FRAME_EXCEPT_IDS_LIMIT = 16;
 
 /**
  * Receives frames published by other instances.

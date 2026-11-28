@@ -296,3 +296,17 @@ describe('RuntimePlugin | Cloudflare Workers env passthrough', () => {
     expect(Object.keys(services.env)).toEqual([]);
   });
 });
+
+describe('createRuntimeServices | waitUntil (V13-200)', () => {
+  it('passes waitUntil to the Workers factory only', () => {
+    const held: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      held.push(promise);
+    };
+    const workers = createRuntimeServices({ platform: 'cloudflare-workers', waitUntil });
+    const work = Promise.resolve();
+    workers.waitUntil?.(work);
+    expect(held).toEqual([work]);
+    expect(createRuntimeServices({ platform: 'node', waitUntil }).waitUntil).toBeUndefined();
+  });
+});

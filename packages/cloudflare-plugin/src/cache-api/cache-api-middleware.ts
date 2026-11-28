@@ -12,12 +12,19 @@
  */
 
 import type { ILogger, IRequestContext, IResponse, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import {
+  cacheControlDirectives,
+  CAPABILITIES,
+  COOKIE_DEPENDENT_RESPONSE_STATE_KEY,
+  parseCookie,
+  PER_VISITOR_RESPONSE_STATE_KEY,
+} from '@setu-ts/common';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
 import { isHostlessRegistry } from '../background/wait-until.ts';
 import type { ICacheApi } from './cache-api.ts';
 import { resolveCacheApi } from './cache-api.ts';
-import { assessCacheability } from './cacheability.ts';
+import { assessCacheability, isPrivate } from './cacheability.ts';
+import { cacheApiKey } from './cache-api-key.ts';
 
 /** The header this middleware reports under. Never `X-Cache` — see the module doc. */
 const STATUS_HEADER = 'X-Cache-Api';
@@ -82,123 +89,37 @@ export interface CacheApiMiddlewareOptions {
    */
   readonly cacheableStatuses?: readonly number[];
   /**
-   * Adds `Cache-Control: public, max-age=<n>` to the **stored copy** when the
-   * response carries no `Cache-Control` of its own. The edge honors the stored
+   * Adds `Cache-Control: max-age=<n>` to the **stored copy** when the response
+   * carries no `Cache-Control` of its own. The edge honors the stored
    * response's own directive, so without one an entry has no freshness lifetime
-   * and is of little use. The client's response is left untouched.
+   * and is of little use. The client's response is left untouched. Not
+   * `public`: the stored copy must not read as shareable with a request that
+   * carries credentials unless the origin itself said `public`.
    */
   readonly ttlSeconds?: number;
+  /**
+   * The cookies that make a request **credentialed**. Omitted, any cookie
+   * does; `[]` leaves `Authorization` as the only credential. A credentialed
+   * request is served only a stored response that says `public` and whose
+   * `Vary` names neither `Cookie` nor `Authorization`, and its own response is
+   * stored only on the same terms. A request carrying any cookie at all, named
+   * here or not, is never served an entry that varies on `Cookie` or
+   * `Authorization`. The same rule, and the same option, as `cache-plugin`'s
+   * `cacheMiddleware`.
+   * @since 0.14.0
+   */
+  readonly credentialCookies?: readonly string[];
 }
 
-/**
- * The query parameters the default key appends for a request that carries a
- * resolved tenant and/or locale, in this order.
- *
- * Each is APPENDED to the request URL's own TEXT — never a re-serialized
- * query, and never a `set`. `set` would delete a client-supplied copy from
- * the key while the handler still sees it, letting any client fill the
- * canonical entry with a response reflecting its own input (web cache
- * poisoning); re-serializing the query would fold encoding variants together
- * (`?p=%32` with `?p=2`, `/page?&&` with `/page`), letting a client choose the
- * exact text a cached reflection of `ctx.request.url` carries. Concatenation
- * keeps every byte the client sent, and since an encoded value can contain
- * neither `&` nor `=`, the LAST occurrence of each name in a key always names
- * the request's own value: two different (URL, tenant, locale) triples never
- * share a key.
- */
-const KEY_DISCRIMINATORS: readonly {
-  readonly name: string;
-  readonly read: (ctx: IRequestContext) => string | undefined;
-}[] = [
-  { name: 'setu-cache-tenant', read: (ctx) => ctx.request.tenant?.id },
-  { name: 'setu-cache-locale', read: (ctx) => ctx.request.locale },
-];
-
-/**
- * The default cache key: the request URL, carrying the resolved tenant and
- * locale when there are any (M103 added the locale; the tenant followed from
- * its audit). Without either the key is the URL unchanged, so an application
- * without multi-tenancy or localization keeps byte-identical keys.
- *
- * Answers `undefined` — the request is then served uncached — whenever no
- * key can keep that request apart from another:
- *
- * - **the URL text is not in its parsed form.** Workers and Bun normalize the
- *   URL before the handler sees it, but Deno (and Node, for some targets)
- *   hand the handler the request target as sent — `/a/./b`, `/a\b`, a raw
- *   `"` or `<` in the query, an upper-case host — while the Cache API parses
- *   a key before it matches, so such a request would fill the entry its
- *   normalized sibling is served from with a response reflecting its own
- *   text. Comparing the text with its own serialization costs one URL parse.
- * - **the URL carries a fragment.** Deno, Node and Bun deliver one to the
- *   handler when a client sends it, while the Cache API ignores fragments when
- *   it matches, so `/page#x` would fill `/page`'s entry. A browser never
- *   sends a fragment, so nothing legitimate is lost; workerd strips it before
- *   the handler.
- * - **a tenant id or locale is not well-formed UTF-16** (a lone surrogate),
- *   which `encodeURIComponent` cannot encode. The two plugins only ever
- *   resolve ids and tags they were configured with; this guards a value an
- *   application sets through `replaceTenant` or `replaceLocale`.
- * - **the request lacks a tenant (or locale), but its URL already contains
- *   `setu-cache-tenant=` (or `setu-cache-locale=`).** Its key would be the
- *   URL itself, which is exactly a tenanted request's key
- *   (`/page?setu-cache-tenant=acme` is `/page` for `acme`). Every key for a
- *   request carrying the value contains the name, so a key for one that does
- *   not cannot match it. This arises only where an application resolves the
- *   tenant or locale on some requests and not others; both plugins' own
- *   middleware set theirs on every request they govern.
- *
- * With those excluded, a key is the parsed URL's own text plus, in a fixed
- * order, the encoded value of each discriminator the request carries — so the
- * names present in a key are exactly the ones the request resolved, and two
- * keys match only when the URL, the tenant and the locale all do.
- */
+/** The default key: the request URL plus its resolved tenant and locale. */
 function defaultKey(ctx: IRequestContext): string | undefined {
-  const url = ctx.request.url;
-  if (url.includes('#') || !isParsedForm(url)) {
-    return undefined;
-  }
-  let key = url;
-  for (const { name, read } of KEY_DISCRIMINATORS) {
-    const value = read(ctx);
-    if (value === undefined) {
-      if (url.includes(`${name}=`)) {
-        return undefined;
-      }
-      continue;
-    }
-    const encoded = encodeValue(value);
-    if (encoded === undefined) {
-      return undefined;
-    }
-    key += `${key.includes('?') ? '&' : '?'}${name}=${encoded}`;
-  }
-  return key;
-}
-
-/**
- * Percent-encodes a discriminator value for the key, or `undefined` when it is
- * not well-formed UTF-16 (`encodeURIComponent` throws `URIError` on a lone
- * surrogate). A `try` rather than `String.prototype.isWellFormed`, which Node
- * 18 lacks.
- */
-function encodeValue(value: string): string | undefined {
-  try {
-    return encodeURIComponent(value);
-  } catch {
-    return undefined;
-  }
-}
-
-/** Reports whether `url` is exactly its own WHATWG serialization. */
-function isParsedForm(url: string): boolean {
-  // `new URL` + `try` rather than `URL.parse`, which is newer than some of the
-  // runtimes this package supports.
-  try {
-    return new URL(url).href === url;
-  } catch {
-    return false;
-  }
+  const tenant = ctx.request.tenant?.id;
+  const locale = ctx.request.locale;
+  return cacheApiKey({
+    url: ctx.request.url,
+    ...(tenant === undefined ? {} : { tenant }),
+    ...(locale === undefined ? {} : { locale }),
+  });
 }
 
 /**
@@ -252,6 +173,10 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
   const bypassFn = options?.bypass;
   const cacheableStatuses = options?.cacheableStatuses ?? DEFAULT_CACHEABLE_STATUSES;
   const ttlSeconds = options?.ttlSeconds;
+  const credentialCookies = options?.credentialCookies;
+  // Once per middleware instance (so once per isolate on Workers), and only
+  // when a logger heard it.
+  let privateSetCookieWarned = false;
 
   // Resolved once: the global does not change over a Worker's lifetime, and a
   // per-request probe would be work on the hot path (AI_GUIDELINES §14).
@@ -281,12 +206,21 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
       return;
     }
 
+    // The key is the URL, so `Vary` cannot keep a per-visitor entry apart:
+    // the rule holds on the lookup side as well as the store side.
+    const credentialed = isCredentialed(ctx.request.headers, credentialCookies);
+    const withCookies = credentialed || carriesCookie(ctx.request.headers);
+
     const hit = await cache.match(key);
     if (hit !== undefined) {
-      replay(ctx.response, hit);
-      // Short-circuit: next() is NOT called, so the handler cannot overwrite
-      // the replayed response.
-      return;
+      if (!withCookies || servableWithCookies(hit.headers, credentialed)) {
+        replay(ctx.response, hit);
+        // Short-circuit: next() is NOT called, so the handler cannot overwrite
+        // the replayed response.
+        return;
+      }
+      // Not this request's to see; the entry stays for the requests it suits.
+      void hit.body?.cancel().catch(() => {});
     }
 
     await next();
@@ -297,18 +231,43 @@ export function cacheApiMiddleware(options?: CacheApiMiddlewareOptions): Middlew
       return;
     }
 
+    // A response a component flagged as depending on cookies is judged and
+    // stored as varying on `Cookie`, whatever its own `Vary` says.
+    const headers =
+      ctx.state.get(COOKIE_DEPENDENT_RESPONSE_STATE_KEY) === true
+        ? withVaryCookie(snapshot.headers)
+        : snapshot.headers;
     const refusals = assessCacheability({
       method: ctx.request.method,
       status: snapshot.status,
-      headers: snapshot.headers,
+      headers,
       cacheableStatuses,
     });
 
-    if (refusals.length === 0) {
-      const stored = buildStoredResponse(snapshot.status, snapshot.headers, snapshot.body, {
+    if (
+      refusals.length === 0 &&
+      ctx.state.get(PER_VISITOR_RESPONSE_STATE_KEY) !== true &&
+      (!withCookies || servableWithCookies(headers, credentialed))
+    ) {
+      const stored = buildStoredResponse(snapshot.status, headers, snapshot.body, {
         ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
       });
       await store(ctx, cache, key, stored);
+    } else if (
+      !privateSetCookieWarned &&
+      refusals.includes('private') &&
+      namesSetCookieInPrivate(headers.get('cache-control')) &&
+      ctx.services.has(CAPABILITIES.LOGGER)
+    ) {
+      privateSetCookieWarned = true;
+      ctx.services
+        .get<ILogger>(CAPABILITIES.LOGGER)
+        .warn(
+          'cloudflare-cache-api: Cache-Control: private=Set-Cookie is not stored in the edge ' +
+            'cache; any private directive refuses it, as cacheMiddleware does. Drop Set-Cookie ' +
+            'from cacheable responses instead',
+          { path: ctx.request.path },
+        );
     }
 
     ctx.response.header(STATUS_HEADER, 'MISS');
@@ -357,7 +316,7 @@ function buildStoredResponse(
   const headers = new Headers(live);
 
   if (options.ttlSeconds !== undefined && !headers.has('cache-control')) {
-    headers.set('cache-control', `public, max-age=${options.ttlSeconds}`);
+    headers.set('cache-control', `max-age=${options.ttlSeconds}`);
   }
 
   // `new Response(null)` is required for a status that forbids a body; passing
@@ -447,4 +406,110 @@ function reportWriteFailure(ctx: IRequestContext, error: unknown): void {
       path: ctx.request.path,
       error: error instanceof Error ? error.name : typeof error,
     });
+}
+
+/**
+ * Whether a request carries a credential: `Authorization`, or a cookie that
+ * counts (any cookie when `credentialCookies` is omitted).
+ */
+function isCredentialed(
+  headers: Headers,
+  credentialCookies: readonly string[] | undefined,
+): boolean {
+  if (headers.has('authorization')) return true;
+  if (credentialCookies === undefined) return carriesCookie(headers);
+  const cookies = parseCookie(headers.get('cookie'));
+  return credentialCookies.some((name) => Object.hasOwn(cookies, name));
+}
+
+/** Whether a request carries any non-blank `Cookie` header, a nameless pair included. */
+function carriesCookie(headers: Headers): boolean {
+  return (headers.get('cookie') ?? '').trim() !== '';
+}
+
+/** The lowercased field names of a `Vary` value. */
+function varyFields(vary: string | null): string[] {
+  return vary === null ? [] : vary.split(',').map((field) => field.trim().toLowerCase());
+}
+
+/** A copy of `headers` whose `Vary` names `Cookie`, added once. */
+function withVaryCookie(headers: Headers): Headers {
+  const copy = new Headers(headers);
+  if (!varyFields(copy.get('vary')).includes('cookie')) copy.append('vary', 'Cookie');
+  return copy;
+}
+
+/**
+ * Whether a response, live or stored, may be served to (or stored from) a
+ * request carrying a cookie or `Authorization`: its `Vary` names neither, and,
+ * for a credentialed request, it says `public` and is not private.
+ */
+function servableWithCookies(headers: Headers, credentialed: boolean): boolean {
+  if (varyFields(headers.get('vary')).some((f) => f === 'cookie' || f === 'authorization')) {
+    return false;
+  }
+  if (!credentialed) return true;
+  const cacheControl = headers.get('cache-control');
+  return cacheControl !== null && !isPrivate(cacheControl) && hasPublic(cacheControl);
+}
+
+/** Whether a readable `Cache-Control` value holds `public`, by the shared parser. */
+function hasPublic(cacheControl: string): boolean {
+  return cacheControlDirectives(cacheControl)?.includes('public') ?? false;
+}
+
+/**
+ * Whether `Cache-Control` names `Set-Cookie` in `private`'s field list, in the
+ * token form (`private=Set-Cookie`) or the quoted-list form
+ * (`private="X-A, Set-Cookie"`), case-insensitively. `false` for an unreadable
+ * value or a `set-cookie` inside another directive's argument.
+ */
+export function namesSetCookieInPrivate(cacheControl: string | null): boolean {
+  if (cacheControl === null) return false;
+  const directives = splitDirectives(cacheControl);
+  if (directives === undefined) return false;
+  return directives.some((directive) => {
+    const eq = directive.indexOf('=');
+    if (eq < 0 || directiveName(directive) !== 'private') return false;
+    let value = directive.slice(eq + 1).trim();
+    if (value.startsWith('"')) value = value.slice(1, -1);
+    return value
+      .split(',')
+      .map((field) => field.trim().toLowerCase())
+      .includes('set-cookie');
+  });
+}
+
+/** A directive's lowercased name. */
+function directiveName(directive: string): string {
+  const eq = directive.indexOf('=');
+  return (eq < 0 ? directive : directive.slice(0, eq)).trim().toLowerCase();
+}
+
+/**
+ * Splits `Cache-Control` into its directives on commas outside quotes;
+ * `undefined` for an unclosed quote.
+ */
+function splitDirectives(cacheControl: string): string[] | undefined {
+  const parts: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < cacheControl.length; i++) {
+    const char = cacheControl[i] as string;
+    if (quoted && char === '\\') {
+      current += char + (cacheControl[i + 1] ?? '');
+      i++;
+      continue;
+    }
+    if (char === '"') quoted = !quoted;
+    if (char === ',' && !quoted) {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (quoted) return undefined;
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part !== '');
 }

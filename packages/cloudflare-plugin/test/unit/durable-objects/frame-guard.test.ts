@@ -19,6 +19,7 @@ afterAll(() => {
 import { describe, expect, it } from 'vitest';
 
 import type { RealtimeFrame } from '@setu-ts/common';
+import { REALTIME_FRAME_EXCEPT_IDS_LIMIT } from '@setu-ts/common';
 import { isRealtimeFrame } from '../../../src/durable-objects/frame-guard.ts';
 
 const FRAME: RealtimeFrame = {
@@ -35,6 +36,8 @@ describe('isRealtimeFrame', () => {
 
   it('accepts a frame carrying the optional fields', () => {
     expect(isRealtimeFrame({ ...FRAME, binary: true, exceptId: 'conn-1' })).toBe(true);
+    expect(isRealtimeFrame({ ...FRAME, exceptId: 'conn-1', exceptIds: ['conn-2'] })).toBe(true);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: [] })).toBe(true);
   });
 
   it('rejects a non-object', () => {
@@ -58,5 +61,16 @@ describe('isRealtimeFrame', () => {
   it('rejects a mistyped optional field rather than ignoring it', () => {
     expect(isRealtimeFrame({ ...FRAME, binary: 'yes' })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, exceptId: 5 })).toBe(false);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: 'conn-2' })).toBe(false);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ['conn-2', 3] })).toBe(false);
+    // The contract's cap: 16 entries pass, 17 are dropped as malformed.
+    const ids = (n: number): string[] => Array.from({ length: n }, (_, i) => `conn-${String(i)}`);
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ids(REALTIME_FRAME_EXCEPT_IDS_LIMIT) })).toBe(
+      true,
+    );
+    expect(isRealtimeFrame({ ...FRAME, exceptIds: ids(REALTIME_FRAME_EXCEPT_IDS_LIMIT + 1) })).toBe(
+      false,
+    );
+    expect(REALTIME_FRAME_EXCEPT_IDS_LIMIT).toBe(16);
   });
 });

@@ -17887,7 +17887,20 @@ lock's real use are documented, and a trace crosses Workers messaging. The proof
 - **V13-219** — A throwing cron handler is logged without its message.
 
 Half of a row owned elsewhere: V13-218 (owned by M143h); V13-220 (owned by M143m); V13-111, V13-135
-(owned by M143a).
+(owned by M143a); V13-41, V13-200 (owned by M143i).
+
+Out-of-lane edits by the maintainer's decision (2026-11-23): V13-200's Core half (optional
+`IRuntimeServices.waitUntil` in `common/src/runtime.ts`, the kernel's cleanup hand-off in `kernel`,
+and `waitUntil` through `runtime/src/plugin`, `src/adapters/shared` and `src/services`) is built in
+this letter rather than as a Core-lane PR; `static-plugin`'s `Vary` fix joins this letter (D10). On
+2026-11-24 the maintainer added three defects found in review: V13-274 (the Durable Object hubs' 426
+without `Upgrade`), V13-275 (an out-of-lane edit to the CLI lane's generated output: the Workers
+scaffold's wrangler pin, whose miniflare installed High-advisory undici and sharp) and the Workers
+handshake status, which measured a different cause than assumed: Workers keeps its 500 for a
+handshake workerd itself refuses. The code review then added V13-278 (a malformed handshake ran a
+Workers route's `onOpen`): the adapter now answers 400 for a malformed key and 426 for a version
+other than 13 before `onOpen`. V13-276 (Deno's handshake validation, an out-of-lane edit in
+`runtime`) is fixed here; V13-277 is an upstream note.
 
 ### Milestone 143p: Queued Work and Frames That Are Lost or Repeated
 
@@ -18384,7 +18397,7 @@ not a pass threshold.
 | 143l      | ⬜     | Web lane: openapi + auth + react-router + validation + mcp + starters — pages, sign-in options and the OpenAPI document                                                                                                                                                                   |
 | 143m      | ⬜     | Messaging lane: messaging + queue + realtime-backplane — broker and queue bounds, health, errors and options                                                                                                                                                                              |
 | 143n      | ⬜     | Docs lane: docs — documentation                                                                                                                                                                                                                                                           |
-| 143o      | ⬜     | Workers lane: cloudflare + websocket + runtime (Workers adapter) — Workers: realtime, Durable Objects, queues and bindings                                                                                                                                                                |
+| 143o      | ✅     | Workers lane: cloudflare + websocket + runtime (Workers adapter) — Workers: realtime, Durable Objects, queues and bindings                                                                                                                                                                |
 | 143p      | ✅     | Messaging lane: queue + messaging + realtime-backplane — queued work and frames that are lost or repeated (security-audited)                                                                                                                                                              |
 | 143q      | ✅     | Data lane: database — databases off PostgreSQL (security-audited)                                                                                                                                                                                                                         |
 | 143r      | ✅     | Integrations lane: storage + secrets + mail + notification + feature-flags + localization — provider arms and their options; all 16 rows (V13-131's worker-pool half reads M143i's `WorkerRunOptions.signal`)                                                                             |

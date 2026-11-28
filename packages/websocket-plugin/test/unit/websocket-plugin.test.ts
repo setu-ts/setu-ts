@@ -269,6 +269,55 @@ describe('WebSocketPlugin scaling notice', () => {
   });
 });
 
+describe('WebSocketPlugin on Cloudflare Workers', () => {
+  /** A context whose runtime reports Cloudflare Workers. */
+  function workersContext(): ReturnType<typeof createContext> {
+    const harness = createContext(createUpgradableAdapter(), true);
+    const ctx = harness.ctx as unknown as { runtime: IPluginContext['runtime'] };
+    const runtime = ctx.runtime;
+    ctx.runtime = { ...runtime, platform: () => 'cloudflare-workers' as const };
+    return harness;
+  }
+
+  it('names the Durable Object arm, not the realtime-backplane plugin, when rooms cannot work', async () => {
+    const harness = workersContext();
+
+    await WebSocketPlugin().register(harness.ctx);
+
+    expect(harness.infoLogs).toHaveLength(1);
+    expect(harness.infoLogs[0]).toContain('CloudflarePlugin({ durableObject');
+    expect(harness.infoLogs[0]).not.toContain('realtime-backplane-plugin');
+  });
+
+  it('stays quiet with scalingNotice false', async () => {
+    const harness = workersContext();
+    await WebSocketPlugin({ scalingNotice: false }).register(harness.ctx);
+    expect(harness.infoLogs).toEqual([]);
+  });
+
+  it('opens no isolate subscription with a link backplane, and stays quiet', async () => {
+    const harness = workersContext();
+    let subscriptions = 0;
+    harness.registered.set(CAPABILITIES.REALTIME_BACKPLANE, {
+      origin: 'isolate',
+      connect: (): Promise<void> => Promise.resolve(),
+      publish: (): Promise<void> => Promise.resolve(),
+      subscribe: (): Promise<() => void> => {
+        subscriptions++;
+        return Promise.resolve(() => {});
+      },
+      close: (): Promise<void> => Promise.resolve(),
+      openConnectionLink: () => ({ publish: () => true, close: () => {} }),
+      publishViaHub: (): Promise<void> => Promise.resolve(),
+    } as IRealtimeBackplane);
+
+    await WebSocketPlugin().register(harness.ctx);
+
+    expect(subscriptions).toBe(0);
+    expect(harness.infoLogs).toEqual([]);
+  });
+});
+
 describe('WebSocketPlugin with a realtime backplane', () => {
   /** A backplane double recording its subscriptions and publishes. */
   function fakeBackplane(): IRealtimeBackplane & {

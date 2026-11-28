@@ -55,7 +55,10 @@ export { parseRequestedProtocols, selectProtocol, WsRouteTable } from './routing
 export type { WsRoute, WsRouteMatch } from './routing/ws-route-table.ts';
 export { HeartbeatSweeper } from './heartbeat/heartbeat.ts';
 export type { HeartbeatOptions } from './heartbeat/heartbeat.ts';
-export { WebSocketUnavailableError } from './errors/websocket-errors.ts';
+export {
+  WebSocketRoomsUnavailableError,
+  WebSocketUnavailableError,
+} from './errors/websocket-errors.ts';
 export type {
   WebSocketPluginOptions,
   WebSocketRouteDefinition,

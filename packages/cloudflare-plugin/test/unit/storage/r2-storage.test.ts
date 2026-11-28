@@ -15,11 +15,8 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  CloudflareObjectNotFoundError,
-  CloudflareUnsupportedError,
-  R2Storage,
-} from '../../../src/index.ts';
+import { httpStatusHintOf, StorageObjectNotFoundError } from '@setu-ts/common';
+import { CloudflareUnsupportedError, R2Storage } from '../../../src/index.ts';
 import { FakeR2, readAll } from '../../fakes.ts';
 
 const BYTES = new Uint8Array([1, 2, 3, 4]);
@@ -33,10 +30,19 @@ describe('R2Storage', () => {
     expect(await storage.get('a.bin')).toEqual(BYTES);
   });
 
-  it('throws a named error for a missing object rather than returning null', async () => {
+  it('throws the portable not-found error for a missing object, served as 404', async () => {
     const storage = new R2Storage(new FakeR2());
-    // IStorage.get is contracted as Promise<Uint8Array> with no null arm.
-    await expect(storage.get('missing.bin')).rejects.toBeInstanceOf(CloudflareObjectNotFoundError);
+    // IStorage.get is contracted as Promise<Uint8Array> with no null arm. The
+    // same class every storage-plugin provider throws (V13-217).
+    const error: unknown = await storage.get('users/42/missing.bin').catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(StorageObjectNotFoundError);
+    expect((error as StorageObjectNotFoundError).key).toBe('users/42/missing.bin');
+    const hint = httpStatusHintOf(error);
+    expect(hint?.status).toBe(404);
+    // The key can name a user or a document: never in the served detail.
+    expect(hint?.detail).toBe('The requested object was not found.');
+    expect(JSON.stringify(hint)).not.toContain('users/42');
   });
 
   it('streams an object without buffering it', async () => {
@@ -52,7 +58,7 @@ describe('R2Storage', () => {
   it('throws from getStream for a missing object', async () => {
     const storage = new R2Storage(new FakeR2());
     await expect(storage.getStream('missing.bin')).rejects.toBeInstanceOf(
-      CloudflareObjectNotFoundError,
+      StorageObjectNotFoundError,
     );
   });
 

@@ -96,6 +96,11 @@ describe('createStaticHandler', () => {
           this._headers.set(name, value);
           return this;
         },
+        appendHeader(name: string, value: string) {
+          const existing = this._headers.get(name);
+          this._headers.set(name, existing === undefined ? value : `${existing}, ${value}`);
+          return this;
+        },
         send(body?: Uint8Array | ReadableStream<Uint8Array>) {
           this._body = body ?? new Uint8Array();
           return this;
@@ -308,6 +313,33 @@ describe('createStaticHandler', () => {
     expect(ctx.response._headers.get('Content-Range')).toContain('0-4');
     expect(ctx.response._headers.get('Accept-Ranges')).toBe('bytes');
   });
+
+  it.each([
+    ['200', {}, 200],
+    ['206', { Range: 'bytes=0-4' }, 206],
+    ['416', { Range: 'bytes=1000-2000' }, 416],
+    ['304', { 'If-None-Match': 'W/"11"' }, 304],
+  ] as const)(
+    'keeps a Vary: Origin set earlier in the chain beside Accept-Encoding on the %s path',
+    async (_label, headers, status) => {
+      await fs.writeFile('/root/test.txt', new TextEncoder().encode('hello world'));
+      const handler = createStaticHandler({
+        fs,
+        root: '/root',
+        urlPrefix: '/',
+        index: 'index.html',
+      }) as RouteHandler;
+
+      ctx.request.path = '/test.txt';
+      for (const [name, value] of Object.entries(headers)) ctx.request.headers.set(name, value);
+      // What CORS (priority 125) leaves on the response before the handler runs.
+      ctx.response._headers.set('Vary', 'Origin');
+      await handler(ctx as never);
+
+      expect(ctx.response._status).toBe(status);
+      expect(ctx.response._headers.get('Vary')).toBe('Origin, Accept-Encoding');
+    },
+  );
 
   it('should return 400 for an invalid URI encoding', async () => {
     const handler = createStaticHandler({

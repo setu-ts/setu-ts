@@ -38,6 +38,13 @@ export interface CloudflareRuntimeOptions {
    * Defaults to an empty record.
    */
   env?: CloudflareEnv;
+  /**
+   * The platform's `waitUntil`, from `import { waitUntil } from
+   * 'cloudflare:workers'` (never one request's `ctx.waitUntil`). Exposed as
+   * {@linkcode IRuntimeServices.waitUntil}; omitted, that member is absent.
+   * @since 0.14.0
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 /**
@@ -51,13 +58,18 @@ export function createCloudflareRuntimeServices(
 ): IRuntimeServices {
   const { vars } = splitWorkerEnv(options?.env ?? {});
 
-  // `fs`, `workers`, `dns` and `onSignal` are all deliberately ABSENT here.
-  // For `onSignal` specifically: a Worker isolate is evicted, never signalled,
-  // so there is no signal to register for and no process to shut down
+  // `fs`, `workers`, `dns`, `createDnsResolver`, `onSignal` and `onFatalError`
+  // are all deliberately ABSENT here: a Worker has no filesystem, no worker
+  // threads and no socket DNS (so neither a resolver nor one with chosen name
+  // servers), and the platform reports an uncaught error itself. For
+  // `onSignal` specifically: a Worker isolate is evicted, never signalled, so
+  // there is no signal to register for and no process to shut down
   // gracefully. Supplying a no-op instead would be worse than omitting it — a
   // caller checking `runtime.onSignal !== undefined` would conclude its
   // shutdown handler will run, and it never would.
+  const waitUntil = options?.waitUntil;
   return mergeRuntimeServices({
+    ...(waitUntil === undefined ? {} : { waitUntil: (promise) => waitUntil(promise) }),
     platform: () => 'cloudflare-workers',
     reportError: (record) => {
       try {

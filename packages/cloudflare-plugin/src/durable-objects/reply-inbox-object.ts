@@ -103,10 +103,15 @@ export class ReplyInboxObjectCore {
     }
 
     if (request.method !== 'POST') {
+      // RFC 9110 §15.5.22: a 426 names the protocol to upgrade to; §15.5.6: a
+      // 405 lists the methods the target supports.
+      const upgradeRequired = request.method === 'GET';
       return new Response(
         'This Durable Object serves a Setu-TS reply inbox. Open it with a WebSocket upgrade, ' +
           'or deliver a reply with POST.',
-        { status: request.method === 'GET' ? 426 : 405 },
+        upgradeRequired
+          ? { status: 426, headers: { upgrade: 'websocket', connection: 'Upgrade' } }
+          : { status: 405, headers: { allow: 'GET, POST' } },
       );
     }
 

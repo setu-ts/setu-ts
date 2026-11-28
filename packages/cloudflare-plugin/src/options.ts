@@ -74,6 +74,36 @@ export interface WorkersQueueArm {
    * silently truncated.
    */
   readonly maxDelaySeconds?: number;
+  /**
+   * The consumer's `max_retries` in `wrangler.toml`: a whole number from 1 to
+   * 100, default 3 (the platform's default). The binding does not expose it,
+   * so the two must match; refused at `register()` otherwise. A job's budget
+   * is `min(maxAttempts, maxRetries)`: a larger `maxAttempts` is capped with
+   * one warning per job name, and the platform's last delivery is kept in
+   * reserve for a dead-letter send that failed.
+   * @since 0.14.0
+   */
+  readonly maxRetries?: number;
+  /**
+   * Where an exhausted job goes: the binding name of a Queues producer for the
+   * dead-letter queue (shape-checked at `register()`), or `false` to discard
+   * exhausted jobs with one warning each. Required for a Worker that consumes
+   * the queue: `process()` refuses without it, because the platform deletes an
+   * exhausted job unless `wrangler.toml` has a `dead_letter_queue`, which the
+   * adapter cannot see. `onFailed` runs before either. Naming the queue's own
+   * binding fails `app.start()`: each exhausted job would be re-enqueued
+   * without end.
+   * @since 0.14.0
+   */
+  readonly deadLetterQueue?: string | false;
+  /**
+   * Seconds before a failed job is redelivered: a number, or a function of the
+   * attempt that failed (1 on the first delivery). Bounded to 0 to
+   * `maxDelaySeconds`; `0` redelivers at once, overriding the queue's
+   * `retry_delay`. Omitted, the queue's own `retry_delay` applies.
+   * @since 0.14.0
+   */
+  readonly retryDelaySeconds?: number | ((attempts: number) => number);
 }
 
 /**
@@ -214,9 +244,13 @@ export interface CloudflarePluginOptions {
    * `import { waitUntil } from 'cloudflare:workers'` (available from
    * compatibility date 2025-08-08).
    *
-   * Omitting it leaves `bindings.waitUntil()` running the promise without
-   * extending the invocation — correct off Cloudflare Workers, and a silent
-   * truncation risk on it, so pass it whenever deploying to Workers.
+   * Omitted, the plugin uses `IRuntimeServices.waitUntil` (set when the
+   * Worker entry passes `waitUntil` to `RuntimePlugin`, since 0.14.0), so one
+   * `RuntimePlugin({ waitUntil })` covers the kernel and this plugin. With
+   * neither, `bindings.waitUntil()` runs the promise without extending the
+   * invocation — correct off Cloudflare Workers, and a silent truncation risk
+   * on it, which the plugin warns about once at startup there. An explicit
+   * value here wins over the runtime's.
    */
   readonly waitUntil?: WaitUntilHost;
   /**

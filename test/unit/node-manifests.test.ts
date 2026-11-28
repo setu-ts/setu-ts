@@ -264,11 +264,12 @@ describe('classifyMember — refusals name the file and the specifier', () => {
     );
   });
 
-  it('ignores relative paths, node: builtins and masked text', () => {
+  it('ignores relative paths, node: and cloudflare: builtins and masked text', () => {
     const source = [
       "import { a } from './a.ts';",
       "import { b } from '../b.ts';",
       "import { readFile } from 'node:fs/promises';",
+      "import { waitUntil } from 'cloudflare:workers';",
       "/** @example import { x } from 'left-pad'; */",
       "const text = `import { y } from 'left-pad';`;",
     ].join('\n');

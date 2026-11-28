@@ -524,6 +524,7 @@ interface IRuntimeServices {
   createDnsResolver?(options: DnsResolverOptions): IDnsResolver;
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
   onFatalError?(handler: (error: unknown, origin: FatalErrorOrigin) => void): () => void;
+  waitUntil?(promise: Promise<unknown>): void;
 }
 
 interface DnsResolverOptions {

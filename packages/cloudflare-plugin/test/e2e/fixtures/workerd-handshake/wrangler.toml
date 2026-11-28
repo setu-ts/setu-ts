@@ -1,0 +1,17 @@
+# A Setu app as the Worker `wrangler dev` exposes, so a raw client handshake
+# reaches it from the edge (with `request.cf`), and a service binding to
+# itself for the Worker-to-Worker case.
+name = "workerd-handshake"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[services]]
+binding = "SELF"
+service = "workerd-handshake"
+
+[alias]
+"@setu-ts/common" = "../../../../../common/src/index.ts"
+"@setu-ts/kernel" = "../../../../../kernel/src/index.ts"
+"@setu-ts/runtime" = "../../../../../runtime/src/index.ts"
+"@setu-ts/websocket-plugin" = "../../../../../websocket-plugin/src/index.ts"

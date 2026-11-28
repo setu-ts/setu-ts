@@ -295,7 +295,7 @@ async function serveFile(
       const response = ctx.response
         .status(304)
         .header('Cache-Control', resolveCacheControl(requestPath, { cacheControl }))
-        .header('Vary', 'Accept-Encoding');
+        .appendHeader('Vary', 'Accept-Encoding');
       const etagValue = computeETag(selected.stat);
       response.header('ETag', etagValue);
       if (selected.stat.mtime) {
@@ -414,7 +414,7 @@ async function serveCompressedFile(
           .header('Content-Length', rangeLength.toString())
           .header('Accept-Ranges', 'bytes')
           .header('Cache-Control', cacheControlValue)
-          .header('Vary', 'Accept-Encoding');
+          .appendHeader('Vary', 'Accept-Encoding');
 
         if (etagValue) {
           response.header('ETag', etagValue);
@@ -444,7 +444,7 @@ async function serveCompressedFile(
             .status(416)
             .header('Content-Range', `bytes */${stat.size}`)
             .header('Cache-Control', cacheControlValue)
-            .header('Vary', 'Accept-Encoding');
+            .appendHeader('Vary', 'Accept-Encoding');
           if (etagValue) {
             response.header('ETag', etagValue);
           }
@@ -477,7 +477,7 @@ async function serveCompressedFile(
     .header('Content-Length', stat.size.toString())
     .header('Accept-Ranges', 'bytes')
     .header('Cache-Control', cacheControlValue)
-    .header('Vary', 'Accept-Encoding');
+    .appendHeader('Vary', 'Accept-Encoding');
 
   if (etagValue) {
     response.header('ETag', etagValue);

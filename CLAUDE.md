@@ -890,6 +890,10 @@ here.
 - **Milestone 143 Core follow-up** (`common` + `runtime` + `kernel` — DNS resolver with chosen name
   servers and a whole-lookup bound, `resolveHost` failing with every lookup's error, and the drain
   503's `x-setu-unprocessed` marker; Core halves of V13-246 and V13-23) — complete (PR #613).
+- **Milestone 143o** (`cloudflare-plugin` + `websocket-plugin` + `runtime` + `kernel` + `common` +
+  `static-plugin` — Workers rooms through per-connection Durable Object links, exhausted Workers
+  jobs dead-lettered, edge-cache credential rule and eviction, lock TTL, binding guards, broker
+  trace, `IRuntimeServices.waitUntil`; 12 V13 rows and six halves) — complete (PR #619).
 - **Milestone 143r** (`storage-plugin` + `secrets-plugin` + `mail-plugin` + `feature-flags-plugin`
   - `notification-plugin` + `localization-plugin` + additive `common` — provider arms and their
     options: every cloud arm bounded by `requestTimeoutMs`, outages as 503/504, one
@@ -907,7 +911,7 @@ here.
   refusal; 12 V13 rows plus V13-272) — complete (PR #617).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
-  `0.14.0`; of the first wave (M143a, b, c, i, o, p, q and r), M143o is still open.
+  `0.14.0`; the first wave (M143a, b, c, i, o, p, q and r) is complete.
 
 ## Verification (run before declaring any work done)
 

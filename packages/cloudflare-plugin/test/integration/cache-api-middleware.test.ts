@@ -69,7 +69,7 @@ describe('cacheApiMiddleware in a kernel application', () => {
     expect(background).toHaveLength(1);
     await Promise.all(background);
     expect(cache.puts).toHaveLength(1);
-    expect(cache.puts.at(0)?.response.headers.get('cache-control')).toBe('public, max-age=300');
+    expect(cache.puts.at(0)?.response.headers.get('cache-control')).toBe('max-age=300');
     // ...and the client's own response never carried the directive.
     expect(first.headers.get('cache-control')).toBeNull();
 

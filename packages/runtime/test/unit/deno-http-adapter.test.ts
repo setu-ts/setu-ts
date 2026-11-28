@@ -391,7 +391,11 @@ describe('Deno adapter: M143i', () => {
       return respond();
     });
     await adapter.listen(0);
-    await deno.options().fetch(new Request('http://localhost/ws'));
+    await deno.options().fetch(
+      new Request('http://localhost/ws', {
+        headers: { 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13' },
+      }),
+    );
     expect(records).toEqual([
       expect.objectContaining({ configured: DENO_WS_MAX_MESSAGE_BYTES + 1, platform: 'deno' }),
     ]);

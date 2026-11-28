@@ -323,6 +323,7 @@ package fits the plugin architecture.
 | `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
+| `hasConnectionLinks`                  | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
 | `idempotencyMetadataOf`               | function  |
@@ -461,6 +462,7 @@ package fits the plugin architecture.
 | `PER_VISITOR_RESPONSE_STATE_KEY`      | const     |
 | `PLUGIN_PRIORITY`                     | const     |
 | `RATE_LIMIT_METADATA`                 | const     |
+| `REALTIME_FRAME_EXCEPT_IDS_LIMIT`     | const     |
 | `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `REQUIRED_SCOPES_STATE_KEY`           | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
@@ -641,8 +643,10 @@ package fits the plugin architecture.
 | `IQueue`                              | interface |
 | `IQueueDiagnosticsSource`             | interface |
 | `IRealtimeBackplane`                  | interface |
+| `IRealtimeConnectionLink`             | interface |
 | `IRealtimeDiagnosticsSource`          | interface |
 | `IRealtimeHandlerErrorReporter`       | interface |
+| `IRealtimeLinkBackplane`              | interface |
 | `IRealtimeObservationCollector`       | interface |
 | `IRedactionService`                   | interface |
 | `IRequest`                            | interface |

@@ -14,6 +14,7 @@ import type {
 import { dispatchRealtimeFrame } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { createTransportHandlerReporter } from './handler-errors.ts';
+import { isRealtimeFrame } from './messaging-backplane.ts';
 
 /**
  * A process-wide bus. Named buses stay isolated from one another, so
@@ -145,12 +146,13 @@ export class MemoryBackplane implements IRealtimeBackplane {
 
   /**
    * Hands a frame to this instance's handlers, dropping any that carries this
-   * instance's own origin.
+   * instance's own origin or is not a well-formed frame (no `origin`, say), as
+   * the Redis, messaging and Durable Object transports do.
    *
    * @param frame - The arriving frame
    */
   #deliver(frame: RealtimeFrame): void {
-    if (frame.origin === this.origin) {
+    if (!isRealtimeFrame(frame) || frame.origin === this.origin) {
       return;
     }
     const delivered = dispatchRealtimeFrame(this.#handlers, frame, this.#handlerReporter);

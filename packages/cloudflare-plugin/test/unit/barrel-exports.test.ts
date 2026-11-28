@@ -55,10 +55,9 @@ describe('cloudflare-plugin barrel', () => {
     expect(unsupported).toBeInstanceOf(Error);
     expect(unsupported.name).toBe('CloudflareUnsupportedError');
 
-    const missing = new barrel.CloudflareObjectNotFoundError('a.bin');
-    expect(missing).toBeInstanceOf(Error);
-    expect(missing.name).toBe('CloudflareObjectNotFoundError');
-    expect(missing.message).toContain('a.bin');
+    // A missing R2 object throws common's StorageObjectNotFoundError (V13-217);
+    // the package's own class is gone.
+    expect('CloudflareObjectNotFoundError' in barrel).toBe(false);
 
     // The Cloudflare counterparts of messaging-plugin's two RPC errors. They
     // are distinct classes because §2.2 forbids importing that package, and an

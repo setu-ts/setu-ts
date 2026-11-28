@@ -76,6 +76,7 @@ export {
   isKvNamespace,
   isQueueProducer,
   isR2Bucket,
+  isServiceBinding,
 } from './bindings/facades.ts';
 
 // Durable Objects — the DO-side cores the application's exported DO class
@@ -117,7 +118,11 @@ export type { LoggerSource, WaitUntilHost } from './background/wait-until.ts';
 
 // Queues — the committed IQueue over a producer binding, plus the `queue` export
 export { WorkersQueue } from './queues/workers-queue.ts';
-export type { JobIdSource, WorkersQueueOptions } from './queues/workers-queue.ts';
+export type {
+  JobIdSource,
+  RetryDelaySeconds,
+  WorkersQueueOptions,
+} from './queues/workers-queue.ts';
 export { createQueueHandler } from './queues/queue-handler.ts';
 export type { QueueHandler, QueueHandlerOptions } from './queues/queue-handler.ts';
 
@@ -144,6 +149,8 @@ export type { ScheduledHandler } from './cron/scheduled-handler.ts';
 export { cacheApiMiddleware } from './cache-api/cache-api-middleware.ts';
 export type { CacheApiMiddlewareOptions } from './cache-api/cache-api-middleware.ts';
 export type { ICacheApi } from './cache-api/cache-api.ts';
+export { cacheApiKey, purgeCacheApi } from './cache-api/cache-api-key.ts';
+export type { CacheApiKeyInput, PurgeCacheApiTarget } from './cache-api/cache-api-key.ts';
 export { assessCacheability } from './cache-api/cacheability.ts';
 export type { CacheabilityInput, CacheRefusal } from './cache-api/cacheability.ts';
 
@@ -172,7 +179,6 @@ export type { R2StorageOptions } from './storage/r2-storage.ts';
 // Errors, for `instanceof` narrowing at call sites
 export {
   CloudflareBindingMissingError,
-  CloudflareObjectNotFoundError,
   CloudflareRemoteHandlerError,
   CloudflareRequestTimeoutError,
   CloudflareUnsupportedError,

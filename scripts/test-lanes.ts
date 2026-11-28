@@ -11,6 +11,7 @@ export const DENO_LANE_TESTS = [
   'packages/mcp-plugin/test/integration/mcp-deno.test.ts',
 
   'packages/websocket-plugin/test/integration/guarded-upgrade.test.ts',
+  'packages/websocket-plugin/test/integration/handshake-refusals.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-guards.test.ts',
   'packages/websocket-plugin/test/integration/websocket-integration.test.ts',

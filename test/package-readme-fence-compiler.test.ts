@@ -169,7 +169,7 @@ const READMES: Readonly<Record<string, number>> = {
   // pinned counts; the UNGATED exemption is deleted, so this record is now
   // every package README on disk.
   'packages/cli/README.md': 4,
-  'packages/cloudflare-plugin/README.md': 10,
+  'packages/cloudflare-plugin/README.md': 11,
   'packages/cqrs-plugin/README.md': 2,
   'packages/database-plugin/README.md': 20,
   'packages/notification-plugin/README.md': 3,

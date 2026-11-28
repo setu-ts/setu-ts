@@ -396,6 +396,23 @@ describe('Room exclusion across the backplane', () => {
     expect(b.transport.sent).toEqual(['hi']);
   });
 
+  it('deliverRemote skips the members named in exceptIds as well as exceptId', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('conn-a');
+    const b = makeConnection('conn-b');
+    const c = makeConnection('conn-c');
+    registry.get('lobby').add(a.conn);
+    registry.get('lobby').add(b.conn);
+    registry.get('lobby').add(c.conn);
+
+    registry.deliverRemote('lobby', 'hi', 'conn-a', ['conn-b']);
+    registry.deliverRemote('lobby', 'only', undefined, ['conn-a', 'conn-c']);
+
+    expect(a.transport.sent).toEqual([]);
+    expect(b.transport.sent).toEqual(['only']);
+    expect(c.transport.sent).toEqual(['hi']);
+  });
+
   it('deliverRemote with no exceptId delivers to every member', () => {
     const registry = new RoomRegistry();
     const a = makeConnection('conn-a');
@@ -463,5 +480,164 @@ describe('RoomRegistry.peek (M74 / X3-8)', () => {
 
     expect(registry.peek('lobby')).toBeUndefined();
     expect(registry.size).toBe(0);
+  });
+});
+
+describe('a room the application keeps after it empties', () => {
+  it('counts its members again, even after a route took its name and an evict ran', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const lobby = registry.get('lobby');
+    lobby.add(a.conn);
+    lobby.remove(a.conn);
+
+    // A route asks for the name meanwhile, creating a fresh, empty room.
+    const fresh = registry.get('lobby');
+    expect(fresh).not.toBe(lobby);
+    lobby.add(b.conn);
+    expect(registry.isMember('lobby', b.conn)).toBe(true);
+
+    // The name holds its one member set through either handle, and an evict
+    // reclaims nothing that has members.
+    registry.evict(a.conn);
+    expect(registry.isMember('lobby', b.conn)).toBe(true);
+    expect(registry.peek('lobby')?.has(b.conn)).toBe(true);
+    expect(fresh.has(b.conn)).toBe(true);
+  });
+
+  it('is put back in the name index when a member joins and the name is free', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const chat = registry.get('chat');
+    chat.add(a.conn);
+    chat.remove(a.conn);
+    expect(registry.peek('chat')).toBeUndefined();
+
+    chat.add(a.conn);
+
+    expect(registry.peek('chat')).toBe(chat);
+    expect(registry.isMember('chat', a.conn)).toBe(true);
+  });
+
+  it('leaves a name held by a room with members to that room', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const live = registry.get('chat');
+    live.add(b.conn);
+
+    kept.add(a.conn);
+
+    expect(registry.peek('chat')).toBe(live);
+    expect(registry.isMember('chat', a.conn)).toBe(true);
+    expect(registry.isMember('chat', b.conn)).toBe(true);
+  });
+
+  it('is one member set through a kept handle and ws.room(name), on local and remote delivery', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const c = makeConnection('c');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const fresh = registry.get('chat');
+    fresh.add(b.conn);
+    kept.add(c.conn);
+
+    expect(kept.size).toBe(2);
+    expect(fresh.size).toBe(2);
+    expect(registry.peek('chat')?.size).toBe(2);
+    kept.broadcast('x');
+    fresh.broadcast('y');
+    registry.deliverRemote('chat', 'r');
+
+    for (const member of [b, c]) expect(member.transport.sent).toEqual(['x', 'y', 'r']);
+    expect(a.transport.sent).toEqual([]);
+    expect(registry.isMember('chat', b.conn)).toBe(true);
+    expect(registry.isMember('chat', c.conn)).toBe(true);
+  });
+
+  it('makes a connection joined through both handles one member', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const fresh = registry.get('chat');
+    fresh.add(b.conn);
+    kept.add(b.conn);
+
+    expect(fresh.size).toBe(1);
+    kept.broadcast('x');
+    registry.deliverRemote('chat', 'r');
+    expect(b.transport.sent).toEqual(['x', 'r']);
+
+    // One remove through either handle takes it out for every handle.
+    kept.remove(b.conn);
+    expect(fresh.has(b.conn)).toBe(false);
+    expect(registry.isMember('chat', b.conn)).toBe(false);
+  });
+
+  it('releases the name once its last member leaves through any handle, and starts empty', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const fresh = registry.get('chat');
+    fresh.add(b.conn);
+    kept.add(a.conn);
+
+    fresh.remove(a.conn);
+    kept.remove(b.conn);
+
+    expect(registry.peek('chat')).toBeUndefined();
+    expect(registry.size).toBe(0);
+    expect(registry.get('chat').size).toBe(0);
+    expect(kept.size).toBe(0);
+  });
+
+  it('keeps a handle left from an earlier use from reclaiming the name taken since', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const first = registry.get('chat'); // never joined
+    first.add(a.conn);
+    first.remove(a.conn); // name released
+    const looked = registry.get('chat'); // never joined, now the handle
+    first.add(b.conn); // joins the name's set; `looked` stays its handle
+
+    registry.evict(a.conn); // reclaims never-joined handles
+
+    expect(looked.has(b.conn)).toBe(true);
+    expect(registry.peek('chat')).toBe(looked);
+    expect(registry.isMember('chat', b.conn)).toBe(true);
+  });
+
+  it('drops an evicted connection from the set every handle shares', () => {
+    const registry = new RoomRegistry();
+    const a = makeConnection('a');
+    const b = makeConnection('b');
+    const kept = registry.get('chat');
+    kept.add(a.conn);
+    kept.remove(a.conn);
+    const fresh = registry.get('chat');
+    fresh.add(b.conn);
+    kept.add(a.conn);
+
+    registry.evict(a.conn);
+
+    expect(kept.has(a.conn)).toBe(false);
+    expect(fresh.size).toBe(1);
+    registry.clear();
+    expect(kept.size).toBe(0);
+    expect(registry.isMember('chat', b.conn)).toBe(false);
   });
 });

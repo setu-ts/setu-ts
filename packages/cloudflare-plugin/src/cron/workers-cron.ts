@@ -24,6 +24,7 @@
  */
 
 import type { ILogger } from '@setu-ts/common';
+import { describeError } from '@setu-ts/common';
 import type { IScheduledController } from '../bindings/facades.ts';
 
 /**
@@ -164,7 +165,15 @@ export class WorkersCron {
       );
 
     if (failures.length > 0) {
-      throw new AggregateError(failures, 'cloudflare-cron: one or more handlers failed');
+      // With no logger this message is the only output the platform shows, so
+      // it names the expression and the first error, bounded by describeError.
+      const first = failures[0] as Error;
+      const more = failures.length > 1 ? `; …and ${failures.length - 1} more` : '';
+      throw new AggregateError(
+        failures,
+        `cloudflare-cron: ${failures.length} handler(s) failed for '${controller.cron}': ` +
+          `${describeError(first)}${more}`,
+      );
     }
   }
 

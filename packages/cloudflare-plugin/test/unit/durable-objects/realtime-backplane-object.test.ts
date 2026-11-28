@@ -63,6 +63,8 @@ describe('RealtimeBackplaneObjectCore.fetch', () => {
     const response = await core.fetch(new Request('https://do/connect'));
 
     expect(response.status).toBe(426);
+    expect(response.headers.get('upgrade')).toBe('websocket');
+    expect(response.headers.get('connection')).toBe('Upgrade');
     expect(await response.text()).toContain('realtime backplane');
     expect(pairs).toHaveLength(0);
     expect(state.accepted).toHaveLength(0);
@@ -181,5 +183,91 @@ describe('RealtimeBackplaneObjectCore close and error handlers', () => {
     core.webSocketError(pairs[0]!.server);
 
     expect(pairs[0]?.server.closeCode).toBe(1011);
+  });
+});
+
+describe('RealtimeBackplaneObjectCore POST /publish', () => {
+  const post = (body: string, headers?: Record<string, string>): Request =>
+    new Request('https://do/publish', {
+      method: 'POST',
+      body,
+      ...(headers === undefined ? {} : { headers }),
+    });
+
+  it('fans the body out verbatim to every socket, links included, and answers 204', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+    await core.fetch(new Request('https://do/connect', UPGRADE));
+    pairs[0]!.server.failSend = true;
+
+    const response = await core.fetch(post('{"raw":1}'));
+
+    expect(response.status).toBe(204);
+    expect(pairs[1]?.server.sent).toEqual(['{"raw":1}']);
+  });
+
+  it('answers 413 above 32 MiB, by declared length or by the body itself', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+
+    const declared = await core.fetch(post('x', { 'content-length': String(33_554_433) }));
+    const actual = await core.fetch(post('x'.repeat(33_554_433)));
+    const atLimit = await core.fetch(post('x'.repeat(33_554_432)));
+
+    expect([declared.status, actual.status, atLimit.status]).toEqual([413, 413, 204]);
+    expect(pairs[0]?.server.sent).toHaveLength(1);
+  });
+
+  it('stops reading a body with no Content-Length once it passes 32 MiB', async () => {
+    const { core } = build();
+    let pulled = 0;
+    const chunk = new Uint8Array(1024 * 1024);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        if (pulled > 64) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+    const response = await core.fetch(
+      new Request('https://do/publish', { method: 'POST', body, duplex: 'half' } as RequestInit),
+    );
+    expect(response.status).toBe(413);
+    expect(pulled).toBeLessThan(40);
+  });
+
+  it('answers 400 for a body that is not valid UTF-8, and sends nothing', async () => {
+    const { core, pairs } = build();
+    await core.fetch(new Request('https://do/link', UPGRADE));
+
+    // 0xFF is never valid UTF-8; a lenient decode would triple it in size.
+    const response = await core.fetch(
+      new Request('https://do/publish', { method: 'POST', body: new Uint8Array([0x7b, 0xff]) }),
+    );
+    const valid = await core.fetch(
+      new Request('https://do/publish', {
+        method: 'POST',
+        body: new TextEncoder().encode('"é"'),
+      }),
+    );
+
+    expect([response.status, valid.status]).toEqual([400, 204]);
+    expect(pairs[0]?.server.sent).toEqual(['"é"']);
+  });
+
+  it('accepts an empty POST body', async () => {
+    const { core } = build();
+    const response = await core.fetch(new Request('https://do/publish', { method: 'POST' }));
+    expect(response.status).toBe(204);
+  });
+
+  it('treats a POST to another path as a non-upgrade request (426)', async () => {
+    const { core } = build();
+    const response = await core.fetch(
+      new Request('https://do/other', { method: 'POST', body: 'x' }),
+    );
+    expect(response.status).toBe(426);
+    expect(response.headers.get('upgrade')).toBe('websocket');
+    expect(await response.text()).toContain('POST /publish');
   });
 });

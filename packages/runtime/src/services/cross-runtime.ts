@@ -104,6 +104,7 @@ export function mergeRuntimeServices(
     | 'onSignal'
     | 'onFatalError'
     | 'reportError'
+    | 'waitUntil'
   >,
 ): IRuntimeServices {
   return {

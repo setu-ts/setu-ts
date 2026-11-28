@@ -152,6 +152,8 @@ describe('ReplyInboxObjectCore', () => {
     const response = await core.fetch(new Request('https://reply-inbox.internal/connect'));
 
     expect(response.status).toBe(426);
+    expect(response.headers.get('upgrade')).toBe('websocket');
+    expect(response.headers.get('connection')).toBe('Upgrade');
     expect(await response.text()).toContain('WebSocket upgrade');
   });
 
@@ -164,6 +166,7 @@ describe('ReplyInboxObjectCore', () => {
     );
 
     expect(response.status).toBe(405);
+    expect(response.headers.get('allow')).toBe('GET, POST');
   });
 
   it('acknowledges a close without echoing an unsendable code', () => {

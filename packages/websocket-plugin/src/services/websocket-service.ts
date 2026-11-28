@@ -34,7 +34,9 @@ import type {
 import {
   composeBehaviorChain,
   decodeFrameData,
+  describeError,
   encodeFrameData,
+  hasConnectionLinks,
   isWebSocketUpgradeRequest,
 } from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
@@ -43,10 +45,14 @@ import {
   realtimeObserverOf,
 } from '../diagnostics/realtime-observations.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
+import { RequestBoundRooms } from '../rooms/request-bound-rooms.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
 import { WsRouteTable } from '../routing/ws-route-table.ts';
-import { HeartbeatSweeper } from '../heartbeat/heartbeat.ts';
-import { WebSocketUnavailableError } from '../errors/websocket-errors.ts';
+import { HeartbeatSweeper, startConnectionHeartbeat } from '../heartbeat/heartbeat.ts';
+import {
+  WebSocketRoomsUnavailableError,
+  WebSocketUnavailableError,
+} from '../errors/websocket-errors.ts';
 import type { WebSocketPluginOptions } from '../interfaces/index.ts';
 
 /** Refused because the server is at its connection limit. */
@@ -72,6 +78,8 @@ const CLOSE_MESSAGE_TOO_BIG = 1009;
 const CLOSE_GOING_AWAY = 1001;
 /** RFC 6455 abnormal closure: the connection dropped without a close frame. */
 const CLOSE_ABNORMAL = 1006;
+/** Close code for a connection whose backplane link could not open (RFC 6455 Internal Error). */
+const CLOSE_INTERNAL_ERROR = 1011;
 
 /** Resolved options with every default applied. */
 interface ResolvedOptions {
@@ -88,19 +96,40 @@ interface ResolvedOptions {
 const MAX_MESSAGE_BYTES_LIMIT = 2 ** 31 - 1;
 
 /**
+ * The largest delay `setInterval` honours: a larger one overflows the timer's
+ * signed 32-bit delay and fires almost at once.
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
  * Applies defaults and rejects a configuration that cannot work.
  *
  * @param options - The caller's options
  * @returns The resolved options
- * @throws {Error} If an idle timeout is set with no heartbeat to sweep on, an
- *   `allowedOrigins` entry is not an absolute http(s) origin, `checkOrigin`
- *   is not a boolean, or `maxMessageBytes` is not a whole number from 0 to
- *   2^31 - 1
+ * @throws {Error} If `heartbeatMs` or `idleTimeoutMs` is not a finite number
+ *   from 0, `heartbeatMs` is above 2^31 - 1, an idle timeout is set with no
+ *   heartbeat to sweep on, an `allowedOrigins` entry is not an absolute
+ *   http(s) origin, `checkOrigin` is not a boolean, or `maxMessageBytes` is
+ *   not a whole number from 0 to 2^31 - 1
  * @since 0.1.0
  */
 export function resolveOptions(options?: WebSocketPluginOptions): ResolvedOptions {
   const heartbeatMs = options?.heartbeatMs ?? 0;
   const idleTimeoutMs = options?.idleTimeoutMs ?? 0;
+
+  // Finite and non-negative: `NaN` passes every `<= 0` check below, and a
+  // heartbeat interval of `NaN` fires almost at once, over and over — once per
+  // connection on Workers, where each connection runs its own. The heartbeat is
+  // also capped at `MAX_TIMER_MS`, above which the delay overflows the same way.
+  for (const [name, value, max] of [
+    ['heartbeatMs', heartbeatMs, MAX_TIMER_MS],
+    ['idleTimeoutMs', idleTimeoutMs, Infinity],
+  ] as const) {
+    if (!Number.isFinite(value) || value < 0 || value > max) {
+      const range = max === Infinity ? 'from 0 (off)' : `from 0 (off) to ${String(max)}`;
+      throw new Error(`WebSocketPlugin: ${name} must be a finite number of milliseconds ${range}.`);
+    }
+  }
 
   if (idleTimeoutMs > 0 && heartbeatMs <= 0) {
     throw new Error(
@@ -227,6 +256,8 @@ export class WebSocketService implements IWebSocketService {
   readonly #routes = new WsRouteTable();
   readonly #rooms: RoomRegistry;
   readonly #connections = new Set<WebSocketConnection>();
+  /** Request-bound mode: each connection's own heartbeat, for `closeAll`. */
+  readonly #heartbeatStops = new Map<WebSocketConnection, () => void>();
   readonly #heartbeat: HeartbeatSweeper;
   readonly #available: boolean;
   readonly #logger: ILogger | undefined;
@@ -241,12 +272,23 @@ export class WebSocketService implements IWebSocketService {
   /** The cross-replica transport, when one was registered. */
   readonly #backplane: IRealtimeBackplane | undefined;
   /**
-   * Whether the backplane transport has been asked to open.
+   * Whether a backplane connect is in flight.
    *
-   * Reset on failure so a later upgrade retries rather than leaving the replica
-   * permanently deaf — see {@linkcode WebSocketService.#openBackplane}.
+   * Cleared once it settles, either outcome, so a later join calls `connect()`
+   * again (idempotent by contract) and a transport that dropped its socket
+   * reopens — see {@linkcode WebSocketService.#openBackplane}.
    */
   #backplaneOpening = false;
+  /**
+   * Set on Cloudflare Workers, where every socket belongs to the request that
+   * accepted it: no code may write to, read the native state of, or close a
+   * connection from another request. Rooms then deliver through per-connection
+   * links ({@linkcode RequestBoundRooms}) and each connection runs its own
+   * heartbeat; `undefined` with {@linkcode WebSocketService.#requestBoundMode}
+   * set means no link backplane is registered, so rooms are unavailable.
+   */
+  readonly #requestBound: RequestBoundRooms | undefined;
+  readonly #requestBoundMode: boolean;
   /**
    * Route-scoped upgrade guards, keyed by the exact route path. Kept beside
    * the route table — whose stored `WsRoute` shape predates guards — and safe
@@ -299,34 +341,50 @@ export class WebSocketService implements IWebSocketService {
     this.#logger = logger;
     this.#backplane = backplane;
     this.#behaviors = [...(behaviors ?? [])];
-    this.#rooms = new RoomRegistry(
-      backplane === undefined
-        ? undefined
-        : (name, data, exceptId): void => {
-            const payload = encodeFrameData(data);
-            // Assembled rather than spread so `exactOptionalPropertyTypes` never
-            // sees an explicit `undefined` on an optional field.
-            const frame: RealtimeFrame = {
-              kind: 'ws-room',
-              origin: backplane.origin,
-              name,
-              data: payload.data,
-              ...(payload.binary === true ? { binary: true } : {}),
-              ...(exceptId === undefined ? {} : { exceptId }),
-            };
-            // Fire-and-forget: a transport failure must never make a local
-            // broadcast throw for the application that issued it.
-            void backplane.publish(frame).catch((error: unknown) => {
-              this.#logger?.warn('websocket: backplane publish failed', {
-                room: name,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            });
-          },
-      // A local member has just joined, so this replica must be able to
-      // RECEIVE — and `subscribe()` alone does not open a transport.
-      () => this.#openBackplane(),
-    );
+    this.#requestBoundMode = runtime.platform() === 'cloudflare-workers';
+    const requestBound =
+      this.#requestBoundMode && backplane !== undefined && hasConnectionLinks(backplane)
+        ? new RequestBoundRooms(backplane, logger)
+        : undefined;
+    this.#requestBound = requestBound;
+    this.#rooms = this.#requestBoundMode
+      ? new RoomRegistry(
+          undefined,
+          undefined,
+          requestBound === undefined
+            ? undefined
+            : (room, data, roomOptions): void => {
+                requestBound.broadcast(room, data, roomOptions);
+              },
+        )
+      : new RoomRegistry(
+          backplane === undefined
+            ? undefined
+            : (name, data, exceptId): void => {
+                const payload = encodeFrameData(data);
+                // Assembled rather than spread so `exactOptionalPropertyTypes` never
+                // sees an explicit `undefined` on an optional field.
+                const frame: RealtimeFrame = {
+                  kind: 'ws-room',
+                  origin: backplane.origin,
+                  name,
+                  data: payload.data,
+                  ...(payload.binary === true ? { binary: true } : {}),
+                  ...(exceptId === undefined ? {} : { exceptId }),
+                };
+                // Fire-and-forget: a transport failure must never make a local
+                // broadcast throw for the application that issued it.
+                void backplane.publish(frame).catch((error: unknown) => {
+                  this.#logger?.warn('websocket: backplane publish failed', {
+                    room: name,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                });
+              },
+          // A local member has just joined, so this replica must be able to
+          // RECEIVE — and `subscribe()` alone does not open a transport.
+          () => this.#openBackplane(),
+        );
     this.#heartbeat = new HeartbeatSweeper(
       runtime,
       {
@@ -364,8 +422,10 @@ export class WebSocketService implements IWebSocketService {
     if (options?.guards !== undefined) {
       this.#routeGuards.set(path, options.guards);
     }
-    // The first route is what makes the heartbeat worth running.
-    this.#heartbeat.start();
+    // The first route is what makes the heartbeat worth running. In
+    // request-bound mode each connection runs its own instead: one shared
+    // interval would write to every socket from one request.
+    if (!this.#requestBoundMode) this.#heartbeat.start();
   }
 
   /**
@@ -413,7 +473,25 @@ export class WebSocketService implements IWebSocketService {
   }
 
   room(name: string): WebSocketRoom {
+    this.#assertRoomsAvailable(name);
     return this.#rooms.get(name);
+  }
+
+  /**
+   * Whether this service runs in request-bound mode (Cloudflare Workers). The
+   * plugin reads it to skip the isolate-level backplane subscription, which a
+   * request-bound service never uses.
+   * @since 0.14.0
+   */
+  get isRequestBound(): boolean {
+    return this.#requestBoundMode;
+  }
+
+  /** Throws when rooms cannot work here (Workers without a link backplane). */
+  #assertRoomsAvailable(name: string): void {
+    if (this.#requestBoundMode && this.#requestBound === undefined) {
+      throw new WebSocketRoomsUnavailableError(name);
+    }
   }
 
   /**
@@ -429,6 +507,7 @@ export class WebSocketService implements IWebSocketService {
    * @since 0.4.0
    */
   peek(name: string): WebSocketRoom | undefined {
+    this.#assertRoomsAvailable(name);
     return this.#rooms.peek(name);
   }
 
@@ -466,7 +545,7 @@ export class WebSocketService implements IWebSocketService {
       });
       return;
     }
-    this.#rooms.deliverRemote(frame.name, data, frame.exceptId);
+    this.#rooms.deliverRemote(frame.name, data, frame.exceptId, frame.exceptIds);
   }
 
   /**
@@ -676,7 +755,8 @@ export class WebSocketService implements IWebSocketService {
   }
 
   /**
-   * Opens the backplane transport, once, on first local use.
+   * Opens the backplane transport on local use; joins while a connect is in
+   * flight share it.
    *
    * `IRealtimeBackplane.connect()` is contracted as idempotent, and a
    * subscriber cannot receive anything until it has been called — `subscribe()`
@@ -688,19 +768,28 @@ export class WebSocketService implements IWebSocketService {
    *
    * Fire-and-forget: an upgrade must not wait on the transport, and a broadcast
    * this replica cannot yet receive is strictly better than a refused
-   * connection. The flag is cleared on failure so the next upgrade retries.
+   * connection. The flag is cleared when the connect settles, so the next join
+   * asks again.
    */
   #openBackplane(): void {
     if (this.#backplane === undefined || this.#backplaneOpening) {
       return;
     }
     this.#backplaneOpening = true;
-    void this.#backplane.connect().catch((error: unknown) => {
-      this.#backplaneOpening = false;
-      this.#logger?.warn('websocket: backplane connect failed', {
-        error: error instanceof Error ? error.message : String(error),
+    void this.#backplane
+      .connect()
+      .catch((error: unknown) => {
+        this.#logger?.warn('websocket: backplane connect failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        // Cleared once the connect settles either way: a transport that later
+        // drops its socket (the Durable Object backplane does) reopens on the
+        // next join. `connect()` is idempotent by contract, so a live
+        // transport is not opened twice.
+        this.#backplaneOpening = false;
       });
-    });
   }
 
   /**
@@ -709,9 +798,25 @@ export class WebSocketService implements IWebSocketService {
    */
   closeAll(): void {
     this.#heartbeat.stop();
+    this.#requestBound?.closeAll();
     for (const conn of [...this.#connections]) {
-      conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
+      try {
+        conn.close(CLOSE_GOING_AWAY, 'Server shutting down');
+      } catch {
+        // One socket that refuses (on Workers, one owned by another request)
+        // must not leave the rest open; its heartbeat is stopped below.
+        continue;
+      }
     }
+    for (const stop of this.#heartbeatStops.values()) {
+      try {
+        stop();
+      } catch {
+        // One timer that refuses must not keep the state below.
+        continue;
+      }
+    }
+    this.#heartbeatStops.clear();
     this.#connections.clear();
     this.#rooms.clear();
     // In-flight handshakes are abandoned along with everything else.
@@ -780,6 +885,18 @@ export class WebSocketService implements IWebSocketService {
     // this boolean and the close code's 1006 test ever reach the collector —
     // never the error, the code value or the reason.
     let errored = false;
+    // Request-bound mode: the connection's own heartbeat, stopped on close.
+    let stopHeartbeat = (): void => {};
+    // Request-bound mode: whether the connection's link opened.
+    let linked = true;
+    /** Runs a handler call with `target` marked as the dispatching connection. */
+    const dispatch = (target: WebSocketConnection, fn: () => void): void => {
+      if (this.#requestBound === undefined) {
+        fn();
+        return;
+      }
+      this.#requestBound.dispatching(target, fn);
+    };
     const settlePending = (): void => {
       if (!settled) {
         settled = true;
@@ -805,7 +922,32 @@ export class WebSocketService implements IWebSocketService {
           attachRealtimeObserver(opened, observer);
           observer.observe('open', true);
         }
-        invoke(handlers.onOpen, opened, context);
+        if (this.#requestBoundMode) {
+          // Opened here, in the connection's own request, so the link's
+          // socket and the heartbeat's timer belong to it.
+          linked =
+            this.#requestBound?.open(opened, (name, member) =>
+              this.#rooms.isMember(name, member),
+            ) ?? true;
+          stopHeartbeat = startConnectionHeartbeat(
+            this.#runtime,
+            {
+              heartbeatMs: this.#options.heartbeatMs,
+              heartbeatPayload: this.#options.heartbeatPayload,
+              idleTimeoutMs: this.#options.idleTimeoutMs,
+            },
+            opened,
+          );
+          this.#heartbeatStops.set(opened, stopHeartbeat);
+        }
+        dispatch(opened, () => {
+          invoke(handlers.onOpen, opened, context);
+        });
+        if (!linked) {
+          // Without its link the connection receives nothing from its rooms:
+          // closed, visibly, rather than left a silent member (1011).
+          opened.close(CLOSE_INTERNAL_ERROR, 'Backplane link unavailable');
+        }
       },
 
       onMessage: (data: string | Uint8Array): void => {
@@ -824,7 +966,9 @@ export class WebSocketService implements IWebSocketService {
         if (this.#behaviors.length === 0) {
           // Zero-configuration dispatch — byte-identical to the pre-chain
           // behaviour: a direct, synchronous invoke with no chain allocated.
-          invoke(handlers.onMessage, target, data);
+          dispatch(target, () => {
+            invoke(handlers.onMessage, target, data);
+          });
           return;
         }
 
@@ -837,15 +981,17 @@ export class WebSocketService implements IWebSocketService {
         // keeps its native `(conn, data)` arguments — only the chain sees it.
         const routePath = route.path;
         const behaviors = this.#behaviors;
-        invoke(
-          (messageConn, frame): Promise<void> =>
-            composeBehaviorChain<IngressContext<string | Uint8Array>, void>(
-              { kind: 'websocket', name: routePath, payload: frame },
-              behaviors,
-              () => Promise.resolve(handlers.onMessage?.(messageConn, frame)),
-            ),
-          target,
-          data,
+        dispatch(target, () =>
+          invoke(
+            (messageConn, frame): Promise<void> =>
+              composeBehaviorChain<IngressContext<string | Uint8Array>, void>(
+                { kind: 'websocket', name: routePath, payload: frame },
+                behaviors,
+                () => Promise.resolve(handlers.onMessage?.(messageConn, frame)),
+              ),
+            target,
+            data,
+          ),
         );
       },
 
@@ -860,10 +1006,29 @@ export class WebSocketService implements IWebSocketService {
         }
         const closing = conn;
         closing.markClosed();
+        try {
+          stopHeartbeat();
+        } catch (error: unknown) {
+          // A runtime whose timer stop throws must not keep a closed peer
+          // registered, counted against maxConnections, or holding its link.
+          try {
+            this.#logger?.warn('websocket: heartbeat stop failed on close', {
+              error: describeError(error),
+            });
+          } catch {
+            // The cleanup below still runs.
+          }
+        }
+        this.#heartbeatStops.delete(closing);
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
         realtimeObserverOf(closing)?.observe('close', !errored && event.code !== CLOSE_ABNORMAL);
-        invoke(handlers.onClose, closing, event);
+        dispatch(closing, () => {
+          invoke(handlers.onClose, closing, event);
+        });
+        // After the handler, so a "member left" broadcast from onClose still
+        // travels over this connection's own link, in order.
+        this.#requestBound?.close(closing);
       },
 
       onError: (error: Error): void => {

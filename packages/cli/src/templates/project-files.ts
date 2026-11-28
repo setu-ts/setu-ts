@@ -1856,11 +1856,13 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
   // a patch release keeps the peer major (its floor still moves, which the `^5`
   // range absorbs), while a minor that changes it is admitted only by bumping
   // this pin. The guarded `npm install` in `workers-install-e2e.test.ts` is what
-  // fails first when an upstream release breaks the set.
+  // fails first when an upstream release breaks the set. 4.153 is the first
+  // minor whose miniflare pins undici 7.30.1 and sharp 0.35.5: 4.148's 7.29.1
+  // and 0.35.4 carry High advisories that land in every generated project.
   if (runtime === 'cloudflare-workers') {
     return {
-      wrangler: '~4.148.0',
-      [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
+      wrangler: '~4.153.0',
+      [WORKERS_TYPES_PACKAGE]: '^5.20261023.1',
       // The generated tests boot the Worker through wrangler's test harness
       // under `tsx --test`, so the runner must be installed. `@types/node`
       // declares the `node:test`, `node:assert` and `process` surfaces those

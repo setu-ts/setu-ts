@@ -6,7 +6,8 @@
  * `errorHandler` answered as a masked `500`: a client that asked for a key that
  * does not exist was told the server failed. The class lives in `common` so any
  * storage backend can throw it without importing a plugin; today
- * `@setu-ts/storage-plugin` does.
+ * `@setu-ts/storage-plugin`'s `StorageService` (for every provider) and `@setu-ts/cloudflare-plugin`'s
+ * `R2Storage` do.
  *
  * @module
  */

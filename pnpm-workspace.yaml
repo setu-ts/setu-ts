@@ -86,6 +86,8 @@ allowBuilds:
   prisma: false
   # The TC39 decorator transformer requires its native build.
   esbuild: true
+  # cloudflare-plugin's workerd e2e runs wrangler dev, whose runtime installs its binary.
+  workerd: true
 
 # GHSA-fc5q-39xc-vjpf (picomatch ReDoS, <=4.0.7) has no patched release yet. picomatch is
 # reached only through dev tooling (vitest, vite, tinyglobby, fdir); no published package

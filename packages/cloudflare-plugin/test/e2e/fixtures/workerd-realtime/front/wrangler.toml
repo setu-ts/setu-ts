@@ -1,0 +1,18 @@
+# The primary configuration: the only Worker `wrangler dev` exposes.
+name = "front"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[services]]
+binding = "A"
+service = "worker-a"
+
+[[services]]
+binding = "B"
+service = "worker-b"
+
+[[durable_objects.bindings]]
+name = "REALTIME"
+class_name = "RealtimeHub"
+script_name = "worker-a"

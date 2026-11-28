@@ -1,0 +1,34 @@
+name = "workerd-queue"
+main = "index.ts"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[queues.producers]]
+queue = "jobs"
+binding = "JOBS"
+
+[[queues.producers]]
+queue = "jobs-dlq"
+binding = "JOBS_DLQ"
+
+[[queues.consumers]]
+queue = "jobs"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 3
+retry_delay = 0
+dead_letter_queue = "jobs-platform-dlq"
+
+[[queues.consumers]]
+queue = "jobs-dlq"
+max_batch_timeout = 1
+
+[[queues.consumers]]
+queue = "jobs-platform-dlq"
+max_batch_timeout = 1
+
+[alias]
+"@setu-ts/common" = "../../../../../common/src/index.ts"
+"@setu-ts/kernel" = "../../../../../kernel/src/index.ts"
+"@setu-ts/runtime" = "../../../../../runtime/src/index.ts"
+"@setu-ts/cloudflare-plugin" = "../../../../../cloudflare-plugin/src/index.ts"

@@ -144,3 +144,32 @@ describe('DurableObjectLock', () => {
     expect(await b.acquire('reports', 5_000)).toBe('token-1');
   });
 });
+
+describe('DurableObjectLock TTL refusal (V13-204)', () => {
+  it.each([Infinity, Number.NaN, 0, -1, 0.5, 2_147_483_648])(
+    'refuses %s before any I/O',
+    async (ttlMs) => {
+      const namespace = new FakeDurableObjectNamespace('lock');
+      const lock = new DurableObjectLock(namespace, { runtime: fakeRuntime() });
+      await expect(lock.acquire('k', ttlMs)).rejects.toThrow(RangeError);
+      await expect(lock.acquire('k', ttlMs)).rejects.toThrow(
+        'ttlMs must be a whole number of milliseconds from 1 to 2147483647',
+      );
+      expect(namespace.requestedNames).toEqual([]);
+    },
+  );
+
+  it.each([1, 2_147_483_647])('accepts %s', async (ttlMs) => {
+    const lock = new DurableObjectLock(new FakeDurableObjectNamespace('lock'), {
+      runtime: fakeRuntime(),
+    });
+    expect(await lock.acquire('k', ttlMs)).not.toBeNull();
+  });
+
+  it('surfaces an object that answers 400 as CloudflareUnsupportedError', async () => {
+    const namespace = new FakeDurableObjectNamespace('lock');
+    namespace.lockStatus = 400;
+    const lock = new DurableObjectLock(namespace, { runtime: fakeRuntime() });
+    await expect(lock.acquire('k', 1000)).rejects.toThrow(CloudflareUnsupportedError);
+  });
+});
