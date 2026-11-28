@@ -1,5 +1,10 @@
 import { expect, it } from 'vitest';
-import { encodeCursor, InvalidCursorError, PrimaryKeyChangeError } from '@setu-ts/common';
+import {
+  DATABASE_PROBLEM_TYPES,
+  encodeCursor,
+  InvalidCursorError,
+  PrimaryKeyChangeError,
+} from '@setu-ts/common';
 import { createD1DataSource } from '../../src/database/d1-data-source.ts';
 import { SqliteD1 } from '../d1-fakes.ts';
 import { D1Adapter } from '../../src/database/d1-adapter.ts';
@@ -132,6 +137,7 @@ it('M119e refuses unknown payload fields and STRICT values with fixed 400 detail
       status: 400,
       title: 'Bad Request',
       detail: 'A supplied value does not fit the type of its field.',
+      problem: DATABASE_PROBLEM_TYPES['invalid-field-value'],
     });
     expect((error as Error).message).not.toContain('canary-value');
   }

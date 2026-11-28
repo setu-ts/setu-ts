@@ -4,6 +4,7 @@ import {
   CosmosAdapter,
   DynamoAdapter,
   DatabaseTimeoutError,
+  DatabaseService,
 } from '../../src/index.ts';
 import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
@@ -108,6 +109,36 @@ for (const type of ['dynamodb', 'cosmos', 'bigtable'])
       try {
         f.fail(error);
         await expect(f.adapter.isHealthy!()).rejects.toBe(error);
+      } finally {
+        await f.adapter.disconnect();
+      }
+    });
+    it('an SDK timeout rejects without claiming refusal, so reachability is unknown', async () => {
+      const f = fixture(type);
+      await f.adapter.connect();
+      const error =
+        type === 'bigtable'
+          ? { code: 4 }
+          : {
+              name: 'TimeoutError',
+              ...(type === 'cosmos' ? { code: 'TimeoutError' } : { code: 'ETIMEDOUT' }),
+            };
+      try {
+        f.fail(error);
+        if (type === 'bigtable') {
+          await expect(f.adapter.isHealthy!()).rejects.toMatchObject({
+            name: 'DatabaseTimeoutError',
+            cause: error,
+          });
+        } else {
+          await expect(f.adapter.isHealthy!()).rejects.toBe(error);
+        }
+        const db = new DatabaseService(
+          f.adapter,
+          (entity) => f.adapter.createDataSource(entity),
+          'custom',
+        );
+        expect(await db.reachability()).toBeUndefined();
       } finally {
         await f.adapter.disconnect();
       }

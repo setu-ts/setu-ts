@@ -11,6 +11,7 @@ import type { IRuntimeServices, IVectorStore, IVectorStoreAdapter } from '@setu-
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { MemoryVectorStore, VectorStorePlugin } from '../../src/index.ts';
+import { RecordingLogger } from '../../../logger-plugin/test/fixtures/recording-logger.ts';
 
 const collections = [
   { name: 'documents', dimensions: 2, filterable: { tag: 'string' as const } },
@@ -41,6 +42,44 @@ class LifecycleAdapter extends MemoryVectorStore implements IVectorStoreAdapter 
 }
 
 describe('VectorStorePlugin', () => {
+  it('wires readiness probe failures through the application logger', async () => {
+    const logger = new RecordingLogger();
+    const adapter = new LifecycleAdapter();
+    adapter.isHealthy = () => Promise.reject(new Error('revoked vector key'));
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'logger',
+          version: '1',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, logger);
+          },
+        },
+        VectorStorePlugin({ adapter, collections }),
+      ],
+    });
+    await app.start();
+    try {
+      const indicator = app.services
+        .getAll<{ name: string; check: () => Promise<unknown> }>(CAPABILITIES.HEALTH_INDICATOR)
+        .find((entry) => entry.name === 'vector-store')!;
+      expect(await indicator.check()).toEqual({
+        status: 'down',
+        data: { adapter: 'memory', reachable: false },
+      });
+      expect(logger.calls.filter((call) => call.level === 'warn')).toHaveLength(1);
+      expect(logger.calls.find((call) => call.level === 'warn')?.message).toContain(
+        'vector-store-plugin: memory',
+      );
+      expect(logger.calls.find((call) => call.level === 'warn')?.meta?.error).toContain(
+        'revoked vector key',
+      );
+    } finally {
+      await app.stop();
+    }
+  });
   it('registers a vector-store readiness indicator that probes the adapter and goes down at close', async () => {
     const adapter = new LifecycleAdapter();
     let reachable = true;

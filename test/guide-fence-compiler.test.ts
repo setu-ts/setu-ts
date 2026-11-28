@@ -39,6 +39,35 @@ import {
 
 const SCRATCH_DIR = '.tmp/guide-fences';
 
+it('run-budget recipe depends on the real budgetMiddleware export', async () => {
+  const directory = '.tmp/run-budget-fences';
+  const markdown = await readFile('docs/ai.md', 'utf8');
+  const recipe = extractFences(
+    'docs/durable-runs.md',
+    await readFile('docs/durable-runs.md', 'utf8'),
+  ).find((fence) => fence.heading === '### Budgeting a run')!;
+  expect(recipe.code).not.toContain('apps/');
+  const file = `${directory}/run.ts`;
+  try {
+    await writeProjectStubs(directory, markdown);
+    await writeFile(file, assembleSource(recipe, classify(recipe)));
+    const positive = await compileFence(file);
+    expect(positive.stderr).toBe('');
+    expect(positive.code).toBe(0);
+    const renamed = markdown.replace(
+      'export function budgetMiddleware(',
+      'export function renamedBudgetMiddleware(',
+    );
+    expect(renamed).not.toBe(markdown);
+    await writeProjectStubs(directory, renamed);
+    const negative = await compileFence(file);
+    expect(negative.code).not.toBe(0);
+    expect(negative.stderr).toContain('budgetMiddleware');
+  } finally {
+    await writeProjectStubs(directory, markdown);
+  }
+});
+
 interface FenceCounts {
   readonly total: number;
   readonly ts: number;
@@ -238,7 +267,8 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 0,
   },
-  // M140e: the run-budget recipe adds one compiling TypeScript fence.
+  // The budget recipe uses modules generated from the AI guide; replacing
+  // its existing fence preserves these inventory counts.
   'docs/durable-runs.md': { total: 3, ts: 2, compile: 2, external: 0, pseudocode: 0, skipped: 1 },
   // M142: +1 compiling fence, the full-stack page's request-bound chat service.
   'docs/ai.md': { total: 11, ts: 10, compile: 10, external: 0, pseudocode: 0, skipped: 1 },

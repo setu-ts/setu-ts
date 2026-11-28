@@ -28,6 +28,7 @@ import type {
 } from '@setu-ts/common';
 import {
   DuplicateKeyError,
+  DATABASE_PROBLEM_TYPES,
   httpStatusHintOf,
   resolveProbeTiming,
   withDeadline,
@@ -108,7 +109,14 @@ function isConflict(error: unknown): boolean {
     depth++
   ) {
     if (current instanceof DuplicateKeyError) return true;
-    if (httpStatusHintOf(current)?.status === 409) return true;
+    const type = httpStatusHintOf(current)?.problem?.type;
+    // The type also matches a DuplicateKeyError from another copy of common.
+    if (
+      type === DATABASE_PROBLEM_TYPES['duplicate-key'].type ||
+      type === DATABASE_PROBLEM_TYPES['write-conflict'].type ||
+      type === DATABASE_PROBLEM_TYPES['lock-timeout'].type
+    )
+      return true;
     let cause: unknown;
     try {
       cause = (current as { readonly cause?: unknown }).cause;

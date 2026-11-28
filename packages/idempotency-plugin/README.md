@@ -190,7 +190,11 @@ record are all-or-nothing. A repeated key whose record is committed returns the 
 without running `fn` (`replayed: true`); a concurrent duplicate loses the race on the claim's
 primary key and its business writes roll back with it, then it replays the winner's result — or,
 where the backend reports a write conflict before the winner committed, rejects with a retryable
-`409` (which `@setu-ts/sdk`'s keyed client retries).
+`409` (which `@setu-ts/sdk`'s keyed client retries). An application-supplied transactional store
+must raise `DuplicateKeyError` to signal a key held by another call. Only that class and the
+`duplicate-key`, `write-conflict` or `lock-timeout` problem types count as holder conflicts. The
+duplicate-key type also recognises errors from another copy of common. A foreign-key violation or a
+status-only `409` is `store-failed` (`503`).
 
 On both the first call and a replay, `value` is the JSON round trip of what `fn` returned: a `Date`
 becomes an ISO string, `undefined` object members are absent, and nested `toJSON()` methods

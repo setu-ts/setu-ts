@@ -42,6 +42,8 @@ export const audit = AuditPlugin({
 - File storage requires writable `runtime.fs`; registration fails when it is absent. File writes are
   serialized read-modify-write operations.
 - Database storage requires an injected `options.client`; no driver is loaded automatically.
+- `log(entry, { scope })` inside `db.transaction(...)` writes through that unit of work on database
+  storage; memory, log and file storage reject a scope with `AuditScopeUnsupportedError`.
 
 ## Other options
 

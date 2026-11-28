@@ -5,6 +5,54 @@
  */
 import { describe, expect, it } from 'vitest';
 import { UnknownPayloadFieldError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  ForeignKeyViolationError,
+  NotNullViolationError,
+  SerializationConflictError,
+} from '../../src/errors.ts';
+import { httpStatusHintOf } from '@setu-ts/common';
+import { errorProblems } from '../fixtures/error-problems.ts';
+
+describe('database condition errors', () => {
+  for (const [error, status, title, slug, problemTitle, detail] of errorProblems) {
+    it(`${slug} has only the documented hint fields`, () => {
+      expect(httpStatusHintOf(error)).toEqual({
+        status,
+        title,
+        detail,
+        problem: {
+          type: `https://setu-ts.dev/errors/${slug}`,
+          title: problemTitle,
+        },
+      });
+      expect(httpStatusHintOf(error)).not.toHaveProperty('message');
+    });
+  }
+  it('retains causes, entities and each explicit/default reason', () => {
+    const cause = new Error('driver');
+    for (const ErrorClass of [ForeignKeyViolationError, NotNullViolationError]) {
+      const error = new ErrorClass('diagnostic', { entity: 'Account', cause });
+      expect(error.entity).toBe('Account');
+      expect(error.cause).toBe(cause);
+      expect(error.message).toBe('diagnostic');
+      expect(new ErrorClass('diagnostic').entity).toBeUndefined();
+    }
+    for (const reason of ['write-conflict', 'lock-timeout'] as const) {
+      expect(new SerializationConflictError('diagnostic', { cause, reason }).reason).toBe(reason);
+    }
+    for (const reason of ['unreachable', 'pool-saturated'] as const) {
+      expect(new DatabaseUnavailableError('diagnostic', { cause, reason }).reason).toBe(reason);
+    }
+    for (const reason of ['bound', 'connection-lost'] as const) {
+      expect(new DatabaseTimeoutError('diagnostic', { cause, reason }).reason).toBe(reason);
+    }
+    expect(new SerializationConflictError('diagnostic').reason).toBe('write-conflict');
+    expect(new DatabaseUnavailableError('diagnostic').reason).toBe('unreachable');
+    expect(new DatabaseTimeoutError('diagnostic').reason).toBe('bound');
+  });
+});
 
 describe('UnknownPayloadFieldError diagnostic', () => {
   it('JSON-quotes control characters without a raw newline', () => {

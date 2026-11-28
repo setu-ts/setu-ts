@@ -54,7 +54,11 @@ The resolved tenant is also available as `ctx.request.tenant`.
 
 One name string (`'subdomain'`, `'header'`, `'path'` or `'jwt'`), one custom `ITenantResolver`, or a
 readonly array of `ITenantResolver` instances tried in order. Only resolver instances chain: an
-array of name strings is refused by the type.
+array of name strings is refused by the type. At `register()`, every array element must also be an
+object with a `resolve` function. An invalid element is refused with its index and the way out: pass
+resolver instances, such as `new HeaderResolver()`. An unknown name string is refused with the name
+in the error. A single object without a `resolve` function is refused too. These are startup errors;
+the application does not start with a chain that can never resolve a tenant.
 
 **`subdomain` takes an optional `baseDomain`.** With one, it constrains resolution to that domain: a
 request for an unrelated host does not resolve a tenant. Without one, the first label of any

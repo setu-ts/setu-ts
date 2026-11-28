@@ -275,7 +275,11 @@ export function createDynamoDataSource(
         Update: update,
       };
       if (transactionBuffer !== undefined) {
-        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        const existing = await client.getItem({
+          TableName: target.table,
+          Key: identifier,
+          ConsistentRead: true,
+        });
         if (existing.Item === undefined) {
           throw new Error(`DynamoDB entity '${entity}' update failed: the key does not exist.`);
         }
@@ -309,7 +313,11 @@ export function createDynamoDataSource(
       const identifier = key(id, 'delete');
       assertFree(identifier);
       if (transactionBuffer !== undefined) {
-        const existing = await client.getItem({ TableName: target.table, Key: identifier });
+        const existing = await client.getItem({
+          TableName: target.table,
+          Key: identifier,
+          ConsistentRead: true,
+        });
         if (existing.Item === undefined) return false;
         transactionBuffer.add(
           {

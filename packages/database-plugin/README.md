@@ -4,14 +4,15 @@ Database access with the repository pattern and Unit of Work. Registers an `IDat
 `CAPABILITIES.DATABASE` (`'database'`).
 
 Driver errors that pass through `IDatabaseService` (repositories, transactions, `query()`) are
-scrubbed before they are classified or logged. Drizzle's `Failed query:` wrapper keeps its SQL with
-placeholders and loses its bound values, from the message, the whole multiline stack header and
-`params`. A SQLSTATE class 22 cause (data exception: invalid text, out of range, bad date, bad enum)
-is rebuilt from its code, because PostgreSQL's message quotes the rejected input. Classification is
-unchanged. Two limits: an error from a query built through `getDrizzleDatabase(...)`, or a raw
-driver call, never passes through the service and is logged as the driver wrote it; and the scrub
-walks at most five causes, so a value nested deeper survives. It is not a general log-redaction
-policy, and request paths logged by the request logger are outside it.
+scrubbed before they reach the caller or log. Classification reads the raw signals first. Drizzle's
+`Failed query:` wrapper keeps its SQL with placeholders and loses its bound values, from the
+message, the whole multiline stack header and `params`. A SQLSTATE class 22 cause (data exception:
+invalid text, out of range, bad date, bad enum) is rebuilt from its code, because PostgreSQL's
+message quotes the rejected input. The scrub does not change how an error is classified. Two limits:
+an error from a query built through `getDrizzleDatabase(...)`, or a raw driver call, never passes
+through the service and is logged as the driver wrote it; and the scrub walks at most five causes,
+so a value nested deeper survives. It is not a general log-redaction policy, and request paths
+logged by the request logger are outside it.
 
 Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
 and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
@@ -74,16 +75,16 @@ await db.transaction(async (uow) => {
 
 ### Portable data guarantees (M119e, 0.11.0)
 
-| Operation / condition                                                              | Guarantee                                                                                                                                                       |
-| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unknown payload field on Drizzle, Prisma or D1 `create` / `update` / `updateWhere` | `UnknownPayloadFieldError` (400); no field or value in the HTTP detail                                                                                          |
-| Unknown payload field on Memory, MongoDB, DynamoDB, Cosmos DB or Bigtable          | Stored and returned; restrict fields with the route's body schema                                                                                               |
-| PostgreSQL refused field value through Drizzle repositories                        | `InvalidFieldValueError` (400), including malformed UUID keys; fixed detail, scrubbed cause                                                                     |
-| Prisma validation other than unknown arguments, or known-request `P2007`           | `InvalidFieldValueError` (400), including malformed UUID keys and conditional writes                                                                            |
-| D1 STRICT-table field type refusal                                                 | `InvalidFieldValueError` (400)                                                                                                                                  |
-| Tenant column on Drizzle                                                           | Resolve the property first, otherwise a unique SQL column name; unresolved or ambiguous mappings throw `TenantColumnUnresolvedError` (500) before statement I/O |
-| Explicit Drizzle `entities.<Entity>.primaryKey` missing from a registered table    | `MissingKeyColumnError` at connect; an id-less query-only table without an override remains valid until repository creation                                     |
-| Scoped keyset cursors (all eight adapters)                                         | Bound to entity, key columns and sort; a fingerprint is a correctness check, and tenant predicates still authorize access                                       |
+| Operation / condition                                                                    | Guarantee                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unknown payload field on Drizzle, Prisma or D1 `create` / `update` / `updateWhere`       | `UnknownPayloadFieldError` (400); no field or value in the HTTP detail                                                                                          |
+| Unknown payload field on Memory, MongoDB, DynamoDB, Cosmos DB or Bigtable                | Stored and returned; restrict fields with the route's body schema                                                                                               |
+| SQL field type, length or range refusal through repositories                             | `InvalidFieldValueError` (400), including malformed UUID keys; fixed detail, scrubbed cause                                                                     |
+| Prisma validation other than unknown arguments, or known-request `P2000`/`P2007`/`P2020` | `InvalidFieldValueError` (400), including malformed UUID keys and conditional writes                                                                            |
+| D1 STRICT-table field type refusal                                                       | `InvalidFieldValueError` (400)                                                                                                                                  |
+| Tenant column on Drizzle                                                                 | Resolve the property first, otherwise a unique SQL column name; unresolved or ambiguous mappings throw `TenantColumnUnresolvedError` (500) before statement I/O |
+| Explicit Drizzle `entities.<Entity>.primaryKey` missing from a registered table          | `MissingKeyColumnError` at connect; an id-less query-only table without an override remains valid until repository creation                                     |
+| Scoped keyset cursors (all eight adapters)                                               | Bound to entity, key columns and sort; a fingerprint is a correctness check, and tenant predicates still authorize access                                       |
 
 `UnknownPayloadFieldError` is defined in `@setu-ts/common` and re-exported by this package as the
 same class. Prisma conditional-write validation uses the same 400 split as ordinary writes,
@@ -280,7 +281,10 @@ export async function editArticle(
 - It works with any repository that has `updateWhere` — an outer repository, `uow.getRepository()`
   and a tenant repository. Inside a transaction it applies on Drizzle, Prisma, MongoDB, DynamoDB,
   Cosmos DB and Bigtable; the memory and D1 transaction sources answer
-  `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write.
+  `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write. The
+  refusal names the bound adapter, including `custom`; a directly constructed `BaseRepository`
+  without an adapter type names `database-plugin`.
+
 - **The outcome is decided by the write itself.** On PostgreSQL the conditional `UPDATE`/`DELETE`
   reports which row it changed; on MySQL, where there is no `RETURNING`, the adapters read the
   statement's affected-row count. A lost race therefore answers `409` on every SQL cell, MySQL
@@ -1618,17 +1622,58 @@ explains the failed framework operation; the cause preserves the driver diagnost
 that intentionally drops a cause must carry a `drops-cause: <reason>` marker and be justified in its
 test.
 
+## DynamoDB buffered pre-reads
+
+Inside a unit of work, plain `update` and `delete` read the current item before buffering the write.
+Both send `ConsistentRead: true`, as the conditional pre-reads already do. A strongly consistent
+read costs one read capacity unit per 4 KB, rounded up; see the
+[DynamoDB read-capacity rules](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/read-write-operations.html).
+Outside a unit of work these operations send their UpdateItem (conditional on the item existing) or
+their unconditional DeleteItem directly; they send no preliminary GetItem.
+
 ## What a driver condition returns to the client
 
-Four driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
-answered as typed errors, so a caller can `instanceof` them instead of matching message text:
+The classifier maps six driver conditions at `DatabaseService`. Repository input refusals also map
+to 400 when the call names an entity. The same status can require different client actions:
 
-| Condition                                                                                                                                                                                                                                                                                                                                                                  | Thrown as                    | Served status |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
-| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, mysql2 `ER_LOCK_DEADLOCK`, a Prisma driver-adapter cause of kind `TransactionWriteConflict`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                                                    | `SerializationConflictError` | `409`         |
-| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, both node-postgres connect-timeout messages (`timeout exceeded when trying to connect`, `Connection terminated due to connection timeout`), `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
-| node-postgres's `query_timeout` fired on a query (the driver's `Query read timeout` rejection)                                                                                                                                                                                                                                                                             | `DatabaseTimeoutError`       | `504`         |
-| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, a Prisma driver-adapter cause of kind `UniqueConstraintViolation`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                                                                             | `DuplicateKeyError`          | `409`         |
+| Condition and driver signals                                                                                                                                                                                                                                                                                                       | Thrown as                                             | Served status |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------- |
+| Write conflict: SQLSTATE `40001`/`40P01`, Prisma `P2034`, mysql2 `ER_LOCK_DEADLOCK`, adapter kind `TransactionWriteConflict`, MongoDB `TransientTransactionError`, DynamoDB `TransactionConflictException`, Bigtable gRPC `10` (`ABORTED`), Cosmos `449`                                                                           | `SerializationConflictError`, reason `write-conflict` | 409           |
+| Lock wait timeout: `55P03`, `ER_LOCK_WAIT_TIMEOUT`, mariadb `1205` only inside Prisma's `kind: 'mysql'` adapter cause                                                                                                                                                                                                              | `SerializationConflictError`, reason `lock-timeout`   | 409           |
+| Unavailable: SQLSTATE class `08`, `57P01`/`57P03`, Prisma `P1001`/`P2028`, adapter kind `DatabaseNotReachable`, mysql2 `ER_SERVER_SHUTDOWN`, libsql `SQLITE_BUSY`, MongoDB network/server-selection/wait-queue/pool-cleared names, Bigtable gRPC `14`, Cosmos `429`/`503`, `NetworkingError` and the connection-fault errno family | `DatabaseUnavailableError`, reason `unreachable`      | 503           |
+| Connection limit: SQLSTATE `53300`, Prisma `P2037`, adapter kind `TooManyConnections`, mysql2 `ER_CON_COUNT_ERROR`/`ER_TOO_MANY_USER_CONNECTIONS`                                                                                                                                                                                  | `DatabaseUnavailableError`, reason `unreachable`      | 503           |
+| pg-pool acquire timeout: exact message `timeout exceeded when trying to connect`, with no string code in the chain                                                                                                                                                                                                                 | `DatabaseUnavailableError`, reason `pool-saturated`   | 503           |
+| New pg connection handshake timeout: `Connection terminated due to connection timeout`, with no string code in the chain                                                                                                                                                                                                           | `DatabaseUnavailableError`, reason `unreachable`      | 503           |
+| Bound elapsed: `Query read timeout`, `TimeoutError`, Cosmos `code: 'TimeoutError'`, Bigtable gRPC `4` (`DEADLINE_EXCEEDED`), Prisma `P1008`, adapter kind `SocketTimeout`, MongoDB `MongoNetworkTimeoutError`/`MongoOperationTimeoutError`                                                                                         | `DatabaseTimeoutError`, reason `bound`                | 504           |
+| Connection lost mid-call: Prisma `P1017`, adapter kind `ConnectionClosed`, mysql2 `PROTOCOL_CONNECTION_LOST`, the pg terminated-connection anchor, namespaced mariadb `45009`, or `TimeoutError` with `ECONNRESET`/`EPIPE`                                                                                                         | `DatabaseTimeoutError`, reason `connection-lost`      | 504           |
+| Duplicate key: `23505`, `P2002`, adapter kind `UniqueConstraintViolation`, `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite `UNIQUE constraint failed:` or `D1_ERROR: UNIQUE constraint failed:`                                                                                                                              | `DuplicateKeyError`                                   | 409           |
+| Foreign key / restrict: `23503`/`23001`, `P2003`, kinds `ForeignKeyConstraintViolation`/`RestrictViolation`, `ER_NO_REFERENCED_ROW_2`/`ER_ROW_IS_REFERENCED_2`, SQLite `FOREIGN KEY constraint failed` or `D1_ERROR: FOREIGN KEY constraint failed`                                                                                | `ForeignKeyViolationError`                            | 409           |
+| NOT NULL: `23502`, `P2011`, kind `NullConstraintViolation`, `ER_BAD_NULL_ERROR`/`ER_NO_DEFAULT_FOR_FIELD`, SQLite `NOT NULL constraint failed:` or `D1_ERROR: NOT NULL constraint failed:`                                                                                                                                         | `NotNullViolationError`                               | 400           |
+| Refused field value, on repository calls only: `22P02`, `22001`, `22003`, `22007`, `22008`; `PrismaClientValidationError`; `P2000`/`P2007`/`P2020` on `PrismaClientKnownRequestError`; kinds `LengthMismatch`/`ValueOutOfRange`; `ER_DATA_TOO_LONG`/`ER_WARN_DATA_OUT_OF_RANGE`                                                    | `InvalidFieldValueError`                              | 400           |
+
+Numeric driver codes are read only in their backend's namespace. Prisma adapter kinds are read from
+`meta.driverAdapterError.cause`, even without `originalCode`. mariadb numeric strings are read only
+from that adapter cause with `kind: 'mysql'`; `45028` is an unavailable pool timeout, not pg-pool
+saturation.
+
+Structured signals are checked before generic names. A bare `TimeoutError` maps to 504, and so does
+a `TimeoutError` whose own `code` is a connection errno such as `ETIMEDOUT`. The rule reads each
+member of the cause chain on its own: a `TimeoutError` wrapping a separate cause with a connection
+errno is read from that cause, so a bare `ETIMEDOUT` or `ECONNREFUSED` cause still answers 503. An
+outer bare `TimeoutError` over a `40001` cause remains a write conflict. Name matching walks
+guarded, bounded prototype chains, so `PoolClearedOnNetworkError` inherits the MongoDB pool-cleared
+classification. Unrecognised conditions keep their original error path.
+
+Under `rfc9457`, classified errors carry a problem `type` from `DATABASE_PROBLEM_TYPES` in
+`@setu-ts/common`; the `default` response format is unchanged. `SerializationConflictError.reason`
+distinguishes `write-conflict` from `lock-timeout`, and `DatabaseTimeoutError.reason` distinguishes
+`bound` from `connection-lost`. A pg-pool acquire timeout is `DatabaseUnavailableError` with
+`reason: 'pool-saturated'` and type `database-pool-saturated`; other unavailable failures use
+`reason: 'unreachable'` and type `database-unavailable`. The mariadb pool timeout `45028` stays
+`unreachable`. Repository value refusals include SQLSTATE `22001`, Prisma `P2000`/`P2020` and
+`LengthMismatch`/`ValueOutOfRange`, and mysql2 length/range codes, as `InvalidFieldValueError`. See
+[Database problem types](https://github.com/setu-ts/setu-ts/blob/main/docs/problem-types.md) for all
+eleven types, titles and client actions.
 
 `DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
 package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
@@ -1640,7 +1685,9 @@ by a create's guard, a buffered memory or Bigtable create) is mapped too. Since 
 Cosmos DB or Bigtable commit whose precondition failed (a conditional write, or a buffered plain
 update of a row deleted meanwhile) or that DynamoDB cancelled with a `TransactionConflict` reason is
 `SerializationConflictError` (`409`): each of those primitives applies nothing when it refuses.
-Every other commit rejection is still rethrown unchanged, because its outcome can be unknown.
+Commit also maps serialization and lock conflicts, foreign-key violations, and NOT NULL violations:
+each is a server refusal. An `UnknownTransactionCommitResult` label always passes through, as do
+unavailable and timeout failures, because their outcome can be unknown.
 
 **Through `query()` on MySQL (since 0.14.0).** Prisma reports a raw statement's failure as `P2010`,
 with the driver error under `meta.driverAdapterError.cause`. Its `kind` is read on every connector:
@@ -1657,16 +1704,18 @@ the driver refused before sending it, the answer is `DatabaseUnavailableError` (
 connection dropped under a statement in flight, with no answer, it is `DatabaseTimeoutError`
 (`504`), because a write's outcome is then unknown.
 
-| Driver        | `503` (not applied)                                                                                                          | `504` (outcome unknown)                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| node-postgres | SQLSTATE `57P01`; `Client has encountered a connection error and is not queryable`; `Client was closed and is not queryable` | `Connection terminated unexpectedly`     |
-| Prisma 7      | `P1001`, `P2028`; under `P2039`/`P2010`, the adapter's `originalCode` `57P01` (pg) or `45028`, `45013`, `1053` (mariadb)     | adapter `originalCode` `45009` (mariadb) |
-| mysql2        | `ER_SERVER_SHUTDOWN`; `Can't add new command when connection is in closed state` (since 0.14.0)                              | `PROTOCOL_CONNECTION_LOST`               |
-| libsql        | `SQLITE_BUSY`                                                                                                                | —                                        |
-| MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107`                                                          | —                                        |
+| Driver        | `503` (not applied)                                                                                                          | `504` (outcome unknown)                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| node-postgres | SQLSTATE `57P01`; `Client has encountered a connection error and is not queryable`; `Client was closed and is not queryable` | `Connection terminated unexpectedly`                                                          |
+| Prisma 7      | `P1001`, `P2028`; under `P2039`/`P2010`, the adapter's `originalCode` `57P01` (pg) or `45028`, `45013`, `1053` (mariadb)     | `P1017`/`ConnectionClosed`, `P1008`/`SocketTimeout`; adapter `originalCode` `45009` (mariadb) |
+| mysql2        | `ER_SERVER_SHUTDOWN`; `Can't add new command when connection is in closed state` (since 0.14.0)                              | `PROTOCOL_CONNECTION_LOST`                                                                    |
+| libsql        | `SQLITE_BUSY`                                                                                                                | —                                                                                             |
+| MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError` and subclasses, code `10107`                                           | `MongoNetworkTimeoutError`, `MongoOperationTimeoutError`                                      |
 
-The older `ECONNRESET`/`EPIPE`/`MongoNetworkError` arms still answer `503` even for a write in
-flight; that is a known limitation.
+Bare `ECONNRESET`/`EPIPE`/`MongoNetworkError` still answer `503` even for a write in flight; that
+remains a known limitation, including on Cosmos. On DynamoDB the SDK renames socket failures to
+`TimeoutError`; these answer `504`, with outcome unknown. Mongo network and operation timeout
+subclasses also answer `504`, while pool-cleared subclasses answer `503`.
 
 **A Drizzle transaction survives a lost connection (M128).** A pg client checked out for a
 transaction has no `'error'` listener of its own, so a backend killed mid-transaction used to exit
@@ -1674,19 +1723,28 @@ the process. The plugin attaches one to every checked-out client of the pool beh
 `drizzleInstance` (through pg-pool's `'acquire'`/`'release'` events) and logs the event at `warn`;
 the transaction's next statement answers `503`.
 
-**Errors your own transaction work throws are not classified (M128).** Inside
-`db.transaction(async (uow) => …)`, repository calls are classified as above; anything else the work
-throws — an HTTP call refused with `ECONNREFUSED`, your own error — reaches you as itself, so a
-refused webhook is no longer reported as "database unavailable".
+**Database errors from transaction work (since 0.14.0).** Inside `db.transaction(async (uow) => …)`,
+a driver error thrown by a native handle, including `getDrizzleTransaction`, is classified from its
+own database-specific signals or a Drizzle query wrapper. An application error with a driver cause
+stays itself, including an error carrying an HTTP status hint; bound values in its Drizzle cause are
+still scrubbed. A frozen hinted error whose cause must be relinked is replaced by a scrubbed copy, a
+plain `Error` that keeps its status but not its class. Already-classified repository errors keep
+their hints. Generic errno codes, AWS/Cosmos timeout names and numeric codes are excluded here, so a
+refused webhook is not reported as database unavailability. An error with a numeric `statusCode` (an
+`HttpError`, an HTTP client's error), thrown or as a Drizzle wrapper's cause, is never classified
+here, whatever its message or code copies from a driver. Outside a transaction, `getDrizzleDatabase`
+errors reach the application as thrown; inspect the Drizzle `cause` when handling them. Value
+length/type refusals require a repository entity and remain unclassified through raw `query()` or
+native transaction work.
 
-All four carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
-reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
-Unlike a `DatabaseUnavailableError`, a `DatabaseTimeoutError` does not say the operation did not
-happen: the timed-out statement may have run, so a write's outcome is unknown and a retry of a write
-must be idempotent. **No classified answer carries `Retry-After`**: the hint channel has no header,
-and the framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the
-typed Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's
-row.
+Classified errors carry the scrubbed driver diagnostic as `cause` — the SQLSTATE and the failing
+statement stay reachable for the log (M90j) — and none serves driver text: the body's `detail` is a
+fixed sentence. Unlike a `DatabaseUnavailableError`, a `DatabaseTimeoutError` does not say the
+operation did not happen: the timed-out statement may have run, so a write's outcome is unknown and
+a retry of a write must be idempotent. **No classified answer carries `Retry-After`**: the hint
+channel has no header, and the framework holds no honest horizon for a pool's saturation. A native
+Drizzle error thrown outside `db.transaction` still bypasses this classifier. Inside transaction
+work the database-specific rule above applies.
 
 ## What a refused query returns to the client
 
@@ -1824,35 +1882,43 @@ carries `reachable` whenever the adapter can probe:
 | omitted                                                            | `up`       | 200      |
 
 The rows are the whole decision. **Since M101a** a saturated pool is not an outage. When the Drizzle
-adapter's `poolStats` reports every connection busy with callers waiting (`idle === 0` and
-`waiting > 0`), the probe queues no `SELECT 1` behind the callers it would be measuring, and the
-indicator reports `up` with `reachable: 'unknown'` and the snapshot in `data.capacity` — failing
-`/ready` there would pull every saturated replica out of rotation at once. **Since 0.13.0** a probe
-that timed out waiting for a pool client (node-postgres's `timeout exceeded when trying to connect`)
-is the same evidence: pg-pool removes the timed-out waiter before it rejects, so with
-`connectionTimeoutMillis` under the 2-second probe bound the snapshot already reads `waiting: 0`.
-This needs `poolStats` to return a valid snapshot: a callback that throws or returns malformed data
-leaves the indicator `degraded`. A new-connection handshake timeout does not count. A full pool is
-ALSO what a hung database looks like (every connection stuck on a server that never answers, callers
-piling up), so the row additionally requires that a query through the adapter completed within the
-last 10 seconds. The indicator samples the adapter's completed-query count on each poll, so a hang
-is detected at most one poll interval plus that window after the last completion; a saturated pool
-whose queries have all stopped completing reports `degraded` and `/ready` answers 503. Only queries
-the adapter runs are counted (`query()`, repositories, the Unit of Work's data sources): once
-`getDrizzleDatabase` or `getDrizzleTransaction` has handed out the native instance, its queries
-bypass the adapter, so progress is unobservable and a saturated pool keeps reading `up` — the
-indicator cannot then tell a hang from load. Queries the application runs on its own Drizzle
-instance are not counted either; an application that queries mainly that way should expect a busy
-pool to read `degraded`. That row needs `poolStats`: without it the indicator cannot tell saturation
-from trouble, so a pool connection timeout or a probe that does not answer reports `degraded`. A
-pool connection timeout used to report `down` (it answered `false`); without `poolStats` it is now
-`degraded`, because the database never answered either way. A probe that **exists and did not
-answer** inside the 2-second bound is evidence of trouble and reports `degraded` — never `up`, which
-is the claim that let a stopped database keep taking traffic (X51-1: the indicator used to read the
-lifecycle `isReady()`, which only says `connect()` once succeeded). An adapter that ships **no
-probe** is the opposite case: a probe that was never written is evidence of nothing, so the payload
-omits `reachable` and the status is today's: a probe that was never written says nothing about the
-backend.
+adapter's capacity snapshot (`poolStats`, or pg-pool's counters by default) reports every connection
+busy with callers waiting (`idle === 0` and `waiting > 0`), the probe queues no `SELECT 1` behind
+the callers it would be measuring, and the indicator reports `up` with `reachable: 'unknown'` and
+the snapshot in `data.capacity` — failing `/ready` there would pull every saturated replica out of
+rotation at once. **Since 0.13.0** a probe that timed out waiting for a pool client (node-postgres's
+`timeout exceeded when trying to connect`) is the same evidence: pg-pool removes the timed-out
+waiter before it rejects, so with `connectionTimeoutMillis` under the 2-second probe bound the
+snapshot already reads `waiting: 0`. An explicit `poolStats` callback wins. Without it, a Drizzle
+instance whose public `$client` has numeric `totalCount`, `idleCount` and `waitingCount` gets
+pg-pool counters by default. mysql2 and Prisma expose no matching public counters; an explicit
+callback is still needed where supported. A callback that throws or returns malformed data leaves
+this saturation case `degraded`. A new-connection handshake timeout does not count as pool
+saturation.
+
+A full pool can also mean a hung database. With pg-pool, the plugin counts `release` events as
+progress for all traffic, including queries through `getDrizzleDatabase`, `getDrizzleTransaction`
+and the application's own Drizzle instance. A `pool.query` release that carries an error (a failed
+query, a client-side query timeout, a broken client) does not count. A transaction's client, or one
+the application checked out with `pool.connect()`, is released without an error even when its work
+failed, so it counts. The plugin removes its listener on shutdown. The indicator samples progress on
+each poll: no observed completion in the last 10 seconds makes saturation `degraded`, with
+`/ready` 503. Detection lags by one poll interval plus that window, and by longer while transactions
+that were in flight when the database stopped answering are still ending. A busy pool that keeps
+releasing clients stays `up` with `reachable: 'unknown'`. Other clients (mysql2 with an explicit
+`poolStats`) count completed adapter calls only. Once such an application takes a native handle,
+progress is unobservable and a saturated pool stays `up` with `reachable: 'unknown'`.
+
+The vector-store plugin owns a different pool/probe. Its pgvector arm also treats `idle === 0` and
+`totalCount >= options.max` as saturation, and counts its own statement completions. DatabasePlugin
+uses `idle === 0 && waiting > 0`, or a probe acquire timeout, plus recent progress. Without a
+readable counter source, the indicator cannot identify saturation: a pool timeout or unanswered
+probe is `degraded`. A probe that **exists and did not answer** inside the 2-second bound is
+evidence of trouble and reports `degraded` — never `up`, which is the claim that let a stopped
+database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`, which
+only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite case: a
+probe that was never written is evidence of nothing, so the payload omits `reachable` and the status
+is today's: a probe that was never written says nothing about the backend.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
@@ -1932,12 +1998,14 @@ imperative begin/commit.
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
 | `EntityNotFoundError`                     | class     |
+| `ForeignKeyViolationError`                | class     |
 | `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
 | `MigrationLedgerError`                    | class     |
 | `MissingKeyColumnError`                   | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
+| `NotNullViolationError`                   | class     |
 | `OutboxStoreUnavailableError`             | class     |
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
@@ -1952,8 +2020,8 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
-| `UnsupportedSqlModeError`                 | class     |
 | `UnsupportedRelationModeError`            | class     |
+| `UnsupportedSqlModeError`                 | class     |
 | `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |

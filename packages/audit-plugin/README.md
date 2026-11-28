@@ -63,6 +63,37 @@ await audit.log({
 `id`/`timestamp`; those are assigned internally on the stored record, which is immutable once
 written.
 
+## Audit inside a transaction
+
+With `storage: 'database'`, pass the caller's unit of work as `log(entry, { scope })`:
+
+```typescript
+import type { IAuditLogger } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+
+export async function deactivate(db: IDatabaseService, audit: IAuditLogger): Promise<void> {
+  await db.transaction(async (scope) => {
+    await scope.getRepository('Account').update('account-1', { active: false });
+    await audit.log({ action: 'deactivate', resource: 'account', result: 'success',
+      before: { active: true }, after: { active: false } }, { scope });
+  });
+}
+```
+
+`AuditService.log` stamps and redacts the entry before either write path. With a scope it calls
+`DatabaseAuditStorage.appendIn(scope, entry)`, which writes `toAuditRow(entry)` through
+`scope.getRepository(options.table).create(...)`. Rollback removes the audit row too. Without a
+scope it keeps using the injected client's `insert`.
+
+Register the entity named by `options.table` (default `audit_logs`) with the database. Its property
+names must be the stored snake_case names, including `resource_id` and `user_id`, rather than
+camelCase aliases. The SQL adapters refuse unknown fields. The row shape below applies to both
+paths, including JSON strings for `before`, `after` and `metadata`.
+
+A scope on `memory`, `log` or `file` rejects with the exported `AuditScopeUnsupportedError` and
+writes nothing. Use database storage to join the transaction, or omit the scope for an independent
+write.
+
 ## Backend configuration
 
 ```typescript
@@ -82,7 +113,7 @@ AuditPlugin({ storage: 'file', options: { path: './audit.log' } });
 | `options.level`  | `log`      | `'info'`        | `'info'` \| `'warn'` \| `'error'`.                                    |
 | `options.logger` | `log`      | `ctx.logger`    | Injected `ILogger`; throws at registration when neither is present.   |
 | `options.client` | `database` | —               | Injected `IAuditDbClient`; required (throws when absent).             |
-| `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`.                                          |
+| `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`, and the entity name for a scoped write.  |
 | `options.path`   | `file`     | `'./audit.log'` | Throws at registration when `runtime.fs` is absent (Workers/edge).    |
 
 ## Database row shape
@@ -190,22 +221,23 @@ MIT
 
 ## Exports
 
-| Export                 | Kind      |
-| ---------------------- | --------- |
-| `AuditPlugin`          | function  |
-| `AuditService`         | class     |
-| `DatabaseAuditStorage` | class     |
-| `FileAuditStorage`     | class     |
-| `LogAuditStorage`      | class     |
-| `MemoryAuditStorage`   | class     |
-| `AuditEntry`           | interface |
-| `AuditPluginOptions`   | interface |
-| `AuditQuery`           | interface |
-| `AuditStorageOptions`  | interface |
-| `IAuditDbClient`       | interface |
-| `IAuditLogger`         | interface |
-| `StoredAuditEntry`     | interface |
-| `AuditStorageType`     | type      |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `AuditPlugin`                | function  |
+| `AuditScopeUnsupportedError` | class     |
+| `AuditService`               | class     |
+| `DatabaseAuditStorage`       | class     |
+| `FileAuditStorage`           | class     |
+| `LogAuditStorage`            | class     |
+| `MemoryAuditStorage`         | class     |
+| `AuditEntry`                 | interface |
+| `AuditPluginOptions`         | interface |
+| `AuditQuery`                 | interface |
+| `AuditStorageOptions`        | interface |
+| `IAuditDbClient`             | interface |
+| `IAuditLogger`               | interface |
+| `StoredAuditEntry`           | interface |
+| `AuditStorageType`           | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

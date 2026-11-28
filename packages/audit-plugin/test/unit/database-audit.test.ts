@@ -7,6 +7,52 @@ import { FakeAuditDbClient } from '../fixtures/fake-audit-db-client.ts';
 import type { StoredAuditEntry } from '../../src/interfaces/index.ts';
 
 describe('DatabaseAuditStorage', () => {
+  it('appendIn uses the configured repository and identical serialized row, never the client', async () => {
+    for (const table of [undefined, 'custom_trail']) {
+      const client = new FakeAuditDbClient();
+      const storage = new DatabaseAuditStorage({
+        client,
+        ...(table === undefined ? {} : { table }),
+      });
+      const entry = {
+        id: 'entry',
+        timestamp: 5,
+        action: 'update',
+        resource: 'account',
+        resourceId: 'a',
+        userId: 'u',
+        result: 'success',
+        before: { safe: true },
+      } as const;
+      const rows: unknown[] = [];
+      const entities: string[] = [];
+      await storage.appendIn(
+        {
+          getRepository(entity) {
+            entities.push(entity);
+            return {
+              create: (row) => {
+                rows.push(row);
+                return Promise.resolve(row);
+              },
+            };
+          },
+        },
+        entry,
+      );
+      expect(client.inserts).toEqual([]);
+      expect(entities).toEqual([table ?? 'audit_logs']);
+      await storage.append(entry);
+      expect(rows).toEqual([client.inserts[0]!.row]);
+    }
+    const error = new Error('scope failed');
+    await expect(
+      new DatabaseAuditStorage({ client: new FakeAuditDbClient() }).appendIn(
+        { getRepository: () => ({ create: () => Promise.reject(error) }) },
+        { id: 'entry', timestamp: 5, action: 'a', resource: 'r', result: 'failure' },
+      ),
+    ).rejects.toBe(error);
+  });
   it('throws when constructed without client', () => {
     // biome-ignore lint/suspicious/noExplicitAny: testing missing client
     expect(() => new DatabaseAuditStorage({ client: undefined as never })).toThrow(

@@ -34,6 +34,39 @@ const spec: VectorCollectionSpec = Object.freeze({
   filterable: Object.freeze({ tag: 'string', year: 'number', public: 'boolean' }),
 });
 
+describe('pgvector index diagnostics', () => {
+  for (const column of ['vector', 'source'] as const) {
+    for (const present of [false, true]) {
+      it(`${column} index distinguishes ${present ? 'wrong relation' : 'missing relation'}`, async () => {
+        const h = await opened((rendered) =>
+          rendered.text.includes('FROM pg_attribute')
+            ? {
+                rows: [
+                  {
+                    dimensions: 3,
+                    source_index: true,
+                    vector_index: true,
+                    source_version: true,
+                    [`${column}_index`]: false,
+                    [`${column}_index_present`]: present,
+                  },
+                ],
+              }
+            : healthy()(rendered),
+        );
+        await expect(h.store.ensureCollection(spec)).rejects.toThrow(
+          present
+            ? /has a relation named .* that is not the expected valid, non-partial/
+            : /is missing its/,
+        );
+        const query = h.statements.find((s) => s.text.includes('AS dimensions'))!;
+        expect(query.text).toContain('AS vector_index_present');
+        expect(query.text).toContain('AS source_index_present');
+      });
+    }
+  }
+});
+
 interface Rendered {
   readonly text: string;
   readonly params: readonly unknown[];
@@ -184,7 +217,13 @@ describe('PgVectorStore', () => {
       'i.indisvalid AND i.indpred IS NULL) AS vector_index',
     ])
       expect(query.text).toContain(sql);
-    expect(query.params).toEqual(['vs_documents_src', 'vs_documents_hnsw', 'vs_documents']);
+    expect(query.params).toEqual([
+      'vs_documents_hnsw',
+      'vs_documents_src',
+      'vs_documents_src',
+      'vs_documents_hnsw',
+      'vs_documents',
+    ]);
   });
   it('gives the app-owned pool an error listener at open, reporting through the logger (audit F1)', async () => {
     const { EventEmitter } = await import('node:events');
@@ -282,6 +321,8 @@ describe('PgVectorStore', () => {
     expect(statements[3]!.text).toContain('FROM pg_index');
     expect(statements[3]!.text).toContain('AS source_version');
     expect(statements[3]!.params).toEqual([
+      'vs_documents_hnsw',
+      'vs_documents_src',
       'vs_documents_src',
       'vs_documents_hnsw',
       'vs_documents',

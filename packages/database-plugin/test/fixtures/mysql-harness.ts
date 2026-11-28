@@ -20,6 +20,7 @@ export async function mysqlHarness(
   type: 'prisma' | 'drizzle',
   connections = 110,
   prismaClient = 'prisma-client-generated-mysql',
+  lockWaitTimeout?: number,
 ) {
   const endpoint = new URL(process.env['MYSQL_URL']!);
   const name = `setu_mysql_${crypto.randomUUID().replaceAll('-', '')}`;
@@ -73,6 +74,9 @@ export async function mysqlHarness(
           database: name,
           connectionLimit: connections,
           allowPublicKeyRetrieval: true,
+          ...(lockWaitTimeout === undefined
+            ? {}
+            : { initSql: `SET SESSION innodb_lock_wait_timeout = ${lockWaitTimeout}` }),
         }),
       });
       adapter = new PrismaAdapter({

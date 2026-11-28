@@ -1,7 +1,8 @@
 /* eslint-disable require-await -- fakes implement Promise-returning interface methods */
 /**
  * `DatabaseService` behaviour added by M128: errors the caller's own
- * transaction work raises are returned as themselves (V11-5, plan §3.3), and
+ * transaction work raises stay themselves unless they carry database-specific
+ * signals (V11-5), and
  * outer-scope repositories are built once per entity (X94-3, plan §3.4).
  *
  * @module
@@ -43,13 +44,13 @@ describe('DatabaseService.transaction — the work owns its errors (V11-5)', () 
     }
   });
 
-  it('does not turn a work-raised SQLSTATE 40001 into a conflict', async () => {
+  it('classifies a work-raised SQLSTATE 40001 as a conflict', async () => {
     const thrown = Object.assign(new Error('not from a repository'), { code: '40001' });
     await expect(
       service.transaction(async () => {
         throw thrown;
       }),
-    ).rejects.toBe(thrown);
+    ).rejects.toBeInstanceOf(SerializationConflictError);
   });
 
   it('still classifies a driver error raised by a repository inside the work', async () => {

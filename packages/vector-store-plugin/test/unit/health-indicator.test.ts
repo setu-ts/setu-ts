@@ -3,7 +3,8 @@
  * The `vector-store` readiness indicator: the adapter's probe, cached and
  * time-bounded; an adapter without one; and the closed state.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createConnectionErrorReporter } from '@setu-ts/common';
 import type { IRuntimeServices, IVectorStoreAdapter } from '@setu-ts/common';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import {
@@ -34,6 +35,106 @@ function probed(answer: () => Promise<boolean>): IVectorStoreAdapter & { calls: 
 }
 
 describe('createVectorStoreIndicator', () => {
+  it('the cache timeout is final even if the driver answers before the wrapper timer callback', async () => {
+    const runtime = createRuntimeServices();
+    const timers: (() => void)[] = [];
+    const clock = {
+      ...runtime,
+      setTimeout: (fn: () => void) => {
+        timers.push(fn);
+        return timers.length as never;
+      },
+      clearTimeout: () => {},
+    };
+    const pending = Promise.withResolvers<boolean>();
+    const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+    const check = createVectorStoreIndicator(
+      probed(() => pending.promise),
+      clock,
+      () => false,
+      createConnectionErrorReporter({ source: 'vector', logger: () => logger }),
+    );
+    const result = check();
+    await Promise.resolve();
+    expect(timers).toHaveLength(2);
+    timers[0]!();
+    expect((await result).status).toBe('down');
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    pending.resolve(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    timers[1]!();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.info).not.toHaveBeenCalled();
+  });
+  it('warns once, debugs repeats, reports false, ignores unknown and logs recovery', async () => {
+    const { runtime, advance } = clockedRuntime();
+    const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+    const reporter = createConnectionErrorReporter({
+      source: 'vector-store-plugin: memory',
+      logger: () => logger,
+    });
+    let value: boolean | undefined = false;
+    let reject = true;
+    const adapter: IVectorStoreAdapter = new MemoryVectorStore();
+    adapter.isHealthy = () =>
+      reject ? Promise.reject(new Error('revoked backend key')) : Promise.resolve(value);
+    const check = createVectorStoreIndicator(adapter, runtime, () => false, reporter);
+    expect((await check()).status).toBe('down');
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(logger.warn.mock.calls)).toContain('revoked backend key');
+    advance(PROBE_TTL_MS + 1);
+    await check();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    reject = false;
+    advance(PROBE_TTL_MS + 1);
+    await check();
+    expect(JSON.stringify(logger.warn.mock.calls)).toContain('reported unreachable');
+    value = undefined;
+    advance(PROBE_TTL_MS + 1);
+    await check();
+    expect(logger.info).not.toHaveBeenCalled();
+    value = true;
+    advance(PROBE_TTL_MS + 1);
+    await check();
+    expect(logger.info).toHaveBeenCalledTimes(1);
+  });
+  for (const late of ['true', 'false', 'rejection'] as const) {
+    it(`a timeout wins over late ${late} and reports its bound once`, async () => {
+      vi.useFakeTimers();
+      try {
+        const real = createRuntimeServices();
+        const runtime = {
+          ...real,
+          setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+          clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+        } as IRuntimeServices;
+        const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+        const pending = Promise.withResolvers<boolean>();
+        const check = createVectorStoreIndicator(
+          probed(() => pending.promise),
+          runtime,
+          () => false,
+          createConnectionErrorReporter({ source: 'vector', logger: () => logger }),
+        );
+        const result = check();
+        await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
+        expect((await result).status).toBe('down');
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(logger.warn.mock.calls)).toContain('did not answer within 2000 ms');
+        if (late === 'rejection') pending.reject(new Error('late'));
+        else pending.resolve(late === 'true');
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.info).not.toHaveBeenCalled();
+        expect(logger.debug).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
   it('reports up with the adapter name when the probe answers', async () => {
     const { runtime } = clockedRuntime();
     const check = createVectorStoreIndicator(

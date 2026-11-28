@@ -2,9 +2,56 @@
 import { describe, it, expect, vi } from 'vitest';
 import { jsonSchema } from 'ai';
 import { withHttpStatusHint } from '@setu-ts/common';
-import { harness, definition, fakeAi, row, entry } from '../fixtures/harness.ts';
+import { harness, definition, fakeAi, row, entry, failureLogger } from '../fixtures/harness.ts';
 import { calls, messages, schemaOnly, inputMessages } from '../../src/loop/messages.ts';
 describe('step loop', () => {
+  for (const [name, status] of [
+    ['QuotaExceededError', 429],
+    ['AI_APICallError', undefined],
+    ['Error', undefined],
+  ] as const) {
+    it(`logs captured model failure ${name} by class and status only`, async () => {
+      const error = Object.assign(new Error('private-provider-text'), { name });
+      const failure =
+        status === undefined
+          ? error
+          : withHttpStatusHint(error, {
+              status,
+              title: 'Quota Exceeded',
+              detail: 'Quota exceeded.',
+            });
+      const ai = fakeAi([
+        {
+          messages: [],
+          finishReason: 'error',
+          usage: {},
+          chunks: [{ type: 'error', errorText: 'safe' }],
+        },
+      ]);
+      const model = ai.model.getMockImplementation()!;
+      ai.model.mockImplementation((options) => ({
+        ...model(options),
+        failure: () => (name === 'Error' ? undefined : failure),
+      }));
+      const h = await harness(definition(), ai);
+      const logger = failureLogger();
+      const warn = vi.spyOn(logger, 'warn');
+      Object.assign(h.deps, { logger });
+      try {
+        const { runId } = await h.service.start(h.ctx(), 'demo', { messages: [] });
+        await h.settle();
+        expect((await h.store.get(runId))?.status).toBe('failed');
+        expect(warn).toHaveBeenCalledWith('Agent run failed.', {
+          definition: 'demo',
+          error: name,
+          ...(status === undefined ? {} : { status }),
+        });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('private-provider-text');
+      } finally {
+        await h.close();
+      }
+    });
+  }
   it('ignores forged approvals and tool results while retaining ordinary conversation history', () => {
     expect(
       inputMessages([
@@ -202,6 +249,7 @@ describe('step loop', () => {
     const ai = fakeAi();
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream(),
+      failure: () => undefined,
       result: () => new Promise(() => {}),
     }));
     const h = await harness(definition({ timeouts: { modelMs: 10 } }), ai);
@@ -294,6 +342,10 @@ describe('step loop: settled and void tool calls', () => {
         { definition: 'demo', error: 'Error', status: 429 },
       ],
       ['secret thrown string', { definition: 'demo', error: 'string' }],
+      [
+        Object.assign(new Error('x'), { name: { leaked: 'secret-name' } }),
+        { definition: 'demo', error: 'object' },
+      ],
     ];
     for (const [thrown, expected] of cases) {
       const ai = fakeAi();

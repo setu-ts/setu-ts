@@ -17,14 +17,190 @@ import {
   isConnectionLostMidCall,
   isPoolAcquireTimeout,
   isUnansweredConnect,
+  isLockTimeout,
+  refusedInputOf,
+  isValueTypeRefusal,
 } from '../../src/errors/classify.ts';
 import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
   SerializationConflictError,
+  ForeignKeyViolationError,
+  NotNullViolationError,
 } from '../../src/errors.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
+
+/** Every new signal has a nearby negative control; sites share this classifier. */
+describe('driver condition signals', () => {
+  it('passes through both integrity error classes even with a driver cause', () => {
+    for (const ErrorClass of [ForeignKeyViolationError, NotNullViolationError]) {
+      const error = new ErrorClass('fixed', { cause: { code: '40001' } });
+      expect(classifyDriverError(error)).toBeNull();
+    }
+  });
+  const adapterCause = (kind: string, originalCode?: string) => ({
+    code: 'P2010',
+    meta: {
+      driverAdapterError: {
+        cause: { kind, ...(originalCode === undefined ? {} : { originalCode }) },
+      },
+    },
+  });
+  const rows: readonly (readonly [
+    string,
+    unknown,
+    unknown,
+    'timeout' | 'unavailable' | 'foreign-key' | 'not-null' | 'conflict',
+    DatabaseAdapterType?,
+  ])[] = [
+    [
+      'smithy bound',
+      { name: 'TimeoutError', code: 'ETIMEDOUT' },
+      { name: 'Error', code: 'ETIMEDOUT' },
+      'timeout',
+    ],
+    [
+      'smithy socket',
+      { name: 'TimeoutError', code: 'ECONNRESET' },
+      { name: 'Error', code: 'ECONNRESET' },
+      'timeout',
+    ],
+    ['bare timeout', { name: 'TimeoutError' }, { name: 'NotTimeoutError' }, 'timeout'],
+    [
+      'Cosmos timeout code',
+      { code: 'TimeoutError', name: 'TimeoutError' },
+      { code: 'NotTimeoutError' },
+      'timeout',
+      'cosmos',
+    ],
+    ['Bigtable deadline', { code: 4 }, { code: 5 }, 'timeout', 'bigtable'],
+    ...['P1017', 'P1008'].map((code) => [code, { code }, { code: code + 'x' }, 'timeout'] as const),
+    ...['ConnectionClosed', 'SocketTimeout'].map(
+      (kind) => [kind, adapterCause(kind), adapterCause(kind + 'x'), 'timeout'] as const,
+    ),
+    ...['DatabaseNotReachable', 'TooManyConnections'].map(
+      (kind) => [kind, adapterCause(kind), adapterCause(kind + 'x'), 'unavailable'] as const,
+    ),
+    ...['P2037', '53300', 'ER_CON_COUNT_ERROR', 'ER_TOO_MANY_USER_CONNECTIONS'].map(
+      (code) => [code, { code }, { code: code + 'x' }, 'unavailable'] as const,
+    ),
+    ...['23503', '23001', 'ER_NO_REFERENCED_ROW_2', 'ER_ROW_IS_REFERENCED_2', 'P2003'].map(
+      (code) => [code, { code }, { code: code + 'x' }, 'foreign-key'] as const,
+    ),
+    ...['ForeignKeyConstraintViolation', 'RestrictViolation'].map(
+      (kind) => [kind, adapterCause(kind), adapterCause(kind + 'x'), 'foreign-key'] as const,
+    ),
+    ...['23502', 'ER_BAD_NULL_ERROR', 'ER_NO_DEFAULT_FOR_FIELD', 'P2011'].map(
+      (code) => [code, { code }, { code: code + 'x' }, 'not-null'] as const,
+    ),
+    [
+      'NullConstraintViolation',
+      adapterCause('NullConstraintViolation'),
+      adapterCause('NullConstraintViolationX'),
+      'not-null',
+    ],
+    ...['', 'D1_ERROR: '].flatMap((prefix) => [
+      [
+        `${prefix}FK anchor`,
+        { message: prefix + 'FOREIGN KEY constraint failed' },
+        { message: 'prefix ' + prefix + 'FOREIGN KEY constraint failed' },
+        'foreign-key',
+      ] as const,
+      [
+        `${prefix}NOT NULL anchor`,
+        { message: prefix + 'NOT NULL constraint failed: t.field' },
+        { message: 'prefix ' + prefix + 'NOT NULL constraint failed: t.field' },
+        'not-null',
+      ] as const,
+    ]),
+    ...['55P03', 'ER_LOCK_WAIT_TIMEOUT'].map(
+      (code) => [code, { code }, { code: code + 'x' }, 'conflict'] as const,
+    ),
+    ['mariadb lock', adapterCause('mysql', '1205'), { code: '1205' }, 'conflict'],
+  ];
+  for (const [label, input, negative, expected, backend] of rows) {
+    it(`${label} classifies with a negative control`, () => {
+      expect(classifyDriverError(input, backend)).toBe(expected);
+      expect(classifyDriverError(negative, backend)).not.toBe(expected);
+      expect(isLockTimeout(input, backend)).toBe(expected === 'conflict');
+      expect(isLockTimeout(negative, backend)).toBe(false);
+    });
+  }
+  it('keeps gRPC namespaces and connection-lost reasons distinct', () => {
+    expect(classifyDriverError({ code: 4 }, 'mongodb')).toBeNull();
+    for (const code of ['ECONNRESET', 'EPIPE']) {
+      expect(isConnectionLostMidCall({ name: 'TimeoutError', code })).toBe(true);
+      expect(isConnectionLostMidCall({ code })).toBe(false);
+    }
+    expect(isConnectionLostMidCall({ code: 'P1017' })).toBe(true);
+    expect(isConnectionLostMidCall(adapterCause('ConnectionClosed'))).toBe(true);
+    expect(isConnectionLostMidCall({ code: 'P1008' })).toBe(false);
+    expect(isConnectionLostMidCall(adapterCause('SocketTimeout'))).toBe(false);
+  });
+  it('classifies real Mongo subclasses most-derived first', async () => {
+    const { MongoNetworkTimeoutError, MongoOperationTimeoutError } = await import('mongodb');
+    // The installed driver keeps this real subclass in an untyped internal module.
+    const errorModule = 'mongodb/lib/cmap/errors.js';
+    const { PoolClearedOnNetworkError } = (await import(errorModule)) as {
+      PoolClearedOnNetworkError: new (pool: { address: string }) => Error;
+    };
+    const pool = { address: 'localhost:27017' };
+    const cleared = new PoolClearedOnNetworkError(pool);
+    expect(classifyDriverError(cleared, 'mongodb')).toBe('unavailable');
+    expect(classifyDriverError(new MongoNetworkTimeoutError('socket'), 'mongodb')).toBe('timeout');
+    expect(classifyDriverError(new MongoOperationTimeoutError('operation'), 'mongodb')).toBe(
+      'timeout',
+    );
+    expect(classifyDriverError({ name: 'PoolClearedOnNetworkError' }, 'mongodb')).toBeNull();
+  });
+  it('bounds and guards prototype names', () => {
+    const parent = { name: 'MongoNetworkError' };
+    expect(classifyDriverError(Object.create(parent) as object)).toBe('unavailable');
+    const derived = Object.assign(Object.create(parent) as object, {
+      name: 'MongoNetworkTimeoutError',
+    });
+    expect(classifyDriverError(derived)).toBe('timeout');
+    const hostile = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error('hostile');
+        },
+      },
+    );
+    expect(classifyDriverError(hostile)).toBeNull();
+    let deep: object = parent;
+    for (let i = 0; i < 9; i++) deep = Object.create(deep) as object;
+    Object.defineProperty(deep, 'name', { value: 'Unknown' });
+    expect(classifyDriverError(deep)).toBeNull();
+  });
+  for (const [label, input, negative] of [
+    ['22001', { code: '22001' }, { code: '22012' }],
+    ...['P2000', 'P2020'].map(
+      (code) =>
+        [
+          code,
+          { name: 'PrismaClientKnownRequestError', code },
+          { name: 'OtherError', code },
+        ] as const,
+    ),
+    ...['LengthMismatch', 'ValueOutOfRange'].map(
+      (kind) => [kind, adapterCause(kind), adapterCause(kind + 'x')] as const,
+    ),
+    ...['ER_DATA_TOO_LONG', 'ER_WARN_DATA_OUT_OF_RANGE'].map(
+      (code) => [code, { code }, { code: code + 'x' }] as const,
+    ),
+    ['adapter originalCode', adapterCause('postgres', '22001'), adapterCause('postgres', '22012')],
+  ] as const) {
+    it(`value refusal ${label} with a negative control`, () => {
+      expect(refusedInputOf(input)).toEqual({ kind: 'value' });
+      expect(isValueTypeRefusal(input)).toBe(true);
+      expect(refusedInputOf(negative)).toBeNull();
+      expect(isValueTypeRefusal(negative)).toBe(false);
+    });
+  }
+});
 
 describe('MySQL driver signals', () => {
   for (const [kind, originalCode, expected] of [
@@ -97,6 +273,11 @@ describe('classifyDriverError — conflict signals (409)', () => {
 describe('classifyDriverError — unavailable signals (503)', () => {
   it('PostgreSQL SQLSTATE class 08', () => {
     expect(classifyDriverError({ code: '08006' })).toBe('unavailable');
+    // Class 08 is a five-character SQLSTATE; an application code is not one.
+    for (const code of ['08-PHONE-INVALID', '080', '08abc']) {
+      expect(classifyDriverError({ code })).toBeNull();
+      expect(classifyDriverError({ code }, 'custom', 'transaction-work')).toBeNull();
+    }
   });
 
   it('PostgreSQL 57P03 cannot_connect_now', () => {
@@ -118,7 +299,7 @@ describe('classifyDriverError — unavailable signals (503)', () => {
   });
 
   it('the AWS SDK network-error names', () => {
-    expect(classifyDriverError({ name: 'TimeoutError' })).toBe('unavailable');
+    expect(classifyDriverError({ name: 'TimeoutError' })).toBe('timeout');
     expect(classifyDriverError({ name: 'NetworkingError' })).toBe('unavailable');
   });
 
@@ -259,8 +440,8 @@ describe('classifyDriverError — duplicate-key signals (409, not retryable)', (
     expect(classifyDriverError({ code: 409 })).toBeNull();
   });
 
-  it('leaves other SQLite constraint failures alone', () => {
-    expect(classifyDriverError(new Error('NOT NULL constraint failed: a.email'))).toBeNull();
+  it('maps NOT NULL and leaves CHECK constraint failures alone', () => {
+    expect(classifyDriverError(new Error('NOT NULL constraint failed: a.email'))).toBe('not-null');
     expect(classifyDriverError(new Error('CHECK constraint failed: positive'))).toBeNull();
   });
 
@@ -326,7 +507,7 @@ describe('classifyDriverError — the walk', () => {
 
   it('an unrecognised error returns null — it keeps the masked 500', () => {
     expect(classifyDriverError(new Error('something unrelated'))).toBe(null);
-    expect(classifyDriverError({ code: '23502' })).toBe(null); // not_null_violation
+    expect(classifyDriverError({ code: '23502' })).toBe('not-null');
     expect(classifyDriverError({ code: '40003' })).toBe(null); // completion unknown
   });
 

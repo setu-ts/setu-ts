@@ -117,6 +117,69 @@ cutting a release renames that heading to the version and is a rename, not a rec
   including with a finite bound. A stop during startup ends pending waits and leaves no late
   service/health registration; a messaging backplane connect overtaken by close rejects.
 
+### Database refusals and store signals (`@setu-ts/database-plugin`, `@setu-ts/common`, audit, agent runs, vector store and multi-tenancy)
+
+Problem Details database responses now use eleven condition-specific type URIs and titles instead of
+`about:blank` and the status title. If a client switches on type/title, update it using
+[Database problem types](problem-types.md). Distinguish write/lock conflict (retry), stale version
+(reload then retry), and duplicate/FK violations (change the write). The `default` response format
+is unchanged and still has no type. `ERROR_TYPE_BASE` keeps its value and exceptions re-exports it
+from common; existing imports still work. Do not mutate DATABASE_PROBLEM_TYPES or its entries.
+
+A TimeoutError now answers 504 rather than 503, including one whose own code is ETIMEDOUT; a
+TimeoutError wrapping a separate connection-errno cause still answers 503. Bigtable's gRPC deadline,
+Cosmos's SDK timeout and Prisma P1008/SocketTimeout also answer 504; P1017/ConnectionClosed is
+connection-lost, also 504. A timed-out write may have run: use an idempotency key or reconcile the
+stored result before retrying. Bare ECONNRESET/EPIPE and MongoNetworkError still answer 503,
+including bare Cosmos socket errors; do not infer a known write outcome from them. DynamoDB SDK
+TimeoutError now follows the unknown-outcome rule. MongoDB pool-cleared subclasses remain 503.
+
+Foreign-key violations now answer 409, NOT NULL and repository length/range refusals 400, and lock
+wait timeouts 409. Catch the named errors or inspect problem.type instead of treating every 409 as
+retryable. Raw query/native work still has no repository entity for value-refusal mapping.
+Database-specific errors thrown inside db.transaction are now classified; generic network errors
+from foreign calls, application-wrapped causes and errors with a numeric `statusCode` (an
+`HttpError`) remain application errors. Native Drizzle errors outside a transaction still reach the
+caller as thrown. Commit maps only duplicate, conflict, FK and NOT NULL verdicts, never
+UnknownTransactionCommitResult or unavailable/timeouts.
+
+`idempotency.within` no longer treats any status-only 409 as a holder conflict. A store-side FK or
+other unrelated 409 becomes store-failed. Custom transactional stores should raise DuplicateKeyError
+for a claim race, or use a write-conflict/lock-timeout problem hint. The duplicate-key problem type
+also works across copies of common. A function's own error still propagates as before.
+
+Drizzle with pg-pool gets capacity counters by default; remove a manual poolStats callback if it
+only reads those counters. Explicit callbacks win. mysql2 and Prisma have no matching public
+counters. Releases now report progress for native queries too: a full pool without releases for the
+progress window becomes degraded, even after taking a typed handle. Configure server/driver bounds
+so a hung call releases its connection. pg-pool acquire timeout has reason pool-saturated; mariadb
+45028 remains unreachable. No classified error adds Retry-After.
+
+To make an audit row atomic with a business write, select database storage and call
+`audit.log(entry, { scope: uow })` inside db.transaction. Register the entity named by options.table
+with snake_case properties resource_id and user_id. Memory/log/file reject a scope with
+AuditScopeUnsupportedError and write nothing; omit scope only when an independent write is intended.
+Stamping and redaction apply to both paths. DynamoDB buffered plain update/delete pre-reads now use
+ConsistentRead: true, costing one RCU per 4 KB. Outer writes still send no GetItem. Unsupported
+conditional writes name their adapter. A directly constructed `BaseRepository` without an adapter
+type names `database-plugin`; `PrismaRepository` and `DrizzleRepository` name `prisma` and
+`drizzle`.
+
+Failed model calls now log the original error's class and status hint, without provider text. Update
+class-based alerts that matched generic Error. Cancelling a replay stream waits for its in-flight
+store read and starts no further read; bound the store, for example with pg query_timeout. The
+run-budget recipe in [durable runs](durable-runs.md#budgeting-a-run) builds one shared quota at
+composition and uses the AI guide's saved middleware/usage modules.
+
+The vector-store readiness probe warns on the first failure, repeats the same cause at debug and
+logs recovery at info. A changed cause warns again. pgvector distinguishes a missing index from a
+present but wrong relation: drop the wrong relation and create the expected index. Its saturation
+rule still belongs to its own pool and differs from DatabasePlugin's.
+
+Multi-tenancy now rejects a non-resolver array member at register(), naming its index; unknown name
+strings and single objects without resolve are refused too. Pass resolver instances such as new
+HeaderResolver() in arrays, or one supported name string. Fix these configurations before startup.
+
 ### Discovery and gRPC calls (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`)
 
 Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`
@@ -2638,10 +2701,12 @@ supplied, a saturated pool reports `up` with `reachable: 'unknown'` while its qu
 completing through the adapter (a full pool with no completed query in 10 seconds reports
 `degraded`; queries run on your own Drizzle instance are not counted, while once the typed
 `getDrizzleDatabase`/`getDrizzleTransaction` seam is used progress is unobservable and saturation
-reads `up`). An alert that paged on `down` for pool exhaustion should watch `degraded` or
-`data.capacity` instead. Separately, a queue depth row the latest diagnostics cycle could not read
-is now absent rather than repeating the previous count; a dashboard should read `depthCoverage`
-instead of assuming every name has a row.
+reads `up`). Since 0.14.0, on pg-pool, error-free client releases count every query, so that
+native-handle exemption ends there; it still applies to other clients. Counters are inferred by
+default on pg-pool; see the Unreleased database entry above. An alert that paged on `down` for pool
+exhaustion should watch `degraded` or `data.capacity` instead. Separately, a queue depth row the
+latest diagnostics cycle could not read is now absent rather than repeating the previous count; a
+dashboard should read `depthCoverage` instead of assuming every name has a row.
 
 ### Raise `commandTimeoutMs` for a slow Redis network
 

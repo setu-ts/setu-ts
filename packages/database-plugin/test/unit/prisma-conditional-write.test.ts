@@ -214,6 +214,14 @@ describe('Prisma conditional translation', () => {
               detail: unknownField
                 ? 'The request names a field this resource does not have.'
                 : 'A supplied value does not fit the type of its field.',
+              ...(!unknownField
+                ? {
+                    problem: {
+                      type: 'https://setu-ts.dev/errors/invalid-field-value',
+                      title: 'Invalid Field Value',
+                    },
+                  }
+                : {}),
             });
             expect((mapped as Error).cause).not.toBe(error);
             expect((mapped as Error).cause).toMatchObject({

@@ -13,6 +13,35 @@ import type { MultiTenancyService } from '../../src/services/multi-tenancy-servi
 import type { ILogger, IPluginContext } from '@setu-ts/common';
 import manifest from '../../deno.json' with { type: 'json' };
 
+describe('resolver configuration validation', () => {
+  for (const value of [
+    ['header', 'subdomain'],
+    [new HeaderResolver(), null],
+    [new HeaderResolver(), {}],
+    'unknown-resolver',
+    {},
+  ]) {
+    it(`refuses non-resolvers at registration: ${JSON.stringify(value)}`, async () => {
+      const resolver = value as unknown as NonNullable<
+        Parameters<typeof MultiTenancyPlugin>[0]
+      >['resolver'];
+      const plugin = MultiTenancyPlugin({ resolver });
+      await expect(
+        Promise.resolve().then(() => plugin.register(ctxAsPlugin(makeMockContext()))),
+      ).rejects.toThrow(/resolver/i);
+      if (Array.isArray(value)) {
+        await expect(
+          Promise.resolve().then(() => plugin.register(ctxAsPlugin(makeMockContext()))),
+        ).rejects.toThrow(`index ${typeof value[0] === 'string' ? 0 : 1}`);
+      } else if (typeof value === 'string') {
+        await expect(
+          Promise.resolve().then(() => plugin.register(ctxAsPlugin(makeMockContext()))),
+        ).rejects.toThrow(value);
+      }
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Types — minimal interfaces to avoid `as any`
 // ---------------------------------------------------------------------------
@@ -557,7 +586,9 @@ describe('multi tenancy plugin', () => {
     const plugin = MultiTenancyPlugin({ resolver: 'unknown-strategy' as 'header' });
     // An empty chain resolves no tenant for any request, forever — it must not
     // register cleanly and degrade silently.
-    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow('empty resolver chain');
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow(
+      "Unknown tenant resolver name 'unknown-strategy'",
+    );
     expect(ctx.registeredServices.has(CAPABILITIES.MULTI_TENANCY)).toBe(false);
     expect(ctx.addedMiddlewares.length).toEqual(0);
   });
@@ -596,7 +627,9 @@ describe('multi tenancy plugin', () => {
   it('plugin — an absent resolver throws at register', () => {
     const ctx = makeMockContext();
     const plugin = MultiTenancyPlugin({ resolver: undefined as unknown as 'header' });
-    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow('empty resolver chain');
+    expect(() => plugin.register(ctxAsPlugin(ctx))).toThrow(
+      "Unknown tenant resolver name 'undefined'",
+    );
   });
 
   // ---------------------------------------------------------------------------

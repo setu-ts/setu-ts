@@ -215,6 +215,8 @@ export class PgVectorStore implements IVectorStoreAdapter {
       dimensions: number;
       source_index: boolean;
       vector_index: boolean;
+      vector_index_present: boolean;
+      source_index_present: boolean;
       source_version: boolean;
     }>(this.#db, describeStatement(sql, spec));
     const { table } = tableNames(spec);
@@ -230,6 +232,15 @@ export class PgVectorStore implements IVectorStoreAdapter {
     }
     // Only a real boolean true passes: a driver returning 'f' must not read as present.
     if (row.source_index !== true || row.vector_index !== true) {
+      const vector = row.vector_index !== true;
+      const present = vector ? row.vector_index_present : row.source_index_present;
+      if (present === true) {
+        const name = vector ? `${table}_hnsw` : `${table}_src`;
+        const definition = vector ? 'HNSW (embedding vector_cosine_ops)' : '(scope, source_id)';
+        throw new VectorCollectionMismatchError(
+          `pgvector: '${table}' has a relation named '${name}' that is not the expected valid, non-partial ${definition} index on '${table}'; drop it and create it as expected.`,
+        );
+      }
       throw new VectorCollectionMismatchError(
         `pgvector: '${table}' is missing its ${row.vector_index !== true ? 'HNSW' : 'source'} index: expected ${row.vector_index !== true ? `${table}_hnsw ON ${table} USING hnsw (embedding vector_cosine_ops)` : `${table}_src ON ${table} (scope, source_id)`}.`,
       );

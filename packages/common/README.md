@@ -441,10 +441,12 @@ package fits the plugin architecture.
 | `CSRF_EXEMPT_STATE_KEY`               | const     |
 | `CSRF_TOKEN_ACCESS_STATE_KEY`         | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
+| `DATABASE_PROBLEM_TYPES`              | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
 | `ERROR_RESPONDER_BRAND`               | const     |
 | `ERROR_RESPONDER_STATE_KEY`           | const     |
+| `ERROR_TYPE_BASE`                     | const     |
 | `FORM_FILE_METADATA`                  | const     |
 | `HTTP_STATUS_HINT`                    | const     |
 | `IDEMPOTENCY_METADATA`                | const     |
@@ -487,6 +489,7 @@ package fits the plugin architecture.
 | `AgentRunSweepReport`                 | interface |
 | `AgentRunView`                        | interface |
 | `AuditEntry`                          | interface |
+| `AuditLogOptions`                     | interface |
 | `AuthorizationDecisionObservation`    | interface |
 | `AuthorizationDecisionStep`           | interface |
 | `AuthorizationDiagnosticsBatch`       | interface |

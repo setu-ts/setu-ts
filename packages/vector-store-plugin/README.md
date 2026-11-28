@@ -300,8 +300,10 @@ CREATE INDEX vs_documents_hnsw ON vs_documents USING hnsw (embedding vector_cosi
 
 An index with the right name but another table, columns, access method or operator class (an L2
 `vector_l2_ops` HNSW index, say) is refused with `VectorCollectionMismatchError` naming the expected
-definition. `ensure: 'create'` does not replace such an index either, so it refuses it too. Every
-collection uses cosine distance.
+definition: "has a relation named … that is not the expected valid, non-partial … index". The check
+distinguishes a missing name from a present but wrong relation, including an invalid or partial
+index. Drop the wrong relation and create the expected index. `ensure: 'create'` does not replace
+such an index either, so it refuses it too. Every collection uses cosine distance.
 
 Every query runs in a transaction with `hnsw.ef_search` raised to at least 40 and
 `hnsw.iterative_scan = strict_order`, so filtered searches keep recall and results stay in distance
@@ -421,15 +423,23 @@ probe that fails, rejects or runs past that bound reports `down` with `reachable
 | `VectorizeVectorStore` | the index's `describe()`                                                                 |
 | `MemoryVectorStore`    | always reachable                                                                         |
 
+The indicator reports a probe's cause through the plugin logger. An outage's first failure logs at
+`warn`; repeats of the same description log at `debug`, and a changed cause warns again. Recovery
+logs once at `info`. A returned `false` reports "reported unreachable"; a timeout reports "did not
+answer within 2000 ms". Only the first outcome counts, so a late result cannot log a recovery after
+timeout. A returned `undefined` reports nothing.
+
 A saturated node-postgres pool, with no idle connection and either callers waiting or every
 connection it may open already open, is not by itself an outage. `PgVectorStore` queues no probe
 behind that traffic. When the pool's `connectionTimeoutMillis` is under the 2-second probe bound, it
 also reads the probe's own pool-acquire timeout as the same saturation. The indicator stays `up`
 with `reachable: 'unknown'` while the adapter's own statements keep completing, or none is running.
-Once they have stopped completing for 10 seconds it reports `down`. This is database-plugin's
-progress rule; database-plugin reports that last case as `degraded`, and both fail `/ready`. An
-adapter without `isHealthy()` stays `up` with `reachable: 'unknown'`. After shutdown the indicator
-reports `down` with `state: 'closed'`. To keep it out of readiness, exclude it in
+Once they have stopped completing for 10 seconds it reports `down`. This plugin owns its own pool
+and counts its own statement completions. DatabasePlugin counts error-free pg-pool releases,
+including native queries, and requires `idle === 0 && waiting > 0` (or a probe acquire timeout); its
+stale-progress case is `degraded`. Both fail `/ready`. An adapter without `isHealthy()` stays `up`
+with `reachable: 'unknown'`. After shutdown the indicator reports `down` with `state: 'closed'`. To
+keep it out of readiness, exclude it in
 `HealthPlugin({ readiness: { exclude: ['vector-store'] } })`.
 
 ## Errors

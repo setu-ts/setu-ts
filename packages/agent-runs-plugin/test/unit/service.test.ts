@@ -95,7 +95,11 @@ describe('AgentRunService', () => {
     let signal: AbortSignal | undefined;
     ai.model.mockImplementation((options) => {
       signal = options.abortSignal;
-      return { chunks: new ReadableStream(), result: () => new Promise(() => {}) };
+      return {
+        chunks: new ReadableStream(),
+        failure: () => undefined,
+        result: () => new Promise(() => {}),
+      };
     });
     const h = await harness(definition(), ai);
     const remote = new AgentRunService(h.deps);
@@ -226,7 +230,11 @@ describe('AgentRunService', () => {
     let signal: AbortSignal | undefined;
     ai.model.mockImplementation((options) => {
       signal = options.abortSignal;
-      return { chunks: new ReadableStream(), result: () => new Promise(() => {}) };
+      return {
+        chunks: new ReadableStream(),
+        failure: () => undefined,
+        result: () => new Promise(() => {}),
+      };
     });
     const h = await harness(definition(), ai);
     try {
@@ -280,6 +288,7 @@ describe('AgentRunService', () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream({ start: (c) => c.close() }),
+      failure: () => undefined,
       result: async () => {
         await gate;
         return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
@@ -335,6 +344,7 @@ describe('AgentRunService', () => {
     const gate = new Promise<void>((resolve) => (release = resolve));
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream({ start: (c) => c.close() }),
+      failure: () => undefined,
       result: async () => {
         await gate;
         return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };
@@ -392,6 +402,7 @@ describe('AgentRunService', () => {
     const modelCalled = new Promise<void>((resolve) => (modelStarted = resolve));
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream({ start: (c) => c.close() }),
+      failure: () => undefined,
       result: async () => {
         modelStarted();
         await runGate;
@@ -434,6 +445,7 @@ describe('AgentRunService', () => {
     const runGate = new Promise<void>((resolve) => (releaseRun = resolve));
     ai.model.mockImplementation(() => ({
       chunks: new ReadableStream({ start: (c) => c.close() }),
+      failure: () => undefined,
       result: async () => {
         await runGate;
         return { messages: [{ role: 'assistant', content: 'x' }], finishReason: 'stop', usage: {} };

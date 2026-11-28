@@ -718,6 +718,48 @@ const OUTAGE_BOUND_MS = 1000;
 const OUTAGE_SLACK_MS = 1000;
 
 describe('DynamoAdapter behind a frozen relay (guarded)', () => {
+  it(
+    'SDK requestTimeout with the plugin bound disabled serves 504 with reason bound',
+    { skip: skipReal, timeout: 15_000 },
+    async () => {
+      const relay = await startFrozenRelay(relayTarget(endpoint));
+      const adapter = new DynamoAdapter({
+        endpoint: `http://${relay.host}:${relay.port}`,
+        region,
+        credentials,
+        requestTimeoutMs: 0,
+        clientOptions: {
+          maxAttempts: 1,
+          requestHandler: { requestTimeout: 200, throwOnRequestTimeout: true },
+        },
+        entities: { Outage: mapping(outageTables.outage, 'id') },
+      });
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'dynamodb',
+      );
+      try {
+        await adapter.connect();
+        const repository = service.getRepository('Outage');
+        await expect(repository.findById('absent')).resolves.toBeNull();
+        relay.freeze();
+        const result = await timed(() => repository.findById('absent'));
+        expect(result.outcome).toBe('rejected');
+        if (result.outcome === 'rejected') {
+          expect(result.error).toBeInstanceOf(DatabaseTimeoutError);
+          expect(result.error).toHaveProperty('reason', 'bound');
+          expect(httpStatusHintOf(result.error)?.status).toBe(504);
+          expect((result.error as Error).cause).toHaveProperty('name', 'TimeoutError');
+          expect((result.error as Error).cause).toHaveProperty('code', 'ETIMEDOUT');
+        }
+        expect(result.elapsedMs).toBeLessThan(3_000);
+      } finally {
+        relay.thaw();
+        await cleanupAll([() => service.close(), () => relay.close()]);
+      }
+    },
+  );
   const outageTables = { outage: table('outage'), ready: table('ready') } as const;
   let outageAdmin: DynamoDBClient | undefined;
 

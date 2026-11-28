@@ -732,6 +732,51 @@ const OUTAGE_SLACK_MS = 1000;
 
 describe('CosmosAdapter behind a frozen relay (guarded)', () => {
   it(
+    'SDK requestTimeout with the plugin bound disabled serves 504 with reason bound',
+    { skip: skipReal, timeout: 15_000 },
+    async () => {
+      const container = await provision(`sdk_timeout_${suffix}`, '/id');
+      const relay = await startFrozenRelay(relayTarget(endpoint ?? ''));
+      const adapter = new CosmosAdapter({
+        endpoint: `http://${relay.host}:${relay.port}/`,
+        key,
+        database: databaseId,
+        requestTimeoutMs: 0,
+        clientOptions: {
+          connectionPolicy: {
+            requestTimeout: 200,
+            enableEndpointDiscovery: false,
+            retryOptions: { maxRetryAttemptCount: 0 },
+          },
+        },
+        containers: { Outage: { container, partitionKey: 'id' } },
+      });
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter.createDataSource(entity),
+        'cosmos',
+      );
+      try {
+        await adapter.connect();
+        const repository = service.getRepository('Outage');
+        await expect(repository.findById('absent')).resolves.toBeNull();
+        relay.freeze();
+        const result = await timed(() => repository.findById('absent'));
+        expect(result.outcome).toBe('rejected');
+        if (result.outcome === 'rejected') {
+          expect(result.error).toBeInstanceOf(DatabaseTimeoutError);
+          expect(result.error).toHaveProperty('reason', 'bound');
+          expect(httpStatusHintOf(result.error)?.status).toBe(504);
+          expect((result.error as Error).cause).toHaveProperty('code', 'TimeoutError');
+        }
+        expect(result.elapsedMs).toBeLessThan(3_000);
+      } finally {
+        relay.thaw();
+        await cleanupAll([() => service.close(), () => relay.close()]);
+      }
+    },
+  );
+  it(
     'ends a point read, a page, a write and a unit of work with 504 within requestTimeoutMs',
     { skip: skipReal, timeout: 60_000 },
     async () => {

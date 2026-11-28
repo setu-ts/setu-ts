@@ -121,8 +121,8 @@ describe('versioned write statuses through errorHandler', () => {
         expect(response.headers.get('content-type')).toContain('application/problem+json');
         const body = response.json<Record<string, unknown>>();
         expect(body).toEqual({
-          type: 'about:blank',
-          title,
+          type: status === 409 ? 'https://setu-ts.dev/errors/version-conflict' : 'about:blank',
+          title: status === 409 ? 'Version Conflict' : title,
           status,
           detail,
           instance: `/articles/${id}`,

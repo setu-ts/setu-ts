@@ -53,6 +53,7 @@ import {
   readQueryProgress,
 } from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
+import { observePoolReleases } from '../health/pool-progress.ts';
 import { VERSION } from '../version.ts';
 import {
   createMigrationReadiness,
@@ -162,10 +163,14 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       const createDataSource = (entity: string): DataSource => adapter.createDataSource(entity);
 
       // Optional logger resolution.
+      let stopPoolProgress: (() => void) | undefined;
       if (adapterType === 'drizzle') {
         const identity = (adapterOptions as DrizzleAdapterOptions).drizzleInstance;
         const database = readDrizzleDatabase(identity).database;
         attachPoolErrorListener(database, (message, meta) => logger?.warn(message, meta));
+        // pg-pool releases are progress for every query, the native handle's
+        // included, so they keep a hung database observable (D-9).
+        stopPoolProgress = observePoolReleases(database, adapter);
       }
 
       // Monotonic clock from runtime (NEVER Date.now()).
@@ -205,8 +210,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // clock, 2-second bound on the runtime's timers) now owns every
       // adapter call and coalesces concurrent polls, so a driver that
       // answers readiness slowly cannot hold `/health` past the bound. A
-      // Drizzle registration with `poolStats` publishes the
-      // application-supplied capacity snapshot — data, never a threshold.
+      // Drizzle registration publishes a capacity snapshot from `poolStats`,
+      // or from pg-pool's public counters — data, never a threshold.
       const probe = createCachedProbe({
         probe: () => service.isHealthy(),
         ttlMs: PROBE_TTL_MS,
@@ -297,7 +302,8 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           // completing is a hung database and falls through to `degraded`.
           // Both are re-read here: the probe above awaited, and the snapshot
           // taken before it may be stale.
-          // An adapter that cannot see all traffic reports progress as
+          // An adapter that cannot see all traffic (a native handle on a
+          // client without pg-pool release events) reports progress as
           // unobservable: a count that does not move then proves nothing, so
           // a saturated pool keeps the pre-M101a-review reading (`up`) rather
           // than pulling every busy replica at once.
@@ -342,6 +348,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
       // Register shutdown hook.
       ctx.lifecycle.onClose(async () => {
+        stopPoolProgress?.();
         await service.close();
       });
     },

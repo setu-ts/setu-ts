@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { z as z3 } from 'zod/v3';
 import { harness, definition } from '../fixtures/harness.ts';
 import { runTool, toolKey, ToolConflict } from '../../src/loop/tool-runner.ts';
+import { IdempotencyWithinError } from '@setu-ts/idempotency-plugin';
 describe('transactional tool runner', () => {
   it('derives a stable key, supplies only its context and replays once', async () => {
     const h = await harness();
@@ -161,7 +162,18 @@ describe('transactional tool runner', () => {
       const spy = vi
         .spyOn(h.deps.idempotency, 'within')
         .mockRejectedValueOnce(conflict)
+        .mockRejectedValueOnce(new IdempotencyWithinError('conflict', 'another call holds the key'))
         .mockRejectedValueOnce(new Error('store'));
+      await expect(
+        runTool(
+          h.deps,
+          definition(),
+          context,
+          await toolKey(h.runtime, context.runId, 0, call.toolCallId),
+          call,
+          [],
+        ),
+      ).rejects.toBeInstanceOf(ToolConflict);
       await expect(
         runTool(
           h.deps,

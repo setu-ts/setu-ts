@@ -73,15 +73,14 @@ interface Row {
 
 const CONSTRUCTIONS: readonly Row[] = [
   {
-    // A replay pump started in `start` reads the run store until closed;
-    // `cancel()` only sets the flag, so a store read can outlive the cleanups.
+    // Cancellation waits for the replay pump's final store read to settle.
     file: 'packages/agent-runs-plugin/src/log/respond.ts',
     count: 1,
-    cancelSettles: 'always',
-    kind: 'cancel-does-not-await',
-    evidence: /void \(async \(\) => \{[\s\S]*cancel\(\) \{\s*abort\(\);\s*\}/,
+    cancelSettles: 'may-hang',
+    kind: 'cancel-awaits-work',
+    evidence: /pump = \(async \(\) => \{[\s\S]*async cancel\(\) \{\s*abort\(\);\s*await pump;/,
     handOver:
-      'Data lane (agent-runs-plugin, M143q/M143h): make cancel() wait for the replay pump, which reads the run store',
+      'Data lane: cancel() awaits a store read that has no bound of its own; bound the store (pg query_timeout), as the database README documents',
   },
   {
     file: 'packages/graphql-plugin/src/transports/sse/graphql-sse-handler.ts',

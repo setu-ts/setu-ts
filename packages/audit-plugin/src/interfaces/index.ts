@@ -7,7 +7,12 @@
  *
  * @module
  */
-import type { ILogger, IRedactionService, RedactionPolicy } from '@setu-ts/common';
+import type {
+  ILogger,
+  IOutboxWriteScope,
+  IRedactionService,
+  RedactionPolicy,
+} from '@setu-ts/common';
 
 /**
  * A stored audit record extends {@linkcode AuditEntry} with an internally
@@ -72,6 +77,8 @@ export interface IAuditStorage {
    * Appends a fully stamped and frozen entry to the trail.
    */
   append(entry: StoredAuditEntry): Promise<void>;
+  /** Appends through a caller's transaction; absent on non-transactional sinks. */
+  appendIn?(scope: IOutboxWriteScope, entry: StoredAuditEntry): Promise<void>;
   /**
    * Returns matching entries ordered ascending by `timestamp`. When `limit`
    * is set, returns the newest `limit` records still in ascending order.

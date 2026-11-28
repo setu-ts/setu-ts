@@ -4,10 +4,153 @@ import { harness, row } from '../fixtures/harness.ts';
 import { respond } from '../../src/log/respond.ts';
 import { claim } from '../../src/lease/lease.ts';
 import { ChunkLog } from '../../src/log/chunk-log.ts';
+import { setTimeout as nextTurn } from 'node:timers/promises';
 async function read(ctx: ReturnType<Awaited<ReturnType<typeof harness>>['ctx']>): Promise<string> {
   return new Response(ctx.response.snapshot().body as ReadableStream<Uint8Array>).text();
 }
 describe('stream replay', () => {
+  it('cancel during the poll wait starts no further get or chunks read', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'poll-cancel' });
+      await h.store.create(current);
+      const get = vi.spyOn(h.store, 'get');
+      const chunks = vi.spyOn(h.store, 'chunks');
+      const ctx = h.ctx();
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 17,
+      });
+      await nextTurn(0);
+      expect([...h.timers.values()].some((timer) => timer.ms === 17)).toBe(true);
+      const counts = [get.mock.calls.length, chunks.mock.calls.length];
+      await (ctx.response.snapshot().body as ReadableStream<Uint8Array>).cancel();
+      await nextTurn(0);
+      expect([get.mock.calls.length, chunks.mock.calls.length]).toEqual(counts);
+      expect(h.timers.size).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
+  for (const operation of ['get', 'chunks'] as const) {
+    it(`cancel waits for a held ${operation} store read, including a late rejection`, async () => {
+      const h = await harness();
+      try {
+        for (const reject of [false, true]) {
+          await h.store.create(row({ id: 'held-' + operation + reject }));
+          const current = row({ id: 'held-' + operation + reject });
+          const entered = Promise.withResolvers<void>();
+          const release = Promise.withResolvers<void>();
+          const afterGet = operation === 'get' ? vi.spyOn(h.store, 'chunks') : undefined;
+          const spy =
+            operation === 'get'
+              ? vi.spyOn(h.store, 'get').mockImplementationOnce(async (id) => {
+                  entered.resolve();
+                  await release.promise;
+                  return h.store.get(id);
+                })
+              : vi.spyOn(h.store, 'chunks').mockImplementationOnce(async (run, from) => {
+                  entered.resolve();
+                  await release.promise;
+                  return h.store.chunks(run, from);
+                });
+          const ctx = h.ctx();
+          await respond(ctx, current, {
+            store: h.store,
+            runtime: h.runtime,
+            headers: {},
+            pollIntervalMs: 1,
+          });
+          await entered.promise;
+          let settled = false;
+          const cancelled = (ctx.response.snapshot().body as ReadableStream<Uint8Array>)
+            .cancel()
+            .then(() => {
+              settled = true;
+            });
+          // A full event-loop turn also catches an async cancel with no pump await.
+          await nextTurn(0);
+          expect(settled).toBe(false);
+          if (reject) release.reject(new Error('late store failure'));
+          else release.resolve();
+          await cancelled;
+          expect(settled).toBe(true);
+          if (afterGet !== undefined) expect(afterGet).not.toHaveBeenCalled();
+          expect(h.timers.size).toBe(0);
+          spy.mockRestore();
+          afterGet?.mockRestore();
+        }
+      } finally {
+        await h.close();
+      }
+    });
+  }
+  it('a disconnect keeps the stream open until a held read settles, so a later cancel waits', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'signal-first' });
+      await h.store.create(current);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const get = vi.spyOn(h.store, 'get').mockImplementationOnce(async (id) => {
+        entered.resolve();
+        await release.promise;
+        return h.store.get(id);
+      });
+      const chunks = vi.spyOn(h.store, 'chunks');
+      const signal = new AbortController();
+      const ctx = { ...h.ctx(), signal: signal.signal };
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+      });
+      await entered.promise;
+      // The request aborts first, then the consumer cancels: the kernel's order.
+      signal.abort();
+      let settled = false;
+      const cancelled = (ctx.response.snapshot().body as ReadableStream<Uint8Array>)
+        .cancel()
+        .then(() => {
+          settled = true;
+        });
+      await nextTurn(0);
+      expect(settled).toBe(false);
+      release.resolve();
+      await cancelled;
+      expect(chunks).not.toHaveBeenCalled();
+      expect(h.timers.size).toBe(0);
+      get.mockRestore();
+      chunks.mockRestore();
+    } finally {
+      await h.close();
+    }
+  });
+  it('an already-aborted request starts no store read and ends the stream', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'pre-aborted' });
+      await h.store.create(current);
+      const get = vi.spyOn(h.store, 'get');
+      const signal = new AbortController();
+      signal.abort();
+      const ctx = { ...h.ctx(), signal: signal.signal };
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+      });
+      expect(await read(ctx)).toBe('');
+      expect(get).not.toHaveBeenCalled();
+      get.mockRestore();
+    } finally {
+      await h.close();
+    }
+  });
   it('closes tails when the request disconnects, including before subscription', async () => {
     const h = await harness();
     try {

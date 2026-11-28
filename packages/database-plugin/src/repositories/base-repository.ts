@@ -14,6 +14,7 @@ import {
   PageNormalizationError,
 } from '../query/query-builder.ts';
 import type { IRepository } from '../interfaces/index.ts';
+import type { DatabaseAdapterType } from '../interfaces/index.ts';
 import { UnsupportedQueryFeatureError } from '../errors.ts';
 
 /**
@@ -58,6 +59,8 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string> impl
   protected constructor(
     /** The underlying data source for this entity. */
     protected readonly _dataSource: DataSource,
+    /** Bound adapter, used when a conditional operation is unsupported. @since 0.14.0 */
+    private readonly _adapterType?: DatabaseAdapterType | undefined,
   ) {}
 
   async findById(id: Id): Promise<Entity | null> {
@@ -132,7 +135,7 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string> impl
     if (this._dataSource.updateWhere === undefined) {
       throw new UnsupportedQueryFeatureError(
         'conditional-write',
-        'database-plugin',
+        this._adapterType ?? 'database-plugin',
         'The bound data source lacks updateWhere.',
       );
     }
@@ -162,7 +165,7 @@ export abstract class BaseRepository<Entity, Id extends EntityKey = string> impl
     if (this._dataSource.deleteWhere === undefined) {
       throw new UnsupportedQueryFeatureError(
         'conditional-write',
-        'database-plugin',
+        this._adapterType ?? 'database-plugin',
         'The bound data source lacks deleteWhere.',
       );
     }

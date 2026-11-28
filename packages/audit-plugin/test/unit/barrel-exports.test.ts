@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AuditPlugin,
+  AuditScopeUnsupportedError,
   AuditService,
   DatabaseAuditStorage,
   FileAuditStorage,
@@ -23,6 +24,9 @@ import type {
 } from '../../src/index.ts';
 
 describe('barrel exports', () => {
+  it('exports the transactional scope refusal', () => {
+    expect(new AuditScopeUnsupportedError()).toBeInstanceOf(Error);
+  });
   it('exports AuditPlugin factory', () => {
     expect(AuditPlugin).toBeDefined();
     expect(typeof AuditPlugin).toBe('function');

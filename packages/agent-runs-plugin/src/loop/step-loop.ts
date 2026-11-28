@@ -13,6 +13,7 @@ import type { ChunkLog } from '../log/chunk-log.ts';
 import { prepareApprovals } from '../approvals/approvals.ts';
 import { calls, childId, json, messages, schemaOnly } from './messages.ts';
 import { runTool, toolKey, ToolConflict } from './tool-runner.ts';
+import { errorLabel } from '../log/error-label.ts';
 
 /** Private deadline marker; model timeouts still follow the ordinary failure path. */
 class CallTimeout extends Error {}
@@ -250,7 +251,8 @@ export async function stepLoop(
           while (true) {
             const next = await reader.read();
             if (next.done) break;
-            if (next.value.type === 'error') throw new Error('Agent model call failed.');
+            if (next.value.type === 'error')
+              throw generation.failure() ?? new Error('Agent model call failed.');
             if (next.value.type === 'abort') throw new Error('Agent model call aborted.');
             if (next.value.type !== 'tool-input-delta' && next.value.type !== 'tool-input-start')
               await log.emit(next.value);
@@ -329,7 +331,7 @@ export async function stepLoop(
       const status = httpStatusHintOf(error)?.status;
       deps.logger?.warn('Agent run failed.', {
         definition: definition?.name ?? '',
-        error: error instanceof Error ? error.name : typeof error,
+        error: errorLabel(error),
         ...(status === undefined ? {} : { status }),
       });
     }

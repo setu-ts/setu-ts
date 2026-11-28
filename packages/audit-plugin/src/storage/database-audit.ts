@@ -11,6 +11,7 @@ import type {
   StoredAuditEntry,
 } from '../interfaces/index.ts';
 import { fromAuditRow, orderAndLimit, toAuditRow } from './audit-record.ts';
+import type { IOutboxWriteScope } from '@setu-ts/common';
 
 /**
  * Primary-key value the reachability probe selects on. Deliberately not a
@@ -45,6 +46,11 @@ export class DatabaseAuditStorage implements IAuditStorage {
   /** Appends one row via `client.insert`. */
   async append(entry: StoredAuditEntry): Promise<void> {
     await this.client.insert(this.table, toAuditRow(entry));
+  }
+
+  /** Appends the same serialized row through the caller's transaction. @since 0.14.0 */
+  async appendIn(scope: IOutboxWriteScope, entry: StoredAuditEntry): Promise<void> {
+    await scope.getRepository(this.table).create(toAuditRow(entry));
   }
 
   /** Selects rows via `client.select`, filters, maps to frozen entries. */

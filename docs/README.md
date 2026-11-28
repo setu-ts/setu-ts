@@ -77,6 +77,7 @@ building production-ready applications with our plugin-first, runtime-independen
   - Package links and API references
 
 - [Durable agent runs](./durable-runs.md)
+- [Database problem types and retry actions](./problem-types.md)
 - [Retrieval (vector search)](./retrieval.md)
   - Tenant-scoped embedding storage and similarity search
   - pgvector, Qdrant, memory and Cloudflare Vectorize adapters

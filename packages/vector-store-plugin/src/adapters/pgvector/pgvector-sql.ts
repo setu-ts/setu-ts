@@ -108,11 +108,14 @@ export function createExtensionStatement(sql: SqlTag): Statement {
  *
  * @param sql - The `sql` tag
  * @param spec - The collection
- * @returns The statement; one row `{ dimensions, source_index, vector_index, source_version }` or none
+ * @returns The statement; one row `{ dimensions, source_index, vector_index, source_version,
+ *   vector_index_present, source_index_present }` or none
  */
 export function describeStatement(sql: SqlTag, spec: VectorCollectionSpec): Statement {
   const { table, sourceIndex, vectorIndex } = tableNames(spec);
   return sql`SELECT a.atttypmod AS dimensions,
+    to_regclass(${vectorIndex}) IS NOT NULL AS vector_index_present,
+    to_regclass(${sourceIndex}) IS NOT NULL AS source_index_present,
     EXISTS (SELECT 1 FROM pg_index i
       JOIN pg_attribute s ON s.attrelid = i.indrelid AND s.attnum = i.indkey[0]
       JOIN pg_attribute t ON t.attrelid = i.indrelid AND t.attnum = i.indkey[1]

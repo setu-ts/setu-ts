@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as common from '@setu-ts/common';
 import * as database from '../../src/index.ts';
+
+it('exports the integrity errors while keeping classification internal', () => {
+  expect(new database.ForeignKeyViolationError('foreign key')).toBeInstanceOf(Error);
+  expect(new database.NotNullViolationError('not null')).toBeInstanceOf(Error);
+  expect('classifyDriverError' in database).toBe(false);
+  expect('isLockTimeout' in database).toBe(false);
+});
 import type {
   DatabaseReadinessOptions,
   IMigrationLedger,

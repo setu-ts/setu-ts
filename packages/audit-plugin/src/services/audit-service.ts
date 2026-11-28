@@ -4,10 +4,11 @@
  *
  * @module
  */
-import type { AuditEntry, IAuditLogger, IRedactionService } from '@setu-ts/common';
+import type { AuditEntry, AuditLogOptions, IAuditLogger, IRedactionService } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
 import { freezeAuditRecord } from '../storage/audit-record.ts';
+import { AuditScopeUnsupportedError } from '../errors.ts';
 
 /**
  * Audit service backed by an {@linkcode IAuditStorage} port.
@@ -27,9 +28,10 @@ export class AuditService implements IAuditLogger {
    * Appends an entry to the audit trail. Entries are immutable once written.
    *
    * @param entry - The audit entry (without id/timestamp)
+   * @param options - Optional caller transaction for an atomic database audit write
    * @throws Propagates any storage rejection (never swallowed)
    */
-  async log(entry: AuditEntry): Promise<void> {
+  async log(entry: AuditEntry, options?: AuditLogOptions): Promise<void> {
     const record: {
       -readonly [Key in keyof StoredAuditEntry]: StoredAuditEntry[Key];
     } = {
@@ -50,6 +52,12 @@ export class AuditService implements IAuditLogger {
     if (entry.metadata !== undefined) {
       record.metadata = this.redaction?.redactRecord(entry.metadata) ?? entry.metadata;
     }
-    await this.storage.append(freezeAuditRecord(record));
+    const frozen = freezeAuditRecord(record);
+    if (options?.scope !== undefined) {
+      if (this.storage.appendIn === undefined) throw new AuditScopeUnsupportedError();
+      await this.storage.appendIn(options.scope, frozen);
+    } else {
+      await this.storage.append(frozen);
+    }
   }
 }

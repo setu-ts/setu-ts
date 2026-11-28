@@ -4,6 +4,13 @@
  *
  * @module
  */
+import type { IOutboxWriteScope } from './outbox.ts';
+
+/** Options for an audit write inside the caller's transaction. @since 0.14.0 */
+export interface AuditLogOptions {
+  /** The transaction-scoped repository provider; the audit row joins this scope. */
+  readonly scope?: IOutboxWriteScope;
+}
 
 /**
  * One immutable audit trail entry.
@@ -51,6 +58,7 @@ export interface IAuditLogger {
    * written.
    *
    * @param entry - The audit entry
+   * @param options - Optional transaction scope; the sink must support scoped writes
    */
-  log(entry: AuditEntry): Promise<void>;
+  log(entry: AuditEntry, options?: AuditLogOptions): Promise<void>;
 }

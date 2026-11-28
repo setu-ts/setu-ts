@@ -909,6 +909,12 @@ here.
   queue bounds, health, errors and options: Service Bus publish bound and concurrency, SQS/SNS
   request bounds and probe, RabbitMQ 503/504 sources, RPC 504/502, Pub/Sub dead-letter bound, outbox
   catch-up, an injected Redis pair's bounded open; 15 V13 rows plus V13-279) — complete (PR #620).
+- **Milestone 143h** (`database-plugin` + `common` + `exceptions` + `audit-plugin` +
+  `agent-runs-plugin` + `vector-store-plugin` + `multi-tenancy-plugin` + `idempotency-plugin` —
+  database errors a client can act on, and store signals: eleven problem types under
+  `https://setu-ts.dev/errors`, FK/NOT NULL/value/lock-timeout classification, `TimeoutError` as
+  504, transaction-work and commit verdicts, audit inside the caller's transaction, pg-pool releases
+  as progress, strongly consistent DynamoDB pre-reads; 15 V13/V12 rows) — complete (PR #621).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; of the first wave (M143a, b, c, i, o, p, q and r), M143o is still open.

@@ -29,6 +29,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { conditionalContract } from '../fixtures/conditional-contract.ts';
+import { postgresConditionCells } from '../fixtures/postgres-condition-cells.ts';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts';
@@ -52,6 +53,46 @@ const url = postgresUrl ?? '';
 const GENERATED_CLIENT_URL = new URL(
   '../fixtures/prisma-client-generated/client.ts',
   import.meta.url,
+);
+
+it(
+  'Prisma PostgreSQL serves FK, NOT NULL, length and lock timeout with rollback',
+  { skip: skipReal },
+  async () => {
+    const { Pool } = await import('pg');
+    const { PrismaPg } = await import('@prisma/adapter-pg');
+    const generated = (await import(GENERATED_CLIENT_URL.href)) as GeneratedClientModule;
+    const pool = new Pool({ connectionString: url });
+    const schema = `condition_${crypto.randomUUID().replaceAll('-', '')}`;
+    const client = new generated.PrismaClient({
+      adapter: new PrismaPg(
+        { connectionString: url, options: '-c lock_timeout=100ms' },
+        { schema },
+      ),
+    });
+    const adapter = new PrismaAdapter({ prismaClient: client, provider: 'postgresql' });
+    const db = new DatabaseService(adapter, (entity) => adapter.createDataSource(entity), 'prisma');
+    try {
+      await pool.query(`CREATE SCHEMA "${schema}"`);
+      await pool.query(`CREATE TABLE "${schema}".parent (id text PRIMARY KEY)`);
+      await pool.query(
+        `CREATE TABLE "${schema}".condition_rows (id text PRIMARY KEY, parent_id text REFERENCES "${schema}".parent(id), label varchar(8) NOT NULL)`,
+      );
+      await adapter.connect();
+      await postgresConditionCells(
+        db,
+        pool,
+        `"${schema}".condition_rows`,
+        'ConditionRecord',
+        { id: 'lock', label: 'before' },
+        { id: 'long', label: '1234567890123456' },
+      );
+    } finally {
+      await db.close();
+      await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      await pool.end();
+    }
+  },
 );
 
 /** The structural surface of a generated model delegate this suite drives. */
@@ -755,8 +796,11 @@ it(
         const response = await app.inject({ method: 'GET', url: row.path });
         expect(response.statusCode).toBe(400);
         expect(response.json()).toEqual({
-          type: 'about:blank',
-          title: 'Bad Request',
+          type:
+            row.errorClass === InvalidFieldValueError
+              ? 'https://setu-ts.dev/errors/invalid-field-value'
+              : 'about:blank',
+          title: row.errorClass === InvalidFieldValueError ? 'Invalid Field Value' : 'Bad Request',
           status: 400,
           detail: row.detail,
           instance: row.path,
