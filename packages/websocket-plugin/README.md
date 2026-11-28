@@ -443,7 +443,8 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   `CloudflarePlugin` always passes them.
 - **A connection whose link gives up is closed** with 1011 (`Backplane link lost`): once a lost link
   has used its three reopens (0.5 s, 1 s, 2 s), the connection would receive nothing more from its
-  rooms, so it is closed and the client reconnects.
+  rooms, so it is closed and the client reconnects. While the hub stays down, every new connection
+  is closed this way about 3.5 s after it opens, so a client should reconnect with a backoff.
 - **`room.size`** counts this isolate's open members, without touching any socket.
 - **Heartbeats** run per connection, each from its own request, instead of one shared interval.
 - **A clean close is answered at once.** The Workers adapter replies to the peer's close frame

@@ -573,6 +573,41 @@ describe('DurableObjectBackplane links and hub publish', () => {
     expect(got).toEqual([FRAME]);
   });
 
+  it("hands a link's onLost through, called once when the link gives up reopening", async () => {
+    // The only real path from a link that gives up to websocket-plugin's 1011.
+    const namespace = new FakeDurableObjectNamespace();
+    const pending: (() => void)[] = [];
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers: {
+        setTimeout: (fn: () => void): unknown => {
+          pending.push(fn);
+          return pending.length;
+        },
+        clearTimeout: (): void => {},
+      },
+    });
+    namespace.omitSocket = true; // every open, the first and each reopen, fails
+    let lost = 0;
+    backplane.openConnectionLink(
+      'c',
+      () => {},
+      () => {
+        lost++;
+      },
+    );
+    await setImmediate();
+    while (pending.length > 0) {
+      expect(lost).toBe(0);
+      pending.shift()?.();
+      await setImmediate();
+    }
+
+    expect(lost).toBe(1);
+  });
+
   it('passes its waitUntil to each link, and survives a host that throws', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const held: Promise<unknown>[] = [];

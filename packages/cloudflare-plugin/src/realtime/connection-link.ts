@@ -126,12 +126,16 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     if (socket === undefined) {
       // Within the budget a frame serializes far below the hub's cap, so a
       // queued frame needs no measuring beyond its data.
-      const size = utf8ByteLength(frame.data);
       // A full queue drops its oldest frame to take this one, so those bytes
       // are free for it.
       const full = this.#queue.length >= LINK_QUEUE_LIMIT;
       const freed = full ? (this.#queue[0]?.bytes ?? 0) : 0;
-      if (this.#queuedBytes - freed + size > LINK_QUEUE_BYTE_BUDGET) return false;
+      const room = LINK_QUEUE_BYTE_BUDGET - this.#queuedBytes + freed;
+      // A string is never shorter in UTF-8 bytes than in units, so a frame
+      // already too long in units is refused without counting it.
+      if (frame.data.length > room) return false;
+      const size = utf8ByteLength(frame.data);
+      if (size > room) return false;
       if (full) {
         this.#shift();
         if (!this.#overflowReported) {

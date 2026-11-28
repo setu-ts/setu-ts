@@ -318,14 +318,16 @@ describe('ConnectionLink', () => {
     expect(lost).toBe(0);
   });
 
-  it('reports a lost-link callback that throws, still staying closed', async () => {
+  it('swallows a lost-link callback that throws, still staying closed', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();
     const logger = new RecordingLogger();
+    let called = 0;
     const l = link(namespace, () => {}, {
       timers,
       logger,
       onLost: () => {
+        called++;
         throw new Error('handler down');
       },
     });
@@ -337,6 +339,7 @@ describe('ConnectionLink', () => {
       await setImmediate();
     }
 
+    expect(called).toBe(1);
     expect(l.publish(frame('after'))).toBe(false);
     expect(logger.records.map((r) => r.message)).toContain('cloudflare: backplane link lost');
   });

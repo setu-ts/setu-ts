@@ -17599,7 +17599,7 @@ schema-ignorant — a future widening of `RealtimeFrame` needs no redeploy of th
 
 **Client sockets belong to a request, not to the isolate (0.14.0).** workerd ties every I/O object
 to the request that created it, so `DurableObjectBackplane` implements `IRealtimeLinkBackplane`
-(`@setu-ts/common`): `openConnectionLink(connectionId, deliver)` opens one link per client
+(`@setu-ts/common`): `openConnectionLink(connectionId, deliver, onLost?)` opens one link per client
 connection from that connection's own request, and `publishViaHub(frame)` POSTs a frame to the hub
 (`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
 request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
