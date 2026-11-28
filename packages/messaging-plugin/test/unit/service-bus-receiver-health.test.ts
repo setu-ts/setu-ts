@@ -179,6 +179,38 @@ describe('Service Bus receiver health', () => {
     }
   });
 
+  it('opens a fresh reply inbox after reconnect when a request cached one during the disconnect drain', async () => {
+    const clock = clockRuntime();
+    const fake = serviceBusTransport();
+    const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+      client: fake.transport,
+    });
+    await broker.connect();
+    const first = broker.request('orders', {}).catch((error: unknown) => error);
+    await flushCloud();
+    const closeGate = Promise.withResolvers<void>();
+    fake.opens[0]!.close.mockReturnValueOnce(closeGate.promise);
+    const closing = broker.disconnect();
+    await flushCloud();
+    // A request made during the drain opens and caches a second inbox.
+    const during = broker.request('orders', {}, { timeoutMs: 100 }).catch((e: unknown) => e);
+    await flushCloud();
+    expect(fake.opens).toHaveLength(2);
+    closeGate.resolve();
+    await closing;
+    await first;
+    await clock.advance(100);
+    await during;
+    expect(fake.opens[1]!.close).toHaveBeenCalledOnce();
+    await broker.connect();
+    const after = broker.request('orders', {}, { timeoutMs: 100 }).catch((e: unknown) => e);
+    await flushCloud();
+    expect(fake.opens).toHaveLength(3);
+    await clock.advance(100);
+    await after;
+    await broker.disconnect();
+  });
+
   it('fences reply-inbox callbacks across disconnect and reconnect', async () => {
     const sdk = serviceBusSdk();
     const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {

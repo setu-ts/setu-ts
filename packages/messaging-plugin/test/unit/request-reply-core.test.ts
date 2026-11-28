@@ -72,12 +72,21 @@ class FakeTransport implements RequestReplyDeps {
     return `id-${this.#uuidN++}`;
   }
 
+  /** Timers armed and neither fired nor cleared. */
+  liveTimers = new Set<unknown>();
+
   setTimeout(fn: () => void, ms: number): number {
-    return setTimeout(fn, ms) as unknown as number;
+    const handle = setTimeout(() => {
+      this.liveTimers.delete(handle);
+      fn();
+    }, ms) as unknown as number;
+    this.liveTimers.add(handle);
+    return handle;
   }
 
   clearTimeout(handle: unknown): void {
     this.clearTimeoutCalls++;
+    this.liveTimers.delete(handle);
     clearTimeout(handle as number);
   }
 
@@ -248,6 +257,68 @@ describe('RequestReplyCore', () => {
     await closing;
     await pending;
     expect(done).toBe(true);
+  });
+
+  it('ends a request at timeoutMs when its reply inbox never finishes opening', async () => {
+    const t = new FakeTransport();
+    let releaseOpen: (() => void) | undefined;
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (onReply) =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void => {
+            void t.openInbox(onReply).then(resolve);
+          };
+        }),
+    });
+    await core.respond('t', () => 'pong');
+    await expect(core.request('t', {}, { timeoutMs: 20 })).rejects.toBeInstanceOf(
+      RequestTimeoutError,
+    );
+    expect(t.published.filter(({ topic }) => topic.startsWith('rr.req'))).toHaveLength(0);
+    // The late open is kept, so the next request uses it.
+    releaseOpen!();
+    await flush();
+    expect(await core.request('t', {}, { timeoutMs: 1000 })).toBe('pong');
+    await core.close();
+  });
+
+  it('rejects a request still acquiring its inbox when close() runs', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: () => new Promise<ReplyInbox>(() => {}),
+    });
+    const request = core.request('t', {}, { timeoutMs: 60000 }).catch((error: unknown) => error);
+    await flush();
+    await core.close({ retireBoundMs: 10 });
+    expect(await request).toMatchObject({
+      message: 'Broker disconnected before a reply was received',
+    });
+    // The rejected request's 60 s deadline was cleared with it, not left armed.
+    expect(t.liveTimers.size).toBe(0);
+  });
+
+  it('discardInbox() drops the cached inbox so the next request opens a new one', async () => {
+    const t = new FakeTransport();
+    const core = new RequestReplyCore(t);
+    await core.respond('t', () => 'pong');
+    expect(await core.request('t', {})).toBe('pong');
+    expect(t.openInboxCalls).toBe(1);
+    core.discardInbox();
+    await flush();
+    expect(t.unsubscribeCalls).toBe(1);
+    expect(await core.request('t', {})).toBe('pong');
+    expect(t.openInboxCalls).toBe(2);
+    await core.close();
   });
 
   it('close() rejects in-flight requests and unsubscribes the inbox', async () => {

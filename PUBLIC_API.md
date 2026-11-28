@@ -7868,7 +7868,7 @@ Signatures (on `IMessageBroker`, from `@setu-ts/common`):
 
 ```typescript
 interface RequestOptions {
-  /** Reply wait budget in ms. @defaultValue 5000 */
+  /** Reply budget in ms; built-in messaging-plugin brokers count it from the call. @defaultValue 5000 */
   readonly timeoutMs?: number;
 }
 

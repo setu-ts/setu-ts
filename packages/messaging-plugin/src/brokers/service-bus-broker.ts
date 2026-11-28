@@ -1043,6 +1043,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (this.#transport) {
       await this.#transport.close();
       this.#transport = null;
+      // A request made while disconnect drained may have opened and cached an
+      // inbox on the transport just closed; drop it so reconnect opens anew.
+      this.#rr.discardInbox();
       // Drop the cached probe WITH the transport (M90b): a surviving probe
       // would serve the stale cached outcome within its TTL and then fire
       // real I/O against the closed client. Post-close `reachability()`

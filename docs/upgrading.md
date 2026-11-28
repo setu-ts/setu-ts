@@ -36,12 +36,17 @@ cutting a release renames that heading to the version and is a rename, not a rec
   reply inbox expires after five idle minutes, including during a longer receive-side outage. A
   receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic is
   missing, invalidates the local cached inbox; the next request recreates it once the shared reply
-  topic exists (a missing topic fails the request with `ReplyInboxUnavailableError`; the broker
-  creates no topics). Requests already in flight may still time out. A request whose inbox is
-  retired while it opens waits for the next one, and is refused after three in a row. `disconnect()`
-  waits at most 5 s for reply-inbox cleanup still in flight, then logs one warning and continues; an
-  inbox open that answers later is still closed. Transient receive errors retain the inbox; clean
-  shutdown deletes it. No option changes are needed.
+  topic exists (a missing topic fails the request with `ReplyInboxUnavailableError` when the refusal
+  arrives within `timeoutMs`; the broker creates no topics). Requests already in flight may still
+  time out. A request whose inbox is retired while it opens waits for the next one, and is refused
+  after three in a row. `disconnect()` waits at most 5 s for reply-inbox cleanup still in flight,
+  then logs one warning and continues; an inbox open that answers later is still closed. Transient
+  receive errors retain the inbox; clean shutdown deletes it. No option changes are needed.
+- On every built-in `@setu-ts/messaging-plugin` broker (not a `custom` adapter),
+  `RequestOptions.timeoutMs` now counts from the `request()` call, so it also covers opening the
+  reply inbox and publishing, and a request still waiting for its inbox is rejected on disconnect. A
+  slow first inbox open uses part of the budget: raise `timeoutMs` if a first request after start
+  needs more. The Cloudflare `WorkersBroker` is unchanged.
 - Service Bus evidence now includes real publish outcomes (including timeouts), receive outages only
   from source `receive`, and delivered application and reply-inbox messages. Consume-only services
   become not-ready on receive transport outages, recovering on a successful publish, delivery or

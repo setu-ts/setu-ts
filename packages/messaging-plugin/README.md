@@ -819,21 +819,24 @@ Every instance reads every reply on that topic and discards the ones it did not 
 high-traffic service its own `replyTopic` to bound the fan-out.
 
 `RequestTimeoutError` and `RemoteHandlerError` are exported for `instanceof` handling. With
-`errorHandler`, they answer 504 (`Gateway Timeout`) and 502 (`Bad Gateway`) respectively.
-`RequestTimeoutError.topic` and `.timeoutMs` name the request and its reply bound when created by
-the broker. The fixed timeout detail says the request may have been handled; the remote error text
-stays on `remoteMessage` and is never served in the response body.
+`errorHandler`, they answer 504 (`Gateway Timeout`) and 502 (`Bad Gateway`) respectively. On the
+built-in brokers, `timeoutMs` counts from the `request()` call, so it also bounds opening the reply
+inbox and publishing; `disconnect()` rejects a request still waiting for its inbox.
+`RequestTimeoutError.topic` and `.timeoutMs` name the request and its bound when created by the
+broker. The fixed timeout detail says the request may have been handled; the remote error text stays
+on `remoteMessage` and is never served in the response body.
 
 Service Bus reply subscriptions use `autoDeleteOnIdleMs: 300000` (five idle minutes) so a crashed
 requester leaves no permanent inbox. A live receiver keeps it active, but a receive-side outage
 longer than that idle lifetime can expire it. A receive report of `MessagingEntityNotFound`, or a
 send confirming that the shared reply topic is missing, invalidates the local cached inbox. The next
 request recreates it once the shared reply topic exists; when the topic itself is missing the
-request fails with `ReplyInboxUnavailableError`, because the broker creates no topics. Requests
-already in flight may still time out. A request whose inbox is retired while it opens waits for the
-next one, and is refused after three in a row. `disconnect()` waits at most 5 s for reply-inbox
-cleanup still in flight, then logs one warning and continues; an inbox open that answers later is
-still closed. Transient receive errors retain the inbox, and clean shutdown still deletes it.
+request fails with `ReplyInboxUnavailableError` when the refusal arrives within `timeoutMs` (a later
+one surfaces as `RequestTimeoutError`), because the broker creates no topics. Requests already in
+flight may still time out. A request whose inbox is retired while it opens waits for the next one,
+and is refused after three in a row. `disconnect()` waits at most 5 s for reply-inbox cleanup still
+in flight, then logs one warning and continues; an inbox open that answers later is still closed.
+Transient receive errors retain the inbox, and clean shutdown still deletes it.
 `MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
 broker's former refusal and no broker throws it now.
 

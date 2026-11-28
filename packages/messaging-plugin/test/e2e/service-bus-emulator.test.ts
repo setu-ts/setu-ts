@@ -247,7 +247,9 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
       // it verifies the named refusal rather than a successful RPC round trip.
       let caught: unknown;
       try {
-        await broker.request('math', { a: 1 }, { timeoutMs: 5000 });
+        // The budget covers the inbox open now; the emulator's admin refusal takes
+        // over 5 s after the SDK's retries, so leave room for it to arrive.
+        await broker.request('math', { a: 1 }, { timeoutMs: 30000 });
       } catch (err) {
         caught = err;
       }

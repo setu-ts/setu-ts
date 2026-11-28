@@ -133,6 +133,8 @@ function isReplyEnvelope(value: unknown): value is ReplyEnvelope {
 export class RequestReplyCore {
   #deps: RequestReplyDeps;
   #pending: Map<string, PendingRequest> = new Map();
+  /** Requests whose deadline is running while they still acquire an inbox. */
+  #acquiring: Set<PendingRequest> = new Set();
   /**
    * The in-flight or settled active inbox open. Detached opens remain tracked
    * until retirement completes, so invalidation and close cannot lose an
@@ -165,7 +167,9 @@ export class RequestReplyCore {
    * @param message - The request payload
    * @param options - Reply timeout behavior
    * @returns The reply payload
-   * @throws {RequestTimeoutError} When no reply arrives within `timeoutMs`
+   * @throws {RequestTimeoutError} When no reply arrives within `timeoutMs` of
+   *   this call, which covers opening the reply inbox and publishing
+   * @throws {Error} When `close()` runs before the reply arrives
    * @throws {RemoteHandlerError} When the responder throws
    * @throws {Error} When three inboxes in a row are retired before the request can be sent
    * @since 0.1.0
@@ -176,42 +180,49 @@ export class RequestReplyCore {
     options?: RequestOptions,
     headers?: Readonly<Record<string, string>>,
   ): Promise<TRes> {
-    let acquired = await this.#ensureInboxWithGeneration();
-    // An inbox retired while its open was pending can still resolve; publishing
-    // with its address may lose the reply. Reacquire, a bounded
-    // number of times, until the inbox this request uses is the current one.
-    for (let attempt = 1; ; attempt++) {
-      // If `close()` was called while we were waiting, the generation will
-      // have advanced and we must reject immediately.
-      if (acquired.generation !== this.#generation) {
-        throw new Error('Broker disconnected before a reply was received');
-      }
-      if (acquired.current()) break;
-      if (attempt >= MAX_INBOX_ACQUIRE_ATTEMPTS) {
-        throw new Error('Reply inbox was retired before the request could be sent');
-      }
-      acquired = await this.#ensureInboxWithGeneration();
-    }
-    const { inbox } = acquired;
-
-    const correlationId = this.#deps.uuid();
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    let correlationId: string | undefined = undefined;
 
+    // The deadline runs from this call, so a reply inbox that never finishes
+    // opening still ends the request at `timeoutMs`. Tracking the request in
+    // `#acquiring` until it has an inbox lets `close()` reject it there too.
+    let entry!: PendingRequest;
     const reply = new Promise<TRes>((resolve, reject) => {
       const timer = this.#deps.setTimeout(() => {
-        this.#pending.delete(correlationId);
+        this.#acquiring.delete(entry);
+        if (correlationId !== undefined) this.#pending.delete(correlationId);
         reject(new RequestTimeoutError(undefined, { topic, timeoutMs }));
       }, timeoutMs);
-      this.#pending.set(correlationId, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
-        timer,
-      });
+      entry = { resolve: resolve as (value: unknown) => void, reject, timer };
     });
-    // The reply deadline can fire while publish is still pending, before the
-    // caller holds `reply`; observe it now so that rejection is never unhandled.
-    // The caller still receives it through the returned promise.
+    this.#acquiring.add(entry);
+    // The deadline can fire while the inbox opens or publish is pending,
+    // before the caller holds `reply`; observe it now so that rejection is
+    // never unhandled. The caller still receives it through the returned promise.
     reply.catch(() => undefined);
+    const abandon = (): void => {
+      this.#deps.clearTimeout(entry.timer);
+      this.#acquiring.delete(entry);
+      if (correlationId !== undefined) this.#pending.delete(correlationId);
+    };
+
+    const acquiring = this.#acquireInbox();
+    // The deadline or close() may win the race; a later open failure is then
+    // nobody's to report.
+    acquiring.catch(() => undefined);
+    let inbox: ReplyInbox;
+    try {
+      // `reply` cannot resolve before the request is published, so the race
+      // only ever ends early by rejecting with the deadline or the disconnect.
+      inbox = await Promise.race([acquiring, reply as Promise<never>]);
+    } catch (err) {
+      abandon();
+      throw err;
+    }
+    // A deadline or close() that landed in the same turn as the open.
+    if (!this.#acquiring.delete(entry)) return reply;
+    correlationId = this.#deps.uuid();
+    this.#pending.set(correlationId, entry);
 
     const envelope: RequestEnvelope = {
       kind: 'rr-request',
@@ -223,15 +234,37 @@ export class RequestReplyCore {
     try {
       await this.#deps.publish(requestChannel(topic), envelope, headers);
     } catch (err) {
-      const pending = this.#pending.get(correlationId);
-      if (pending) {
-        this.#deps.clearTimeout(pending.timer);
-        this.#pending.delete(correlationId);
-      }
+      abandon();
       throw err;
     }
 
     return reply;
+  }
+
+  /**
+   * Opens or reuses the reply inbox, reacquiring when the one awaited was
+   * retired before it could be used.
+   * @returns The current inbox
+   * @throws {Error} When `close()` ran while waiting, or three inboxes in a row
+   *   were retired first
+   */
+  async #acquireInbox(): Promise<ReplyInbox> {
+    let acquired = await this.#ensureInboxWithGeneration();
+    // An inbox retired while its open was pending can still resolve; publishing
+    // with its address may lose the reply. Reacquire, a bounded number of
+    // times, until the inbox this request uses is the current one.
+    for (let attempt = 1; ; attempt++) {
+      // If `close()` was called while we were waiting, the generation will
+      // have advanced and we must reject immediately.
+      if (acquired.generation !== this.#generation) {
+        throw new Error('Broker disconnected before a reply was received');
+      }
+      if (acquired.current()) return acquired.inbox;
+      if (attempt >= MAX_INBOX_ACQUIRE_ATTEMPTS) {
+        throw new Error('Reply inbox was retired before the request could be sent');
+      }
+      acquired = await this.#ensureInboxWithGeneration();
+    }
   }
 
   /**
@@ -302,11 +335,12 @@ export class RequestReplyCore {
     // Increment the generation to invalidate any in-flight requests.
     this.#generation++;
 
-    for (const pending of this.#pending.values()) {
+    for (const pending of [...this.#pending.values(), ...this.#acquiring]) {
       this.#deps.clearTimeout(pending.timer);
       pending.reject(new Error('Broker disconnected before a reply was received'));
     }
     this.#pending.clear();
+    this.#acquiring.clear();
 
     // Await an in-flight open before tearing down. Checking `#inbox` alone
     // missed the case where `close()` lands while `openInbox` is still
@@ -350,6 +384,22 @@ export class RequestReplyCore {
    */
   invalidateInbox(onReply: (message: unknown) => void): void {
     if (this.#inboxReply !== onReply) return;
+    const init = this.#inboxInit;
+    this.#inboxInit = null;
+    this.#inboxReply = null;
+    if (init) this.#retireInbox(init);
+  }
+
+  /**
+   * Drops whatever reply inbox is cached and closes it in the background. A
+   * broker calls it once its transport has closed, so an inbox a request
+   * opened while `disconnect()` was draining is never reused after reconnect.
+   * @returns Nothing
+   * @throws Never; retirement failures are contained as during close
+   * @since 0.14.0
+   * @internal
+   */
+  discardInbox(): void {
     const init = this.#inboxInit;
     this.#inboxInit = null;
     this.#inboxReply = null;
