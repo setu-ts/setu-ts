@@ -314,10 +314,14 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     if (delay === undefined) {
       this.#closed = true;
       this.#clearQueue();
-      this.#options.logger?.()?.warn('cloudflare: backplane link lost', {
-        topic: this.#options.topic,
-        connection: this.#options.connectionId,
-      });
+      try {
+        this.#options.logger?.()?.warn('cloudflare: backplane link lost', {
+          topic: this.#options.topic,
+          connection: this.#options.connectionId,
+        });
+      } catch {
+        // A logger that throws must not keep the connection from being told.
+      }
       // The connection would receive nothing more from its rooms; its owner
       // closes it so the client reconnects.
       try {

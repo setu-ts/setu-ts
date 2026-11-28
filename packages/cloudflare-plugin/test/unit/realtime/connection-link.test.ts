@@ -298,6 +298,32 @@ describe('ConnectionLink', () => {
     expect(lost).toBe(1);
   });
 
+  it('still tells its connection when the logger throws on the lost-link warning', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const logger = new RecordingLogger();
+    logger.warn = (message: string) => {
+      if (message === 'cloudflare: backplane link lost') throw new Error('logger down');
+    };
+    let lost = 0;
+    link(namespace, () => {}, {
+      timers,
+      logger,
+      onLost: () => {
+        lost++;
+      },
+    });
+    await setImmediate();
+    namespace.clients.at(-1)?.fire('close', { data: '' });
+    namespace.omitSocket = true;
+    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
+      timers.runNext();
+      await setImmediate();
+    }
+
+    expect(lost).toBe(1);
+  });
+
   it('does not tell its connection when it is closed, or when a reopen succeeds', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();
