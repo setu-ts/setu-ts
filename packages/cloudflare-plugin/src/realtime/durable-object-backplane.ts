@@ -291,6 +291,7 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
 
   /** The POST itself, with its failure reported. */
   async #post(frame: RealtimeFrame): Promise<void> {
+    let status: number;
     try {
       const stub = this.#namespace.get(this.#namespace.idFromName(this.#options.topic));
       const response = await stub.fetch(PUBLISH_URL, {
@@ -298,21 +299,20 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(frame),
       });
-      if (response.ok) {
-        this.#publishFailing = false;
-        return;
-      }
-      // A refused frame (413 above the cap, 400 for a body that is not
-      // UTF-8) is that frame's fault and is reported each time; a server
-      // fault is the hub's, reported once per run of failures.
-      if (response.status < 500) {
-        this.#reportPublishFailure({ status: response.status });
-        return;
-      }
-      this.#reportOutage({ status: response.status });
+      status = response.status;
     } catch (error) {
       this.#reportOutage({ error: error instanceof Error ? error.message : String(error) });
+      return;
     }
+    if (status >= 200 && status < 300) {
+      this.#publishFailing = false;
+      return;
+    }
+    // The hub refuses a frame above its cap with 413 and a body that is not
+    // UTF-8 with 400: that frame's fault, reported each time. Any other answer
+    // is the hub's (or the binding's), reported once per run of failures.
+    if (status === 413 || status === 400) this.#reportPublishFailure({ status });
+    else this.#reportOutage({ status });
   }
 
   /** Reports a hub failure once per run of them: while a hub is down every broadcast lands here. */
@@ -322,12 +322,16 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
     this.#reportPublishFailure(detail);
   }
 
-  /** Logs one failed hub publish, without frame content. */
+  /** Logs one failed hub publish, without frame content; a logger that throws is ignored. */
   #reportPublishFailure(detail: { readonly status: number } | { readonly error: string }): void {
-    this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
-      topic: this.#options.topic,
-      ...detail,
-    });
+    try {
+      this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
+        topic: this.#options.topic,
+        ...detail,
+      });
+    } catch {
+      // Only the log line is lost.
+    }
   }
 
   /**

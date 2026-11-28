@@ -179,12 +179,11 @@ export class RequestBoundRooms {
       if (current !== except && room.has(current) && current.isOpen) {
         // The link refused the frame (still opening with its budget used, in
         // an outage, or the frame is above the hub's cap), so it goes through
-        // the hub. The
-        // hub may or may not hold the sender's opening link yet, so the sender
-        // gets its copy here, before the transport as on every runtime, and is
-        // excluded from the hub's copy so it never gets two: as the frame's
-        // one `exceptId` when the caller excluded nobody, or beside the
-        // caller's `except` in `exceptIds`.
+        // the hub. The hub may or may not hold the sender's opening link yet,
+        // so the sender gets its copy here, before the transport as on every
+        // runtime, and is excluded from the hub's copy so it never gets two:
+        // as the frame's one `exceptId` when the caller excluded nobody, or
+        // beside the caller's `except` in `exceptIds`.
         sendQuietly(current, data);
         frame =
           except === undefined

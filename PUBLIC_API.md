@@ -17628,14 +17628,15 @@ error is retired and closed rather than left open at the hub, so the next call r
 `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from different
 requests never touch a socket another request owns; a failed POST is logged as
 `cloudflare: backplane publish failed`, never thrown: a refused frame (413, 400) each time, and a
-hub fault (a rejected call or a 5xx) once per run of them, logged again after a POST succeeds, since
-while the hub is down every broadcast falls back here. The hub fans the POST out to every socket,
-the publisher's own included, and the replica drops a frame whose `origin` is its own (the rule
-every backplane transport applies, along with dropping a frame that is not well-formed). A replica
-hears a frame only once its socket has joined the hub. The socket belongs to the request that opened
-it: on local workerd it keeps receiving after that request has answered, which is unverified on the
-platform. Each publish is its own call to the hub and the platform orders calls only within one
-stub, so other replicas may receive one replica's frames out of order.
+hub fault (a rejected call, or any other failing status, such as a 5xx or a 426 from a binding that
+is not the hub) once per run of them, logged again after a POST succeeds, since while the hub is
+down every broadcast falls back here. The hub fans the POST out to every socket, the publisher's own
+included, and the replica drops a frame whose `origin` is its own (the rule every backplane
+transport applies, along with dropping a frame that is not well-formed). A replica hears a frame
+only once its socket has joined the hub. The socket belongs to the request that opened it: on local
+workerd it keeps receiving after that request has answered, which is unverified on the platform.
+Each publish is its own call to the hub and the platform orders calls only within one stub, so other
+replicas may receive one replica's frames out of order.
 
 **Lock.** `DurableObjectLock` is taken from Worker code (a route, a queue or cron handler, another
 Durable Object): a Durable Object binding exists only inside a Worker, and `SchedulerPlugin` refuses

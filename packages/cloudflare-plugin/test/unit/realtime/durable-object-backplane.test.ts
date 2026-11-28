@@ -616,6 +616,69 @@ describe('DurableObjectBackplane links and hub publish', () => {
     expect(failed()).toBe(4);
   });
 
+  it.each([
+    // [status, warnings for two failed publishes]: a refused frame is that
+    // frame's fault and is reported each time; anything else is the hub's.
+    [413, 2],
+    [400, 2],
+    [426, 1],
+    [404, 1],
+    [503, 1],
+  ])('reports two hub publishes answered %i with %i warning(s)', async (status, warnings) => {
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: () => ({ fetch: () => Promise.resolve(new Response(null, { status })) }),
+    } as unknown as IDurableObjectNamespace;
+    const logger = new RecordingLogger();
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      logger: () => logger,
+    });
+    await backplane.publishViaHub(FRAME);
+    await backplane.publishViaHub(FRAME);
+
+    expect(
+      logger.records.filter((r) => r.message === 'cloudflare: backplane publish failed'),
+    ).toHaveLength(warnings);
+  });
+
+  it('does not take a logger that throws for a hub outage', async () => {
+    let answer: 413 | 'throw' = 413;
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: () => ({
+        fetch: () =>
+          answer === 'throw'
+            ? Promise.reject(new Error('hub down'))
+            : Promise.resolve(new Response(null, { status: answer })),
+      }),
+    } as unknown as IDurableObjectNamespace;
+    const logger = new RecordingLogger();
+    let throwOnce = true;
+    logger.warn = (message: string, metadata?: unknown) => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error('logger down');
+      }
+      logger.records.push({ level: 'warn', message, meta: metadata });
+    };
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      logger: () => logger,
+    });
+    await expect(backplane.publishViaHub(FRAME)).resolves.toBeUndefined();
+    answer = 'throw';
+    await backplane.publishViaHub(FRAME);
+
+    expect(logger.records.map((r) => r.meta)).toEqual([{ topic: 'chat', error: 'hub down' }]);
+  });
+
   it('passes its waitUntil to each link, and survives a host that throws', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const held: Promise<unknown>[] = [];
