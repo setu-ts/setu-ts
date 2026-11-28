@@ -149,9 +149,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
         this.#shift();
         if (!this.#overflowReported) {
           this.#overflowReported = true;
-          this.#options.logger?.()?.warn('cloudflare: backplane link queue full, oldest dropped', {
-            topic: this.#options.topic,
-            connection: this.#options.connectionId,
+          this.#report('warn', 'cloudflare: backplane link queue full, oldest dropped', {
             limit: LINK_QUEUE_LIMIT,
           });
         }
@@ -192,9 +190,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     }
     if (this.#queue.length > 0) {
       // Closed while waiting to reopen: nothing can carry these any more.
-      this.#options.logger?.()?.warn('cloudflare: backplane link closed with frames unsent', {
-        topic: this.#options.topic,
-        connection: this.#options.connectionId,
+      this.#report('warn', 'cloudflare: backplane link closed with frames unsent', {
         dropped: this.#queue.length,
       });
     }
@@ -243,9 +239,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       if (unsent > 0) {
         // Closing: nothing will reopen to carry these. Said once, without
         // frame content.
-        this.#options.logger?.()?.warn('cloudflare: backplane link closed with frames unsent', {
-          topic: this.#options.topic,
-          connection: this.#options.connectionId,
+        this.#report('warn', 'cloudflare: backplane link closed with frames unsent', {
           dropped: unsent,
         });
         this.#clearQueue();
@@ -320,9 +314,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       // The link closed before it opened and the open failed: what it had
       // queued cannot be sent. Said once, without frame content.
       this.#flushing = false;
-      this.#options.logger?.()?.warn('cloudflare: backplane link closed before its socket opened', {
-        topic: this.#options.topic,
-        connection: this.#options.connectionId,
+      this.#report('warn', 'cloudflare: backplane link closed before its socket opened', {
         dropped: this.#queue.length,
       });
       this.#clearQueue();
@@ -346,8 +338,15 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     }, delay);
   }
 
-  /** Logs a link state change; a logger that throws cannot stop the reopens. */
-  #report(level: 'warn' | 'info', message: string, extra?: { readonly dropped: number }): void {
+  /**
+   * Logs a link event with its topic and connection, never frame content. A
+   * logger that throws loses only the line: never a frame, a close or a reopen.
+   */
+  #report(
+    level: 'warn' | 'info',
+    message: string,
+    extra?: Readonly<Partial<Record<'dropped' | 'limit', number>>>,
+  ): void {
     try {
       this.#options.logger?.()?.[level](message, {
         topic: this.#options.topic,

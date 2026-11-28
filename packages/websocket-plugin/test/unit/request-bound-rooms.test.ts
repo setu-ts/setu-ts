@@ -545,6 +545,36 @@ describe('RequestBoundRooms', () => {
     expect(otherGot).toEqual([]);
   });
 
+  it('still publishes through the hub when the debug logger throws', () => {
+    const world = new RequestWorld();
+    const hub = new FakeHub(world);
+    const posted: RealtimeFrame[] = [];
+    const backplane = {
+      ...hub.backplane('o'),
+      openConnectionLink: () => ({ publish: () => false, close: () => {} }),
+      publishViaHub: (frame: RealtimeFrame) => {
+        posted.push(frame);
+        return Promise.resolve();
+      },
+    };
+    const logger = createFakeLogger();
+    logger.debug = () => {
+      throw new Error('logger down');
+    };
+    const rooms = new RequestBoundRooms(backplane, logger);
+    const sender = { id: 's', isOpen: true, send: () => {} } as unknown as IWebSocketConnection;
+    rooms.open(sender, () => true);
+    const room = new Room('lobby');
+    room.add(sender);
+
+    expect(() => {
+      rooms.dispatching(sender, () => {
+        rooms.broadcast(room, 'x');
+      });
+    }).not.toThrow();
+    expect(posted).toHaveLength(1);
+  });
+
   it('logs a link that cannot open, and a hub publish that rejects', async () => {
     const logger = createFakeLogger();
     const world = new RequestWorld();

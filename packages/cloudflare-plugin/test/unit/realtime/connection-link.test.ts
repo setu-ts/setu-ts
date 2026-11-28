@@ -118,6 +118,48 @@ describe('ConnectionLink', () => {
     expect(logger.records.filter((r) => r.message.includes('queue full'))).toHaveLength(1);
   });
 
+  it('never lets a throwing logger lose a frame or skip a close', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const logger = new RecordingLogger();
+    logger.warn = () => {
+      throw new Error('logger down');
+    };
+    // A full queue warns as it drops the oldest frame; the new one is still queued.
+    const opening = link(namespace, () => {}, { logger });
+    for (let i = 0; i < LINK_QUEUE_LIMIT; i++) opening.publish(frame(`m${String(i)}`));
+    expect(opening.publish(frame('one more'))).toBe(true);
+
+    // Closed while waiting to reopen, with frames queued: it still clears its
+    // timer and closes.
+    const waiting = link(namespace, () => {}, { timers, logger });
+    await setImmediate();
+    const socket = namespace.clients.at(-1);
+    socket?.close();
+    socket?.fire('close', { data: '' });
+    waiting.publish(frame('queued'));
+    expect(() => {
+      waiting.close();
+    }).not.toThrow();
+    expect(timers.pending.filter((t) => !t.cleared)).toEqual([]);
+
+    // Closed before it opened, then the open fails: still settles quietly.
+    namespace.omitSocket = true;
+    const early = link(namespace, () => {}, { logger });
+    early.publish(frame('early'));
+    early.close();
+    await setImmediate();
+    // Closed before it opened, then the open succeeds but cannot send.
+    namespace.omitSocket = false;
+    const flushing = link(namespace, () => {}, { logger });
+    flushing.publish(frame('late'));
+    flushing.close();
+    const pending = namespace.clients.length;
+    await setImmediate();
+    const flushed = namespace.clients.at(pending);
+    expect(flushed === undefined || flushed.closed).toBe(true);
+  });
+
   it('refuses a frame that would pass the byte budget while opening, keeping what it queued', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const got: RealtimeFrame[] = [];

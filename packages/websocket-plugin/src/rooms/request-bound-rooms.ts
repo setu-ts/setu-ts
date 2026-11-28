@@ -200,7 +200,11 @@ export class RequestBoundRooms {
     }
     if (attempted && !this.#fallbackLogged) {
       this.#fallbackLogged = true;
-      this.#logger?.debug('websocket: broadcast published through the hub', { room: room.name });
+      try {
+        this.#logger?.debug('websocket: broadcast published through the hub', { room: room.name });
+      } catch {
+        // A logger that throws must not keep the broadcast from the hub.
+      }
     }
     void this.#backplane.publishViaHub(frame).catch((error: unknown) => {
       this.#logger?.warn('websocket: backplane publish failed', {
