@@ -113,15 +113,22 @@ export async function respond(
               chunk: value.chunks[i]!,
             });
       };
+      // Whether this source has already ended its stream (`[DONE]` or an error).
+      let ended = false;
+      // A disconnect stops the pump but leaves the stream open until the pump
+      // settles: a consumer that cancels after the abort (the kernel's deferred
+      // wrapper does) then reaches cancel(), which waits for the store read in
+      // flight before the request's cleanups run. The pump closes the stream.
       const disconnected = (): void => {
         if (closed) return;
-        controller.close();
         abort();
       };
       ctx.signal?.addEventListener('abort', disconnected, { once: true });
       if (ctx.signal?.aborted) disconnected();
       pump = (async () => {
         try {
+          // An already-aborted request starts no store read at all.
+          if (closed) return;
           let current = (await deps.store.get(row.id)) ?? row;
           if (closed) return;
           const initial = await deps.store.chunks(current, 0);
@@ -164,12 +171,23 @@ export async function respond(
           if (!closed) {
             controller.enqueue(encoder.encode('data: [DONE]\n\n'));
             controller.close();
+            ended = true;
           }
         } catch (error) {
-          if (!closed) controller.error(error);
+          if (!closed) {
+            controller.error(error);
+            ended = true;
+          }
         } finally {
           abort();
           ctx.signal?.removeEventListener('abort', disconnected);
+          if (!ended) {
+            try {
+              controller.close();
+            } catch {
+              // Already cancelled by its consumer: nothing left to close.
+            }
+          }
         }
       })();
     },

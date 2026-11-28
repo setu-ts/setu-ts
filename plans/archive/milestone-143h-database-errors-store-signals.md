@@ -1,8 +1,9 @@
 # Milestone 143h — Database errors a client can act on, and store signals (`@setu-ts/database-plugin` + 5)
 
 > **Status:** Approved by the maintainer on 2026-11-27 (IST): D-2 to D-8 as recommended, and D-1
-> changed to its alternative (the `common` edits ship in this pull request; §12). Implementation
-> waits for the maintainer's explicit go. Branch: `feat/m143h-database-errors-store-signals`, cut
+> changed to its alternative (the `common` edits ship in this pull request; §12). **Complete:**
+> implemented, reviewed, security-audited and verified on this branch (D-9 to D-11 decided during
+> review and audit), shipped in PR #621. Branch: `feat/m143h-database-errors-store-signals`, cut
 > from `origin/develop` at `1f21e029a` (after #617 M143q and #618 M143c). `develop` and `main` are
 > protected; all work, implementation and fixes, stays on this branch until it merges through one
 > pull request into `develop`.

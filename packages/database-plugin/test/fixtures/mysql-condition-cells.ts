@@ -5,14 +5,23 @@ import { mysqlHarness } from './mysql-harness.ts';
 /** Same real constraints on mysql2 and mariadb; every fixture owns its database. */
 export async function mysqlConditionCells(type: 'drizzle' | 'prisma'): Promise<void> {
   const h = await mysqlHarness(type, 4, 'prisma-client-generated-mysql', 1);
-  // Pin and initialize every mysql2 session before handing it to Drizzle.
-  const sessions = await Promise.all(Array.from({ length: 4 }, () => h.pool.getConnection()));
   try {
-    for (const session of sessions) await session.query('SET SESSION innodb_lock_wait_timeout = 1');
-  } finally {
-    for (const session of sessions) session.release();
-  }
-  try {
+    // Pin and initialize every mysql2 session before handing it to Drizzle. Each
+    // session is released as acquired, so a failed acquire or SET still frees
+    // the others and reaches the harness disposal below.
+    const sessions: Awaited<ReturnType<typeof h.pool.getConnection>>[] = [];
+    try {
+      const acquired = await Promise.allSettled(
+        Array.from({ length: 4 }, () => h.pool.getConnection()),
+      );
+      for (const result of acquired) if (result.status === 'fulfilled') sessions.push(result.value);
+      const failed = acquired.find((result) => result.status === 'rejected');
+      if (failed !== undefined) throw (failed as PromiseRejectedResult).reason;
+      for (const session of sessions)
+        await session.query('SET SESSION innodb_lock_wait_timeout = 1');
+    } finally {
+      for (const session of sessions) session.release();
+    }
     await h.pool.query('CREATE TABLE condition_parent (id varchar(191) PRIMARY KEY)');
     await h.pool.query(
       'ALTER TABLE `rows` ADD FOREIGN KEY (tenant_id) REFERENCES condition_parent(id)',

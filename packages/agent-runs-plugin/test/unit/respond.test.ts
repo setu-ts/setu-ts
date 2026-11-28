@@ -87,6 +87,70 @@ describe('stream replay', () => {
       }
     });
   }
+  it('a disconnect keeps the stream open until a held read settles, so a later cancel waits', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'signal-first' });
+      await h.store.create(current);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const get = vi.spyOn(h.store, 'get').mockImplementationOnce(async (id) => {
+        entered.resolve();
+        await release.promise;
+        return h.store.get(id);
+      });
+      const chunks = vi.spyOn(h.store, 'chunks');
+      const signal = new AbortController();
+      const ctx = { ...h.ctx(), signal: signal.signal };
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+      });
+      await entered.promise;
+      // The request aborts first, then the consumer cancels: the kernel's order.
+      signal.abort();
+      let settled = false;
+      const cancelled = (ctx.response.snapshot().body as ReadableStream<Uint8Array>)
+        .cancel()
+        .then(() => {
+          settled = true;
+        });
+      await nextTurn(0);
+      expect(settled).toBe(false);
+      release.resolve();
+      await cancelled;
+      expect(chunks).not.toHaveBeenCalled();
+      expect(h.timers.size).toBe(0);
+      get.mockRestore();
+      chunks.mockRestore();
+    } finally {
+      await h.close();
+    }
+  });
+  it('an already-aborted request starts no store read and ends the stream', async () => {
+    const h = await harness();
+    try {
+      const current = row({ id: 'pre-aborted' });
+      await h.store.create(current);
+      const get = vi.spyOn(h.store, 'get');
+      const signal = new AbortController();
+      signal.abort();
+      const ctx = { ...h.ctx(), signal: signal.signal };
+      await respond(ctx, current, {
+        store: h.store,
+        runtime: h.runtime,
+        headers: {},
+        pollIntervalMs: 1,
+      });
+      expect(await read(ctx)).toBe('');
+      expect(get).not.toHaveBeenCalled();
+      get.mockRestore();
+    } finally {
+      await h.close();
+    }
+  });
   it('closes tails when the request disconnects, including before subscription', async () => {
     const h = await harness();
     try {
