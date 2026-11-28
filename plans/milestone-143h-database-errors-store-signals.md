@@ -786,6 +786,19 @@ D-1 to its alternative ("Do D1 in the same PR"). §3 is written to match.
   expectation in `packages/cloudflare-plugin/test/unit/d1-database.test.ts:131-135` (the
   `InvalidFieldValueError` hint gains its problem type) is edited in this pull request, an approved
   out-of-lane edit recorded in the lanes table and the PR body.
+- D-11 (raised by the security audit as F-2, decided 2026-11-28, "Narrow it"): at the
+  transaction-work site, a thrown error with a numeric `statusCode` is left as the application's own
+  error. Without it, `serviceUnavailable('NOT NULL constraint failed: x')` was served 400 and an
+  `HttpError` carrying `code: 'P2003'` 409. The check is in `membersAtSite` (`errors/classify.ts`),
+  which every transaction-work reader goes through. The maintainer asked that Cosmos SDK errors keep
+  their classification, identified by something the SDK sets. Read from `@azure/cosmos` 4.10.2
+  `request/RequestHandler.js:119-126`, a Cosmos `ErrorResponse` carries its status on `code`, with
+  `headers`, `activityId` and `substatus`, and has no `statusCode`, so the `statusCode` check never
+  matches one and no exemption is needed; adding one would be code no path reads. A framework
+  `HttpError` always carries `statusCode` (`exceptions` `http-error.ts`), so it always matches. The
+  tests pin both: a real `ErrorResponse` has no `statusCode`, stays itself from transaction work
+  (numeric codes are not read there, D-3), and is still a write conflict from a unit-of-work
+  repository call.
 
 | #   | Section     | Question                                                                                                                                                                                           | Recommended                                                                                                                                                                                                                                                                                               | Alternative and its cost                                                                                                                                                                                                                  |
 | --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

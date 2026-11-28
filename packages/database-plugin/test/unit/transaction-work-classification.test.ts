@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DrizzleQueryError } from 'drizzle-orm';
+import { ErrorResponse } from '@azure/cosmos';
 import { httpStatusHintOf, withHttpStatusHint } from '@setu-ts/common';
 import type { IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
@@ -401,5 +402,45 @@ describe('a tagged driver error that the scrub replaces keeps its status', () =>
       .findAll()
       .catch((error: unknown) => error);
     check(thrown);
+  });
+});
+
+describe('a real Cosmos SDK error keeps its classification', () => {
+  const cosmosError = (code: number): Error =>
+    Object.assign(new ErrorResponse('Request rate is large'), {
+      code,
+      headers: { 'x-ms-activity-id': 'activity' },
+      activityId: 'activity',
+      substatus: 0,
+    });
+  it('carries no statusCode, so the HTTP-layer rule never reads it', () => {
+    expect(cosmosError(449)).not.toHaveProperty('statusCode');
+  });
+  it('thrown from transaction work stays itself, as numeric codes are not read there', async () => {
+    const error = cosmosError(449);
+    await expect(
+      service(undefined, 'cosmos').transaction(() => Promise.reject(error)),
+    ).rejects.toBe(error);
+  });
+  it('from a unit-of-work repository call is still a write conflict', async () => {
+    const failing: IDataSource = { ...source, findAll: () => Promise.reject(cosmosError(449)) };
+    const adapter: IDatabaseAdapter = {
+      connect: () => Promise.resolve(),
+      disconnect: () => Promise.resolve(),
+      isReady: () => true,
+      createDataSource: () => failing,
+      rawQuery: () => Promise.resolve([]),
+      beginTransaction: () =>
+        Promise.resolve({
+          createDataSource: () => failing,
+          commit: () => Promise.resolve(),
+          rollback: () => Promise.resolve(),
+        }),
+    };
+    const thrown = await new DatabaseService(adapter, () => failing, 'cosmos')
+      .transaction((uow) => uow.getRepository('Item').findAll())
+      .catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(SerializationConflictError);
+    expect(httpStatusHintOf(thrown)?.status).toBe(409);
   });
 });

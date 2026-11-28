@@ -760,6 +760,12 @@ function membersAtSite(error: unknown, site?: 'transaction-work'): DriverErrorMe
   if (typeof error !== 'object' || error === null) return [];
   let candidate: object = error;
   try {
+    // A numeric HTTP `statusCode` marks an HTTP-layer error (the framework's
+    // `HttpError`, an HTTP client's error): it stays the application's own,
+    // whatever its message or code copies from a driver (audit F-2). Cosmos
+    // SDK errors are unaffected: `RequestHandler` sets the status on `code`,
+    // with `headers`, `activityId` and `substatus`, and no `statusCode`.
+    if (typeof (error as { statusCode?: unknown }).statusCode === 'number') return [];
     const wrapper = error as { query?: unknown; params?: unknown; cause?: unknown };
     if (
       error instanceof Error &&

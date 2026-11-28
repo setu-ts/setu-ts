@@ -1730,10 +1730,11 @@ stays itself, including an error carrying an HTTP status hint; bound values in i
 still scrubbed. A frozen hinted error whose cause must be relinked is replaced by a scrubbed copy, a
 plain `Error` that keeps its status but not its class. Already-classified repository errors keep
 their hints. Generic errno codes, AWS/Cosmos timeout names and numeric codes are excluded here, so a
-refused webhook is not reported as database unavailability. Outside a transaction,
-`getDrizzleDatabase` errors reach the application as thrown; inspect the Drizzle `cause` when
-handling them. Value length/type refusals require a repository entity and remain unclassified
-through raw `query()` or native transaction work.
+refused webhook is not reported as database unavailability. An error with a numeric `statusCode` (an
+`HttpError`, an HTTP client's error) is never classified here, whatever its message or code copies
+from a driver. Outside a transaction, `getDrizzleDatabase` errors reach the application as thrown;
+inspect the Drizzle `cause` when handling them. Value length/type refusals require a repository
+entity and remain unclassified through raw `query()` or native transaction work.
 
 Classified errors carry the scrubbed driver diagnostic as `cause` — the SQLSTATE and the failing
 statement stay reachable for the log (M90j) — and none serves driver text: the body's `detail` is a
