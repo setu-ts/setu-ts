@@ -207,8 +207,8 @@ All notable changes to this project are documented here. The format follows
   to the caller's transaction. Memory, log and file reject the scope and write nothing. Redaction
   and stamping run before both paths; scoped SQL entities use snake_case row properties.
 - **BREAKING — `@setu-ts/agent-runs-plugin` (M143h; V13-27, #621).** Model failures log the original
-  error class and status hint without provider text. Replay cancellation waits for the store read in
-  flight and starts no new read after cancellation; bound the store so cleanup can finish.
+  error class and status hint without provider text. Replay cancellation, and a client disconnect,
+  waits for the store read in flight and starts no new read; bound the store so cleanup can finish.
 - **`@setu-ts/vector-store-plugin` (M143h; V13-39, V13-5, #621).** Readiness warns on an outage's
   first probe failure, repeats the same cause at debug and logs recovery at info. Changed causes
   warn again; late settlements after timeout report nothing. pgvector distinguishes a missing index

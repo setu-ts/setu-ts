@@ -134,8 +134,10 @@ A failed model call logs the original error's class and HTTP status hint at `war
 captured cause keeps the generic `Error` fallback.
 
 Cancelling a replay stream aborts its pump and waits for the store read already in flight. It starts
-no new read after cancellation. The wait has no separate bound: configure a bound on the store, such
-as pg `query_timeout`, so response cleanup can finish.
+no new read after cancellation. A client disconnect does the same: the stream stays open until that
+read settles, so the request's cleanups run after it, and a request that is already aborted starts
+no read. The wait has no separate bound: configure a bound on the store, such as pg `query_timeout`,
+so response cleanup can finish.
 
 ## Development
 
