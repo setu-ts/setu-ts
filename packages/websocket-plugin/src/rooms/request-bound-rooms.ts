@@ -42,7 +42,8 @@ export class RequestBoundRooms {
 
   /**
    * @param backplane - A backplane that gives each connection its own link
-   * @param logger - For the one debug line when a broadcast falls back to the hub
+   * @param logger - For the debug line when a broadcast falls back to the hub, and the
+   *   warnings for a link that cannot open or close and a hub publish that fails
    */
   constructor(backplane: IRealtimeLinkBackplane, logger?: ILogger) {
     this.#backplane = backplane;

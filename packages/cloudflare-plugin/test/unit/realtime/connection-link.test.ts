@@ -151,13 +151,13 @@ describe('ConnectionLink', () => {
     const waitUntil = (promise: Promise<unknown>): void => {
       held.push(promise);
     };
-    namespace.omitSocket = true;
-    const early = link(namespace, () => {}, { logger, waitUntil });
+    const failing = new FakeDurableObjectNamespace();
+    failing.omitSocket = true;
+    const early = link(failing, () => {}, { logger, waitUntil });
     early.publish(frame('early'));
     early.close();
     // Closed before it opened, then the open succeeds but its send throws: the
     // unsent frame is reported and the socket is still closed.
-    namespace.omitSocket = false;
     let flushed: { failSend: boolean; closed: boolean } | undefined;
     const flushing = link(namespace, () => {}, {
       logger,
