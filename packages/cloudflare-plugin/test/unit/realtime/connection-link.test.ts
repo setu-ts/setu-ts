@@ -67,6 +67,7 @@ function link(
     timers?: ReturnType<typeof manualTimers>;
     logger?: RecordingLogger;
     hub?: () => IServiceBinding;
+    waitUntil?: (promise: Promise<unknown>) => void;
   },
 ): ConnectionLink {
   return new ConnectionLink({
@@ -77,6 +78,7 @@ function link(
     deliver,
     timers: extra?.timers ?? manualTimers(),
     ...(extra?.logger === undefined ? {} : { logger: () => extra.logger }),
+    ...(extra?.waitUntil === undefined ? {} : { waitUntil: extra.waitUntil }),
   });
 }
 
@@ -143,21 +145,38 @@ describe('ConnectionLink', () => {
     }).not.toThrow();
     expect(timers.pending.filter((t) => !t.cleared)).toEqual([]);
 
-    // Closed before it opened, then the open fails: still settles quietly.
+    // Closed before it opened, then the open fails: the open, kept alive
+    // through waitUntil, still settles without throwing.
+    const held: Promise<unknown>[] = [];
+    const waitUntil = (promise: Promise<unknown>): void => {
+      held.push(promise);
+    };
     namespace.omitSocket = true;
-    const early = link(namespace, () => {}, { logger });
+    const early = link(namespace, () => {}, { logger, waitUntil });
     early.publish(frame('early'));
     early.close();
-    await setImmediate();
-    // Closed before it opened, then the open succeeds but cannot send.
+    // Closed before it opened, then the open succeeds but its send throws: the
+    // unsent frame is reported and the socket is still closed.
     namespace.omitSocket = false;
-    const flushing = link(namespace, () => {}, { logger });
+    let flushed: { failSend: boolean; closed: boolean } | undefined;
+    const flushing = link(namespace, () => {}, {
+      logger,
+      waitUntil,
+      hub: () => ({
+        fetch: async (input: string, init?: RequestInit) => {
+          const response = await namespace.get('chat').fetch(input, init);
+          flushed = (response as unknown as { webSocket: { failSend: boolean; closed: boolean } })
+            .webSocket;
+          flushed.failSend = true;
+          return response;
+        },
+      }),
+    });
     flushing.publish(frame('late'));
     flushing.close();
-    const pending = namespace.clients.length;
-    await setImmediate();
-    const flushed = namespace.clients.at(pending);
-    expect(flushed === undefined || flushed.closed).toBe(true);
+    await expect(Promise.all(held)).resolves.toHaveLength(2);
+
+    expect(flushed?.closed).toBe(true);
   });
 
   it('refuses a frame that would pass the byte budget while opening, keeping what it queued', async () => {

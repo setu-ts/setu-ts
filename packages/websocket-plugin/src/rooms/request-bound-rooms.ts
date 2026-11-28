@@ -207,10 +207,15 @@ export class RequestBoundRooms {
       }
     }
     void this.#backplane.publishViaHub(frame).catch((error: unknown) => {
-      this.#logger?.warn('websocket: backplane publish failed', {
-        room: room.name,
-        error: describeError(error),
-      });
+      try {
+        this.#logger?.warn('websocket: backplane publish failed', {
+          room: room.name,
+          error: describeError(error),
+        });
+      } catch {
+        // Nothing awaits this; a logger that throws must not become an
+        // unhandled rejection.
+      }
     });
   }
 }

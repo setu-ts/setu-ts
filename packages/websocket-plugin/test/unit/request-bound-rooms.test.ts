@@ -599,6 +599,35 @@ describe('RequestBoundRooms', () => {
   });
 });
 
+describe('a throwing logger on the hub fallback', () => {
+  it('leaves no unhandled rejection when a failed hub publish is reported', async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', record);
+    try {
+      const world = new RequestWorld();
+      const hub = new FakeHub(world);
+      const failing = {
+        ...hub.backplane('o'),
+        publishViaHub: () => Promise.reject(new Error('hub down')),
+      };
+      const logger = createFakeLogger();
+      logger.warn = () => {
+        throw new Error('logger down');
+      };
+      const rooms = new RequestBoundRooms(failing, logger);
+      rooms.broadcast(new Room('lobby'), 'x');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } finally {
+      process.off('unhandledRejection', record);
+    }
+
+    expect(unhandled).toEqual([]);
+  });
+});
+
 describe('connections whose link fails, and shutdown, on Workers', () => {
   it('closes a connection whose link cannot open with 1011, after its onOpen runs', async () => {
     const world = new RequestWorld();
