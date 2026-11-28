@@ -763,13 +763,15 @@ Per-broker limits:
   reports `MessagingEntityNotFound`, the broker retires it and recreates the same per-instance
   subscription and receiver, so delivery resumes. Recovery retries every second through receive
   outages and transient administration failures (408, 429, most 5xx, a request that got no answer,
-  or a create that does not answer within 5 seconds). Cleanup it waits on (the old receiver's close,
-  the delete after a failed open) is bounded at 5 seconds; past it, a warning naming the cleanup is
-  logged once per subscription and recovery continues; `unsubscribe()` and `disconnect()` also stop
-  waiting for such a close after 5 seconds. Its first failure logs one warning; any other failure,
-  such as 401, 403 or 404 or a missing `Manage` right, stops recovery for that subscription. Copies
-  published while the subscription is missing are lost; recovery does not replay them. Transient
-  receive errors and durable competing subscriptions do not trigger this recreation.
+  or a create that does not answer within 5 seconds), and when a receiver open finds the recreated
+  subscription missing again. Each cleanup step it waits on (abandoning held deliveries, then the
+  old receiver's close, and the delete after a failed open) is bounded at 5 seconds; past it, a
+  warning naming that step is logged once per subscription and recovery continues; `unsubscribe()`
+  and `disconnect()` also stop waiting for such a close after 5 seconds. Its first failure logs one
+  warning; any other failure, such as 401, 403, a 404 on a create or a missing `Manage` right, stops
+  recovery for that subscription. Copies published while the subscription is missing are lost;
+  recovery does not replay them. Transient receive errors and durable competing subscriptions do not
+  trigger this recreation.
 - **Pub/Sub.** A failed delete on close is logged and left to the one-day idle expiry.
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.

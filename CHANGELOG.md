@@ -519,48 +519,48 @@ All notable changes to this project are documented here. The format follows
   reply-inbox cleanup still in flight, then logs one warning and continues; an inbox open that
   answers later is still closed. Fan-out receivers also recreate their same per-instance
   subscription after a missing-entity receive report, resuming after an outage longer than the idle
-  lifetime. Recovery retries every second through outages and transient administration failures
-  (each create, and the cleanup recovery waits on, bounded at 5 s; `unsubscribe()` and
-  `disconnect()` also stop waiting for a receiver recovery retired after 5 s); the first failure
-  logs one warning, and any other failure, such as 401/403/404, stops recovery for that
-  subscription. Copies published during the missing-subscription gap are lost, without replay.
-  Transient receive failures retain inboxes and fan-out receivers; durable competing subscriptions
-  are not recreated. Service Bus refusal codes take precedence over `retryable` and stay unchanged
-  without marking it down. An aggregate stays a refusal only when its last inner error has a refusal
-  code; every other aggregate is an outage, regardless of the last error's `retryable` value.
-  Non-aggregate outages include `retryable: true`, SDK codes `ServiceCommunicationProblem`,
-  `ServiceTimeout` and `ServiceBusy`, and socket codes `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`,
-  `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and `EAI_AGAIN`. The fallback requires
-  undefined `code` and `retryable` and no numeric `statusCode`; numeric status-only errors stay
-  unchanged without changing reachability evidence. Pub/Sub adds `PubSubTopicMissingError` and
-  bounds dead-letter topic inspection at 1500 ms. **Prerelease removal:** the unused
-  `PubSubSdkModule.topic().exists?` facade member is removed; substitute SDK modules use
-  `getMetadata` for inspection. `IPubSubTransport.topicExists` remains supported. The exported
-  `ICustomMessageBroker` documents optional trace-header members; every custom publish validates
-  options and consumers use `subscribe` metadata headers. Queue adds `retryDelayMs` and `health`
-  probe settings. Retry delay accepts a function or a finite non-negative number; omitted/undefined
-  keeps backoff, while other runtime types (including null) and invalid numbers throw `RangeError`
-  at plugin-factory and service construction. Every queue loop-failure line (`queue reserve failed`,
-  `queue poll failed`, `queue recurring failed`, `queue depth-probe failed`,
-  `queue recurring enqueue failed`) warns once per episode (error when warn is absent) and recovers
-  at info with a failure count. Its `error` uses one-line `describeError`, including the error name
-  and available classifiers/causes, masking URL userinfo without adding a stack field. Job-error
-  reports keep their existing format. SQS's SDK path now has the documented per-queue
-  `GetQueueAttributes` probe, explicitly selects its separate one-attempt SDK client and aborts each
-  request at `min(1500, floor(0.75 * health.probeTimeoutMs))` ms. It adds `requestTimeoutMs` (15000
-  ms, 0 unbounded) and `waitTimeSeconds` (20, range 0–20); SNS adds the same request bound. SDK
-  abort signals and 503/504 classification cover calls; redrive reads retain a finite 10 s ceiling
-  at disabled bounds. Receive adds the long-poll duration, capped at 2147483647 ms (0 stays
-  unbounded). Per-name reserves run independently and disconnect fences late results. Full
-  failure-free outbox sweeps follow up with a macrotask yield between batches, warning once on
-  saturation and logging catch-up; any failure stops the chain. Backlogs drain back-to-back with one
-  claim and one mark per delivered row; there is no chain switch or tuning option. Call `dispatch()`
-  after commit to avoid interval latency. An injected Redis backplane open now shares the 15000 ms
-  command bound and close cancels pending opens before late registration. Once the backplane's own
-  open installs a connected pair, any close UNSUBSCRIBEs then QUITs both injected clients, with
-  disconnect on failed QUIT, preserving 0.13.0 normal-close behavior. This includes kernel cleanup
-  after a later plugin fails or `stop()` cancels application start; retry startup in a new
-  application with new injected clients. A cancelled, failed or timed-out backplane open never
+  lifetime. Recovery retries every second through outages, transient administration failures and a
+  receiver open that finds the subscription missing (each create, and the cleanup recovery waits on,
+  bounded at 5 s; `unsubscribe()` and `disconnect()` also stop waiting for a receiver recovery
+  retired after 5 s); the first failure logs one warning, and any other failure, such as 401, 403 or
+  a 404 on a create, stops recovery for that subscription. Copies published during the
+  missing-subscription gap are lost, without replay. Transient receive failures retain inboxes and
+  fan-out receivers; durable competing subscriptions are not recreated. Service Bus refusal codes
+  take precedence over `retryable` and stay unchanged without marking it down. An aggregate stays a
+  refusal only when its last inner error has a refusal code; every other aggregate is an outage,
+  regardless of the last error's `retryable` value. Non-aggregate outages include `retryable: true`,
+  SDK codes `ServiceCommunicationProblem`, `ServiceTimeout` and `ServiceBusy`, and socket codes
+  `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and
+  `EAI_AGAIN`. The fallback requires undefined `code` and `retryable` and no numeric `statusCode`;
+  numeric status-only errors stay unchanged without changing reachability evidence. Pub/Sub adds
+  `PubSubTopicMissingError` and bounds dead-letter topic inspection at 1500 ms. **Prerelease
+  removal:** the unused `PubSubSdkModule.topic().exists?` facade member is removed; substitute SDK
+  modules use `getMetadata` for inspection. `IPubSubTransport.topicExists` remains supported. The
+  exported `ICustomMessageBroker` documents optional trace-header members; every custom publish
+  validates options and consumers use `subscribe` metadata headers. Queue adds `retryDelayMs` and
+  `health` probe settings. Retry delay accepts a function or a finite non-negative number;
+  omitted/undefined keeps backoff, while other runtime types (including null) and invalid numbers
+  throw `RangeError` at plugin-factory and service construction. Every queue loop-failure line
+  (`queue reserve failed`, `queue poll failed`, `queue recurring failed`,
+  `queue depth-probe failed`, `queue recurring enqueue failed`) warns once per episode (error when
+  warn is absent) and recovers at info with a failure count. Its `error` uses one-line
+  `describeError`, including the error name and available classifiers/causes, masking URL userinfo
+  without adding a stack field. Job-error reports keep their existing format. SQS's SDK path now has
+  the documented per-queue `GetQueueAttributes` probe, explicitly selects its separate one-attempt
+  SDK client and aborts each request at `min(1500, floor(0.75 * health.probeTimeoutMs))` ms. It adds
+  `requestTimeoutMs` (15000 ms, 0 unbounded) and `waitTimeSeconds` (20, range 0–20); SNS adds the
+  same request bound. SDK abort signals and 503/504 classification cover calls; redrive reads retain
+  a finite 10 s ceiling at disabled bounds. Receive adds the long-poll duration, capped at
+  2147483647 ms (0 stays unbounded). Per-name reserves run independently and disconnect fences late
+  results. Full failure-free outbox sweeps follow up with a macrotask yield between batches, warning
+  once on saturation and logging catch-up; any failure stops the chain. Backlogs drain back-to-back
+  with one claim and one mark per delivered row; there is no chain switch or tuning option. Call
+  `dispatch()` after commit to avoid interval latency. An injected Redis backplane open now shares
+  the 15000 ms command bound and close cancels pending opens before late registration. Once the
+  backplane's own open installs a connected pair, any close UNSUBSCRIBEs then QUITs both injected
+  clients, with disconnect on failed QUIT, preserving 0.13.0 normal-close behavior. This includes
+  kernel cleanup after a later plugin fails or `stop()` cancels application start; retry startup in
+  a new application with new injected clients. A cancelled, failed or timed-out backplane open never
   disconnects or QUITs injected clients; it removes its listeners and watches and undoes late
   subscriptions unless a newer open is using the subscriber. Owned clients now force-disconnect when
   close cancels an in-flight SUBSCRIBE even with a finite bound. See the

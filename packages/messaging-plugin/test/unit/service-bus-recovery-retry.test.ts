@@ -262,6 +262,131 @@ describe('Service Bus fan-out recovery retries', () => {
     },
   );
 
+  it('recreates the subscription when the recovery open finds it missing', async () => {
+    const h = harness();
+    const handler = vi.fn();
+    await h.broker.connect();
+    try {
+      await h.broker.subscribe('orders', handler, { fanOut: true });
+      vi.mocked(h.transport.open).mockRejectedValueOnce(missing);
+      h.fail();
+      await flushCloud();
+      expect(h.clock.timerCount()).toBe(1);
+      await h.clock.advance(1000);
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(3);
+      expect(h.opens).toHaveLength(2);
+      await h.opens[1]!.deliver({ payload: '{}', ack: vi.fn(), nack: vi.fn() });
+      expect(handler).toHaveBeenCalledOnce();
+    } finally {
+      await h.broker.disconnect();
+      expect(h.clock.timerCount()).toBe(0);
+    }
+  });
+
+  it('starts closing the old receiver after the bound when a held settlement never answers', async () => {
+    const fake = serviceBusTransport();
+    const clock = clockRuntime();
+    const warn = vi.fn();
+    const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+      client: fake.transport,
+      consumerRetry: { maxAttempts: 5, delaysMs: [60000] },
+      logger: { error: vi.fn(), warn },
+    });
+    const hungNack = Promise.withResolvers<void>();
+    await broker.connect();
+    try {
+      await broker.subscribe('orders', () => Promise.reject(new Error('handler')), {
+        fanOut: true,
+      });
+      void fake.opens[0]!.deliver({
+        payload: '{}',
+        deliveryCount: 0,
+        ack: vi.fn(),
+        nack: () => hungNack.promise,
+        deadLetter: vi.fn(),
+      });
+      await flushCloud();
+      vi.mocked(fake.transport.open).mock.calls[0]![3]!.onReceiveError!(missing, 'receive');
+      await flushCloud();
+      await clock.advance(4999);
+      expect(fake.opens[0]!.close).not.toHaveBeenCalled();
+      await clock.advance(1);
+      expect(fake.opens[0]!.close).toHaveBeenCalledOnce();
+      expect(fake.opens).toHaveLength(2);
+      // The stalled step is named; the close that answered at once is not.
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        'Service Bus held fan-out deliveries were not abandoned within 5000ms; the retired receiver closes anyway',
+      );
+    } finally {
+      hungNack.resolve();
+      await broker.disconnect();
+      expect(clock.timerCount()).toBe(0);
+    }
+  });
+
+  it.each(['unsubscribe', 'disconnect'] as const)(
+    'starts the old receiver close at once on %s while a held settlement still hangs',
+    async (end) => {
+      const fake = serviceBusTransport();
+      const clock = clockRuntime();
+      const warn = vi.fn();
+      const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+        client: fake.transport,
+        consumerRetry: { maxAttempts: 5, delaysMs: [60000] },
+        logger: { error: vi.fn(), warn },
+      });
+      const hungNack = Promise.withResolvers<void>();
+      await broker.connect();
+      try {
+        const sub = await broker.subscribe('orders', () => Promise.reject(new Error('handler')), {
+          fanOut: true,
+        });
+        void fake.opens[0]!.deliver({
+          payload: '{}',
+          deliveryCount: 0,
+          ack: vi.fn(),
+          nack: () => hungNack.promise,
+          deadLetter: vi.fn(),
+        });
+        await flushCloud();
+        vi.mocked(fake.transport.open).mock.calls[0]![3]!.onReceiveError!(missing, 'receive');
+        await flushCloud();
+        expect(fake.opens[0]!.close).not.toHaveBeenCalled();
+        fake.opens[0]!.close.mockRejectedValueOnce(new Error('close'));
+        const ending = (end === 'unsubscribe' ? sub.unsubscribe() : broker.disconnect()).catch(
+          (error: unknown) => error,
+        );
+        await flushCloud();
+        expect(fake.opens[0]!.close).toHaveBeenCalledOnce();
+        // close() reports the failed close; recovery, already cancelled, does not.
+        expect(await ending).toMatchObject({ message: 'close' });
+        expect(JSON.stringify(warn.mock.calls)).not.toContain('could not be closed');
+        expect(clock.timerCount()).toBe(0);
+      } finally {
+        hungNack.resolve();
+        await broker.disconnect();
+        expect(clock.timerCount()).toBe(0);
+      }
+    },
+  );
+
+  it('deletes quietly when a failed recovery open finds the subscription already gone', async () => {
+    const h = harness();
+    await h.broker.connect();
+    try {
+      await h.broker.subscribe('orders', vi.fn(), { fanOut: true });
+      vi.mocked(h.transport.open).mockRejectedValueOnce(missing);
+      vi.mocked(h.transport.deleteSubscription).mockRejectedValueOnce(managementFailure(404));
+      h.fail();
+      await flushCloud();
+      expect(h.transport.deleteSubscription).toHaveBeenCalledOnce();
+      expect(JSON.stringify(h.warn.mock.calls)).not.toContain('was not deleted');
+    } finally {
+      await h.broker.disconnect();
+      expect(h.clock.timerCount()).toBe(0);
+    }
+  });
+
   it.each(['unsubscribe', 'disconnect'] as const)(
     'releases a bounded recovery wait at once on %s',
     async (end) => {

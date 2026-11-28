@@ -389,6 +389,14 @@ function errorName(error: unknown): string {
   return 'unknown error';
 }
 
+/** Whether a delete failed only because the subscription was already gone. */
+function alreadyGone(error: unknown): boolean {
+  return (
+    (error as { statusCode?: unknown } | null)?.statusCode === 404 ||
+    isServiceBusEntityMissing(error)
+  );
+}
+
 /** Whether an admin failure is an authorization refusal (401/403 or an Unauthorized code). */
 function unauthorized(error: unknown): boolean {
   try {
@@ -1295,6 +1303,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // Best effort: the subscription also deletes itself after 5 idle minutes,
       // so a failed delete never stops the close.
       await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
+        // Already gone (expired, or removed by a delete that answered late) is
+        // the outcome the delete wanted.
+        if (alreadyGone(error)) return;
         warnOnce(
           'delete',
           `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
@@ -1471,6 +1482,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       let retryTimer: TimerHandle | undefined;
       let releaseCreate: (() => void) | undefined;
       let releaseWait: (() => void) | undefined;
+      let releaseGrace: (() => void) | undefined;
       let warned = false;
       /**
        * Waits for cleanup that recovery depends on, up to the recovery call
@@ -1502,6 +1514,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         // itself retired.
         releaseCreate?.();
         releaseWait?.();
+        releaseGrace?.();
       };
       cancelRecovery = cancel;
       const taskCurrent = (): boolean => active() && cancelRecovery === cancel;
@@ -1533,7 +1546,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
               async () => {
                 if (!abandoned || active()) return;
                 await transport.deleteSubscription(topic, queue).catch((error: unknown) => {
-                  if ((error as { statusCode?: unknown } | null)?.statusCode === 404) return;
+                  if (alreadyGone(error)) return;
                   warnOnce(
                     'delete',
                     `Service Bus fan-out subscription ${JSON.stringify(queue)} was not deleted (${errorName(error)}); it is removed after 5 idle minutes`,
@@ -1596,7 +1609,10 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
             creating && (error as { name?: unknown } | null)?.name === 'RestError';
           const retry = administration
             ? isTransientManagementFailure(error)
-            : isServiceBusOutage(error) || (creating && isTransientManagementFailure(error));
+            : isServiceBusOutage(error) ||
+              // A receiver open that finds the entity missing (a late delete
+              // removed it after the create) recreates the same subscription.
+              (creating ? isTransientManagementFailure(error) : isServiceBusEntityMissing(error));
           if (!retry) {
             stop(error);
             return;
@@ -1610,17 +1626,42 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       const runAttempt = (): void => {
         void attempt().catch(stop);
       };
-      const retiring = Promise.all([...holds].map((cancelHold) => cancelHold())).then(() =>
-        retire(previous),
-      );
+      // Held deliveries are abandoned first, but a settlement that never
+      // answers must not keep the old receiver open: after the recovery call
+      // bound (or on cancel) its close starts regardless.
+      const settling = Promise.all([...holds].map((cancelHold) => cancelHold()));
+      const grace = new Promise<boolean>((resolve) => {
+        const timer = this.#runtime.setTimeout(() => {
+          releaseGrace = undefined;
+          resolve(true);
+        }, SERVICE_BUS_RECOVERY_CALL_MS);
+        releaseGrace = (): void => {
+          this.#runtime.clearTimeout(timer);
+          releaseGrace = undefined;
+          resolve(false);
+        };
+        const settled = (): void => releaseGrace?.();
+        void settling.then(settled, settled);
+      });
+      const retiring = grace.then(() => retire(previous));
       retirements.add(retiring);
       void retiring.then(
         () => retirements.delete(retiring),
         () => retirements.delete(retiring),
       );
       void (async () => {
-        // The old receiver's callbacks are already fenced by its generation, so
-        // recovery need not wait past the bound for its close to finish.
+        // Each step gets its own bound and its own warning: first abandoning
+        // held deliveries, then the close that starts after it. The old
+        // receiver's callbacks are already fenced by its generation, so
+        // recovery need not wait past either bound.
+        if ((await grace) && taskCurrent())
+          warnOnce(
+            'settle-timeout',
+            `Service Bus held fan-out deliveries were not abandoned within ${SERVICE_BUS_RECOVERY_CALL_MS}ms; the retired receiver closes anyway`,
+          );
+        // Cancelled during the grace: close() now owns the retirement, its
+        // bound and its errors.
+        if (!taskCurrent()) return;
         const outcome = await waitBounded(retiring);
         if (outcome === 'failed')
           this.#write('Service Bus retired fan-out receiver could not be closed');
