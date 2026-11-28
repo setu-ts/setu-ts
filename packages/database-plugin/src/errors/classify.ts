@@ -762,10 +762,12 @@ function membersAtSite(error: unknown, site?: 'transaction-work'): DriverErrorMe
   try {
     // A numeric HTTP `statusCode` marks an HTTP-layer error (the framework's
     // `HttpError`, an HTTP client's error): it stays the application's own,
-    // whatever its message or code copies from a driver (audit F-2). Cosmos
-    // SDK errors are unaffected: `RequestHandler` sets the status on `code`,
-    // with `headers`, `activityId` and `substatus`, and no `statusCode`.
-    if (typeof (error as { statusCode?: unknown }).statusCode === 'number') return [];
+    // whatever its message or code copies from a driver (audit F-2). The same
+    // holds for the cause a Drizzle wrapper carries (a cache or type-parser
+    // error). Cosmos SDK errors are unaffected: `RequestHandler` sets the
+    // status on `code`, with `headers`, `activityId` and `substatus`, and no
+    // `statusCode`.
+    if (hasNumericStatusCode(error)) return [];
     const wrapper = error as { query?: unknown; params?: unknown; cause?: unknown };
     if (
       error instanceof Error &&
@@ -775,6 +777,7 @@ function membersAtSite(error: unknown, site?: 'transaction-work'): DriverErrorMe
       wrapper.cause !== null
     )
       candidate = wrapper.cause;
+    if (candidate !== error && hasNumericStatusCode(candidate)) return [];
   } catch {
     return [];
   }
@@ -795,6 +798,11 @@ function membersAtSite(error: unknown, site?: 'transaction-work'): DriverErrorMe
     // names remain authoritative beside a numeric code or an errno.
     return { ...own, code: excludedCode ? undefined : code, names, name: names[0] };
   });
+}
+
+/** Whether a value carries an HTTP-layer numeric `statusCode`; a throwing read propagates. */
+function hasNumericStatusCode(value: object): boolean {
+  return typeof (value as { statusCode?: unknown }).statusCode === 'number';
 }
 
 /** Unknown commit acknowledgements cannot be translated as server refusals. */

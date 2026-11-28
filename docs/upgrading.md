@@ -33,9 +33,10 @@ Foreign-key violations now answer 409, NOT NULL and repository length/range refu
 wait timeouts 409. Catch the named errors or inspect problem.type instead of treating every 409 as
 retryable. Raw query/native work still has no repository entity for value-refusal mapping.
 Database-specific errors thrown inside db.transaction are now classified; generic network errors
-from foreign calls and application-wrapped causes remain application errors. Native Drizzle errors
-outside a transaction still reach the caller as thrown. Commit maps only duplicate, conflict, FK and
-NOT NULL verdicts, never UnknownTransactionCommitResult or unavailable/timeouts.
+from foreign calls, application-wrapped causes and errors with a numeric `statusCode` (an
+`HttpError`) remain application errors. Native Drizzle errors outside a transaction still reach the
+caller as thrown. Commit maps only duplicate, conflict, FK and NOT NULL verdicts, never
+UnknownTransactionCommitResult or unavailable/timeouts.
 
 `idempotency.within` no longer treats any status-only 409 as a holder conflict. A store-side FK or
 other unrelated 409 becomes store-failed. Custom transactional stores should raise DuplicateKeyError

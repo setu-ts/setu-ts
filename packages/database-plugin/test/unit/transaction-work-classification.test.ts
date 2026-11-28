@@ -405,6 +405,33 @@ describe('a tagged driver error that the scrub replaces keeps its status', () =>
   });
 });
 
+describe('an HTTP-layer error under a Drizzle wrapper is not classified', () => {
+  it('a wrapped cause with a numeric statusCode stays unclassified', async () => {
+    for (const cause of [
+      Object.assign(new Error('NOT NULL constraint failed: items.name'), { statusCode: 503 }),
+      Object.assign(new Error('upstream'), { statusCode: 503, code: '23503' }),
+    ]) {
+      const wrapped = new DrizzleQueryError('insert into items values ($1)', ['v'], cause);
+      const thrown = await service()
+        .transaction(() => Promise.reject(wrapped))
+        .catch((error: unknown) => error);
+      expect(httpStatusHintOf(thrown)).toBeUndefined();
+    }
+  });
+  it('the same causes without statusCode are classified', async () => {
+    for (const [cause, status] of [
+      [new Error('NOT NULL constraint failed: items.name'), 400],
+      [Object.assign(new Error('fk'), { code: '23503' }), 409],
+    ] as const) {
+      const wrapped = new DrizzleQueryError('insert into items values ($1)', ['v'], cause);
+      const thrown = await service()
+        .transaction(() => Promise.reject(wrapped))
+        .catch((error: unknown) => error);
+      expect(httpStatusHintOf(thrown)?.status).toBe(status);
+    }
+  });
+});
+
 describe('a real Cosmos SDK error keeps its classification', () => {
   const cosmosError = (code: number): Error =>
     Object.assign(new ErrorResponse('Request rate is large'), {

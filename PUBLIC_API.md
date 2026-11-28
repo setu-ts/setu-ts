@@ -3372,11 +3372,13 @@ DynamoDB's SDK renames socket errors to TimeoutError, ending that limitation on 
 
 **Transaction work.** Native errors from `getDrizzleTransaction` are classified from the thrown
 error's own database-specific signals, or the cause of a Drizzle query wrapper. Generic errno,
-AWS/Cosmos timeout names/codes and numeric codes are excluded at this boundary. Database-specific
-names, labels, SQLSTATEs, Prisma codes and adapter kinds still apply. Application errors with a
-driver cause retain their identity, including hinted errors, while bound values in a Drizzle cause
-are scrubbed. Outside `db.transaction`, errors from `getDrizzleDatabase` reach the application as
-thrown; inspect the Drizzle cause when handling them.
+AWS/Cosmos timeout names/codes and numeric codes are excluded at this boundary, and an error with a
+numeric `statusCode` (an `HttpError`, an HTTP client's error, or such an error as a Drizzle
+wrapper's cause) is never classified there. Database-specific names, labels, SQLSTATEs, Prisma codes
+and adapter kinds still apply. Application errors with a driver cause retain their identity,
+including hinted errors, while bound values in a Drizzle cause are scrubbed. Outside
+`db.transaction`, errors from `getDrizzleDatabase` reach the application as thrown; inspect the
+Drizzle cause when handling them.
 
 At commit, duplicate, serialization/lock conflict, FK and NOT NULL verdicts are mapped.
 `UnknownTransactionCommitResult` always prevents mapping. Unavailable/timeout commit rejections are
