@@ -41,8 +41,17 @@ export const LINK_QUEUE_LIMIT = 64;
  */
 export const LINK_QUEUE_BYTE_BUDGET = 1_048_576;
 
-/** Delays before each reopen of a lost link. */
+/** Delays before the first reopens of a lost link; later ones double from the last. */
 export const LINK_REOPEN_DELAYS_MS: readonly number[] = [500, 1000, 2000];
+
+/** The last of {@linkcode LINK_REOPEN_DELAYS_MS}, which later reopens double from. */
+const LAST_FIXED_DELAY_MS = 2000;
+
+/**
+ * The longest wait between reopens. A link never stops reopening while its
+ * connection is open, so this bounds how stale a recovered hub can find it.
+ */
+export const LINK_REOPEN_MAX_DELAY_MS = 30_000;
 
 /**
  * What a {@linkcode ConnectionLink} needs.
@@ -65,11 +74,6 @@ export interface ConnectionLinkOptions {
   /** Logger accessor, read when something is reported. */
   readonly logger?: () => ILogger | undefined;
   /**
-   * Called once, in the owning request, when the link gives up reopening a
-   * lost socket; never after `close()`.
-   */
-  readonly onLost?: () => void;
-  /**
    * Keeps an early close's work alive after its connection's request ends
    * (the backplane's `waitUntil`): the flush of queued frames, or with none
    * queued the open in flight, whose socket is then closed. Absent, both run
@@ -80,8 +84,8 @@ export interface ConnectionLinkOptions {
 
 /**
  * A link: opened at construction, queues frames until open, delivers what
- * arrives, reopens a lost socket up to three times, and closes with its
- * connection.
+ * arrives, reopens a lost socket until its connection closes it, and closes
+ * with its connection.
  *
  * @since 0.14.0
  */
@@ -102,6 +106,8 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   /** The open in flight, so an early close can hand it to `waitUntil`. */
   #opening: Promise<void> | undefined;
   #reopens = 0;
+  /** Set once an outage passed the routine reopens and was warned about. */
+  #outageReported = false;
   #timer: TimerHandle | undefined;
   #overflowReported = false;
 
@@ -260,6 +266,10 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     socket.addEventListener('error', dropped);
     this.#socket = socket;
     this.#reopens = 0;
+    if (this.#outageReported) {
+      this.#outageReported = false;
+      this.#report('info', 'cloudflare: backplane link restored');
+    }
     // A send that throws leaves the rest queued: the socket went away while
     // draining, and the close listener reopens to send them.
     this.#drain(socket);
@@ -295,7 +305,11 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     this.#queuedBytes = 0;
   }
 
-  /** Schedules a reopen, or gives up after the last delay. */
+  /**
+   * Schedules the next reopen. A link reopens for as long as its connection is
+   * open, backing off to {@linkcode LINK_REOPEN_MAX_DELAY_MS}; an outage past
+   * the routine reopens is warned about once, without frame content.
+   */
   #lost(): void {
     if (this.#flushing) {
       // The link closed before it opened and the open failed: what it had
@@ -310,33 +324,29 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       return;
     }
     if (this.#closed) return;
-    const delay = LINK_REOPEN_DELAYS_MS[this.#reopens];
-    if (delay === undefined) {
-      this.#closed = true;
-      this.#clearQueue();
-      try {
-        this.#options.logger?.()?.warn('cloudflare: backplane link lost', {
-          topic: this.#options.topic,
-          connection: this.#options.connectionId,
-        });
-      } catch {
-        // A logger that throws must not keep the connection from being told.
-      }
-      // The connection would receive nothing more from its rooms; its owner
-      // closes it so the client reconnects.
-      try {
-        this.#options.onLost?.();
-      } catch {
-        // A failing callback belongs to the connection, not to the link.
-      }
-      return;
+    if (this.#reopens >= LINK_REOPEN_DELAYS_MS.length && !this.#outageReported) {
+      this.#outageReported = true;
+      this.#report('warn', 'cloudflare: backplane link still reopening');
     }
+    const delay = reopenDelay(this.#reopens);
     this.#reopens++;
     // close() clears this timer, so it only fires on a link still open.
     this.#timer = this.#options.timers.setTimeout(() => {
       this.#timer = undefined;
       this.#open();
     }, delay);
+  }
+
+  /** Logs a link state change; a logger that throws cannot stop the reopens. */
+  #report(level: 'warn' | 'info', message: string): void {
+    try {
+      this.#options.logger?.()?.[level](message, {
+        topic: this.#options.topic,
+        connection: this.#options.connectionId,
+      });
+    } catch {
+      // Only the log line is lost.
+    }
   }
 
   /** Parses one arriving message; anything but a realtime frame is dropped. */
@@ -355,6 +365,18 @@ export class ConnectionLink implements IRealtimeConnectionLink {
       // A delivery failure belongs to the connection, not to the link.
     }
   }
+}
+
+/**
+ * The wait before reopen number `attempt` (from 0): the fixed delays first,
+ * then doubling from the last, capped at {@linkcode LINK_REOPEN_MAX_DELAY_MS}.
+ */
+function reopenDelay(attempt: number): number {
+  const fixed = LINK_REOPEN_DELAYS_MS[attempt];
+  if (fixed !== undefined) return fixed;
+  const doublings = attempt - LINK_REOPEN_DELAYS_MS.length + 1;
+  // Bounded so a link that has retried for days cannot overflow the product.
+  return Math.min(LINK_REOPEN_MAX_DELAY_MS, LAST_FIXED_DELAY_MS * 2 ** Math.min(doublings, 32));
 }
 
 /** Closes a socket without letting a failure escape. */

@@ -99,7 +99,6 @@ export function ownedTransport(world: RequestWorld): OwnedTransport {
 interface HubLink {
   readonly owner: string;
   readonly deliver: (frame: RealtimeFrame) => void;
-  readonly onLost: (() => void) | undefined;
   closed: boolean;
 }
 
@@ -109,22 +108,6 @@ export class FakeHub {
   posts = 0;
 
   constructor(readonly world: RequestWorld) {}
-
-  /**
-   * Makes `owner`'s links give up, as a link does once its reopens are used
-   * up: each is closed and its `onLost` runs in the owner's request.
-   * @param owner - The request whose links are lost
-   */
-  lose(owner: string): void {
-    for (const link of [...this.links]) {
-      if (link.owner !== owner) continue;
-      link.closed = true;
-      this.links.delete(link);
-      this.world.run(owner, () => {
-        link.onLost?.();
-      });
-    }
-  }
 
   /** Sends a frame to every open link except `skip`, each in its owner's request. */
   fanOut(frame: RealtimeFrame, skip?: HubLink): void {
@@ -158,8 +141,8 @@ export class FakeHub {
       publish: () => Promise.resolve(),
       subscribe: () => Promise.resolve(() => {}),
       close: () => Promise.resolve(),
-      openConnectionLink(_id, deliver, onLost): IRealtimeConnectionLink {
-        const link: HubLink = { owner: world.current ?? 'unknown', deliver, onLost, closed: false };
+      openConnectionLink(_id, deliver): IRealtimeConnectionLink {
+        const link: HubLink = { owner: world.current ?? 'unknown', deliver, closed: false };
         links.add(link);
         return {
           publish(frame: RealtimeFrame): boolean {

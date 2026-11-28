@@ -14511,11 +14511,10 @@ refused by the implementation's queue or frame bound, so the caller publishes an
 queued are still sent once it opens, kept alive through `waitUntil` where the backplane has one;
 frames queued while a lost link waits to reopen are dropped with one `warn`).
 `IRealtimeLinkBackplane extends IRealtimeBackplane` adds
-`openConnectionLink(connectionId, deliver, onLost?): IRealtimeConnectionLink` (called from the
-request that owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that
-request; `onLost`, when given, runs once in that request when the link has given up reopening, never
-after `close()`, so the caller can close its connection) and `publishViaHub(frame): Promise<void>`
-(publishes without a socket, from any request; reaches every link, the caller's own included).
+`openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
+owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and
+`publishViaHub(frame): Promise<void>` (publishes without a socket, from any request; reaches every
+link, the caller's own included).
 `hasConnectionLinks(backplane): backplane is IRealtimeLinkBackplane` is true when both members are
 functions.
 
@@ -17599,7 +17598,7 @@ schema-ignorant — a future widening of `RealtimeFrame` needs no redeploy of th
 
 **Client sockets belong to a request, not to the isolate (0.14.0).** workerd ties every I/O object
 to the request that created it, so `DurableObjectBackplane` implements `IRealtimeLinkBackplane`
-(`@setu-ts/common`): `openConnectionLink(connectionId, deliver, onLost?)` opens one link per client
+(`@setu-ts/common`): `openConnectionLink(connectionId, deliver)` opens one link per client
 connection from that connection's own request, and `publishViaHub(frame)` POSTs a frame to the hub
 (`POST /publish`, 204; 413 above 33,554,432 bytes; 400 for a body that is not valid UTF-8) from any
 request, handed to `waitUntil` when the plugin has a host. `websocket-plugin` uses these on Workers
@@ -17615,18 +17614,21 @@ sender that names itself as `except` gets no copy, as on every runtime. The hub'
 sender: as `exceptId` when the broadcast has no `except`, otherwise in `exceptIds` beside the
 caller's `except`, so its link drops that copy whether or not the hub had accepted the link yet.
 Frames sent through the hub while queued ones wait can arrive before them. A link reopens a lost
-socket three times (0.5 s, 1 s, 2 s), then logs `cloudflare: backplane link lost` once with
-`{ topic, connection }` and calls the link's `onLost`; `websocket-plugin` closes that connection
-with 1011 (`Backplane link lost`). The isolate socket (`connect`/`subscribe`) stays for `sse-plugin`
-and receives only: it opens lazily (on `connect` or the first `publish`), and a socket that reports
-a close or an error is retired and closed rather than left open at the hub, so the next call reopens
-it. `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from
-different requests never touch a socket another request owns; a failed POST is logged as
-`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
-publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
-backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
-frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
-local workerd it keeps receiving after that request has answered, which is unverified on the
+socket for as long as its connection is open: after 0.5 s, 1 s and 2 s, then doubling to a 30 s cap.
+Once the third reopen has failed it logs `cloudflare: backplane link still reopening` once, with
+`{ topic, connection }` and no frame content, and `cloudflare: backplane link restored` at `info`
+when a reopen succeeds. The connection stays open meanwhile; frames other replicas publish during
+the outage are not delivered to it, and its own broadcasts queue within the link's bounds. Its
+connection's `close()` clears the pending reopen. The isolate socket (`connect`/`subscribe`) stays
+for `sse-plugin` and receives only: it opens lazily (on `connect` or the first `publish`), and a
+socket that reports a close or an error is retired and closed rather than left open at the hub, so
+the next call reopens it. `publish(frame)` sends through `POST /publish`, never over that socket, so
+publishes from different requests never touch a socket another request owns; a failed POST is logged
+as `cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket,
+the publisher's own included, and the replica drops a frame whose `origin` is its own (the rule
+every backplane transport applies, along with dropping a frame that is not well-formed). A replica
+hears a frame only once its socket has joined the hub. The socket belongs to the request that opened
+it: on local workerd it keeps receiving after that request has answered, which is unverified on the
 platform. Each publish is its own call to the hub and the platform orders calls only within one
 stub, so other replicas may receive one replica's frames out of order.
 

@@ -441,10 +441,10 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
   left as a member that receives nothing. Only a backplane built without its timers fails this way;
   `CloudflarePlugin` always passes them.
-- **A connection whose link gives up is closed** with 1011 (`Backplane link lost`): once a lost link
-  has used its three reopens (0.5 s, 1 s, 2 s), the connection would receive nothing more from its
-  rooms, so it is closed and the client reconnects. While the hub stays down, every new connection
-  is closed this way about 3.5 s after it opens, so a client should reconnect with a backoff.
+- **A connection whose link is lost stays open.** Its link keeps reopening, backing off to 30 s, for
+  as long as the connection is open, and room delivery resumes once it reopens; frames other members
+  broadcast meanwhile do not reach it, as with any backplane during an outage. A lasting outage is
+  logged once by the Cloudflare plugin.
 - **`room.size`** counts this isolate's open members, without touching any socket.
 - **Heartbeats** run per connection, each from its own request, instead of one shared interval.
 - **A clean close is answered at once.** The Workers adapter replies to the peer's close frame

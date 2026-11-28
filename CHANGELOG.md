@@ -636,9 +636,10 @@ All notable changes to this project are documented here. The format follows
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a
     connection whose link cannot open is closed with 1011, also when the logger throws while
-    reporting it, and so is one whose link gives up after its three reopens (`Backplane link lost`),
-    so the client reconnects. `IRealtimeLinkBackplane.openConnectionLink` (`@setu-ts/common`) takes
-    an optional `onLost` callback for this.
+    reporting it. A lost link never gives up while its connection is open: it reopens after 0.5 s, 1
+    s and 2 s, then doubling to a 30 s cap, warns once per outage
+    (`cloudflare: backplane link still reopening`) and logs `cloudflare: backplane link restored` at
+    `info` on recovery; the connection stays open meanwhile, as on other backplanes.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws. A peer's close removes it, its rooms and its link even when the
     runtime's heartbeat stop throws.

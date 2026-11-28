@@ -336,9 +336,11 @@ Looked up 2026-11-22. A cell marked "not verified" was not read at a primary sou
      accepted socket, bounded at 33,554,432 bytes (the platform's received-message ceiling; larger
      answers 413). `/connect` keeps serving the isolate-level path that `sse-plugin` uses.
   10. **Link loss.** A link whose socket closes or errors reopens from its own `close` listener (its
-      own request), up to 3 times with 0.5 s, 1 s and 2 s delays through `runtime.setTimeout`, then
-      logs one `warn` (`cloudflare: backplane link lost`, `{ topic, connection }`, no frame content)
-      and stays closed. A link is closed when its connection closes, so the hub's socket count
+      own request), after 0.5 s, 1 s and 2 s through `runtime.setTimeout`, then doubling to a 30 s
+      cap, for as long as its connection is open (maintainer decision 2026-11-28, superseding "up to
+      3 times, then stays closed"); one `warn` per outage once the third reopen fails
+      (`cloudflare: backplane link still reopening`, `{ topic, connection }`, no frame content), one
+      `info` on recovery. A link is closed when its connection closes, so the hub's socket count
       follows live connections.
 - **Why:** it is the smallest change that satisfies the outcome with the programming model the
   framework already has: application handlers stay in the Worker's `ws.route()`; every write happens
@@ -1635,9 +1637,12 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       - a heartbeat stop that throws no longer skips the peer's close cleanup;
       - README and PUBLIC_API wording on the Workers fallback, `onClose` after an `await` and the
         sender's copy. Then, by the maintainer's decision (2026-11-28): the opening-queue budget
-        counts UTF-8 bytes of `frame.data` ("Count UTF-8 bytes"), and a link that has used its three
-        reopens calls `onLost`, an optional third argument of `openConnectionLink`, so
-        `websocket-plugin` closes the connection with 1011 ("Close with 1011").
+        counts UTF-8 bytes of `frame.data` ("Count UTF-8 bytes"), and, after first choosing a 1011
+        close (7db019aca), the maintainer chose "Retry forever, warn": Centrifugo,
+        phoenix_pubsub_redis, `@socket.io/redis-adapter` and the SignalR Redis backplane all keep
+        reconnecting and leave client sockets open. A lost link reopens with a backoff capped at 30
+        s while its connection is open, warns once per outage and logs its recovery; the `onLost`
+        close path was removed.
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as

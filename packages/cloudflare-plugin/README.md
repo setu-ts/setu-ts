@@ -505,10 +505,12 @@ when that connection is a member of the room. Without the arm, `ws.room()` and `
   as the hub's cap is. A broadcast that would pass the byte budget, or is above the hub's 32 MiB
   cap, goes through the hub's HTTP publish instead, where the hub refuses one above the cap with 413
   and the failure is logged.
-- **A lost link** reopens up to three times (0.5 s, 1 s, 2 s apart), then logs
-  `cloudflare: backplane link lost` once and stays closed. `websocket-plugin` then closes the
-  connection with 1011 (`Backplane link lost`), so the client reconnects rather than staying open
-  and receiving nothing from its rooms.
+- **A lost link** reopens for as long as its connection is open: after 0.5 s, 1 s and 2 s, then
+  doubling to a 30 s cap. Once the third reopen has failed it logs
+  `cloudflare: backplane link still reopening` once, with `{ topic, connection }` and no frame
+  content, and `cloudflare: backplane link restored` at `info` when a reopen succeeds. The
+  connection stays open meanwhile; frames other replicas publish during the outage are not delivered
+  to it, and its own broadcasts queue within the link's bounds.
 
 **SSE channels** use one isolate-level socket to the hub, for receiving only. A channel publish is
 POSTed to the hub, so publishes from concurrent requests never touch a socket another request owns.

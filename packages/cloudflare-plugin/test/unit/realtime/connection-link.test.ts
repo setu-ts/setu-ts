@@ -24,6 +24,7 @@ import {
   LINK_QUEUE_BYTE_BUDGET,
   LINK_QUEUE_LIMIT,
   LINK_REOPEN_DELAYS_MS,
+  LINK_REOPEN_MAX_DELAY_MS,
 } from '../../../src/realtime/connection-link.ts';
 import { FakeDurableObjectNamespace } from '../../do-fakes.ts';
 import { RecordingLogger } from '../../fakes.ts';
@@ -65,7 +66,6 @@ function link(
     timers?: ReturnType<typeof manualTimers>;
     logger?: RecordingLogger;
     hub?: () => IServiceBinding;
-    onLost?: () => void;
   },
 ): ConnectionLink {
   return new ConnectionLink({
@@ -76,7 +76,6 @@ function link(
     deliver,
     timers: extra?.timers ?? manualTimers(),
     ...(extra?.logger === undefined ? {} : { logger: () => extra.logger }),
-    ...(extra?.onLost === undefined ? {} : { onLost: extra.onLost }),
   });
 }
 
@@ -253,121 +252,128 @@ describe('ConnectionLink', () => {
     expect(a.publish(frame('x'))).toBe(false);
   });
 
-  it('reopens a lost link with 0.5 s, 1 s and 2 s delays, then warns once and stays closed', async () => {
+  /**
+   * Loses a socket (the newest by default) and fails the next `attempts`
+   * reopens, returning each delay.
+   */
+  async function failReopens(
+    namespace: FakeDurableObjectNamespace,
+    timers: ReturnType<typeof manualTimers>,
+    attempts: number,
+    lostSocket = namespace.clients.at(-1),
+  ): Promise<number[]> {
+    // Dropped at the hub too, so the lost socket delivers nothing more.
+    lostSocket?.close();
+    lostSocket?.fire('close', { data: '' });
+    namespace.omitSocket = true;
+    const delays: number[] = [];
+    for (let i = 0; i < attempts; i++) {
+      delays.push(timers.pending.at(-1)?.ms ?? -1);
+      timers.runNext();
+      await setImmediate();
+    }
+    return delays;
+  }
+
+  it('keeps reopening a lost link past three attempts, backing off to a 30 s cap', async () => {
+    // Like other backplanes, a link never gives up while its connection is
+    // open: the connection stays open and its rooms resume once the hub is back.
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const l = link(namespace, () => {}, { timers });
+    await setImmediate();
+
+    const delays = await failReopens(namespace, timers, 8);
+
+    expect(delays).toEqual([...LINK_REOPEN_DELAYS_MS, 4000, 8000, 16000, 30_000, 30_000]);
+    expect(LINK_REOPEN_MAX_DELAY_MS).toBe(30_000);
+    expect(timers.pending.filter((t) => !t.cleared)).toHaveLength(1); // still retrying
+    expect(l.publish(frame('during'))).toBe(true); // queued, not refused
+  });
+
+  it('warns once per outage past the third reopen, and reports the recovery at info', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();
     const logger = new RecordingLogger();
-    const l = link(namespace, () => {}, { timers, logger });
+    const got: RealtimeFrame[] = [];
+    const l = link(namespace, (f) => got.push(f), { timers, logger });
     await setImmediate();
+    const lost = (): unknown[] =>
+      logger.records.filter((r) => r.message === 'cloudflare: backplane link still reopening');
+    const restored = (): unknown[] =>
+      logger.records.filter((r) => r.message === 'cloudflare: backplane link restored');
 
-    // The socket is lost; every reopen then fails, so each delay is tried in turn.
-    namespace.clients.at(-1)?.fire('close', { data: '' });
-    namespace.omitSocket = true;
-    for (const delay of LINK_REOPEN_DELAYS_MS) {
-      expect(timers.pending.at(-1)?.ms).toBe(delay);
-      timers.runNext();
-      await setImmediate();
-    }
-    expect(timers.pending).toEqual([]);
-
-    const lost = logger.records.filter((r) => r.message === 'cloudflare: backplane link lost');
-    expect(lost).toHaveLength(1);
-    expect(lost[0]?.meta).toEqual({ topic: 'chat', connection: 'conn-1' });
-    expect(l.publish(frame('after'))).toBe(false);
-  });
-
-  it('tells its connection once when it gives up reopening', async () => {
-    const namespace = new FakeDurableObjectNamespace();
-    const timers = manualTimers();
-    let lost = 0;
-    link(namespace, () => {}, {
-      timers,
-      onLost: () => {
-        lost++;
-      },
+    await failReopens(namespace, timers, LINK_REOPEN_DELAYS_MS.length - 1);
+    expect(lost()).toEqual([]); // the first reopens are routine
+    timers.runNext(); // the third reopen fails too
+    await setImmediate();
+    expect(lost()).toHaveLength(1);
+    timers.runNext();
+    await setImmediate();
+    expect(lost()).toHaveLength(1); // once per outage
+    expect(logger.records.find((r) => r.message.includes('still reopening'))?.meta).toEqual({
+      topic: 'chat',
+      connection: 'conn-1',
     });
-    await setImmediate();
 
-    namespace.clients.at(-1)?.fire('close', { data: '' });
-    namespace.omitSocket = true;
-    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
-      expect(lost).toBe(0);
-      timers.runNext();
-      await setImmediate();
-    }
-    expect(lost).toBe(1);
+    // The hub is back: the next reopen succeeds, and delivery resumes.
+    expect(l.publish(frame('queued'))).toBe(true);
+    namespace.omitSocket = false;
+    timers.runNext();
+    await setImmediate();
+    expect(restored()).toHaveLength(1);
+    expect(restored().at(0)).toMatchObject({ level: 'info' });
+    const reopened = namespace.clients.at(-1);
+    const other = link(namespace, () => {});
+    await setImmediate();
+    other.publish(frame('after'));
+    expect(got.map((f) => f.data)).toEqual(['after']);
+
+    // A second outage warns again, once.
+    await failReopens(namespace, timers, LINK_REOPEN_DELAYS_MS.length + 2, reopened);
+    expect(lost()).toHaveLength(2);
   });
 
-  it('still tells its connection when the logger throws on the lost-link warning', async () => {
+  it('reports no recovery for a socket lost and reopened within the first three reopens', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();
     const logger = new RecordingLogger();
-    logger.warn = (message: string) => {
-      if (message === 'cloudflare: backplane link lost') throw new Error('logger down');
-    };
-    let lost = 0;
-    link(namespace, () => {}, {
-      timers,
-      logger,
-      onLost: () => {
-        lost++;
-      },
-    });
-    await setImmediate();
-    namespace.clients.at(-1)?.fire('close', { data: '' });
-    namespace.omitSocket = true;
-    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
-      timers.runNext();
-      await setImmediate();
-    }
-
-    expect(lost).toBe(1);
-  });
-
-  it('does not tell its connection when it is closed, or when a reopen succeeds', async () => {
-    const namespace = new FakeDurableObjectNamespace();
-    const timers = manualTimers();
-    let lost = 0;
-    const onLost = (): void => {
-      lost++;
-    };
-    const reopened = link(namespace, () => {}, { timers, onLost });
+    link(namespace, () => {}, { timers, logger });
     await setImmediate();
     namespace.clients.at(-1)?.fire('close', { data: '' });
     timers.runNext();
     await setImmediate();
-    const closed = link(namespace, () => {}, { timers, onLost });
-    closed.close();
-    reopened.close();
-    await setImmediate();
 
-    expect(lost).toBe(0);
+    expect(logger.records).toEqual([]);
   });
 
-  it('swallows a lost-link callback that throws, still staying closed', async () => {
+  it('leaves no timer once its connection closes it while it reopens', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const l = link(namespace, () => {}, { timers });
+    await setImmediate();
+    await failReopens(namespace, timers, 5);
+
+    l.close();
+
+    expect(timers.pending.filter((t) => !t.cleared)).toEqual([]);
+    expect(l.publish(frame('after'))).toBe(false);
+  });
+
+  it('keeps reopening when the logger throws on the outage warning', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const timers = manualTimers();
     const logger = new RecordingLogger();
-    let called = 0;
-    const l = link(namespace, () => {}, {
-      timers,
-      logger,
-      onLost: () => {
-        called++;
-        throw new Error('handler down');
-      },
-    });
+    logger.warn = () => {
+      throw new Error('logger down');
+    };
+    link(namespace, () => {}, { timers, logger });
     await setImmediate();
-    namespace.clients.at(-1)?.fire('close', { data: '' });
-    namespace.omitSocket = true;
-    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
-      timers.runNext();
-      await setImmediate();
-    }
 
-    expect(called).toBe(1);
-    expect(l.publish(frame('after'))).toBe(false);
-    expect(logger.records.map((r) => r.message)).toContain('cloudflare: backplane link lost');
+    const delays = await failReopens(namespace, timers, 6);
+
+    expect(delays.at(-1)).toBe(16000);
+    expect(timers.pending.filter((t) => !t.cleared)).toHaveLength(1);
   });
 
   it('resets the reopen count once a reopen succeeds', async () => {

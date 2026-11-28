@@ -66,23 +66,9 @@ export class RequestBoundRooms {
   open(conn: IWebSocketConnection, isMember: MembershipCheck): boolean {
     let link: IRealtimeConnectionLink;
     try {
-      link = this.#backplane.openConnectionLink(
-        conn.id,
-        (frame) => {
-          deliver(conn, frame, isMember);
-        },
-        () => {
-          // The link gave up reopening: left open, the connection would
-          // receive nothing from its rooms, so it is closed and the client
-          // reconnects. Runs in the connection's own request.
-          if (this.#links.get(conn) === link) this.#links.delete(conn);
-          try {
-            conn.close(1011, 'Backplane link lost');
-          } catch {
-            // Already closing.
-          }
-        },
-      );
+      link = this.#backplane.openConnectionLink(conn.id, (frame) => {
+        deliver(conn, frame, isMember);
+      });
     } catch (error: unknown) {
       // Only a misbuilt backplane fails here (a hand-made
       // DurableObjectBackplane without `timers`); a connection left open would

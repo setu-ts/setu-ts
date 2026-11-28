@@ -66,16 +66,11 @@ export interface IRealtimeLinkBackplane extends IRealtimeBackplane {
    * @param connectionId - The connection's id, for diagnostics only
    * @param deliver - Receives every frame the hub sends this link, unfiltered;
    *   the caller decides whether its connection should see it
-   * @param onLost - Called once, in the owning request, when the link has
-   *   given up reopening a lost socket and will deliver nothing more; the
-   *   caller should close its connection so the client reconnects. Not called
-   *   after {@linkcode IRealtimeConnectionLink.close}. Since 0.14.0.
    * @returns The link
    */
   openConnectionLink(
     connectionId: string,
     deliver: (frame: RealtimeFrame) => void,
-    onLost?: () => void,
   ): IRealtimeConnectionLink;
   /**
    * Publishes a frame to every link through the hub without a socket, so it
