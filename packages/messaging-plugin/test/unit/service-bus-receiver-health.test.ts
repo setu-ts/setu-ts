@@ -139,6 +139,46 @@ describe('Service Bus receiver health', () => {
     }
   });
 
+  it('finishes disconnect past a reply inbox open that never settles, then closes it when it does', async () => {
+    const clock = clockRuntime();
+    const fake = serviceBusTransport();
+    const warn = vi.fn();
+    const broker = new ServiceBusBroker(clock.runtime, new JsonSerializer(), {
+      client: fake.transport,
+      logger: { error: vi.fn(), warn },
+    });
+    const hung = Promise.withResolvers<{ close: () => Promise<void> }>();
+    const lateClose = vi.fn(() => Promise.resolve());
+    vi.mocked(fake.transport.open).mockReturnValueOnce(hung.promise);
+    await broker.connect();
+    const request = broker.request('orders', {}).catch((error: unknown) => error);
+    await flushCloud();
+    let done = false;
+    const closing = broker.disconnect().then(() => {
+      done = true;
+    });
+    try {
+      await clock.advance(4999);
+      expect(done).toBe(false);
+      await clock.advance(1);
+      await closing;
+      expect(done).toBe(true);
+      expect(warn).toHaveBeenCalledWith(
+        'Messaging reply inbox cleanup did not finish within 5000ms; disconnect continues and closes it when it settles',
+      );
+      expect(fake.transport.close).toHaveBeenCalledOnce();
+      hung.resolve({ close: lateClose });
+      await flushCloud();
+      expect(lateClose).toHaveBeenCalledOnce();
+      expect(fake.transport.deleteSubscription).toHaveBeenCalledOnce();
+      expect(clock.timerCount()).toBe(0);
+    } finally {
+      hung.resolve({ close: lateClose });
+      await closing;
+      await request;
+    }
+  });
+
   it('fences reply-inbox callbacks across disconnect and reconnect', async () => {
     const sdk = serviceBusSdk();
     const broker = new ServiceBusBroker(clockRuntime().runtime, new JsonSerializer(), {

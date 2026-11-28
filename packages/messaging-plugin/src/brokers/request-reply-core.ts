@@ -70,8 +70,9 @@ interface ReplyEnvelope {
  */
 export interface RequestReplyDeps {
   /**
-   * Reports an ignored fanOut request on a responder.
-   * @param message - Fixed configuration warning
+   * Reports an ignored fanOut request on a responder, and an inbox cleanup
+   * wait in `close()` that ran past its bound.
+   * @param message - Fixed warning text, carrying no message values
    * @returns Nothing
    * @throws Never; failures are swallowed by the core
    * @since 0.14.0
@@ -290,9 +291,14 @@ export class RequestReplyCore {
    * Tears down the reply inbox and rejects every in-flight request. Call from
    * the broker's `disconnect` so no timer or subscription leaks.
    *
+   * With `retireBoundMs`, the wait for inbox opens and closes still in flight
+   * is bounded: past it, one warning is logged and close returns, while each
+   * open that settles later is still closed in the background.
+   *
+   * @param options - `retireBoundMs`: bound on the inbox cleanup wait, in ms
    * @since 0.1.0
    */
-  async close(): Promise<void> {
+  async close(options?: { retireBoundMs?: number }): Promise<void> {
     // Increment the generation to invalidate any in-flight requests.
     this.#generation++;
 
@@ -310,7 +316,27 @@ export class RequestReplyCore {
     this.#inboxInit = null;
     this.#inboxReply = null;
     if (init) this.#retireInbox(init);
-    await Promise.all([...this.#retiringInboxes]);
+    const retiring = Promise.all([...this.#retiringInboxes]);
+    const bound = options?.retireBoundMs;
+    if (bound === undefined) {
+      await retiring;
+      return;
+    }
+    let timer: unknown;
+    const expired = new Promise<boolean>((resolve) => {
+      timer = this.#deps.setTimeout(() => resolve(true), bound);
+    });
+    const timedOut = await Promise.race([retiring.then(() => false), expired]);
+    this.#deps.clearTimeout(timer);
+    if (timedOut) {
+      try {
+        this.#deps.warn?.(
+          `Messaging reply inbox cleanup did not finish within ${bound}ms; disconnect continues and closes it when it settles`,
+        );
+      } catch {
+        /* Reporting cannot prevent close. */
+      }
+    }
   }
 
   /**

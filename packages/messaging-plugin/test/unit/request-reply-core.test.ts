@@ -183,6 +183,73 @@ describe('RequestReplyCore', () => {
     expect(t.clearTimeoutCalls).toBe(1);
   });
 
+  it('bounds the inbox cleanup wait in close(), then closes an open that settles late', async () => {
+    const t = new FakeTransport();
+    const warnings: string[] = [];
+    let releaseOpen: (() => void) | undefined;
+    let closed = 0;
+    const core = new RequestReplyCore({
+      warn: (message) => warnings.push(message),
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void =>
+            resolve({
+              address: 'rr.inbox.late',
+              close: () => {
+                closed++;
+                return Promise.resolve();
+              },
+            });
+        }),
+    });
+    const pending = core.request('t', {}, { timeoutMs: 1000 }).catch(() => {});
+    await flush();
+    // The open never settles within the bound; close still returns.
+    await core.close({ retireBoundMs: 20 });
+    expect(warnings).toEqual([
+      'Messaging reply inbox cleanup did not finish within 20ms; disconnect continues and closes it when it settles',
+    ]);
+    expect(closed).toBe(0);
+    releaseOpen!();
+    await flush();
+    expect(closed).toBe(1);
+    await pending;
+  });
+
+  it('negative control: without a bound, close() waits for an inbox open that never settles', async () => {
+    const t = new FakeTransport();
+    let releaseOpen: (() => void) | undefined;
+    const core = new RequestReplyCore({
+      publish: (topic, message) => t.publish(topic, message),
+      subscribe: (topic, handler, options) => t.subscribe(topic, handler, options),
+      uuid: () => t.uuid(),
+      setTimeout: (fn, ms) => t.setTimeout(fn, ms),
+      clearTimeout: (handle) => t.clearTimeout(handle),
+      openInbox: (): Promise<ReplyInbox> =>
+        new Promise<ReplyInbox>((resolve) => {
+          releaseOpen = (): void =>
+            resolve({ address: 'rr.inbox.x', close: () => Promise.resolve() });
+        }),
+    });
+    const pending = core.request('t', {}, { timeoutMs: 1000 }).catch(() => {});
+    await flush();
+    let done = false;
+    const closing = core.close().then(() => {
+      done = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(done).toBe(false);
+    releaseOpen!();
+    await closing;
+    await pending;
+    expect(done).toBe(true);
+  });
+
   it('close() rejects in-flight requests and unsubscribes the inbox', async () => {
     const t = new FakeTransport();
     const core = new RequestReplyCore(t);

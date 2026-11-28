@@ -763,11 +763,13 @@ Per-broker limits:
   reports `MessagingEntityNotFound`, the broker retires it and recreates the same per-instance
   subscription and receiver, so delivery resumes. Recovery retries every second through receive
   outages and transient administration failures (408, 429, most 5xx, a request that got no answer,
-  or a create that does not answer within 5 seconds). Its first failure logs one warning; any other
-  failure, such as 401, 403 or 404 or a missing `Manage` right, stops recovery for that
-  subscription. Copies published while the subscription is missing are lost; recovery does not
-  replay them. Transient receive errors and durable competing subscriptions do not trigger this
-  recreation.
+  or a create that does not answer within 5 seconds). Cleanup it waits on (the old receiver's close,
+  the delete after a failed open) is bounded at 5 seconds; past it, a warning naming the cleanup is
+  logged once per subscription and recovery continues; `unsubscribe()` and `disconnect()` also stop
+  waiting for such a close after 5 seconds. Its first failure logs one warning; any other failure,
+  such as 401, 403 or 404 or a missing `Manage` right, stops recovery for that subscription. Copies
+  published while the subscription is missing are lost; recovery does not replay them. Transient
+  receive errors and durable competing subscriptions do not trigger this recreation.
 - **Pub/Sub.** A failed delete on close is logged and left to the one-day idle expiry.
 - **NATS.** A stream provisioned with the work-queue retention policy refuses a second consumer on a
   subject, so a fan-out subscribe there fails.
@@ -827,9 +829,11 @@ send confirming that the shared reply topic is missing, invalidates the local ca
 request recreates it once the shared reply topic exists; when the topic itself is missing the
 request fails with `ReplyInboxUnavailableError`, because the broker creates no topics. Requests
 already in flight may still time out. A request whose inbox is retired while it opens waits for the
-next one, and is refused after three in a row. Transient receive errors retain the inbox, and clean
-shutdown still deletes it. `MessagingNotSupportedError` is also still exported but **deprecated** —
-it existed for the Kafka broker's former refusal and no broker throws it now.
+next one, and is refused after three in a row. `disconnect()` waits at most 5 s for reply-inbox
+cleanup still in flight, then logs one warning and continues; an inbox open that answers later is
+still closed. Transient receive errors retain the inbox, and clean shutdown still deletes it.
+`MessagingNotSupportedError` is also still exported but **deprecated** — it existed for the Kafka
+broker's former refusal and no broker throws it now.
 
 ## Writing a custom broker
 

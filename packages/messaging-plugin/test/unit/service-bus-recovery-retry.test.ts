@@ -153,6 +153,141 @@ describe('Service Bus fan-out recovery retries', () => {
     }
   });
 
+  it('stops waiting for an old receiver close after the bound, recovers, and lets the close finish', async () => {
+    const h = harness();
+    const handler = vi.fn();
+    const hung = Promise.withResolvers<void>();
+    await h.broker.connect();
+    try {
+      await h.broker.subscribe('orders', handler, { fanOut: true });
+      h.opens[0]!.close.mockReturnValueOnce(hung.promise);
+      h.fail();
+      await flushCloud();
+      await h.clock.advance(4999);
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(1);
+      await h.clock.advance(1);
+      expect(h.warn).toHaveBeenCalledExactlyOnceWith(
+        'Service Bus retired fan-out receiver did not close within 5000ms; recovery continues and the close finishes in the background',
+      );
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(2);
+      expect(h.opens).toHaveLength(2);
+      // The old receiver's late deliveries stay fenced.
+      await h.opens[0]!.deliver({ payload: '{}', ack: vi.fn(), nack: vi.fn() });
+      expect(handler).not.toHaveBeenCalled();
+      await h.opens[1]!.deliver({ payload: '{}', ack: vi.fn(), nack: vi.fn() });
+      expect(handler).toHaveBeenCalledOnce();
+      hung.resolve();
+      await flushCloud();
+      expect(h.opens[0]!.close).toHaveBeenCalledOnce();
+    } finally {
+      hung.resolve();
+      await h.broker.disconnect();
+      expect(h.clock.timerCount()).toBe(0);
+    }
+  });
+
+  it('stops waiting for a delete after a failed recovery open, retries, and recovers again after a late delete', async () => {
+    const h = harness();
+    const handler = vi.fn();
+    const hung = Promise.withResolvers<void>();
+    await h.broker.connect();
+    try {
+      await h.broker.subscribe('orders', handler, { fanOut: true });
+      vi.mocked(h.transport.open).mockRejectedValueOnce(transient);
+      vi.mocked(h.transport.deleteSubscription).mockReturnValueOnce(hung.promise);
+      h.fail();
+      await flushCloud();
+      expect(h.transport.deleteSubscription).toHaveBeenCalledOnce();
+      await h.clock.advance(4999);
+      expect(h.clock.timerCount()).toBe(1);
+      await h.clock.advance(1);
+      expect(h.warn).toHaveBeenCalledWith(
+        'Service Bus fan-out subscription delete did not finish within 5000ms; recovery continues',
+      );
+      await h.clock.advance(1000);
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(3);
+      expect(h.opens).toHaveLength(2);
+      // The late delete removes the recreated entity; its receiver reports it
+      // missing and recovery recreates it again.
+      hung.resolve();
+      await flushCloud();
+      h.fail(2);
+      await flushCloud();
+      expect(h.transport.createSubscription).toHaveBeenCalledTimes(4);
+      expect(h.opens).toHaveLength(3);
+      await h.opens[2]!.deliver({ payload: '{}', ack: vi.fn(), nack: vi.fn() });
+      expect(handler).toHaveBeenCalledOnce();
+    } finally {
+      hung.resolve();
+      await h.broker.disconnect();
+      expect(h.clock.timerCount()).toBe(0);
+    }
+  });
+
+  it.each(['unsubscribe', 'disconnect'] as const)(
+    'stops waiting for a hung retired receiver close on %s after the bound',
+    async (end) => {
+      const h = harness();
+      const hung = Promise.withResolvers<void>();
+      await h.broker.connect();
+      try {
+        const sub = await h.broker.subscribe('orders', vi.fn(), { fanOut: true });
+        h.opens[0]!.close.mockReturnValueOnce(hung.promise);
+        h.fail();
+        await flushCloud();
+        await h.clock.advance(5000);
+        expect(h.opens).toHaveLength(2);
+        h.warn.mockClear();
+        let done = false;
+        const ending = (end === 'unsubscribe' ? sub.unsubscribe() : h.broker.disconnect()).then(
+          () => {
+            done = true;
+          },
+        );
+        await flushCloud();
+        expect(done).toBe(false);
+        await h.clock.advance(5000);
+        await ending;
+        expect(done).toBe(true);
+        expect(h.warn).toHaveBeenCalledExactlyOnceWith(
+          'Service Bus retired fan-out receiver did not close within 5000ms; the subscription closes without it',
+        );
+        expect(h.opens[1]!.close).toHaveBeenCalledOnce();
+        expect(h.clock.timerCount()).toBe(0);
+      } finally {
+        hung.resolve();
+        await h.broker.disconnect();
+        expect(h.clock.timerCount()).toBe(0);
+      }
+    },
+  );
+
+  it.each(['unsubscribe', 'disconnect'] as const)(
+    'releases a bounded recovery wait at once on %s',
+    async (end) => {
+      const h = harness();
+      const hung = Promise.withResolvers<void>();
+      await h.broker.connect();
+      try {
+        const sub = await h.broker.subscribe('orders', vi.fn(), { fanOut: true });
+        vi.mocked(h.transport.open).mockRejectedValueOnce(transient);
+        vi.mocked(h.transport.deleteSubscription).mockReturnValueOnce(hung.promise);
+        h.fail();
+        await flushCloud();
+        expect(h.clock.timerCount()).toBe(1);
+        if (end === 'unsubscribe') await sub.unsubscribe();
+        else await h.broker.disconnect();
+        expect(h.clock.timerCount()).toBe(0);
+        await h.clock.advance(10000);
+        expect(h.transport.createSubscription).toHaveBeenCalledTimes(2);
+      } finally {
+        hung.resolve();
+        await h.broker.disconnect();
+        expect(h.clock.timerCount()).toBe(0);
+      }
+    },
+  );
+
   it.each(['REQUEST_SEND_ERROR', 'ECONNABORTED', 'ENETDOWN', 'ERR_TLS_CERT_ALTNAME_INVALID'])(
     'retries an administration request that got no answer (RestError %s, no status)',
     async (code) => {

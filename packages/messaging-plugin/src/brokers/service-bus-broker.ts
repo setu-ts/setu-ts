@@ -61,7 +61,13 @@ const SERVICE_BUS_MIN_AUTO_DELETE_ON_IDLE_MS = 300000;
 /** Yield between failed fan-out recovery operations without sharing job retry policy. */
 const SERVICE_BUS_RECOVERY_RETRY_MS = 1000;
 
-/** Bound on one fan-out recovery administration call, in ms. */
+/**
+ * Bound on one recovery or cleanup call that could otherwise hang a caller, in
+ * ms: a fan-out recovery create, the delete after a failed recovery open, the
+ * old receiver's close before recovery, the closes of receivers retired by
+ * recovery that `unsubscribe()` and `disconnect()` wait for, and the reply inbox
+ * cleanup that `disconnect()` waits for.
+ */
 const SERVICE_BUS_RECOVERY_CALL_MS = 5000;
 
 /** A fan-out recovery administration call that did not answer within its bound. */
@@ -1017,7 +1023,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
   async disconnect(): Promise<void> {
     this.#generation++;
-    await this.#rr.close();
+    await this.#rr.close({ retireBoundMs: SERVICE_BUS_RECOVERY_CALL_MS });
 
     // Every subscription is closed even when one close fails; the first
     // failure is rethrown once the transport is closed too.
@@ -1308,8 +1314,29 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         try {
           const sub = current;
           current = undefined;
-          const results = await Promise.allSettled([retire(sub), ...retirements]);
-          const failed = results.find((result) => result.status === 'rejected');
+          // Receivers retired by recovery are already fenced; wait for their
+          // closes only up to the recovery call bound, as recovery itself does,
+          // so one hung close cannot hold unsubscribe or disconnect. The live
+          // receiver's close is still awaited in full.
+          const detached = Promise.allSettled([...retirements]);
+          let timer: TimerHandle | undefined;
+          const expired = new Promise<'expired'>((resolve) => {
+            timer = this.#runtime.setTimeout(
+              () => resolve('expired'),
+              SERVICE_BUS_RECOVERY_CALL_MS,
+            );
+          });
+          const [live, retired] = await Promise.all([
+            Promise.allSettled([retire(sub)]),
+            Promise.race([detached, expired]).finally(() => this.#runtime.clearTimeout(timer!)),
+          ]);
+          if (retired === 'expired')
+            this.#write(
+              `Service Bus retired fan-out receiver did not close within ${SERVICE_BUS_RECOVERY_CALL_MS}ms; the subscription closes without it`,
+            );
+          const failed = [...live, ...(retired === 'expired' ? [] : retired)].find(
+            (result) => result.status === 'rejected',
+          );
           if (failed !== undefined) throw failed.reason;
         } finally {
           await deleteCreated();
@@ -1443,15 +1470,38 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       created = false;
       let retryTimer: TimerHandle | undefined;
       let releaseCreate: (() => void) | undefined;
+      let releaseWait: (() => void) | undefined;
       let warned = false;
+      /**
+       * Waits for cleanup that recovery depends on, up to the recovery call
+       * bound. A cancelled recovery releases the wait at once. The work keeps
+       * running either way, so whatever it was closing is still closed.
+       */
+      const waitBounded = (work: Promise<unknown>): Promise<'settled' | 'failed' | 'expired'> =>
+        new Promise((resolve) => {
+          const finish = (outcome: 'settled' | 'failed' | 'expired'): void => {
+            this.#runtime.clearTimeout(timer);
+            if (releaseWait === release) releaseWait = undefined;
+            resolve(outcome);
+          };
+          const release = (): void => finish('expired');
+          const timer = this.#runtime.setTimeout(release, SERVICE_BUS_RECOVERY_CALL_MS);
+          releaseWait = release;
+          work.then(
+            () => finish('settled'),
+            () => finish('failed'),
+          );
+        });
       const cancel = (): void => {
         if (retryTimer !== undefined) {
           this.#runtime.clearTimeout(retryTimer);
           retryTimer = undefined;
         }
         if (cancelRecovery === cancel) cancelRecovery = undefined;
-        // Settles a pending bounded create now; the attempt then sees itself retired.
+        // Settles a pending bounded create or wait now; the attempt then sees
+        // itself retired.
         releaseCreate?.();
+        releaseWait?.();
       };
       cancelRecovery = cancel;
       const taskCurrent = (): boolean => active() && cancelRecovery === cancel;
@@ -1530,7 +1580,14 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
           // An open may install callbacks before rejecting. Fence them before
           // cleanup or the retry wait, rather than letting them revive this task.
           receiverGeneration++;
-          await deleteCreated();
+          // A delete that answers after the bound may remove the subscription a
+          // later attempt recreates; that receiver then reports it missing and
+          // recovery runs again, so the late answer cannot strand delivery.
+          if ((await waitBounded(deleteCreated())) === 'expired' && taskCurrent())
+            warnOnce(
+              'delete-timeout',
+              `Service Bus fan-out subscription delete did not finish within ${SERVICE_BUS_RECOVERY_CALL_MS}ms; recovery continues`,
+            );
           if (!taskCurrent()) return;
           report(error);
           // An administration answer (a RestError) is judged only by the
@@ -1562,11 +1619,16 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         () => retirements.delete(retiring),
       );
       void (async () => {
-        try {
-          await retiring;
-        } catch {
+        // The old receiver's callbacks are already fenced by its generation, so
+        // recovery need not wait past the bound for its close to finish.
+        const outcome = await waitBounded(retiring);
+        if (outcome === 'failed')
           this.#write('Service Bus retired fan-out receiver could not be closed');
-        }
+        else if (outcome === 'expired' && taskCurrent())
+          warnOnce(
+            'retire-timeout',
+            `Service Bus retired fan-out receiver did not close within ${SERVICE_BUS_RECOVERY_CALL_MS}ms; recovery continues and the close finishes in the background`,
+          );
         if (taskCurrent()) runAttempt();
       })().catch(stop);
     };

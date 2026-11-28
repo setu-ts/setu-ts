@@ -7187,9 +7187,10 @@ Provides message broker abstraction for cross-service integration events.
   is missing, invalidates the local cached inbox; the next request recreates it once the shared
   reply topic exists (a missing topic fails with `ReplyInboxUnavailableError`; the broker creates no
   topics), while requests already in flight may time out. A request whose inbox is retired while it
-  opens waits for the next one, and is refused after three in a row. Transient receive errors retain
-  it. `IServiceBusTransport.send` adds a fifth optional `{ abortSignal?: AbortSignal }`; `open` adds
-  a fourth optional
+  opens waits for the next one, and is refused after three in a row. `disconnect()` waits at most 5
+  s for reply-inbox cleanup still in flight, then logs one warning and continues; an inbox open that
+  answers later is still closed. Transient receive errors retain it. `IServiceBusTransport.send`
+  adds a fifth optional `{ abortSignal?: AbortSignal }`; `open` adds a fourth optional
   `{ maxConcurrentCalls?: number; onReceiveError?: (error: unknown, errorSource: string) => void }`.
   The SDK adapter forwards both, including `processError`. Publish expiry aborts and throws
   `PublishTimeoutError` (504); outages throw `BackendOutcomeUnknownError` (504). Classification
