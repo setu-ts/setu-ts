@@ -34,8 +34,9 @@ const LINK_URL = 'https://realtime-backplane.internal/link';
 export const LINK_QUEUE_LIMIT = 64;
 
 /**
- * Bytes of frame data (`frame.data.length`, the encoded payload) a link queues
- * while it opens. A frame that would take the queue past this is not queued:
+ * Bytes of frame data a link queues while it opens, counted as the UTF-8
+ * length of `frame.data` (the encoded payload), the unit the hub's cap is
+ * measured in. A frame that would take the queue past this is not queued:
  * `publish` returns `false` and the caller publishes it through the hub.
  */
 export const LINK_QUEUE_BYTE_BUDGET = 1_048_576;
@@ -64,6 +65,11 @@ export interface ConnectionLinkOptions {
   /** Logger accessor, read when something is reported. */
   readonly logger?: () => ILogger | undefined;
   /**
+   * Called once, in the owning request, when the link gives up reopening a
+   * lost socket; never after `close()`.
+   */
+  readonly onLost?: () => void;
+  /**
    * Keeps an early close's work alive after its connection's request ends
    * (the backplane's `waitUntil`): the flush of queued frames, or with none
    * queued the open in flight, whose socket is then closed. Absent, both run
@@ -81,8 +87,9 @@ export interface ConnectionLinkOptions {
  */
 export class ConnectionLink implements IRealtimeConnectionLink {
   readonly #options: ConnectionLinkOptions;
-  readonly #queue: RealtimeFrame[] = [];
-  /** `frame.data.length` summed over {@linkcode #queue}. */
+  /** Queued frames, each with the UTF-8 length of its data. */
+  readonly #queue: { readonly frame: RealtimeFrame; readonly bytes: number }[] = [];
+  /** The `bytes` of {@linkcode #queue}, summed. */
   #queuedBytes = 0;
   #socket: IDurableObjectClientSocket | undefined;
   #closed = false;
@@ -110,20 +117,20 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   publish(frame: RealtimeFrame): boolean {
     if (this.#closed) return false;
-    const size = frame.data.length;
     // Above the hub's cap no socket message can carry it either; the hub's
     // HTTP publish answers it with a 413 the caller reports. The serialized
     // frame is never shorter than its data, so this is checked before
     // serializing.
-    if (size > MAX_FRAME_BYTES) return false;
+    if (frame.data.length > MAX_FRAME_BYTES) return false;
     const socket = this.#socket;
     if (socket === undefined) {
       // Within the budget a frame serializes far below the hub's cap, so a
-      // queued frame needs no measuring.
+      // queued frame needs no measuring beyond its data.
+      const size = utf8ByteLength(frame.data);
       // A full queue drops its oldest frame to take this one, so those bytes
       // are free for it.
       const full = this.#queue.length >= LINK_QUEUE_LIMIT;
-      const freed = full ? (this.#queue[0]?.data.length ?? 0) : 0;
+      const freed = full ? (this.#queue[0]?.bytes ?? 0) : 0;
       if (this.#queuedBytes - freed + size > LINK_QUEUE_BYTE_BUDGET) return false;
       if (full) {
         this.#shift();
@@ -136,7 +143,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
           });
         }
       }
-      this.#queue.push(frame);
+      this.#queue.push({ frame, bytes: size });
       this.#queuedBytes += size;
       return true;
     }
@@ -263,7 +270,7 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   #drain(socket: IDurableObjectClientSocket): number {
     while (this.#queue.length > 0) {
       try {
-        socket.send(JSON.stringify(this.#queue[0]));
+        socket.send(JSON.stringify(this.#queue[0]?.frame));
       } catch {
         break;
       }
@@ -274,8 +281,8 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   /** Takes the oldest queued frame off the queue and its bytes off the budget. */
   #shift(): void {
-    const frame = this.#queue.shift();
-    if (frame !== undefined) this.#queuedBytes -= frame.data.length;
+    const entry = this.#queue.shift();
+    if (entry !== undefined) this.#queuedBytes -= entry.bytes;
   }
 
   /** Empties the queue and its byte count. */
@@ -307,6 +314,13 @@ export class ConnectionLink implements IRealtimeConnectionLink {
         topic: this.#options.topic,
         connection: this.#options.connectionId,
       });
+      // The connection would receive nothing more from its rooms; its owner
+      // closes it so the client reconnects.
+      try {
+        this.#options.onLost?.();
+      } catch {
+        // A failing callback belongs to the connection, not to the link.
+      }
       return;
     }
     this.#reopens++;
@@ -362,9 +376,35 @@ export function keepAliveQuietly(
 /**
  * Whether `message` is more than the hub's cap in UTF-8 bytes. Each UTF-16
  * unit encodes to at most three bytes, so a short message is answered without
- * encoding it.
+ * counting it.
  */
 function exceedsHubCap(message: string): boolean {
   if (message.length * 3 <= MAX_FRAME_BYTES) return false;
-  return new TextEncoder().encode(message).byteLength > MAX_FRAME_BYTES;
+  return utf8ByteLength(message) > MAX_FRAME_BYTES;
+}
+
+/**
+ * The length of `text` once UTF-8 encoded, as `TextEncoder` encodes it (a lone
+ * surrogate as U+FFFD, three bytes), counted without encoding.
+ *
+ * @param text - Any string
+ * @returns Its UTF-8 byte length
+ */
+function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i);
+    if (unit < 0x80) bytes += 1;
+    else if (unit < 0x800) bytes += 2;
+    else if (unit >= 0xd800 && unit <= 0xdbff && isLowSurrogate(text.charCodeAt(i + 1))) {
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+/** Whether a UTF-16 unit is a low (trailing) surrogate; `NaN` past the end is not. */
+function isLowSurrogate(unit: number): boolean {
+  return unit >= 0xdc00 && unit <= 0xdfff;
 }

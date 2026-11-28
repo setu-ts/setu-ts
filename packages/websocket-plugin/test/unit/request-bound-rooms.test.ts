@@ -643,6 +643,23 @@ describe('connections whose link fails, and shutdown, on Workers', () => {
     expect(transport.closes).toEqual([{ code: 1011, reason: 'Backplane link unavailable' }]);
   });
 
+  it('closes a connection with 1011 when its link gives up reopening, so the client reconnects', async () => {
+    const h = await rooms();
+    const { transport: ta } = await h.connect('a');
+    const { transport: tb } = await h.connect('b');
+
+    h.hub.lose('a');
+
+    // Left open it would receive nothing from its rooms.
+    expect(ta.closes).toEqual([{ code: 1011, reason: 'Backplane link lost' }]);
+    // `size` counts open members, so the closed one leaves it at once.
+    expect(h.service.room('lobby').size).toBe(1);
+    h.disconnect('a');
+    expect(h.service.connectionCount).toBe(1);
+    expect(h.world.violations).toEqual([]);
+    expect(tb.closes).toEqual([]);
+  });
+
   it('closeAll closes every connection and stops every heartbeat when a close throws', async () => {
     const h = await rooms();
     await h.connect('a');

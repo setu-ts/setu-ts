@@ -619,14 +619,14 @@ All notable changes to this project are documented here. The format follows
   - **Backplane links:** a link keeps the frames a failed drain did not send, and reports those a
     closing link could not. A link closed while it opens, with nothing queued, hands the open to
     `waitUntil`, so its socket is still closed at the hub after the connection's request ends. While
-    it opens, a link queues at most 1 MiB of frame data beside the 64-frame bound. A broadcast past
-    that budget goes through the hub's HTTP publish and can arrive before the queued frames. One
-    above the hub's 32 MiB cap in serialized bytes is refused with a logged 413 and reaches no other
-    member. A sender that is an open member of the room is sent its own such broadcast exactly once,
-    locally (a send that throws on a closing socket is dropped), when `except` names nobody or
-    another member, and the hub's copy excludes it: as `exceptId` when nobody else is excluded,
-    otherwise in the new `RealtimeFrame.exceptIds`. A sender that names itself as `except` gets no
-    copy, as on every runtime.
+    it opens, a link queues at most 1 MiB of frame data, counted in UTF-8 bytes, beside the 64-frame
+    bound. A broadcast past that budget goes through the hub's HTTP publish and can arrive before
+    the queued frames. One above the hub's 32 MiB cap in serialized bytes is refused with a logged
+    413 and reaches no other member. A sender that is an open member of the room is sent its own
+    such broadcast exactly once, locally (a send that throws on a closing socket is dropped), when
+    `except` names nobody or another member, and the hub's copy excludes it: as `exceptId` when
+    nobody else is excluded, otherwise in the new `RealtimeFrame.exceptIds`. A sender that names
+    itself as `except` gets no copy, as on every runtime.
   - **`RealtimeFrame.exceptIds` (`@setu-ts/common`):** an optional list of further connection IDs a
     broadcast excludes, beside `exceptId`. Every receiver skips a member named in either; both
     backplane guards refuse a non-array, a non-string entry, or more than
@@ -636,7 +636,9 @@ All notable changes to this project are documented here. The format follows
   - **Rooms:** a kept `Room` handle and `ws.room(name)` share one member set, so a join, a broadcast
     or a remote frame through either reaches the same members, once each, on every runtime; a
     connection whose link cannot open is closed with 1011, also when the logger throws while
-    reporting it.
+    reporting it, and so is one whose link gives up after its three reopens (`Backplane link lost`),
+    so the client reconnects. `IRealtimeLinkBackplane.openConnectionLink` (`@setu-ts/common`) takes
+    an optional `onLost` callback for this.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws. A peer's close removes it, its rooms and its link even when the
     runtime's heartbeat stop throws.

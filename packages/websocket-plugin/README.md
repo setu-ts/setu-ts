@@ -431,16 +431,19 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
   link, so one member's frames arrive in order. `onClose` is the exception after an `await`: the
   closing connection's link is closed once the handler's synchronous part returns, so a later
   broadcast goes through the hub and can arrive before that member's earlier frames. The exception
-  is a link still opening whose 1 MiB queue budget the next frame would pass: that frame goes
-  through the hub and can arrive before the queued ones. A sender that is an open member of the room
-  is still sent its own such broadcast exactly once when `except` names nobody or another member (a
-  send that throws on a closing socket is dropped): it is sent locally, and the hub's copy excludes
-  the sender. A sender that names itself as `except` gets no copy, as on every runtime. A broadcast
-  from a route is published through the hub with no order relative to members' frames, as with any
-  cross-replica backplane.
+  is a link still opening whose 1 MiB queue budget (UTF-8 bytes of frame data) the next frame would
+  pass: that frame goes through the hub and can arrive before the queued ones. A sender that is an
+  open member of the room is still sent its own such broadcast exactly once when `except` names
+  nobody or another member (a send that throws on a closing socket is dropped): it is sent locally,
+  and the hub's copy excludes the sender. A sender that names itself as `except` gets no copy, as on
+  every runtime. A broadcast from a route is published through the hub with no order relative to
+  members' frames, as with any cross-replica backplane.
 - **A connection whose link cannot open is closed** with 1011 after its `onOpen` runs, rather than
   left as a member that receives nothing. Only a backplane built without its timers fails this way;
   `CloudflarePlugin` always passes them.
+- **A connection whose link gives up is closed** with 1011 (`Backplane link lost`): once a lost link
+  has used its three reopens (0.5 s, 1 s, 2 s), the connection would receive nothing more from its
+  rooms, so it is closed and the client reconnects.
 - **`room.size`** counts this isolate's open members, without touching any socket.
 - **Heartbeats** run per connection, each from its own request, instead of one shared interval.
 - **A clean close is answered at once.** The Workers adapter replies to the peer's close frame

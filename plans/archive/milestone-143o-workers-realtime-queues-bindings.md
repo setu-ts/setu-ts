@@ -1634,9 +1634,10 @@ Each is measured, registered, given a CHANGELOG line and a test that fails on th
       - `open()` still reports `false` when the logger throws, so the 1011 close happens;
       - a heartbeat stop that throws no longer skips the peer's close cleanup;
       - README and PUBLIC_API wording on the Workers fallback, `onClose` after an `await` and the
-        sender's copy. Held for the maintainer: measuring the opening-queue budget in UTF-8 bytes
-        rather than `frame.data.length`, and telling the connection when its link exhausts its
-        reopens.
+        sender's copy. Then, by the maintainer's decision (2026-11-28): the opening-queue budget
+        counts UTF-8 bytes of `frame.data` ("Count UTF-8 bytes"), and a link that has used its three
+        reopens calls `onLost`, an optional third argument of `openConnectionLink`, so
+        `websocket-plugin` closes the connection with 1011 ("Close with 1011").
     - **Size check order.** It refuses on `frame.data.length` before serializing, and a queued frame
       is never serialized for measuring. Only an open link's send measures the serialized bytes.
     - **Docs.** The websocket README now has the ordering exception. The storage class is named as

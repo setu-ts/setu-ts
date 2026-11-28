@@ -248,6 +248,8 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
    * the connection.
    * @param connectionId - The connection's id, for log lines
    * @param deliver - Receives every frame the hub sends the link
+   * @param onLost - Called once when the link gives up reopening (after the
+   *   0.5 s, 1 s and 2 s reopens), in the owning request
    * @returns The link
    * @throws {Error} When the backplane was built without `timers`
    * @since 0.14.0
@@ -255,6 +257,7 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
   openConnectionLink(
     connectionId: string,
     deliver: (frame: RealtimeFrame) => void,
+    onLost?: () => void,
   ): IRealtimeConnectionLink {
     const timers = this.#options.timers;
     if (timers === undefined) {
@@ -269,6 +272,7 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
       timers,
       ...(this.#options.logger === undefined ? {} : { logger: this.#options.logger }),
       ...(this.#options.waitUntil === undefined ? {} : { waitUntil: this.#options.waitUntil }),
+      ...(onLost === undefined ? {} : { onLost }),
     });
   }
 

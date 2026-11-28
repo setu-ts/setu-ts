@@ -65,6 +65,7 @@ function link(
     timers?: ReturnType<typeof manualTimers>;
     logger?: RecordingLogger;
     hub?: () => IServiceBinding;
+    onLost?: () => void;
   },
 ): ConnectionLink {
   return new ConnectionLink({
@@ -75,6 +76,7 @@ function link(
     deliver,
     timers: extra?.timers ?? manualTimers(),
     ...(extra?.logger === undefined ? {} : { logger: () => extra.logger }),
+    ...(extra?.onLost === undefined ? {} : { onLost: extra.onLost }),
   });
 }
 
@@ -130,6 +132,36 @@ describe('ConnectionLink', () => {
     await setImmediate();
 
     expect(got.map((f) => f.data.length)).toEqual([half.length, half.length]);
+  });
+
+  it('counts the opening budget in UTF-8 bytes, not UTF-16 units', () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const opening = (): ConnectionLink => link(namespace, () => {});
+    // 350,000 units of three bytes each: under the budget in `.length`,
+    // 1,050,000 bytes once encoded.
+    expect(opening().publish(frame('€'.repeat(350_000)))).toBe(false);
+    // Exactly the budget in bytes: two-byte, four-byte (a surrogate pair) and
+    // three-byte (a lone surrogate, encoded as U+FFFD) characters.
+    for (const [unit, bytes] of [
+      ['é', 2],
+      ['😀', 4],
+      ['\uD800', 3],
+    ] as const) {
+      const sender = opening();
+      const fits = 'x'.repeat(LINK_QUEUE_BYTE_BUDGET % bytes);
+      const exact = unit.repeat(Math.floor(LINK_QUEUE_BYTE_BUDGET / bytes)) + fits;
+      expect(sender.publish(frame(exact))).toBe(true);
+      expect(sender.publish(frame('y'))).toBe(false); // one byte past it
+    }
+  });
+
+  it('gives a multibyte frame dropped by the count bound its UTF-8 bytes back', () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const sender = link(namespace, () => {});
+    // Each frame is its share of the budget in bytes, a third of that in units.
+    const share = '€'.repeat(Math.floor(LINK_QUEUE_BYTE_BUDGET / LINK_QUEUE_LIMIT / 3));
+    for (let i = 0; i < LINK_QUEUE_LIMIT; i++) expect(sender.publish(frame(share))).toBe(true);
+    for (let i = 0; i < 10; i++) expect(sender.publish(frame(share))).toBe(true);
   });
 
   it('refuses a frame above the hub cap even on an open link', async () => {
@@ -242,6 +274,71 @@ describe('ConnectionLink', () => {
     expect(lost).toHaveLength(1);
     expect(lost[0]?.meta).toEqual({ topic: 'chat', connection: 'conn-1' });
     expect(l.publish(frame('after'))).toBe(false);
+  });
+
+  it('tells its connection once when it gives up reopening', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    let lost = 0;
+    link(namespace, () => {}, {
+      timers,
+      onLost: () => {
+        lost++;
+      },
+    });
+    await setImmediate();
+
+    namespace.clients.at(-1)?.fire('close', { data: '' });
+    namespace.omitSocket = true;
+    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
+      expect(lost).toBe(0);
+      timers.runNext();
+      await setImmediate();
+    }
+    expect(lost).toBe(1);
+  });
+
+  it('does not tell its connection when it is closed, or when a reopen succeeds', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    let lost = 0;
+    const onLost = (): void => {
+      lost++;
+    };
+    const reopened = link(namespace, () => {}, { timers, onLost });
+    await setImmediate();
+    namespace.clients.at(-1)?.fire('close', { data: '' });
+    timers.runNext();
+    await setImmediate();
+    const closed = link(namespace, () => {}, { timers, onLost });
+    closed.close();
+    reopened.close();
+    await setImmediate();
+
+    expect(lost).toBe(0);
+  });
+
+  it('reports a lost-link callback that throws, still staying closed', async () => {
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const logger = new RecordingLogger();
+    const l = link(namespace, () => {}, {
+      timers,
+      logger,
+      onLost: () => {
+        throw new Error('handler down');
+      },
+    });
+    await setImmediate();
+    namespace.clients.at(-1)?.fire('close', { data: '' });
+    namespace.omitSocket = true;
+    for (let i = 0; i < LINK_REOPEN_DELAYS_MS.length; i++) {
+      timers.runNext();
+      await setImmediate();
+    }
+
+    expect(l.publish(frame('after'))).toBe(false);
+    expect(logger.records.map((r) => r.message)).toContain('cloudflare: backplane link lost');
   });
 
   it('resets the reopen count once a reopen succeeds', async () => {
