@@ -905,6 +905,12 @@ here.
   Prisma (Branch B, by connector) and Drizzle, NoSQL call bounds, readiness probes and transactional
   conditional writes, the Bigtable emulator defaults, the Drizzle mysql2 `NO_BACKSLASH_ESCAPES`
   refusal; 12 V13 rows plus V13-272) — complete (PR #617).
+- **Milestone 143h** (`database-plugin` + `common` + `exceptions` + `audit-plugin` +
+  `agent-runs-plugin` + `vector-store-plugin` + `multi-tenancy-plugin` + `idempotency-plugin` —
+  database errors a client can act on, and store signals: eleven problem types under
+  `https://setu-ts.dev/errors`, FK/NOT NULL/value/lock-timeout classification, `TimeoutError` as
+  504, transaction-work and commit verdicts, audit inside the caller's transaction, pg-pool releases
+  as progress, strongly consistent DynamoDB pre-reads; 15 V13/V12 rows) — complete (PR pending).
 - **Next milestone** — Milestone 143, the `v0.13.0` smoke closeout: 248 rows in eighteen letters
   (M143a–M143r) cut into eight lanes that can be built in parallel sessions, all shipping in
   `0.14.0`; of the first wave (M143a, b, c, i, o, p, q and r), M143o is still open.

@@ -798,7 +798,10 @@ D-1 to its alternative ("Do D1 in the same PR"). §3 is written to match.
   `HttpError` always carries `statusCode` (`exceptions` `http-error.ts`), so it always matches. The
   tests pin both: a real `ErrorResponse` has no `statusCode`, stays itself from transaction work
   (numeric codes are not read there, D-3), and is still a write conflict from a unit-of-work
-  repository call.
+  repository call. The rule is scoped to a numeric `statusCode`, as chosen: an error without one (a
+  plain `Error`, a `status`-only HTTP error, a string `statusCode`) whose message or code copies a
+  driver's is still classified at this site, and `transaction-work-http-error.test.ts` pins that
+  residual. The fresh re-audit at `f056245c6` recorded it as an observation (O-1), not a finding.
 
 | #   | Section     | Question                                                                                                                                                                                           | Recommended                                                                                                                                                                                                                                                                                               | Alternative and its cost                                                                                                                                                                                                                  |
 | --- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
