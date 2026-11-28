@@ -26,6 +26,7 @@ import {
   LINK_REOPEN_DELAYS_MS,
   LINK_REOPEN_MAX_DELAY_MS,
 } from '../../../src/realtime/connection-link.ts';
+import type { FakeClientSocket } from '../../do-fakes.ts';
 import { FakeDurableObjectNamespace } from '../../do-fakes.ts';
 import { RecordingLogger } from '../../fakes.ts';
 
@@ -260,9 +261,10 @@ describe('ConnectionLink', () => {
     namespace: FakeDurableObjectNamespace,
     timers: ReturnType<typeof manualTimers>,
     attempts: number,
-    lostSocket = namespace.clients.at(-1),
+    lostSocket: FakeClientSocket | null | undefined = namespace.clients.at(-1),
   ): Promise<number[]> {
-    // Dropped at the hub too, so the lost socket delivers nothing more.
+    // Dropped at the hub too, so the lost socket delivers nothing more. `null`
+    // continues an outage already under way.
     lostSocket?.close();
     lostSocket?.fire('close', { data: '' });
     namespace.omitSocket = true;
@@ -288,7 +290,36 @@ describe('ConnectionLink', () => {
     expect(delays).toEqual([...LINK_REOPEN_DELAYS_MS, 4000, 8000, 16000, 30_000, 30_000]);
     expect(LINK_REOPEN_MAX_DELAY_MS).toBe(30_000);
     expect(timers.pending.filter((t) => !t.cleared)).toHaveLength(1); // still retrying
-    expect(l.publish(frame('during'))).toBe(true); // queued, not refused
+    // Past the routine reopens the link refuses, so the caller goes through the hub.
+    expect(l.publish(frame('during'))).toBe(false);
+  });
+
+  it('drops what it queued once an outage is warned about, so recovery sends nothing stale', async () => {
+    // Other replicas would get minutes-old frames in a burst; a stale frame is
+    // worse than none, as on the Redis backplane during an outage.
+    const namespace = new FakeDurableObjectNamespace();
+    const timers = manualTimers();
+    const logger = new RecordingLogger();
+    const got: RealtimeFrame[] = [];
+    link(namespace, (f) => got.push(f));
+    await setImmediate();
+    const sender = link(namespace, () => {}, { timers, logger });
+    await setImmediate();
+    const senderSocket = namespace.clients.at(-1);
+
+    await failReopens(namespace, timers, 1, senderSocket);
+    expect(sender.publish(frame('early'))).toBe(true); // queued: a routine reopen
+    await failReopens(namespace, timers, LINK_REOPEN_DELAYS_MS.length - 1, null);
+    expect(
+      logger.records.find((r) => r.message === 'cloudflare: backplane link still reopening')?.meta,
+    ).toEqual({ topic: 'chat', connection: 'conn-1', dropped: 1 });
+    namespace.omitSocket = false;
+    timers.runNext();
+    await setImmediate();
+
+    expect(got).toEqual([]);
+    expect(sender.publish(frame('fresh'))).toBe(true);
+    expect(got.map((f) => f.data)).toEqual(['fresh']);
   });
 
   it('warns once per outage past the third reopen, and reports the recovery at info', async () => {
@@ -314,10 +345,11 @@ describe('ConnectionLink', () => {
     expect(logger.records.find((r) => r.message.includes('still reopening'))?.meta).toEqual({
       topic: 'chat',
       connection: 'conn-1',
+      dropped: 0,
     });
 
     // The hub is back: the next reopen succeeds, and delivery resumes.
-    expect(l.publish(frame('queued'))).toBe(true);
+    expect(l.publish(frame('refused'))).toBe(false);
     namespace.omitSocket = false;
     timers.runNext();
     await setImmediate();

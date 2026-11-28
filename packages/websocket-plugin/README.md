@@ -444,7 +444,8 @@ fail for every member but the sender. On Workers this plugin runs in **request-b
 - **A connection whose link is lost stays open.** Its link keeps reopening, backing off to 30 s, for
   as long as the connection is open, and room delivery resumes once it reopens; frames other members
   broadcast meanwhile do not reach it, as with any backplane during an outage. A lasting outage is
-  logged once by the Cloudflare plugin.
+  logged once per connection by the Cloudflare plugin, and that connection's broadcasts go through
+  the hub's HTTP publish meanwhile.
 - **`room.size`** counts this isolate's open members, without touching any socket.
 - **Heartbeats** run per connection, each from its own request, instead of one shared interval.
 - **A clean close is answered at once.** The Workers adapter replies to the peer's close frame

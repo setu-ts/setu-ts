@@ -338,10 +338,12 @@ Looked up 2026-11-22. A cell marked "not verified" was not read at a primary sou
   10. **Link loss.** A link whose socket closes or errors reopens from its own `close` listener (its
       own request), after 0.5 s, 1 s and 2 s through `runtime.setTimeout`, then doubling to a 30 s
       cap, for as long as its connection is open (maintainer decision 2026-11-28, superseding "up to
-      3 times, then stays closed"); one `warn` per outage once the third reopen fails
-      (`cloudflare: backplane link still reopening`, `{ topic, connection }`, no frame content), one
-      `info` on recovery. A link is closed when its connection closes, so the hub's socket count
-      follows live connections.
+      3 times, then stays closed"); one `warn` per outage per link once the third reopen fails
+      (`cloudflare: backplane link still reopening`, `{ topic, connection, dropped }`, no frame
+      content), the queue dropped and frames refused until recovery so broadcasts go through the
+      hub, one `info` on recovery. No jitter: the backplanes the maintainer compared (Centrifugo,
+      phoenix_pubsub_redis) retry on a fixed interval. A link is closed when its connection closes,
+      so the hub's socket count follows live connections.
 - **Why:** it is the smallest change that satisfies the outcome with the programming model the
   framework already has: application handlers stay in the Worker's `ws.route()`; every write happens
   in the owning request, the only thing workerd allows. Terminating sockets in a Durable Object (the

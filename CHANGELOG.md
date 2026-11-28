@@ -637,9 +637,11 @@ All notable changes to this project are documented here. The format follows
     or a remote frame through either reaches the same members, once each, on every runtime; a
     connection whose link cannot open is closed with 1011, also when the logger throws while
     reporting it. A lost link never gives up while its connection is open: it reopens after 0.5 s, 1
-    s and 2 s, then doubling to a 30 s cap, warns once per outage
-    (`cloudflare: backplane link still reopening`) and logs `cloudflare: backplane link restored` at
-    `info` on recovery; the connection stays open meanwhile, as on other backplanes.
+    s and 2 s, then doubling to a 30 s cap, warns once per outage per connection
+    (`cloudflare: backplane link still reopening`, with the count of queued frames it dropped),
+    refuses frames until it recovers so broadcasts go through the hub, and then logs
+    `cloudflare: backplane link restored` at `info`; the connection stays open meanwhile, as on
+    other backplanes.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws. A peer's close removes it, its rooms and its link even when the
     runtime's heartbeat stop throws.

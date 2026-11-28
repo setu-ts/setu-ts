@@ -130,6 +130,9 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     if (frame.data.length > MAX_FRAME_BYTES) return false;
     const socket = this.#socket;
     if (socket === undefined) {
+      // In an outage past the routine reopens a queued frame could reach
+      // other replicas minutes late; the caller publishes through the hub.
+      if (this.#outageReported) return false;
       // Within the budget a frame serializes far below the hub's cap, so a
       // queued frame needs no measuring beyond its data.
       // A full queue drops its oldest frame to take this one, so those bytes
@@ -307,8 +310,10 @@ export class ConnectionLink implements IRealtimeConnectionLink {
 
   /**
    * Schedules the next reopen. A link reopens for as long as its connection is
-   * open, backing off to {@linkcode LINK_REOPEN_MAX_DELAY_MS}; an outage past
-   * the routine reopens is warned about once, without frame content.
+   * open, backing off to {@linkcode LINK_REOPEN_MAX_DELAY_MS}. Once the routine
+   * reopens have failed, the outage is warned about once (with how many queued
+   * frames it dropped, never their content), and the link refuses frames
+   * until it recovers.
    */
   #lost(): void {
     if (this.#flushing) {
@@ -325,8 +330,12 @@ export class ConnectionLink implements IRealtimeConnectionLink {
     }
     if (this.#closed) return;
     if (this.#reopens >= LINK_REOPEN_DELAYS_MS.length && !this.#outageReported) {
+      // What was queued is now stale; dropped rather than sent in a burst on
+      // recovery, and new frames are refused until then.
       this.#outageReported = true;
-      this.#report('warn', 'cloudflare: backplane link still reopening');
+      const dropped = this.#queue.length;
+      this.#clearQueue();
+      this.#report('warn', 'cloudflare: backplane link still reopening', { dropped });
     }
     const delay = reopenDelay(this.#reopens);
     this.#reopens++;
@@ -338,11 +347,12 @@ export class ConnectionLink implements IRealtimeConnectionLink {
   }
 
   /** Logs a link state change; a logger that throws cannot stop the reopens. */
-  #report(level: 'warn' | 'info', message: string): void {
+  #report(level: 'warn' | 'info', message: string, extra?: { readonly dropped: number }): void {
     try {
       this.#options.logger?.()?.[level](message, {
         topic: this.#options.topic,
         connection: this.#options.connectionId,
+        ...extra,
       });
     } catch {
       // Only the log line is lost.

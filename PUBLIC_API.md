@@ -17615,20 +17615,22 @@ sender: as `exceptId` when the broadcast has no `except`, otherwise in `exceptId
 caller's `except`, so its link drops that copy whether or not the hub had accepted the link yet.
 Frames sent through the hub while queued ones wait can arrive before them. A link reopens a lost
 socket for as long as its connection is open: after 0.5 s, 1 s and 2 s, then doubling to a 30 s cap.
-Once the third reopen has failed it logs `cloudflare: backplane link still reopening` once, with
-`{ topic, connection }` and no frame content, and `cloudflare: backplane link restored` at `info`
-when a reopen succeeds. The connection stays open meanwhile; frames other replicas publish during
-the outage are not delivered to it, and its own broadcasts queue within the link's bounds. Its
-connection's `close()` clears the pending reopen. The isolate socket (`connect`/`subscribe`) stays
-for `sse-plugin` and receives only: it opens lazily (on `connect` or the first `publish`), and a
-socket that reports a close or an error is retired and closed rather than left open at the hub, so
-the next call reopens it. `publish(frame)` sends through `POST /publish`, never over that socket, so
-publishes from different requests never touch a socket another request owns; a failed POST is logged
-as `cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket,
-the publisher's own included, and the replica drops a frame whose `origin` is its own (the rule
-every backplane transport applies, along with dropping a frame that is not well-formed). A replica
-hears a frame only once its socket has joined the hub. The socket belongs to the request that opened
-it: on local workerd it keeps receiving after that request has answered, which is unverified on the
+Once the third reopen has failed, each connection's link logs
+`cloudflare: backplane link still reopening` once, with `{ topic, connection, dropped }` and no
+frame content, drops the frames it had queued (they would reach other replicas late) and refuses new
+ones, so broadcasts go through the hub's HTTP publish; when a reopen then succeeds it logs
+`cloudflare: backplane link restored` at `info`. The connection stays open meanwhile, and frames
+other replicas publish during the outage are not delivered to it. Its connection's `close()` clears
+the pending reopen. The isolate socket (`connect`/`subscribe`) stays for `sse-plugin` and receives
+only: it opens lazily (on `connect` or the first `publish`), and a socket that reports a close or an
+error is retired and closed rather than left open at the hub, so the next call reopens it.
+`publish(frame)` sends through `POST /publish`, never over that socket, so publishes from different
+requests never touch a socket another request owns; a failed POST is logged as
+`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
+publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
+backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
+frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
+local workerd it keeps receiving after that request has answered, which is unverified on the
 platform. Each publish is its own call to the hub and the platform orders calls only within one
 stub, so other replicas may receive one replica's frames out of order.
 
