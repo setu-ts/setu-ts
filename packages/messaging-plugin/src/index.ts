@@ -40,6 +40,7 @@ export {
   UnroutableMessageError,
   OutboxPublisherConfirmsRequiredError,
   PubSubDeadLetterTopicMissingError,
+  PubSubTopicMissingError,
 } from './errors.ts';
 export { MessagingPlugin } from './plugin/messaging-plugin.ts';
 export { EventsMessagingBridge } from './bridge/events-messaging-bridge.ts';
@@ -138,6 +139,7 @@ export type {
 export type {
   ConsumerRetryOptions,
   CustomMessagingOptions,
+  ICustomMessageBroker,
   EventsMessagingBridgeOptions,
   INatsHeaders,
   InMemoryBrokerOptions,

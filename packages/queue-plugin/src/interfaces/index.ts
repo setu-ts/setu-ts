@@ -231,6 +231,23 @@ export type QueueAdapterType = 'memory' | 'redis' | 'rabbitmq' | 'sqs';
  * Options for configuring the queue plugin.
  */
 export interface QueuePluginOptions {
+  /**
+   * Retry delay for every adapter: a function or a finite non-negative number.
+   * Omitted or undefined uses exponential backoff. A function receives the attempt
+   * that just failed; results clamp to 0–2147483647. A throwing function or
+   * non-finite result warns once and retries immediately.
+   * @throws {RangeError} At QueuePlugin or QueueService construction for any other
+   * supplied value, including null or an invalid number.
+   * @since 0.14.0
+   */
+  retryDelayMs?: number | ((attempts: number) => number);
+  /** Cached reachability policy; failed results share the same cache TTL. @since 0.14.0 */
+  health?: {
+    /** Cache TTL in integer ms, 0–2147483647, default 5000; 0 probes each read. @since 0.14.0 */
+    probeCacheMs?: number;
+    /** Probe bound in integer ms, 1–2147483647, default 2000. @since 0.14.0 */
+    probeTimeoutMs?: number;
+  };
   /** Redis key namespace, default `queue:`. Non-empty, at most 128 characters,
    * without control characters. Does not read the RabbitMQ `prefix` option.
    * @since 0.10.0

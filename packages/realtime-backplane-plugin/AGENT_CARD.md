@@ -1,11 +1,9 @@
-# @setu-ts/realtime-backplane-plugin — share room and channel broadcasts
+# @setu-ts/realtime-backplane-plugin
 
-**Add it:** `setu add realtime-backplane` wires `RealtimeBackplanePlugin()` in functional config.
-Provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`); replicas need Redis or messaging.
+**Add it:** `setu add realtime-backplane` wires `RealtimeBackplanePlugin()`; provides
+`CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`).
 
-## Connect replicas through Redis
-
-In `setu.config.ts`:
+## Redis
 
 ```ts
 import { RealtimeBackplanePlugin } from '@setu-ts/realtime-backplane-plugin';
@@ -15,9 +13,9 @@ export const backplane = RealtimeBackplanePlugin({
 });
 ```
 
-## Broadcast through the existing SSE service
+## SSE
 
-With SSE registered, use its channel API; it publishes through the backplane automatically:
+With SSE registered:
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -34,24 +32,28 @@ export function registerDeployRoutes(router: IRouterApi): void {
 }
 ```
 
-## Behaviour the types do not show
+## Behaviour
 
-- Default `'memory'`: process-local, bus `default`; it does not connect replicas.
-- Redis needs two connections: injected `client` and `subscriber` must be supplied together
-  (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
-  `ioredis` and builds both.
-- Built/injected pairs get error/ready watches, detached on close. Successful injected opens QUIT on
-  close. An overtaken open only stops waiting: the caller's connect keeps running and remains
-  caller-owned. Retired owned clients keep an error sink until end.
+- `'memory'` is process-local, bus `default`. Supply Redis `client`/`subscriber` together, or omit
+  both to build an `ioredis` pair. node-redis:
+  `client: nodeRedisClient(url), subscriber: nodeRedisClient(url)`.
+- Once the backplane installs its connected pair, any close UNSUBSCRIBEs then QUITs both clients
+  (disconnect on failed QUIT), even after a later plugin fails or `app.stop()` cancels application
+  start. Retry with a new app and clients.
+- Failed/cancelled/timed-out backplane opens never QUIT/disconnect injected clients; own
+  listeners/watches come off, and late subscriptions are undone unless a newer open uses the
+  subscriber. Owned clients force-close on cancelled SUBSCRIBE, even with a finite bound.
 - Replicas share `topic` (default `setu-ts.realtime`); generated `origin` prevents self-replay.
-- WebSocket/SSE broadcasts fan out automatically. Membership counts stay local.
-- Outages keep health up and local delivery working; inspect `data.reachable`.
-- Built Redis commands default to 15000 ms. A timed-out publish can still arrive later.
+- WebSocket/SSE broadcasts fan out; membership stays local. Outages keep health up and local
+  delivery working; inspect `data.reachable`.
+- `commandTimeoutMs` (default 15000 ms, 0 disables) bounds built commands and injected connect +
+  first subscribe; injected open expiry is `BackendUnavailableError`. Injected commands after
+  connect keep their own settings. Timed-out publishes may arrive. Cancelling application start
+  during open ends waits without late service/health registration.
 
-## Other options
+## Options
 
 - `'messaging'` needs a broker confirming `fanOut`, else startup fails.
 - `maxFrameAgeMs` (default 0) drops late frames.
 - `'custom'` uses `instance: IRealtimeBackplane`; `'memory'` accepts a named `bus`.
-- `commandTimeoutMs: 0` disables the Redis bound; `diagnostics` observes transport activity and
-  `localNotice: false` suppresses the memory notice.
+- `diagnostics` observes activity; `localNotice: false` suppresses the memory notice.

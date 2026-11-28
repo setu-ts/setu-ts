@@ -108,8 +108,10 @@ export class OutboxService implements IOutbox {
   #closing = false;
   #inflight: Promise<OutboxSweepResult> | undefined;
   #followUp: Promise<OutboxSweepResult | undefined> | undefined;
+  #cancelFollowUp: (() => void) | undefined;
   #lastSweep: OutboxSweepResult | undefined;
   #lastRelayOverlapAt: number | undefined;
+  #saturated = false;
 
   /**
    * @param deps - Runtime, broker, resolved options and optional hooks
@@ -225,15 +227,13 @@ export class OutboxService implements IOutbox {
       if (this.#closing || this.#stores === undefined) return;
       let promise: Promise<unknown>;
       const running = this.#inflight;
-      if (running === undefined) {
+      if (this.#followUp !== undefined) {
+        promise = this.#followUp;
+      } else if (running === undefined) {
         promise = this.#start('dispatch');
       } else {
         // One follow-up waits behind the running sweep; further requests join it.
-        promise = this.#followUp ??= running.then(noop, noop).then(() => {
-          this.#followUp = undefined;
-          if (this.#closing) return undefined;
-          return this.#inflight ?? this.#start('dispatch');
-        });
+        promise = this.#queueFollowUp(running);
       }
       const guarded = promise.then(noop, (error: unknown) => this.#logFailure(error));
       const background = this.#deps.options.background;
@@ -309,6 +309,7 @@ export class OutboxService implements IOutbox {
    */
   async close(): Promise<void> {
     this.#closing = true;
+    this.#cancelFollowUp?.();
     await this.#followUp?.then(noop, noop);
     await this.#inflight?.then(noop, noop);
   }
@@ -333,8 +334,58 @@ export class OutboxService implements IOutbox {
     const clear = (): void => {
       if (this.#inflight === sweep) this.#inflight = undefined;
     };
-    sweep.then(clear, clear);
+    sweep.then((result) => {
+      clear();
+      if (result.failures !== 0 || this.#closing) return;
+      if (result.endedBy === 'publish-limit') {
+        if (!this.#saturated) {
+          this.#saturated = true;
+          this.#logSaturation('warn');
+        }
+        void this.#queueFollowUp(sweep).catch((error: unknown) => this.#logFailure(error));
+      } else if (result.endedBy === 'complete' && this.#saturated) {
+        this.#saturated = false;
+        this.#logSaturation('info');
+      }
+    }, clear);
     return sweep;
+  }
+
+  #queueFollowUp(running: Promise<OutboxSweepResult>): Promise<OutboxSweepResult | undefined> {
+    return (this.#followUp ??= running.then(noop, noop).then(() => {
+      if (this.#closing) {
+        this.#followUp = undefined;
+        return undefined;
+      }
+      return new Promise<OutboxSweepResult | undefined>((resolve, reject) => {
+        const handle = this.#deps.runtime.setTimeout(() => {
+          this.#cancelFollowUp = undefined;
+          this.#followUp = undefined;
+          if (this.#closing) resolve(undefined);
+          else (this.#inflight ?? this.#start('dispatch')).then(resolve, reject);
+        }, 0);
+        this.#cancelFollowUp = () => {
+          this.#deps.runtime.clearTimeout(handle);
+          this.#cancelFollowUp = undefined;
+          this.#followUp = undefined;
+          resolve(undefined);
+        };
+      });
+    }));
+  }
+
+  #logSaturation(level: 'warn' | 'info'): void {
+    try {
+      const logger = this.#deps.logger?.();
+      if (level === 'warn')
+        logger?.warn('outbox relay is at its sweep budget', {
+          publishLimit: this.#deps.options.publishLimit,
+          intervalMs: this.#deps.options.intervalMs,
+        });
+      else logger?.info('outbox relay caught up');
+    } catch {
+      /* A diagnostic cannot change relay scheduling. */
+    }
   }
 
   /** One sweep over every store, in rotating order, within one budget. */

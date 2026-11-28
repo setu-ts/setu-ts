@@ -12,7 +12,7 @@ describe('SNS jobs through raw and wrapped SQS subscriptions', { skip: !endpoint
     region: 'us-east-1',
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   };
-  const prefix = `m143p-${crypto.randomUUID()}`;
+  const prefix = `m143m-${crypto.randomUUID()}`;
   const urls: string[] = [];
   const subscriptions: string[] = [];
   const queues: SqsQueue[] = [];

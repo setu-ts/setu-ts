@@ -5528,6 +5528,23 @@ const app = createApplication({
 Its priority is `PLUGIN_PRIORITY.HIGH`, so the transport is connected before either consumer
 registers and subscribes.
 
+Since 0.14.0 its close hook is registered before connecting. Cancelling application start closes
+pending transport waits and registers no service, health indicator or diagnostics source afterwards.
+An injected Redis pair's connect and first subscribe share `commandTimeoutMs` (default 15000 ms, 0
+unbounded); expiry fails as `BackendUnavailableError` with source
+`realtime-backplane-plugin: redis transport`. Close cancels that wait even with a finite bound. Once
+the Redis backplane's own open installs its connected pair, any close UNSUBSCRIBEs then QUITs both
+injected clients, with disconnect as the fallback if QUIT fails, as for built clients and in 0.13.0.
+This includes kernel cleanup after a later plugin fails or `stop()` cancels application start; retry
+startup in a new application with new injected clients. A failed, cancelled or timed-out backplane
+open never disconnects or QUITs injected clients. It stops waiting, removes the backplane's
+listeners and watches, and undoes late subscriptions unless a newer open is using the subscriber.
+`commandTimeoutMs` bounds built-client commands and an injected pair's whole backplane open (default
+15000 ms, 0 disables); injected commands after connect retain their own settings. Owned clients are
+still force-disconnected when close cancels an in-flight SUBSCRIBE, including with a finite bound.
+Closing a messaging backplane during connect rejects the connect promise and cleans up a late
+subscription; the broker still owns its subscribe timeout.
+
 ### Options
 
 Discriminated on `transport`.
@@ -5552,7 +5569,7 @@ supplied and own their reporting.
 | `url`                     | `'redis'`                | —                        | Connection URL, read only on the lazy `ioredis` path                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `client` / `subscriber`   | `'redis'`                | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `module`                  | `'redis'`                | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair                                                                                                    |
+| `commandTimeoutMs`        | `'redis'`                | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Also bounds an injected pair’s connect and first subscribe together (0.14.0)                                                    |
 | `maxFrameAgeMs`           | `'messaging'`, `'redis'` | `0` (off)                | 0.14.0 opt-in: a receiver drops a frame whose `sentAtMs` stamp is older than this by its own clock; `0` delivers every frame. Assumes the replicas' clocks agree. Outside `0`–`2147483647` throws `RangeError` at construction                                                                                                                                                                                                                                         |
 | `connectionErrorReporter` | `'redis'`                | logger-backed            | Receives the `'error'`/`'ready'` events of both built and injected connections. Watches attach on open and detach on close. The plugin defaults it to a `createConnectionErrorReporter` over the application logger (first error `warn`, repeats `debug`, recovery `info`); supply one to route them elsewhere. Without a listener `ioredis` prints every reconnect failure to `console.error`. Injected pairs retain their caller's listeners and connection settings |
 | `instance`                | `'custom'`               | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -7153,6 +7170,77 @@ app.router.get('/users/:id', async (ctx) => {
 
 Provides message broker abstraction for cross-service integration events.
 
+### Broker bounds and custom transport contract (0.14.0)
+
+- `RequestTimeoutError(message?, details?: { topic: string; timeoutMs: number })` exposes readonly
+  `topic: string | undefined` and `timeoutMs: number | undefined`. The broker supplies both. Its
+  status hint is
+  `{ status: 504, title: 'Gateway Timeout', detail: 'No reply arrived in time; the request may have been handled.' }`.
+  `RemoteHandlerError` carries
+  `{ status: 502, title: 'Bad Gateway', detail: 'The service that handled the request failed.' }`;
+  its `remoteMessage` remains diagnostic only. `errorHandler` serves the hint, never remote text.
+- Both Service Bus plugin arms and `ServiceBusOptions` add `publishTimeoutMs?: number` (15000 ms, 0
+  unbounded, validated through `deadlineRangeError`) and `maxConcurrentCalls?: number` (integer
+  1–1000, default 1). Every application subscription, fan-out included, receives that concurrency;
+  reply inboxes remain at 1 and expire after 300000 idle ms, including during a longer receive-side
+  outage. A receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic
+  is missing, invalidates the local cached inbox; the next request recreates it once the shared
+  reply topic exists (a missing topic fails with `ReplyInboxUnavailableError`; the broker creates no
+  topics), while requests already in flight may time out. A request whose inbox is retired while it
+  opens waits for the next one, and is refused after three in a row. `disconnect()` waits at most 5
+  s for reply-inbox cleanup still in flight, then logs one warning and continues; an inbox open that
+  answers later is still closed. Transient receive errors retain it. `IServiceBusTransport.send`
+  adds a fifth optional `{ abortSignal?: AbortSignal }`; `open` adds a fourth optional
+  `{ maxConcurrentCalls?: number; onReceiveError?: (error: unknown, errorSource: string) => void }`.
+  The SDK adapter forwards both, including `processError`. Publish expiry aborts and throws
+  `PublishTimeoutError` (504); outages throw `BackendOutcomeUnknownError` (504). Classification
+  checks refusal codes `UnauthorizedAccess`, `MessagingEntityNotFound`, `MessagingEntityDisabled`,
+  `MessageSizeExceeded` and `QuotaExceeded` before `retryable`: even `UnauthorizedAccess` with
+  `retryable: true` is a refusal, returned unchanged without marking the data plane down. An
+  `AggregateError` stays a refusal only when its last inner error has one of these refusal codes;
+  every other aggregate is an outage, even with a final `SessionLockLost` and `retryable: false`.
+  For non-aggregate errors, outages are `retryable: true`, codes `ServiceCommunicationProblem`,
+  `ServiceTimeout` or `ServiceBusy`, and socket codes `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`,
+  `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `ENOTFOUND` and `EAI_AGAIN`. The fallback applies only
+  when `code` and `retryable` are undefined and `statusCode` is not a number. Status-only errors
+  with a numeric `statusCode` are returned unchanged without changing reachability evidence.
+  Evidence includes real publish outcomes (including deadlines), receive outages only from source
+  `receive`, and delivered application and reply-inbox messages. A successful publish, delivery or
+  positive management probe restores reachability.
+- Exported `PubSubTopicMissingError(topic, subscription, cause, possibleDeadLetterTopic?)` exposes
+  readonly `topic` and `subscription`, preserves `cause`, and advises creating the topic. Only a
+  create-path gRPC 5 is wrapped, after dead-letter inspection; a proven absent dead-letter topic
+  retains `PubSubDeadLetterTopicMissingError`. Inconclusive inspection names the possible target.
+  `IPubSubTransport.topicExists` keeps its signature and is bounded at 1500 ms; the SDK uses
+  `Topic.getMetadata({ timeout: 1500, retry: null })`, mapping code 5 to false. Other subscription
+  administration calls retain their SDK bounds. The exported `PubSubSdkModule.topic()` facade uses
+  `getMetadata` for topic inspection.
+- Exported `ICustomMessageBroker extends IMessageBroker` adds optional methods:
+
+  ```typescript
+  interface ICustomMessageBroker extends IMessageBroker {
+    publishWithHeaders?<T>(topic: string, message: T, headers: Readonly<Record<string, string>>, options?: PublishOptions): Promise<void>;
+    requestWithHeaders?<TReq, TRes>(topic: string, request: TReq, headers: Readonly<Record<string, string>>, options?: RequestOptions): Promise<TRes>;
+  }
+  ```
+
+  `CustomMessagingOptions.instance` has this type. The wrapper always validates caller publish
+  options, then calls the header member when available; absence falls back, warning once when
+  non-empty trace headers would be dropped. Framework trace headers must arrive as
+  `MessageMetadata.headers` from `subscribe`. RPC and `fanOut` delivery/confirmation remain the
+  instance's responsibility. Health derives from `isHealthy`, not a private `reachability`;
+  `subscribeWithHeaders` is not called.
+
+- A full outbox sweep (`endedBy: 'publish-limit'`, zero failures) starts one coalesced follow-up and
+  continues while full, including after `dispatch()` with scheduling off. Follow-ups yield through
+  `runtime.setTimeout(..., 0)` so event-loop timers run between batches. A sweep with any failure is
+  never followed up. Saturation warns once with `publishLimit` and `intervalMs`, recovery logs at
+  info after a failure-free completed lap. Failures never start or clear an episode. Rows publish
+  serially through claim/publish/mark; call `dispatch()` after commit to avoid up to `intervalMs`
+  (1000 ms default) of waiting. The backlog drains back-to-back, with one claim and one mark per
+  delivered row; there is no chain switch or tuning option. `publishLimit` caps a sweep and
+  `intervalMs` spaces scheduled sweeps; neither throttles the follow-up chain.
+
 ### Registration
 
 ```typescript
@@ -7539,6 +7627,10 @@ type PubSubMessagingOptions = PubSubMessagingOptionsInjected | PubSubMessagingOp
 
 // ── Azure Service Bus — injected transport (client required; credentials optional) ───
 interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Whole publish bound, 15000 ms; 0 disables. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   broker: 'service-bus';
   /** Injected transport (bypasses the lazy SDK load). Required for this arm. */
   client: IServiceBusTransport;
@@ -7560,6 +7652,10 @@ interface ServiceBusMessagingOptionsInjected extends MessagingCommonOptions {
 
 // ── Azure Service Bus — production (connectionString required; client must be omitted) ─
 interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Whole publish bound, 15000 ms; 0 disables. @since 0.14.0 */
+  publishTimeoutMs?: number;
+  /** Application receive concurrency, integer 1–1000, default 1. @since 0.14.0 */
+  maxConcurrentCalls?: number;
   broker: 'service-bus';
   /** Connection string for the Service Bus namespace. Required for production. */
   connectionString: string;
@@ -7600,10 +7696,16 @@ interface ServiceBusRetryOptions {
 
 `ServiceBusOptions` — the exported options type of a directly constructed `ServiceBusBroker` —
 carries one more member (**since M95b**): `dataPlaneEvidenceMs?: number`, how long a positive
-data-plane outcome stays authoritative. Default `5000`. A negative outcome remains authoritative
-until a successful publish or a positive management probe contradicts it; elapsed time alone never
-reports a known outage as healthy. It is a broker option rather than a plugin-wide one because no
-other broker has two planes to choose between; the plugin arm does not forward it.
+data-plane outcome (a successful publish or delivered application or reply-inbox message) stays
+authoritative. Default `5000`. Real publish outages and deadlines, and receive outages only from
+source `receive`, record negative evidence under the classification in
+[Broker bounds and custom transport contract](#broker-bounds-and-custom-transport-contract-0140).
+Refusal codes take precedence over `retryable`. An aggregate stays a refusal only when its last
+inner error has a refusal code; every other aggregate is an outage. Refusals stay unchanged and do
+not mark the data plane down. A negative outcome remains authoritative until a successful publish, a
+delivery or a positive management probe contradicts it; elapsed time alone never reports a known
+outage as healthy. It is a broker option rather than a plugin-wide one because no other broker has
+two planes to choose between; the plugin arm does not forward it.
 
 **It must be a safe positive integer, and the constructor REFUSES anything else** rather than
 accepting a value that reads as configured while the window misbehaves. `NaN` — what `Number(env.X)`
@@ -7620,7 +7722,7 @@ type ServiceBusMessagingOptions =
 interface CustomMessagingOptions extends MessagingCommonOptions {
   broker: 'custom';
   /** Pre-built IMessageBroker instance. Required for this arm. */
-  instance: IMessageBroker;
+  instance: ICustomMessageBroker;
 }
 
 /** The factory's single options parameter. */
@@ -7766,7 +7868,7 @@ Signatures (on `IMessageBroker`, from `@setu-ts/common`):
 
 ```typescript
 interface RequestOptions {
-  /** Reply wait budget in ms. @defaultValue 5000 */
+  /** Reply budget in ms; built-in messaging-plugin brokers count it from the call. @defaultValue 5000 */
   readonly timeoutMs?: number;
 }
 
@@ -7801,25 +7903,26 @@ consumer group, needs `IRedisStreamsClient.xread` and `xrevrange` (optional memb
 client without them is refused at that `subscribe()` with `TypeError`), and is not retried by
 `consumerRetry`.
 
-Three errors added in 0.14.0:
+Errors added in 0.14.0:
 
 | Error                                  | Thrown when                                                                                                                                                                       |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UnroutableMessageError`               | A RabbitMQ publish that required a route (the outbox relay's) came back unroutable. Names the topic and routing key, never the payload. The relay retries the row, then fails it. |
 | `OutboxPublisherConfirmsRequiredError` | The outbox is configured on a RabbitMQ connection without `createConfirmChannel` and return listeners; thrown when the outbox is activated, so `start()` fails.                   |
 | `PubSubDeadLetterTopicMissingError`    | The broker created a subscription with a dead-letter policy and `deadLetterTopic` does not exist. The SDK error is the `cause`.                                                   |
+| `PubSubTopicMissingError`              | A Pub/Sub subscription create failed with gRPC 5; names the topic and subscription, with the SDK error as `cause`.                                                                |
 
 `request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
 
 <!-- version:history -->
 
-| Error                        | Thrown when                                                                                                                                                                                                                               |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                                                                                                                                                                                      |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                                                                                                                                                                         |
-| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility.                                                                                                                                                          |
-| `PublishTimeoutError`        | The request's publish outlived `publishTimeoutMs`; the message may still be delivered. Carries `topic` and `timeoutMs`, and since 0.12.0 a `504 Gateway Timeout` hint ("The backend did not answer; the request may have been applied."). |
+| Error                        | Thrown when                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                                                                                                                                                                                                                                                                                             |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                                                                                                                                                                                                                                                                                |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility.                                                                                                                                                                                                                                                                 |
+| `PublishTimeoutError`        | The request's publish outlived `publishTimeoutMs`, and that happened within `timeoutMs` (otherwise the request rejects with `RequestTimeoutError` first); the message may still be delivered. Carries `topic` and `timeoutMs`, and since 0.12.0 a `504 Gateway Timeout` hint ("The backend did not answer; the request may have been applied."). |
 
 Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3). Each
 carries the platform error as `cause` **when there is one** — the absent-stream refusal below is a
@@ -7841,7 +7944,7 @@ thrown by `subscribe()`, so a declared subscription rejects `start()` with it:
 
 > **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
 > Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
-> delegates to the injected `IMessageBroker`).
+> delegates to the injected `ICustomMessageBroker`).
 >
 > **Kafka has one operational prerequisite.** Replies travel on a shared reply topic (`replyTopic`,
 > default `'messaging.replies'`) which **must already exist** — the broker creates no topics, so
@@ -7940,6 +8043,7 @@ export {
   NatsConsumerNameCollisionError,
   OutboxPublisherConfirmsRequiredError, // 0.14.0
   PubSubDeadLetterTopicMissingError, // 0.14.0
+  PubSubTopicMissingError, // 0.14.0
   PubSubSubscriptionBoundElsewhereError,
   PublishTimeoutError,
   RemoteHandlerError,
@@ -7953,6 +8057,7 @@ export type {
   ConsumerRetryOptions,
   CustomMessagingOptions,
   EventsMessagingBridgeOptions,
+  ICustomMessageBroker,
   InMemoryBrokerOptions,
   KafkaMessagingOptions,
   KafkaOptions,
@@ -8211,26 +8316,30 @@ at most one round trip per TTL.
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
 **Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
-records the outcome of every real publish — the **data plane** — and `reachability()` consults it
-FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs` (default
-`5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected topic or a
-quota error is an application-level fact, never an outage) resolves `false` until a successful
-publish or a positive management probe contradicts it. **Since M101a** that retained failure is
-answered at once: the management probe runs in the background and only a `true` answer clears the
-outcome, for the NEXT read. Before, `reachability()` awaited the probe, whose own 2-second bound
-tied the indicator's, so the indicator's bound fired first and a recorded outage was reported `up`.
-A failure inside a window the indicator has already cached as `up` is reported at the first poll
-after that 5-second cache expires. The plane distinction is the substance: the management round trip
-proves the **management** plane is reachable — evidence about the data plane, never proof of it —
-and that gap is what let a stopped namespace report `up` while every publish threw. Two further
-changes: every arm's probe is bounded by the indicator's `createCachedProbe` (5-second TTL, 2-second
-bound), so a probe that cannot answer — a **hung** broker, the condition a stopped one never
-produces — settles `reachable: 'unknown'` instead of holding `/health` open; and the RabbitMQ probe
-is a real round trip (a throwaway channel open/close), replacing the connection-fault flag read that
-a hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
-Bus management plane is unreachable and that publishes nothing keeps reporting
-`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
-can publish synthetically.
+records real publish outcomes (including timeouts), receive outages only from source `receive`, and
+delivered application and reply-inbox messages as **data-plane** evidence. `reachability()` consults
+it FIRST: a successful publish or delivery resolves `true` for
+`ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`); a publish outage or deadline, or a receive
+outage, resolves `false` until a successful publish, delivery or positive management probe
+contradicts it. Refusal codes take precedence over `retryable`. An `AggregateError` stays a refusal
+only when its last inner error has a refusal code; every other aggregate is an outage. See
+[Broker bounds and custom transport contract](#broker-bounds-and-custom-transport-contract-0140) for
+the full classification. Refusals stay unchanged and do not mark the data plane down. **Since
+M101a** that retained failure is answered at once: the management probe runs in the background and
+only a `true` answer clears the outcome, for the NEXT read. Before, `reachability()` awaited the
+probe, whose own 2-second bound tied the indicator's, so the indicator's bound fired first and a
+recorded outage was reported `up`. A failure inside a window the indicator has already cached as
+`up` is reported at the first poll after that 5-second cache expires. The plane distinction is the
+substance: the management round trip proves the **management** plane is reachable — evidence about
+the data plane, never proof of it — and that gap is what let a stopped namespace report `up` while
+every publish threw. Two further changes: every arm's probe is bounded by the indicator's
+`createCachedProbe` (5-second TTL, 2-second bound), so a probe that cannot answer — a **hung**
+broker, the condition a stopped one never produces — settles `reachable: 'unknown'` instead of
+holding `/health` open; and the RabbitMQ probe is a real round trip (a throwaway channel
+open/close), replacing the connection-fault flag read that a hung broker never trips. Residual
+exposure, stated rather than implied: a deployment whose Service Bus management plane is unreachable
+and that has no publish outcome, receive outage or delivery keeps reporting `reachable: 'unknown'`
+with status `up` — an operator who needs the signal can publish synthetically.
 
 Kafka and Pub/Sub also own cached probes (5 s TTL, 2 s bound), protecting direct `isHealthy()`
 callers. Kafka uses `describeCluster()` on a second `<clientId>-health` client (zero retries, 1500
@@ -8689,6 +8798,74 @@ the store's.
 
 Provides background job queue with Memory and Redis adapters.
 
+### Queue bounds and polling options (0.14.0)
+
+`QueuePluginOptions.retryDelayMs?: number | ((attempts: number) => number)` applies to every
+adapter. A number must be finite and non-negative; the function receives the attempt that just
+failed (1 on first delivery). Omitted or `undefined` retains exponential backoff. Other runtime
+types (including `null`, strings, objects and booleans) and negative or non-finite numbers throw
+`RangeError` synchronously at `QueuePlugin(...)` and `QueueService` construction. Results clamp to
+0–2147483647; a throwing function or non-finite result warns once and retries without delay.
+`health?: { probeCacheMs?: number; probeTimeoutMs?: number }` configures the cached reachability
+probe: defaults 5000/2000 ms, integer ranges 0–2147483647 / 1–2147483647. TTL 0 probes every read;
+failures share the cache TTL. Invalid values throw `RangeError` at construction.
+
+Every queue loop-failure line (`queue reserve failed`, `queue poll failed`,
+`queue recurring failed`, `queue depth-probe failed`, `queue recurring enqueue failed`) reports once
+per failure episode at warn (error when warn is absent), then info on recovery with the failure
+count. Their `error` metadata is the one-line `describeError` rendering, including the error name
+and available classifiers/causes, with URL userinfo masked and no stack field added. Job-error
+reports keep their existing format.
+
+`SqsQueueOptions.requestTimeoutMs` and `SnsPublisherOptions.requestTimeoutMs` default to 15000 ms; 0
+disables the whole-call bound (SDK retries included). `deadlineRangeError` validates the range. SQS
+send, delete and visibility commands and both SNS publish methods use it and abort SDK calls on
+expiry. Receive, redrive reads and health probes have the separate bounds below. An operation expiry
+is `BackendOutcomeUnknownError` (504); refused network, HTTP 5xx and throttling answers are 503,
+upgraded to 504 after more than one SDK attempt. In-flight connection loss is 504; other refusals
+pass through unchanged. Redrive reads always use a finite bound: `min(requestTimeoutMs, 10000)` ms,
+or 10000 ms when `requestTimeoutMs` is 0. SNS uses runtime timers when supplied and ambient deadline
+timers otherwise.
+
+`SqsQueueOptions.waitTimeSeconds?: number` defaults to 20, an integer 0–20, and reaches
+`ReceiveMessage.WaitTimeSeconds`. Receive's bound is
+`min(2147483647, waitTimeSeconds * 1000 + requestTimeoutMs)` ms (0 remains unbounded when
+`requestTimeoutMs` is 0). Each name reserves independently, at most one in flight per name.
+Disconnect aborts receives and drains reserve tasks; old generations dispatch and report nothing. An
+injected transport ignoring the abort signal may hold stop until its receive returns. At 50
+configured names with long polling the adapter warns about the SDK's default 50 HTTP sockets.
+
+`ISqsTransport.send`, `getQueueAttributes`, `getQueueUrl`, `delete` and `changeVisibility` gain
+optional trailing `options?: { abortSignal?: AbortSignal }`;
+`receive(queueUrl, max, visibilitySeconds, waitTimeSeconds?, options?)` gains the wait and the same
+signal options. `SqsSdkModule.SQSClient` config accepts `maxAttempts?: number`, and its `send`
+accepts signal options. The SDK probe explicitly selects its own `maxAttempts: 1` client,
+independently of the requested attribute names, and forwards `abortSignal` to the SDK request.
+`SqsQueue.isHealthy(probeTimeoutMs?: number)` uses a 2000 ms default when called directly;
+`QueueService` supplies `health.probeTimeoutMs`. The method exists when `getQueueAttributes` exists
+and reads every distinct configured source URL with `['QueueArn']`, in parallel under individual
+`min(1500, floor(0.75 * health.probeTimeoutMs))` ms bounds: 1500 ms with the default outer 2000 ms,
+750 ms when configured to 1000 ms. With a 1 ms outer bound, the rounded budget is 0 and the probe
+reads false without issuing a request. Expiry aborts a request and reads false before the outer
+timeout. Missing queue, network fault or HTTP 5xx reads false; another response below 500 proves
+reachability. It never rejects. Without the attribute method, an injected `isHealthy` is used if
+available; otherwise reachability is unknown. `ISnsTransport.publish(topicArn, body, options?)` and
+`SnsSdkModule`'s send forward the abort signal. `sqs:GetQueueAttributes` is needed to detect missing
+queues; a 403 still proves reachability, so readiness can pass without that permission.
+Redrive-policy reads retain their permission requirements.
+
+Reserve failures warn once per name and episode and recover at info with `failures`; poll and
+recurring-enqueue failures follow the same rule. RabbitMQ publish paths use the operation-specific
+sources `queue-plugin: rabbitmq enqueue`, `queue-plugin: rabbitmq requeue`,
+`queue-plugin: rabbitmq dead-letter` and `queue-plugin: rabbitmq quarantine`. Definite refusals
+throw `BackendUnavailableError` (503); uncertain confirmations, expiry or close after writing but
+before confirmation throw `BackendOutcomeUnknownError` (504). `QueueService.add` preserves both.
+Driver-error causes are queue-naming wrappers whose own `cause` is the original driver error;
+synthetic deadline or channel-close causes need not have an underlying driver error. Declaration
+rejections say `RabbitMQ could not declare queue <name> before <operation>`, without implying a
+publish occurred. A failed quarantine move produces a safe warning carrying the quarantine source;
+reserve does not reject for that move, and the warning does not expose driver text.
+
 ### Exports
 
 - **`QueuePlugin`** — Plugin factory for registering the queue service
@@ -8740,16 +8917,23 @@ Provides background job queue with Memory and Redis adapters.
     revives an expired claim.
 
 - **`SqsQueueOptions`** — SQS adapter configuration (`queues`, `deadLetterQueues?`,
-  `visibilityTimeoutSeconds?`, `region?`, `credentials?`, `endpoint?`, `client?`).
-  `deadLetterQueues` maps a consumed job name to a target URL, or to `false` to discard that name's
-  exhausted jobs (`onFailed` still runs, the message is deleted with a warning and counted
-  `discarded`); a URL wins over the queue's redrive policy. `visibilityTimeoutSeconds` (default 30)
-  must be an integer from 1 to 43,200, else a `RangeError`.
+  `visibilityTimeoutSeconds?`, `region?`, `credentials?`, `endpoint?`, `client?`,
+  `requestTimeoutMs?`, `waitTimeSeconds?`); bounds and defaults are in
+  [Queue bounds and polling options](#queue-bounds-and-polling-options-0140). `deadLetterQueues`
+  maps a consumed job name to a target URL, or to `false` to discard that name's exhausted jobs
+  (`onFailed` still runs, the message is deleted with a warning and counted `discarded`); a URL wins
+  over the queue's redrive policy. `visibilityTimeoutSeconds` (default 30) must be an integer from 1
+  to 43,200, else a `RangeError`.
 - **`ISqsTransport`** — Structural SQS transport port (injected via `SqsQueueOptions.client`). Since
-  0.14.0: `send(queueUrl, body, delaySeconds?, attributes?)` takes optional SQS message attributes,
-  and two optional members are used to find a dead-letter target:
-  `getQueueAttributes?(queueUrl, names)` and `getQueueUrl?(queueName, ownerAccountId)`. A transport
-  without `getQueueAttributes` can consume only names with an explicit `deadLetterQueues` entry.
+  0.14.0: `send(queueUrl, body, delaySeconds?, attributes?, options?)` takes optional SQS message
+  attributes; `receive(queueUrl, max, visibilitySeconds, waitTimeSeconds?, options?)`,
+  `delete(queueUrl, receiptHandle, options?)` and
+  `changeVisibility(queueUrl, receiptHandle, seconds, options?)` accept the same trailing
+  `options?: { abortSignal?: AbortSignal }`. Two optional members find a dead-letter target:
+  `getQueueAttributes?(queueUrl, names, options?)` and
+  `getQueueUrl?(queueName, ownerAccountId, options?)`, both with the same signal options. A
+  transport without `getQueueAttributes` can consume only names with an explicit `deadLetterQueues`
+  entry.
 - **`SqsReceivedMessage`** — SQS received message shape (`messageId?`, `body`, `receiptHandle`,
   `approximateReceiveCount`)
 - **`SqsSdkModule`** additions (0.14.0) — `GetQueueAttributesCommand`, `GetQueueUrlCommand`
@@ -8785,8 +8969,8 @@ Provides background job queue with Memory and Redis adapters.
 - **`QueueDepths`** — `{ ready, processing, dead }` per job name, as the health indicator publishes
   them
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
-- **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
-  through (structurally compatible with `ILogger`)
+- **`QueueLogger`** — Required `error`, optional `warn`/`info` logger surface for background
+  failures and recovery (structurally compatible with `ILogger`)
 - **`QueueDiagnosticsOptions`** — Opt-in minimized attempt/depth observations for the diagnostics
   connector (M98f): `{ enabled: true, instanceAlias, queues, depths? }`
 - **`QueueDepthDiagnosticsOptions`** — Separately bounded depth collection:

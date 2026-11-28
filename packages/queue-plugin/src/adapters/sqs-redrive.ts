@@ -54,6 +54,7 @@ export class SqsRedrive {
     queueUrl: string,
     explicit: string | false | undefined,
     warn: (message: string) => void,
+    requestTimeoutMs = 15000,
   ): Promise<ISqsRedriveTarget> {
     if (explicit === false) return { url: false };
     type Refusal = SqsDeadLetterTargetMissingReason;
@@ -62,14 +63,20 @@ export class SqsRedrive {
       refusal = cause === undefined ? { reason } : { reason, cause };
       throw new SqsDeadLetterTargetMissingError(name, queueUrl, reason, cause);
     };
-    const bounded = async <T>(read: () => Promise<T>, reason: Refusal): Promise<T> => {
+    const timeoutMs = requestTimeoutMs === 0 ? 10000 : Math.min(requestTimeoutMs, 10000);
+    const bounded = async <T>(
+      read: (signal: AbortSignal) => Promise<T>,
+      reason: Refusal,
+    ): Promise<T> => {
       if (this.#closed) return refuse(reason, new Error('SqsQueue is disconnecting'));
       try {
         return await withDeadline(read, {
-          timeoutMs: 10_000,
+          timeoutMs,
           onTimeout: () =>
             new Error(
-              this.#closed ? 'SqsQueue is disconnecting' : 'SQS read timed out after 10000 ms',
+              this.#closed
+                ? 'SqsQueue is disconnecting'
+                : `SQS read timed out after ${timeoutMs} ms`,
             ),
           timing: {
             setTimer: (fn, ms) => {
@@ -91,7 +98,7 @@ export class SqsRedrive {
       if (!transport.getQueueAttributes) return refuse('attributes-unavailable');
       const read = transport.getQueueAttributes.bind(transport);
       const attributes = await bounded(
-        () => read(queueUrl, ['RedrivePolicy']),
+        (abortSignal) => read(queueUrl, ['RedrivePolicy'], { abortSignal }),
         'attributes-unavailable',
       );
       if (attributes.RedrivePolicy === undefined) {
@@ -124,7 +131,10 @@ export class SqsRedrive {
       if (explicit) return { url: explicit, maxReceiveCount: count };
       if (!transport.getQueueUrl) return refuse('target-unresolvable');
       const resolveUrl = transport.getQueueUrl.bind(transport);
-      const url = await bounded(() => resolveUrl(arn[4]!, arn[3]!), 'target-unresolvable');
+      const url = await bounded(
+        (abortSignal) => resolveUrl(arn[4]!, arn[3]!, { abortSignal }),
+        'target-unresolvable',
+      );
       if (!url) return refuse('target-unresolvable');
       return { url, maxReceiveCount: count };
     } catch (error) {

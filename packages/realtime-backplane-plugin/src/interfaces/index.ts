@@ -258,8 +258,9 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * to become ready (since 0.13.0); with `0` that wait ends only when the
    * publisher is ready or `close()` is called.
    *
-   * Read only on the lazy `ioredis` path: an injected `client` /
-   * `subscriber` pair keeps whatever timeout it was constructed with.
+   * Since 0.14.0 it also bounds an injected pair's connect and first subscribe
+   * together. Injected clients keep their own per-command timeout afterwards.
+   * Every connect/subscribe wait is cancellable by close(), including at 0.
    *
    * @throws {RangeError} At construction, when not a number from `0` to
    * `2147483647` — above that, the runtime's timer overflows to 1 ms and every

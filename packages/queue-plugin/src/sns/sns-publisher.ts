@@ -13,9 +13,13 @@ import {
   contextToTraceparent,
   TELEMETRY_CONTEXT_OPAQUE,
   TRACEPARENT_HEADER,
+  BackendOutcomeUnknownError,
+  resolveProbeTiming,
+  withDeadline,
 } from '@setu-ts/common';
 import type { IRuntimeServices, ITelemetryService } from '@setu-ts/common';
 import { encodeSqsEnvelope } from '../adapters/sqs-envelope.ts';
+import { resolveSqsRequestTimeout, toSqsFault } from '../adapters/sqs-faults.ts';
 
 /**
  * Declares the constructors used from the real AWS SNS SDK v3.
@@ -26,7 +30,7 @@ export interface SnsSdkModule {
     credentials?: unknown;
     endpoint?: string | undefined;
   }) => {
-    send(command: unknown): Promise<unknown>;
+    send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>;
     destroy(): Promise<void>;
   };
   PublishCommand: new (input: Record<string, unknown>) => unknown;
@@ -37,7 +41,11 @@ export interface SnsSdkModule {
  */
 export interface ISnsTransport {
   /** Publish a message to a topic. Returns the message ID or undefined. */
-  publish(topicArn: string, body: string): Promise<string | undefined>;
+  publish(
+    topicArn: string,
+    body: string,
+    options?: { abortSignal?: AbortSignal },
+  ): Promise<string | undefined>;
   /** Close the client. */
   close(): Promise<void>;
 }
@@ -46,7 +54,9 @@ export interface ISnsTransport {
  * Options for SNS publisher.
  */
 export interface SnsPublisherOptions {
-  /** Supplies publishJob ids through uuid(); publish ignores it. @since 0.14.0 */
+  /** Whole publish bound in ms, default 15000; 0 disables it. @since 0.14.0 */
+  requestTimeoutMs?: number;
+  /** Supplies publishJob ids and timers for the publish bound. @since 0.14.0 */
   runtime?: IRuntimeServices;
   /** Producer spans and envelope traceparent for publishJob; publish ignores it. @since 0.14.0 */
   telemetry?: ITelemetryService;
@@ -94,12 +104,17 @@ export function adaptSnsModule(
   const client = new mod.SNSClient(clientConfig);
 
   return {
-    publish: async (topicArn: string, body: string): Promise<string | undefined> => {
+    publish: async (
+      topicArn: string,
+      body: string,
+      callOptions?: { abortSignal?: AbortSignal },
+    ): Promise<string | undefined> => {
       const result = await client.send(
         new mod.PublishCommand({
           TopicArn: topicArn,
           Message: body,
         }),
+        callOptions,
       );
       return (result as { MessageId?: string }).MessageId;
     },
@@ -127,8 +142,10 @@ export class SnsPublisher {
   #ready = false;
   #runtime: IRuntimeServices | undefined;
   #telemetry: ITelemetryService | undefined;
+  readonly #requestTimeoutMs: number;
 
   constructor(options: SnsPublisherOptions) {
+    this.#requestTimeoutMs = resolveSqsRequestTimeout(options.requestTimeoutMs);
     this.#runtime = options.runtime;
     this.#telemetry = options.telemetry;
     this.#topicArn = options.topicArn;
@@ -178,7 +195,7 @@ export class SnsPublisher {
     if (!this.#transport) throw new Error('SnsPublisher is not connected');
 
     const body = typeof message === 'string' ? message : JSON.stringify(message);
-    return this.#transport.publish(this.#topicArn, body);
+    return this.#publishBody(body);
   }
   /**
    * Publishes work readable by raw and wrapped SQS subscriptions consuming name.
@@ -213,8 +230,7 @@ export class SnsPublisher {
     const publish = (
       headers: Readonly<Record<string, string>> | undefined,
     ): Promise<string | undefined> =>
-      transport.publish(
-        this.#topicArn,
+      this.#publishBody(
         encodeSqsEnvelope({
           id,
           name,
@@ -246,5 +262,27 @@ export class SnsPublisher {
         },
       },
     );
+  }
+
+  async #publishBody(body: string): Promise<string | undefined> {
+    const transport = this.#transport!;
+    const source = 'queue-plugin: sns publish';
+    try {
+      return await withDeadline(
+        (abortSignal) => transport.publish(this.#topicArn, body, { abortSignal }),
+        {
+          timeoutMs: this.#requestTimeoutMs,
+          onTimeout: () =>
+            new BackendOutcomeUnknownError(source, {
+              cause: new Error(
+                `SNS publish exceeded requestTimeoutMs (${this.#requestTimeoutMs}ms)`,
+              ),
+            }),
+          ...(this.#runtime === undefined ? {} : { timing: resolveProbeTiming(this.#runtime) }),
+        },
+      );
+    } catch (error) {
+      throw toSqsFault(error, source);
+    }
   }
 }

@@ -1,8 +1,68 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SnsPublisher } from '../../src/sns/sns-publisher.ts';
 import type { ISnsTransport } from '../../src/sns/sns-publisher.ts';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
+import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('SnsPublisher', () => {
+  it.each([false, true])('bounds and aborts publishJob=%s using runtime timers', async (job) => {
+    const runtime = new FakeRuntimeServices(0);
+    let signal: AbortSignal | undefined;
+    const client: ISnsTransport = {
+      publish: (_arn, _body, options) => {
+        signal = options?.abortSignal;
+        return new Promise(() => {});
+      },
+      close: async () => {},
+    };
+    const publisher = new SnsPublisher({
+      topicArn: 'topic',
+      runtime,
+      requestTimeoutMs: 25,
+      client,
+    });
+    await publisher.connect();
+    const result = (job ? publisher.publishJob('build', {}) : publisher.publish({})).catch(
+      (error: unknown) => error,
+    );
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    await runtime.advanceMs(25);
+    expect(await result).toBeInstanceOf(BackendOutcomeUnknownError);
+    expect(signal?.aborted).toBe(true);
+    await publisher.disconnect();
+  });
+  it('supports ambient timers, disabled bounds, and classifies publish faults', async () => {
+    vi.useFakeTimers();
+    const pending = Promise.withResolvers<string>();
+    const client = { publish: vi.fn(() => pending.promise), close: async () => {} };
+    const bounded = new SnsPublisher({ topicArn: 'topic', requestTimeoutMs: 25, client });
+    await bounded.connect();
+    const result = bounded.publish({}).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(25);
+    expect(await result).toBeInstanceOf(BackendOutcomeUnknownError);
+    await bounded.disconnect();
+    const unbounded = new SnsPublisher({ topicArn: 'topic', requestTimeoutMs: 0, client });
+    await unbounded.connect();
+    let settled = false;
+    const call = unbounded.publish({}).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(settled).toBe(false);
+    pending.resolve('id');
+    await call;
+    client.publish.mockRejectedValueOnce(
+      Object.assign(new Error('offline'), { $metadata: { httpStatusCode: 503 } }),
+    );
+    await expect(unbounded.publishJob('build', {}, { id: 'j' })).rejects.toBeInstanceOf(
+      BackendUnavailableError,
+    );
+    await unbounded.disconnect();
+    vi.useRealTimers();
+  });
+  it.each([-1, NaN, Infinity, 2147483648])('refuses requestTimeoutMs %s', (requestTimeoutMs) =>
+    expect(() => new SnsPublisher({ topicArn: 'topic', requestTimeoutMs })).toThrow(RangeError),
+  );
   describe('connect()', () => {
     it('uses injected client', async () => {
       const transport: ISnsTransport = {
@@ -152,10 +212,11 @@ describe('SnsPublisher', () => {
 
       // Fake SDK module matching SnsSdkModule shape
       const fakeClient = {
-        send: (_cmd: unknown) =>
+        send: vi.fn(() =>
           Promise.resolve({
             MessageId: 'test-msg-id',
           }),
+        ),
         destroy: async () => {},
       };
       const mod = {
@@ -173,8 +234,15 @@ describe('SnsPublisher', () => {
         { region: 'us-east-1' },
       );
 
-      const msgId = await transport.publish('arn:aws:sns:us-east-1:123456:topic', 'hello');
+      const options = { abortSignal: new AbortController().signal };
+      const msgId = await transport.publish('arn:aws:sns:us-east-1:123456:topic', 'hello', options);
       expect(msgId).toBe('test-msg-id');
+      expect(fakeClient.send).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          input: { TopicArn: 'arn:aws:sns:us-east-1:123456:topic', Message: 'hello' },
+        }),
+        options,
+      );
       await transport.close();
     });
 
@@ -313,7 +381,6 @@ describe('loadSnsModule — the guarded import (M113d §3.1)', () => {
   });
 });
 
-import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 import { fakeTelemetry, TRACEPARENT } from '../fixtures/fake-telemetry.ts';
 import { encodeSqsEnvelope, decodeSqsEnvelope } from '../../src/adapters/sqs-envelope.ts';
 
@@ -358,6 +425,7 @@ describe('SNS job publishing', () => {
     expect(body).toEqual([
       'topic',
       encodeSqsEnvelope({ id: 'fake-uuid-0', name: 'build', data: { value: 1 }, headers }),
+      { abortSignal: expect.any(AbortSignal) },
     ]);
     expect(decodeSqsEnvelope(body[1], 'build')).toMatchObject({ ok: true });
     expect(JSON.parse(body[1])).not.toHaveProperty('maxAttempts');
@@ -395,7 +463,7 @@ describe('SNS job publishing', () => {
       await publisher.connect();
       const headers = { traceparent: 'caller', tenant: 't1' };
       await publisher.publishJob('build', null, { id: 'j1', headers });
-      expect(publish.mock.calls[0]).toHaveLength(2);
+      expect(publish.mock.calls[0]).toHaveLength(3);
       expect(JSON.parse(publish.mock.calls[0]![1]).headers).toEqual({
         traceparent: valid ? TRACEPARENT : 'caller',
         tenant: 't1',
@@ -406,7 +474,11 @@ describe('SNS job publishing', () => {
       );
       expect(headers.traceparent).toBe('caller');
       await publisher.publish('unchanged');
-      expect(publish.mock.calls[1]).toEqual(['topic', 'unchanged']);
+      expect(publish.mock.calls[1]).toEqual([
+        'topic',
+        'unchanged',
+        { abortSignal: expect.any(AbortSignal) },
+      ]);
       expect(spans).toHaveBeenCalledTimes(1);
       await publisher.disconnect();
     },

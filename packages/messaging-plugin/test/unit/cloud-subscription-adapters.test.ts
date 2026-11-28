@@ -18,7 +18,7 @@ function pubSubSdk() {
     for (const handler of listeners.get(event) ?? []) handler(value);
   };
   const create = vi.fn(() => Promise.resolve([{}]));
-  const exists = vi.fn(() => Promise.resolve<[boolean]>([true]));
+  const exists = vi.fn(() => Promise.resolve<unknown[]>([{}]));
   const list = vi.fn(() => Promise.resolve<[unknown[]]>([[]]));
   const metadata = vi.fn(() =>
     Promise.resolve<[Metadata]>([{ topic: 'projects/p/topics/orders' }]),
@@ -37,7 +37,7 @@ function pubSubSdk() {
           name: name.startsWith('projects/') ? name : `projects/p/topics/${name}`,
           publishMessage: () => Promise.resolve('id'),
           createSubscription: create,
-          exists,
+          getMetadata: exists,
           getSubscriptions: list,
         };
       }
@@ -170,7 +170,7 @@ describe('Pub/Sub optional subscription policies and stream lifecycle', () => {
     const h = pubSubSdk();
     const transport = adaptPubSubModule(h.sdk, { projectId: 'p' });
     expect(await transport.topicExists!('dead')).toBe(true);
-    h.exists.mockResolvedValue([false]);
+    h.exists.mockRejectedValueOnce({ code: 5 });
     expect(await transport.topicExists!('dead')).toBe(false);
     const error = new Error('remote-secret');
     h.exists.mockRejectedValue(error);

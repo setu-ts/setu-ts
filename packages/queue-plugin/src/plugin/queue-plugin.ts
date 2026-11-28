@@ -49,7 +49,8 @@ import {
   validateClient as isAmqpQueueConnection,
 } from '../adapters/rabbitmq-queue.ts';
 import { SqsQueue } from '../adapters/sqs-queue.ts';
-import { QueueService } from '../services/queue-service.ts';
+import { QueueService, resolveQueueServiceOptions } from '../services/queue-service.ts';
+import { resolveSqsRequestTimeout } from '../adapters/sqs-faults.ts';
 import { withIngressBehaviors } from '../processors/job-processor.ts';
 import { QueueCollector } from '../metrics/queue-collector.ts';
 import { TracedQueue } from '../tracing/traced-queue.ts';
@@ -80,6 +81,8 @@ import { VERSION } from '../version.ts';
  * @since 0.1.0
  */
 export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
+  resolveQueueServiceOptions(options);
+  if (options?.adapter === 'sqs') resolveSqsRequestTimeout(options.sqs?.requestTimeoutMs);
   const adapterType: QueueAdapterType = options?.adapter ?? 'memory';
   const name = options?.name;
   const defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
@@ -279,6 +282,8 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
               adapterType === 'memory' || adapterType === 'redis',
             );
       const serviceOptions = {
+        ...(options?.health === undefined ? {} : { health: options.health }),
+        ...(options?.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
         defaultMaxAttempts,
         pollIntervalMs,
         ...(logger !== undefined && { logger }),
@@ -464,6 +469,8 @@ class BehaviorChainQueueService extends QueueService {
     options: {
       defaultMaxAttempts?: number;
       pollIntervalMs?: number;
+      health?: QueuePluginOptions['health'];
+      retryDelayMs?: QueuePluginOptions['retryDelayMs'];
       logger?: QueueLogger | undefined;
       collector?: QueueCollector | undefined;
     },

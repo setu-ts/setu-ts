@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { createConnectionErrorReporter } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { RuntimePlugin, createNodeRuntimeServices } from '@setu-ts/runtime';
 import { RealtimeBackplanePlugin } from '../../src/index.ts';
 import type { IRedisBackplaneClient } from '../../src/index.ts';
 import {
@@ -86,7 +86,12 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           plugins: [
             RuntimePlugin(),
             loggerPlugin(new RecordingLogger()),
-            RealtimeBackplanePlugin({ transport: 'redis', client: injected, subscriber }),
+            RealtimeBackplanePlugin({
+              transport: 'redis',
+              topic: `m143m-injected-${createNodeRuntimeServices().uuid()}`,
+              client: injected,
+              subscriber,
+            }),
           ],
         });
         try {

@@ -7,20 +7,24 @@
  */
 import { createServer } from 'node:http';
 import type { Server, ServerResponse } from 'node:http';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BackendUnavailableError } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { S3Provider } from '../../src/providers/s3-provider.ts';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
 import { b2RegionFromEndpoint, createProvider } from '../../src/plugin/storage-plugin.ts';
 
+// Each test gets its own server and its own records, so no test reads another's requests.
 let server: Server;
 let port = 0;
 const authorizations: string[] = [];
 const stalled = new Set<ServerResponse>();
 let closed = 0;
 
-beforeAll(async () => {
+beforeEach(async () => {
+  authorizations.length = 0;
+  stalled.clear();
+  closed = 0;
   server = createServer((req, res) => {
     authorizations.push(String(req.headers.authorization ?? ''));
     // Headers and the first byte of a 1 MiB body, then nothing.
@@ -41,7 +45,7 @@ beforeAll(async () => {
   port = (server.address() as { port: number }).port;
 });
 
-afterAll(async () => {
+afterEach(async () => {
   for (const res of stalled) res.destroy();
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -98,7 +102,6 @@ describe('b2 with only an endpoint (V13-248)', () => {
   } as unknown as IRuntimeServices;
 
   it('signs with us-east-1 for a non-Backblaze endpoint, and sends', async () => {
-    authorizations.length = 0;
     const provider = createProvider(
       {
         provider: 'b2',

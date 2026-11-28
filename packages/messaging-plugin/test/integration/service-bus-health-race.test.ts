@@ -57,7 +57,10 @@ describe('Service Bus outage through /health and /ready (M101a V8-1)', () => {
     await app.start();
     try {
       const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-      await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('ECONNREFUSED');
+      await expect(broker.publish('orders', { id: 1 })).rejects.toMatchObject({
+        name: 'BackendOutcomeUnknownError',
+        cause: { message: expect.stringContaining('ECONNREFUSED') },
+      });
 
       const started = performance.now();
       const health = await app.fetch(new Request('http://localhost/health'));

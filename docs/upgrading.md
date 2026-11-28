@@ -12,6 +12,111 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Broker and queue bounds, health and delivery (`@setu-ts/messaging-plugin`, `@setu-ts/queue-plugin`, `@setu-ts/realtime-backplane-plugin`)
+
+- RPC failures served by `errorHandler` change from 500 to 504 (`RequestTimeoutError`) or 502
+  (`RemoteHandlerError`). Remote text stays on `remoteMessage`, outside the response. A custom
+  response can catch and rethrow an application `HttpError` as before. RabbitMQ enqueue failures now
+  distinguish definite refusal (503) from a lost confirmation or deadline (504).
+- Service Bus `publishTimeoutMs` now defaults to 15000 ms over the entire send including retries. It
+  aborts on expiry with `PublishTimeoutError` (504); a send outage is also 504 because a previous
+  attempt may have arrived. Set 0 or a larger value for longer sends. `retryOptions` keeps its
+  meaning inside the bound. The refusal codes `UnauthorizedAccess`, `MessagingEntityNotFound`,
+  `MessagingEntityDisabled`, `MessageSizeExceeded` and `QuotaExceeded` take precedence over
+  `retryable`, including an SDK `UnauthorizedAccess` with `retryable: true`. Refusals are returned
+  unchanged and do not mark the data plane down. An `AggregateError` stays a refusal only when its
+  last inner error has one of these refusal codes; every other aggregate is an outage, even with a
+  final `SessionLockLost` and `retryable: false`. For non-aggregate errors, outages are
+  `retryable: true`, codes `ServiceCommunicationProblem`, `ServiceTimeout` or `ServiceBusy`, and
+  socket codes `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`,
+  `ENOTFOUND` and `EAI_AGAIN`. The fallback applies only when `code` and `retryable` are undefined
+  and `statusCode` is not a number. Status-only errors with a numeric `statusCode` are returned
+  unchanged without changing reachability evidence. `maxConcurrentCalls` defaults to 1, so existing
+  ordering stays intact; opt into 1–1000 for throughput, allowing later messages to run first. A
+  reply inbox expires after five idle minutes, including during a longer receive-side outage. A
+  receive report of `MessagingEntityNotFound`, or a send confirming the shared reply topic is
+  missing, invalidates the local cached inbox; the next request recreates it once the shared reply
+  topic exists (a missing topic fails the request with `ReplyInboxUnavailableError` when the refusal
+  arrives within `timeoutMs`; the broker creates no topics). Requests already in flight may still
+  time out. A request whose inbox is retired while it opens waits for the next one, and is refused
+  after three in a row. `disconnect()` waits at most 5 s for reply-inbox cleanup still in flight,
+  then logs one warning and continues; an inbox open that answers later is still closed. Transient
+  receive errors retain the inbox; clean shutdown deletes it. No option changes are needed.
+- On every built-in `@setu-ts/messaging-plugin` broker (not a `custom` adapter),
+  `RequestOptions.timeoutMs` now counts from the `request()` call, so it also covers opening the
+  reply inbox and publishing, and a request still waiting for its inbox is rejected on disconnect. A
+  slow first inbox open uses part of the budget: raise `timeoutMs` if a first request after start
+  needs more. The Cloudflare `WorkersBroker` is unchanged.
+- Service Bus evidence now includes real publish outcomes (including timeouts), receive outages only
+  from source `receive`, and delivered application and reply-inbox messages. Consume-only services
+  become not-ready on receive transport outages, recovering on a successful publish, delivery or
+  positive management probe. Exclude `messaging` through
+  `HealthPlugin({ readiness: { exclude: ['messaging'] } })` to keep them in rotation.
+- Pub/Sub create-path gRPC code 5 becomes `PubSubTopicMissingError` naming the source topic and
+  subscription; the original code is on `cause.code`. A proven missing dead-letter topic still gives
+  `PubSubDeadLetterTopicMissingError`. Its topic inspection now ends within 1500 ms. The prerelease
+  SDK facade drops unused `PubSubSdkModule.topic().exists?`; substitute SDK modules provide
+  `getMetadata` for inspection. The transport's `IPubSubTransport.topicExists` remains supported.
+- Custom brokers use `ICustomMessageBroker`. Publish options are always validated, including
+  reserved headers, even for an instance implementing the full internal adapter. Existing
+  `publishWithHeaders` continues to carry producer tracing. The wrapper now calls `subscribe` (which
+  must populate `MessageMetadata.headers`) rather than `subscribeWithHeaders`, and derives
+  reachability from `isHealthy` rather than a custom `reachability`. Without a header channel the
+  broker behaves as before, warning once when non-empty trace headers would be dropped. Confirm
+  `ISubscription.fanOut` for independent copies.
+- Queue reserve failures move from error on every tick to warn once per name and episode, then info
+  with a failure count on recovery (error remains the fallback when warn is absent). Update alert
+  severity/volume expectations. The `error` metadata on every queue loop-failure line
+  (`queue reserve failed`, `queue poll failed`, `queue recurring failed`,
+  `queue depth-probe failed`, `queue recurring enqueue failed`) now uses one-line `describeError`,
+  including the error name and available classifiers/causes, with URL userinfo masked and no stack
+  field added. Job-error reports keep their existing format. The optional `health.probeCacheMs`
+  (5000 ms, 0 disables caching) and `health.probeTimeoutMs` (2000 ms) preserve the previous
+  defaults; failures remain cached. `retryDelayMs` adds a fixed or callable delay for every adapter;
+  omission or `undefined` keeps existing exponential backoff. Only a function or a finite
+  non-negative number is accepted. Other runtime types (including `null`, numeric strings, objects
+  and booleans) and invalid numbers throw `RangeError` synchronously at `QueuePlugin(...)` and
+  `QueueService` construction; convert environment strings to numbers before supplying them.
+- SQS's SDK path now probes all distinct configured queue URLs with `GetQueueAttributes` for
+  `QueueArn`, explicitly selecting a separate one-attempt SDK client rather than matching the
+  attribute list. Each request forwards `abortSignal` and aborts on expiry. Its per-call bound is
+  `min(1500, floor(0.75 * health.probeTimeoutMs))` ms: 1500 ms with the default 2000 ms outer bound,
+  750 ms with a configured 1000 ms. A hung endpoint reads down before the outer timeout. A missing
+  queue or outage makes readiness fail; `sqs:GetQueueAttributes` is needed to detect a missing
+  queue, even for a name configured to discard. Readiness can pass without that permission because
+  403 proves reachability; redrive-policy reads still need the permissions in the next section.
+  `HealthPlugin.readiness.exclude` can exclude the queue indicator. Other SQS commands and SNS
+  publishes default to a 15000 ms `requestTimeoutMs`, including SDK retries; set 0 or a larger value
+  to retain longer calls. A send may have arrived on 504. Start-path redrive reads stay finite:
+  `min(requestTimeoutMs, 10000)` ms, or 10000 ms when the option is 0.
+- SQS `waitTimeSeconds` now defaults to 20, reducing receives while delivering an arriving message
+  immediately; 0 restores short polling. Receive uses
+  `min(2147483647, waitTimeSeconds * 1000 + requestTimeoutMs)` ms; `requestTimeoutMs: 0` keeps it
+  unbounded. Names reserve independently. An injected transport may ignore the new wait parameter,
+  retaining short polling, and should honor the new optional trailing `{ abortSignal }` to end
+  receives promptly at disconnect. Methods remain compatible.
+- A full failure-free outbox sweep now starts another, including after `dispatch()` with scheduling
+  off. Follow-ups yield through `runtime.setTimeout(..., 0)`, allowing event-loop timers between
+  batches. During a backlog the relay runs back-to-back until it drains; the extra store work is one
+  claim and one mark per delivered row, the cost of delivering the backlog. A sweep with any failure
+  is never followed up. There is no switch or tuning option for the chain; `publishLimit` caps each
+  sweep and `intervalMs` spaces scheduled sweeps, but neither throttles the chain. Call
+  `outbox.dispatch()` after commit to avoid up to `relay.intervalMs` (default one second) of
+  latency. This is explicit; there is no automatic after-commit hook.
+- An injected Redis backplane pair must connect and subscribe within `commandTimeoutMs` (15000 ms),
+  or its backplane open fails with `BackendUnavailableError`. Use 0 for an unbounded wait or connect
+  clients before `app.start()`. Once the backplane's own open installs a connected pair, any close
+  UNSUBSCRIBEs then QUITs both injected Redis clients, with disconnect as the fallback if QUIT
+  fails, preserving 0.13.0 normal-close behavior; no normal-close migration is needed. This includes
+  kernel cleanup after a later plugin fails or `stop()` cancels application start. To retry
+  application `start()`, create a new application with new injected clients. A cancelled, failed or
+  timed-out backplane open never disconnects or QUITs injected clients. It stops waiting, removes
+  its own listeners and watches, and undoes late subscriptions unless a newer open is using the
+  subscriber. The option also bounds built-client commands; injected-client commands after connect
+  retain their own settings. Owned clients are force-disconnected when close cancels SUBSCRIBE,
+  including with a finite bound. A stop during startup ends pending waits and leaves no late
+  service/health registration; a messaging backplane connect overtaken by close rejects.
+
 ### Discovery and gRPC calls (`@setu-ts/service-discovery-plugin`, `@setu-ts/grpc-plugin`)
 
 Warm discovery names now answer from cache immediately and refresh in the background. `cacheTtlMs`

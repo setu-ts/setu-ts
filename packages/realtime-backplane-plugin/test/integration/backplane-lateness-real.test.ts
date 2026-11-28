@@ -82,7 +82,7 @@ describe('real frames delayed in a task-owned TCP relay', () => {
           let close: () => Promise<void>;
           let publish: (data: string) => Promise<void>;
           if (arm === 'redis') {
-            const topic = 'm143p-' + runtime.uuid();
+            const topic = 'm143m-lateness-' + runtime.uuid();
             const sender = new RedisBackplane(
               { transport: 'redis', url: relay.url, maxFrameAgeMs },
               'sender',

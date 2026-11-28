@@ -77,7 +77,7 @@ describe('QueueService lease renewal', () => {
     vi.spyOn(s.adapter, 'reserve').mockImplementationOnce(() => reserved.promise);
     s.processor.mockImplementation(() => work.promise);
     await s.runtime.advanceMs(100);
-    await s.service.disconnect();
+    const stopped = s.service.disconnect();
     reserved.resolve([
       {
         id: 'late',
@@ -89,8 +89,9 @@ describe('QueueService lease renewal', () => {
         claimToken: 'delivery',
       },
     ]);
+    await stopped;
     await s.runtime.advanceMs(500);
-    expect(s.processor).toHaveBeenCalledTimes(1);
+    expect(s.processor).not.toHaveBeenCalled();
     expect(s.extend).not.toHaveBeenCalled();
     work.resolve();
     await s.runtime.advanceMs(100);

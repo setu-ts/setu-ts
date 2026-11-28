@@ -125,16 +125,26 @@ export function RealtimeBackplanePlugin(
         () => ctx.runtime.now(),
       );
 
+      let collector: ReturnType<typeof createRealtimeObservationCollector> | undefined = undefined;
+      ctx.lifecycle.onClose(async () => {
+        if (collector !== undefined) {
+          detachRealtimeObserver(backplane);
+          collector.close();
+        }
+        await backplane.close();
+      });
+
       // Awaited, so the subscription is live before the first request and
       // before either consumer plugin registers its handler.
       await backplane.connect();
+      if (ctx.signal?.aborted) return;
 
       ctx.services.register<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE, backplane);
 
       // M98l: one realtime source as a MULTI provider, describing THIS
       // transport only. A backplane has no gauges. Opted out (and always on
       // the `'custom'` arm), the collector is inert and nothing is attached.
-      const collector = createRealtimeObservationCollector({
+      collector = createRealtimeObservationCollector({
         kind: 'backplane',
         alias: diagnosticsAlias,
         clock: () => ctx.runtime.hrtime(),
@@ -168,13 +178,6 @@ export function RealtimeBackplanePlugin(
             reachable,
           },
         };
-      });
-
-      ctx.lifecycle.onClose(async () => {
-        // M98l: detached and closed BEFORE the transport tears down.
-        detachRealtimeObserver(backplane);
-        collector.close();
-        await backplane.close();
       });
     },
   };

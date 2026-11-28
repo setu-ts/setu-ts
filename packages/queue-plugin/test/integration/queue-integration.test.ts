@@ -376,7 +376,7 @@ describe('QueuePlugin integration', () => {
     await ctx.lifecycle.triggerClose();
 
     // The adapter is disconnected, so further enqueues fail.
-    await expect(queue.add('test2', {})).rejects.toThrow('not connected');
+    await expect(queue.add('test2', {})).rejects.toMatchObject({ name: 'BackendUnavailableError' });
 
     // The health indicator reports the queue as down once closed.
     const health = await ctx.health.check();

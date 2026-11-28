@@ -438,8 +438,11 @@ export interface SubscribeOptions {
  */
 export interface RequestOptions {
   /**
-   * Reply wait budget in milliseconds. When no correlated reply arrives within
-   * this window, `request` rejects. Defaults to `5000` when omitted.
+   * Reply budget in milliseconds. When no correlated reply arrives within it,
+   * `request` rejects. The built-in `@setu-ts/messaging-plugin` brokers count it from
+   * the `request` call, so it also covers opening the reply inbox and
+   * publishing; other implementations may start it once their inbox is open.
+   * Defaults to `5000` when omitted.
    */
   readonly timeoutMs?: number;
 }

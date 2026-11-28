@@ -98,7 +98,9 @@ describe('SQS consumer dead-letter targets', () => {
     );
     await Promise.all([queue.prepareConsumer('build'), queue.prepareConsumer('build')]);
     expect(read).toHaveBeenCalledTimes(1);
-    expect(getUrl).toHaveBeenCalledExactlyOnceWith('dead.fifo', '123456789012');
+    expect(getUrl).toHaveBeenCalledExactlyOnceWith('dead.fifo', '123456789012', {
+      abortSignal: expect.any(AbortSignal),
+    });
     for (const maxAttempts of [8, 9]) {
       await transport.send('source', envelope(maxAttempts));
       const [job] = await queue.reserve('build', 1, 0);
