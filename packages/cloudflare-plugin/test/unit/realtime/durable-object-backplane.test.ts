@@ -573,6 +573,49 @@ describe('DurableObjectBackplane links and hub publish', () => {
     expect(got).toEqual([FRAME]);
   });
 
+  it('warns once per run of failed hub publishes, again after one succeeds, and on every 413', async () => {
+    // A hub outage refuses every link, so every broadcast comes here; one line
+    // per outage, not one per broadcast.
+    let answer: 'throw' | 'ok' | 503 | 413 = 'throw';
+    const namespace: IDurableObjectNamespace = {
+      idFromName: (name) => name,
+      get: () => ({
+        fetch: () => {
+          if (answer === 'throw') return Promise.reject(new Error('hub down'));
+          return Promise.resolve(new Response(null, { status: answer === 'ok' ? 204 : answer }));
+        },
+      }),
+    } as unknown as IDurableObjectNamespace;
+    const logger = new RecordingLogger();
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'a',
+      binding: 'REALTIME',
+      topic: 'chat',
+      timers,
+      logger: () => logger,
+    });
+    const failed = (): number =>
+      logger.records.filter((r) => r.message === 'cloudflare: backplane publish failed').length;
+
+    for (let i = 0; i < 5; i++) await backplane.publishViaHub(FRAME);
+    answer = 503;
+    for (let i = 0; i < 5; i++) await backplane.publishViaHub(FRAME);
+    expect(failed()).toBe(1);
+
+    answer = 'ok';
+    await backplane.publishViaHub(FRAME);
+    answer = 'throw';
+    await backplane.publishViaHub(FRAME);
+    await backplane.publishViaHub(FRAME);
+    expect(failed()).toBe(2);
+
+    // A frame over the hub's cap is that frame's fault, reported each time.
+    answer = 413;
+    await backplane.publishViaHub(FRAME);
+    await backplane.publishViaHub(FRAME);
+    expect(failed()).toBe(4);
+  });
+
   it('passes its waitUntil to each link, and survives a host that throws', async () => {
     const namespace = new FakeDurableObjectNamespace();
     const held: Promise<unknown>[] = [];

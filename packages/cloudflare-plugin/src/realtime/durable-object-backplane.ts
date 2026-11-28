@@ -146,6 +146,8 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
    * reference to shut it down.
    */
   #generation = 0;
+  /** Set by a hub publish that failed for the hub's reason, cleared by one that succeeds. */
+  #publishFailing = false;
 
   /**
    * @param namespace - The Durable Object namespace binding
@@ -296,18 +298,36 @@ export class DurableObjectBackplane implements IRealtimeLinkBackplane {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(frame),
       });
-      if (!response.ok) {
-        this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
-          topic: this.#options.topic,
-          status: response.status,
-        });
+      if (response.ok) {
+        this.#publishFailing = false;
+        return;
       }
+      // A refused frame (413 above the cap, 400 for a body that is not
+      // UTF-8) is that frame's fault and is reported each time; a server
+      // fault is the hub's, reported once per run of failures.
+      if (response.status < 500) {
+        this.#reportPublishFailure({ status: response.status });
+        return;
+      }
+      this.#reportOutage({ status: response.status });
     } catch (error) {
-      this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
-        topic: this.#options.topic,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      this.#reportOutage({ error: error instanceof Error ? error.message : String(error) });
     }
+  }
+
+  /** Reports a hub failure once per run of them: while a hub is down every broadcast lands here. */
+  #reportOutage(detail: { readonly status: number } | { readonly error: string }): void {
+    if (this.#publishFailing) return;
+    this.#publishFailing = true;
+    this.#reportPublishFailure(detail);
+  }
+
+  /** Logs one failed hub publish, without frame content. */
+  #reportPublishFailure(detail: { readonly status: number } | { readonly error: string }): void {
+    this.#options.logger?.()?.warn('cloudflare: backplane publish failed', {
+      topic: this.#options.topic,
+      ...detail,
+    });
   }
 
   /**

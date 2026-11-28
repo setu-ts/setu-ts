@@ -29,7 +29,9 @@ import type { IRealtimeBackplane, RealtimeFrame } from './realtime.ts';
 export interface IRealtimeConnectionLink {
   /**
    * Sends a frame over this link. Frames sent before the link is open are
-   * queued (bounded) and sent once it opens.
+   * queued (bounded) and sent once it opens, unless the implementation
+   * declares an outage first: it may then drop what it queued, so other
+   * replicas never receive it late, and refuse frames until it recovers.
    *
    * The hub delivers a link's own frame to every other link, never back to
    * this one, so the caller delivers to its own connection itself when it
@@ -37,9 +39,9 @@ export interface IRealtimeConnectionLink {
    *
    * @param frame - The frame to publish
    * @returns `false` when the frame could not be handed to the link (it is
-   *   closed, the call came from a request that does not own it, or the
-   *   implementation's queue or frame bound refuses it); the caller then
-   *   publishes another way
+   *   closed, the call came from a request that does not own it, the
+   *   implementation's queue or frame bound refuses it, or the link is in an
+   *   outage); the caller then publishes another way
    */
   publish(frame: RealtimeFrame): boolean;
   /**

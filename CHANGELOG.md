@@ -640,8 +640,9 @@ All notable changes to this project are documented here. The format follows
     s and 2 s, then doubling to a 30 s cap, warns once per outage per connection
     (`cloudflare: backplane link still reopening`, with the count of queued frames it dropped),
     refuses frames until it recovers so broadcasts go through the hub, and then logs
-    `cloudflare: backplane link restored` at `info`; the connection stays open meanwhile, as on
-    other backplanes.
+    `cloudflare: backplane link restored` at `info`; a hub publish that fails for the hub's reason
+    is warned about once per run of failures rather than once per broadcast; the connection stays
+    open meanwhile, as on other backplanes.
   - **Shutdown:** `closeAll` closes every connection when one close throws, and every link when a
     link close or the logger throws. A peer's close removes it, its rooms and its link even when the
     runtime's heartbeat stop throws.

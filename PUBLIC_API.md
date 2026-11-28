@@ -14505,11 +14505,12 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 ### Per-connection realtime links (0.14.0)
 
 `IRealtimeConnectionLink` is one connection's link to a backplane hub: `publish(frame): boolean`
-(queued until open; `false` when closed, called from a request that does not own the link, or
-refused by the implementation's queue or frame bound, so the caller publishes another way) and
-`close(): void` (idempotent; while an open, the first or a reopen, is in flight, frames already
-queued are still sent once it opens, kept alive through `waitUntil` where the backplane has one;
-frames queued while a lost link waits to reopen are dropped with one `warn`).
+(queued until open, unless the implementation declares an outage first and drops the queue; `false`
+when closed, called from a request that does not own the link, refused by the implementation's queue
+or frame bound, or in an outage, so the caller publishes another way) and `close(): void`
+(idempotent; while an open, the first or a reopen, is in flight, frames already queued are still
+sent once it opens, kept alive through `waitUntil` where the backplane has one; frames queued while
+a lost link waits to reopen are dropped with one `warn`).
 `IRealtimeLinkBackplane extends IRealtimeBackplane` adds
 `openConnectionLink(connectionId, deliver): IRealtimeConnectionLink` (called from the request that
 owns the connection; `deliver` receives every frame the hub sends, unfiltered, in that request) and
@@ -17626,11 +17627,13 @@ only: it opens lazily (on `connect` or the first `publish`), and a socket that r
 error is retired and closed rather than left open at the hub, so the next call reopens it.
 `publish(frame)` sends through `POST /publish`, never over that socket, so publishes from different
 requests never touch a socket another request owns; a failed POST is logged as
-`cloudflare: backplane publish failed`, never thrown. The hub fans the POST out to every socket, the
-publisher's own included, and the replica drops a frame whose `origin` is its own (the rule every
-backplane transport applies, along with dropping a frame that is not well-formed). A replica hears a
-frame only once its socket has joined the hub. The socket belongs to the request that opened it: on
-local workerd it keeps receiving after that request has answered, which is unverified on the
+`cloudflare: backplane publish failed`, never thrown: a refused frame (413, 400) each time, and a
+hub fault (a rejected call or a 5xx) once per run of them, logged again after a POST succeeds, since
+while the hub is down every broadcast falls back here. The hub fans the POST out to every socket,
+the publisher's own included, and the replica drops a frame whose `origin` is its own (the rule
+every backplane transport applies, along with dropping a frame that is not well-formed). A replica
+hears a frame only once its socket has joined the hub. The socket belongs to the request that opened
+it: on local workerd it keeps receiving after that request has answered, which is unverified on the
 platform. Each publish is its own call to the hub and the platform orders calls only within one
 stub, so other replicas may receive one replica's frames out of order.
 
