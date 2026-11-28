@@ -578,7 +578,7 @@ describe('DurableObjectBackplane links and hub publish', () => {
     // per outage, not one per broadcast.
     let answer: 'throw' | 'ok' | 503 | 413 = 'throw';
     const namespace: IDurableObjectNamespace = {
-      idFromName: (name) => name,
+      idFromName: (name: string) => name,
       get: () => ({
         fetch: () => {
           if (answer === 'throw') return Promise.reject(new Error('hub down'));
